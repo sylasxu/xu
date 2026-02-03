@@ -1,6 +1,6 @@
 // Hot Keywords Model - TypeBox schemas (v4.8 Digital Ascension)
 import { Elysia, t, type Static } from 'elysia';
-import { selectGlobalKeywordSchema, insertGlobalKeywordSchema } from '@juchang/db';
+import { selectGlobalKeywordSchema } from '@juchang/db';
 
 /**
  * Hot Keywords Model Plugin (v4.8 Digital Ascension)
@@ -19,51 +19,46 @@ import { selectGlobalKeywordSchema, insertGlobalKeywordSchema } from '@juchang/d
 // ==========================================
 
 // 全局关键词响应 Schema（从 DB 派生）
-const GlobalKeywordResponse = t.Object({
-  id: t.String(),
-  keyword: t.String(),
-  matchType: t.Union([t.Literal('exact'), t.Literal('prefix'), t.Literal('fuzzy')]),
-  responseType: t.Union([
-    t.Literal('widget_explore'),
-    t.Literal('widget_draft'),
-    t.Literal('widget_launcher'),
-    t.Literal('widget_action'),
-    t.Literal('widget_ask_preference'),
-    t.Literal('text'),
+// 注意：drizzle-typebox 生成的 timestamp 字段是 Date 类型
+// API 响应中需要转换为 ISO 字符串，所以这里重新定义时间字段
+const GlobalKeywordResponse = t.Composite([
+  t.Pick(selectGlobalKeywordSchema, [
+    'id',
+    'keyword',
+    'matchType',
+    'responseType',
+    'responseContent',
+    'priority',
+    'isActive',
+    'hitCount',
+    'conversionCount',
+    'createdBy',
   ]),
-  responseContent: t.Any(), // JSONB
-  priority: t.Number(),
-  validFrom: t.Union([t.String(), t.Null()]),
-  validUntil: t.Union([t.String(), t.Null()]),
-  isActive: t.Boolean(),
-  hitCount: t.Number(),
-  conversionCount: t.Number(),
-  createdBy: t.Union([t.String(), t.Null()]),
-  createdAt: t.String(),
-  updatedAt: t.String(),
-});
+  t.Object({
+    // 时间字段转换为 ISO 字符串
+    validFrom: t.Union([t.String(), t.Null()]),
+    validUntil: t.Union([t.String(), t.Null()]),
+    createdAt: t.String(),
+    updatedAt: t.String(),
+  }),
+]);
 
 // 热词列表项（简化版，用于 Hot Chips 显示）
-const HotKeywordListItem = t.Object({
-  id: t.String(),
-  keyword: t.String(),
-  responseType: t.Union([
-    t.Literal('widget_explore'),
-    t.Literal('widget_draft'),
-    t.Literal('widget_launcher'),
-    t.Literal('widget_action'),
-    t.Literal('widget_ask_preference'),
-    t.Literal('text'),
-  ]),
-  priority: t.Number(),
-  hitCount: t.Number(),
-});
+// 从 DB Schema 派生
+const HotKeywordListItem = t.Pick(selectGlobalKeywordSchema, [
+  'id',
+  'keyword',
+  'responseType',
+  'priority',
+  'hitCount',
+]);
 
 // ==========================================
-// 创建/更新 Schema
+// 创建/更新 Schema（从 DB insertSchema 派生）
 // ==========================================
 
-// 创建热词请求
+// 创建热词请求 - 手动定义（因为需要额外的验证规则）
+// 这是允许的，因为 insertSchema 不包含 minLength/maxLength 等验证
 const CreateGlobalKeywordRequest = t.Object({
   keyword: t.String({ minLength: 1, maxLength: 100, description: '关键词文本' }),
   matchType: t.Union([
@@ -96,7 +91,7 @@ const UpdateGlobalKeywordRequest = t.Partial(
 );
 
 // ==========================================
-// 查询参数 Schema
+// 查询参数 Schema（通用辅助类型，允许手动定义）
 // ==========================================
 
 // 热词列表查询参数（小程序使用）
@@ -167,7 +162,7 @@ const DeleteKeywordResponse = t.Object({
   success: t.Boolean(),
 });
 
-// 热词分析项
+// 热词分析项（Admin 特有类型，允许手动定义）
 const KeywordAnalyticsItem = t.Object({
   keyword: t.String(),
   hitCount: t.Number(),

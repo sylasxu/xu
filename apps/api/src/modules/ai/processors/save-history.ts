@@ -1,100 +1,126 @@
 /**
- * Save History Processor - 保存对话历史
+ * Save History Processor (v4.8)
  * 
- * 纯函数实现，保存用户消息和 AI 响应到数据库
+ * 负责保存对话历史到数据库：
+ * - 保存用户消息和 AI 响应到 conversation_messages 表
+ * - 更新 conversations 表的 messageCount 和 lastMessageAt
+ * - 关联 activityId（如果 AI 响应中包含）
+ * 
+ * 注意：这是一个后处理 Processor，在 AI 响应生成后执行
  */
 
-import { getOrCreateThread, saveMessage } from '../memory/store';
-import { getToolWidgetType } from '../tools';
-import { createLogger } from '../observability/logger';
-
-const logger = createLogger('processor.save-history');
-
-export interface ToolCallTrace {
-    toolName: string;
-    toolCallId: string;
-    args: unknown;
-    result?: unknown;
-}
+import type { ProcessorContext, ProcessorResult } from './types';
+import { db, conversations, conversationMessages, eq, sql } from '@juchang/db';
 
 /**
+ * Save History Processor
+ * 
  * 保存对话历史到数据库
- * 
- * @param userId - 用户 ID
- * @param userMessage - 用户消息
- * @param aiResponse - AI 响应文本
- * @param toolCalls - Tool 调用记录
  */
-export async function saveConversationHistory(
-    userId: string | null,
-    userMessage: string,
-    aiResponse: string,
-    toolCalls: ToolCallTrace[] = []
-): Promise<void> {
-    if (!userId) return;
-
-    try {
-        const { id: threadId } = await getOrCreateThread(userId);
-
-        // 1. 保存用户消息
-        if (userMessage) {
-            await saveMessage({
-                conversationId: threadId,
-                userId,
-                role: 'user',
-                messageType: 'text',
-                content: { text: userMessage },
-            });
-        }
-
-        // 2. 保存 AI 响应
-        if (aiResponse) {
-            // 检查是否有关联的 activityId
-            const activityId = extractActivityId(toolCalls);
-
-            // 确定消息类型
-            let messageType = 'text';
-            if (toolCalls.length > 0) {
-                const widgetType = getToolWidgetType(toolCalls[toolCalls.length - 1].toolName);
-                if (widgetType) messageType = widgetType;
-            }
-
-            await saveMessage({
-                conversationId: threadId,
-                userId,
-                role: 'assistant',
-                messageType,
-                content: {
-                    text: aiResponse,
-                    toolCalls: toolCalls.map(tc => ({
-                        toolName: tc.toolName,
-                        args: tc.args,
-                        result: tc.result,
-                    })),
-                },
-                activityId,
-            });
-        }
-
-        logger.debug('Conversation saved', { userId, threadId, toolCallsCount: toolCalls.length });
-
-    } catch (error) {
-        // 保存失败不阻塞响应
-        logger.error('Failed to save conversation', {
-            userId,
-            error: error instanceof Error ? error.message : 'Unknown error',
-        });
+export async function saveHistory(context: ProcessorContext): Promise<ProcessorResult> {
+  const startTime = Date.now();
+  
+  try {
+    const { userId, messages, metadata } = context;
+    
+    // 如果没有 userId，跳过
+    if (!userId) {
+      return {
+        success: true,
+        context,
+        executionTime: Date.now() - startTime,
+        data: { skipped: true, reason: 'no-user-id' },
+      };
     }
+    
+    // 获取或创建会话
+    const conversationId = metadata?.conversationId as string | undefined;
+    
+    let finalConversationId = conversationId;
+    
+    if (!conversationId) {
+      // 创建新会话
+      const [newConversation] = await db
+        .insert(conversations)
+        .values({
+          userId,
+          title: '新对话',
+          messageCount: 0,
+        })
+        .returning({ id: conversations.id });
+      
+      finalConversationId = newConversation.id;
+    }
+    
+    if (!finalConversationId) {
+      throw new Error('无法获取或创建会话 ID');
+    }
+    
+    // 保存最后两条消息（用户消息 + AI 响应）
+    // 使用 reverse + find 替代 findLast（兼容性更好）
+    const reversedMessages = [...messages].reverse();
+    const lastUserMessage = reversedMessages.find(m => m.role === 'user');
+    const lastAssistantMessage = reversedMessages.find(m => m.role === 'assistant');
+    
+    const messagesToSave = [];
+    
+    if (lastUserMessage) {
+      messagesToSave.push({
+        conversationId: finalConversationId,
+        userId,
+        role: 'user' as const,
+        messageType: 'text' as const,
+        content: { text: lastUserMessage.content },
+      });
+    }
+    
+    if (lastAssistantMessage) {
+      const activityId = metadata?.activityId as string | undefined;
+      
+      messagesToSave.push({
+        conversationId: finalConversationId,
+        userId,
+        role: 'assistant' as const,
+        messageType: 'text' as const,
+        content: { text: lastAssistantMessage.content },
+        activityId,
+      });
+    }
+    
+    if (messagesToSave.length > 0) {
+      await db.insert(conversationMessages).values(messagesToSave);
+      
+      // 更新会话统计
+      await db
+        .update(conversations)
+        .set({
+          messageCount: sql`${conversations.messageCount} + ${messagesToSave.length}`,
+          lastMessageAt: new Date(),
+        })
+        .where(eq(conversations.id, finalConversationId));
+    }
+    
+    return {
+      success: true,
+      context,
+      executionTime: Date.now() - startTime,
+      data: {
+        conversationId: finalConversationId,
+        messagesSaved: messagesToSave.length,
+      },
+    };
+    
+  } catch (error) {
+    // 保存历史失败不应阻止整个流程，只记录错误
+    return {
+      success: true,
+      context,
+      executionTime: Date.now() - startTime,
+      error: error instanceof Error ? error.message : '未知错误',
+      data: { skipped: true, reason: 'error' },
+    };
+  }
 }
 
-/**
- * 从 Tool 结果中提取 activityId
- */
-function extractActivityId(toolCalls: ToolCallTrace[]): string | undefined {
-    for (const tc of toolCalls) {
-        const result = tc.result as any;
-        if (result?.data?.activityId) return result.data.activityId;
-        if (result?.activityId) return result.activityId;
-    }
-    return undefined;
-}
+// Processor 元数据
+saveHistory.processorName = 'save-history';

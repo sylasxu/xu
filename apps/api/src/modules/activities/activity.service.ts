@@ -15,6 +15,7 @@ import { deductAiCreateQuota } from '../users/user.service';
 import { indexActivity, deleteIndex } from '../ai/rag';
 import { addInterestVector } from '../ai/memory';
 import { validateFields } from '../content-security';
+import { notifyJoin } from '../notifications/notification.service';
 
 // 群聊归档时间：活动开始后 24 小时
 const ARCHIVE_HOURS = 24;
@@ -322,6 +323,8 @@ export async function getActivityById(id: string): Promise<ActivityDetailRespons
     createdAt: activity.createdAt.toISOString(),
     updatedAt: activity.updatedAt.toISOString(),
     isArchived: calculateIsArchived(activity.startAt),
+    groupOpenId: activity.groupOpenId,
+    dynamicMessageId: activity.dynamicMessageId,
     creator: creator || null,
     participants: participantsList.map(p => ({
       id: p.id,
@@ -713,20 +716,39 @@ export async function joinActivity(activityId: string, userId: string): Promise<
     })
     .where(eq(users.id, userId));
 
+  // v4.8: 发送通知给活动创建者 (异步，不阻塞主流程)
+  notifyJoin(
+    activity.creatorId,
+    activityId,
+    activity.title,
+    'someone' // TODO: 获取用户昵称
+  ).catch(err => {
+    console.error('Failed to send join notification:', err);
+  });
+
+  // v4.8: 如果是群内活动，更新动态消息卡片 (异步，不阻塞主流程)
+  if (activity.groupOpenId && activity.dynamicMessageId) {
+    import('../wechat/wechat.service').then(({ updateDynamicMessage }) => {
+      updateDynamicMessage(
+        activity.dynamicMessageId!,
+        `${activity.currentParticipants + 1}人已参与`
+      ).catch(err => {
+        console.error('Failed to update dynamic message:', err);
+      });
+    });
+  }
+
   // v4.5: 异步更新用户兴趣向量 (不阻塞主流程)
   updateUserInterestVector(userId, activityId).catch(err => {
     console.error('Failed to update interest vector:', err);
   });
 
   // v4.8: 异步追踪关键词转化 (不阻塞主流程)
-  (async () => {
-    try {
-      const { trackConversion } = await import('../hot-keywords/hot-keywords.service');
-      await trackConversion(userId);
-    } catch (err) {
+  import('../hot-keywords/hot-keywords.service').then(({ trackConversion }) => {
+    trackConversion(userId).catch(err => {
       console.error('Failed to track keyword conversion:', err);
-    }
-  })();
+    });
+  });
 
   return { id: participant.id };
 }

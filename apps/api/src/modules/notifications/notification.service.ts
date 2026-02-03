@@ -75,6 +75,7 @@ export async function getAllNotifications(
         content: notifications.content,
         isRead: notifications.isRead,
         activityId: notifications.activityId,
+        notificationMethod: notifications.notificationMethod,
         createdAt: notifications.createdAt,
         userNickname: users.nickname,
         userAvatarUrl: users.avatarUrl,
@@ -124,6 +125,7 @@ export async function getNotificationsByUserId(
         content: notifications.content,
         isRead: notifications.isRead,
         activityId: notifications.activityId,
+        notificationMethod: notifications.notificationMethod,
         createdAt: notifications.createdAt,
         userNickname: users.nickname,
         userAvatarUrl: users.avatarUrl,
@@ -292,4 +294,19 @@ export async function notifyCancelled(
     content: `「${activityTitle}」已取消`,
     activityId,
   });
+}
+
+// ==========================================
+// 混合通知策略 (v4.8 Chat Tool Mode)
+// 简化版：只负责决策和记录，微信 API 调用由 wechat.service 处理
+// ==========================================
+
+/**
+ * 决定通知策略
+ * 根据 groupOpenId 选择通知方式
+ */
+export function decideNotificationStrategy(
+  groupOpenId: string | null
+): 'system_message' | 'service_notification' {
+  return groupOpenId ? 'system_message' : 'service_notification';
 }

@@ -69,6 +69,51 @@ inclusion: always
 - **文件结构**: `*.controller.ts` / `*.service.ts` (纯函数) / `*.model.ts`
 - **禁止**: `export namespace`、class Service、手动定义 DB 表 Schema
 
+---
+
+## 🔧 AI Processor 规范
+
+**Processor 必须是纯函数，禁止使用 class**：
+
+```typescript
+// ❌ 禁止使用 class
+export class MyProcessor implements Processor {
+  name = 'my-processor';
+  async execute(context: ProcessorContext): Promise<ProcessorResult> { ... }
+}
+
+// ✅ 必须使用纯函数
+export async function myProcessor(context: ProcessorContext): Promise<ProcessorResult> {
+  const startTime = Date.now();
+  
+  try {
+    // 处理逻辑
+    return {
+      success: true,
+      context: updatedContext,
+      executionTime: Date.now() - startTime,
+      data: { ... },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      context,
+      executionTime: Date.now() - startTime,
+      error: error instanceof Error ? error.message : '未知错误',
+    };
+  }
+}
+
+// 添加元数据
+myProcessor.processorName = 'my-processor';
+```
+
+**Processor 设计原则**：
+- 纯函数：无副作用，相同输入产生相同输出
+- 可组合：通过 `runProcessors()` 串联执行
+- 可观测：记录执行时间和结果到 `processorLog`
+- 容错：失败时返回 `success: false`，不抛出异常
+
 ### apps/admin (管理后台)
 - **Tech**: Vite + React 19 + TanStack Router + Eden Treaty
 - **禁止**: Zod、zodResolver

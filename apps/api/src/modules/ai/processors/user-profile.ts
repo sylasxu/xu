@@ -1,52 +1,89 @@
 /**
- * User Profile Processor - 用户画像注入
+ * User Profile Processor (v4.8)
  * 
- * 纯函数实现，注入用户偏好到 System Prompt
+ * 负责注入用户画像到系统提示词：
+ * - 从数据库加载用户的 workingMemory
+ * - 将用户画像注入到 systemPrompt
+ * 
+ * 用户画像包含：
+ * - 活动偏好（类型、时间、地点）
+ * - 历史行为（创建、参与、取消）
+ * - 社交偏好（群体大小、互动风格）
  */
 
-import { getEnhancedUserProfile, buildProfilePrompt } from '../memory/working';
-import { createLogger } from '../observability/logger';
-
-const logger = createLogger('processor.user-profile');
+import type { ProcessorContext, ProcessorResult } from './types';
+import { db, users, eq } from '@juchang/db';
 
 /**
- * 注入用户画像到 System Prompt
+ * User Profile Processor
  * 
- * @param systemPrompt - 原始 System Prompt
- * @param userId - 用户 ID
- * @returns 注入画像后的 Prompt
+ * 注入用户画像到系统提示词
  */
-export async function injectUserProfile(
-    systemPrompt: string,
-    userId: string | null
-): Promise<string> {
-    if (!userId) return systemPrompt;
-
-    try {
-        const profile = await getEnhancedUserProfile(userId);
-
-        // 如果没有有效画像，直接返回
-        if (!profile || (profile.preferences.length === 0 && profile.frequentLocations.length === 0)) {
-            return systemPrompt;
-        }
-
-        // 构建画像 Prompt
-        const profilePrompt = buildProfilePrompt(profile);
-        if (!profilePrompt) return systemPrompt;
-
-        logger.debug('User profile injected', {
-            userId,
-            preferencesCount: profile.preferences.length,
-            locationsCount: profile.frequentLocations.length,
-        });
-
-        return `${systemPrompt}\n\n${profilePrompt}`;
-
-    } catch (error) {
-        logger.error('Failed to inject user profile', {
-            userId,
-            error: error instanceof Error ? error.message : 'Unknown error',
-        });
-        return systemPrompt; // 失败时返回原始 Prompt
+export async function userProfile(context: ProcessorContext): Promise<ProcessorResult> {
+  const startTime = Date.now();
+  
+  try {
+    const { userId } = context;
+    
+    // 如果没有 userId，跳过
+    if (!userId) {
+      return {
+        success: true,
+        context,
+        executionTime: Date.now() - startTime,
+        data: { skipped: true, reason: 'no-user-id' },
+      };
     }
+    
+    // 从数据库加载用户画像
+    const [user] = await db
+      .select({ workingMemory: users.workingMemory })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    
+    if (!user || !user.workingMemory) {
+      return {
+        success: true,
+        context,
+        executionTime: Date.now() - startTime,
+        data: { skipped: true, reason: 'no-profile' },
+      };
+    }
+    
+    // 注入用户画像到系统提示词
+    const updatedSystemPrompt = `${context.systemPrompt}
+
+## 用户画像
+${user.workingMemory}
+
+请根据用户画像提供个性化的建议和响应。`;
+    
+    const updatedContext: ProcessorContext = {
+      ...context,
+      systemPrompt: updatedSystemPrompt,
+      userProfile: user.workingMemory,
+    };
+    
+    return {
+      success: true,
+      context: updatedContext,
+      executionTime: Date.now() - startTime,
+      data: {
+        profileLength: user.workingMemory.length,
+        injected: true,
+      },
+    };
+    
+  } catch (error) {
+    return {
+      success: false,
+      context,
+      executionTime: Date.now() - startTime,
+      error: error instanceof Error ? error.message : '未知错误',
+    };
+  }
 }
+
+// Processor 元数据
+userProfile.processorName = 'user-profile';

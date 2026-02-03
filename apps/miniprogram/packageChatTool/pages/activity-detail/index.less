@@ -1,0 +1,185 @@
+/**
+ * Chat Tool Mode - 活动详情页样式
+ * Requirements: 4.1, 4.4, 4.5
+ */
+@import '/styles/tokens.less';
+
+.page-container {
+  min-height: 100vh;
+  background: @bg-page;
+  padding-bottom: 160rpx; // 为底部按钮留空间
+
+  &.half-screen {
+    min-height: auto;
+    max-height: 80vh;
+    border-radius: @rounded-2xl @rounded-2xl 0 0;
+    overflow: hidden;
+  }
+}
+
+// 下滑关闭指示器
+.drag-indicator {
+  display: flex;
+  justify-content: center;
+  padding: @spacing-3 0;
+}
+
+.drag-bar {
+  width: 80rpx;
+  height: 8rpx;
+  background: @gray-300;
+  border-radius: @rounded-full;
+}
+
+// 加载状态
+.loading-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 400rpx;
+}
+
+// 内容区
+.content {
+  padding: @spacing-4;
+}
+
+// 头部
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: @spacing-4;
+}
+
+.title {
+  font-size: @text-xl;
+  font-weight: 700;
+  color: @gray-900;
+  flex: 1;
+  line-height: 1.4;
+}
+
+.type-badge {
+  font-size: @text-sm;
+  padding: @spacing-1 @spacing-2;
+  background: @gray-100;
+  border-radius: @rounded-full;
+  color: @gray-600;
+  flex-shrink: 0;
+  margin-left: @spacing-2;
+}
+
+// 信息区
+.info-section {
+  background: @bg-white;
+  border-radius: @rounded-xl;
+  padding: @spacing-4;
+  margin-bottom: @spacing-4;
+}
+
+.info-item {
+  display: flex;
+  align-items: flex-start;
+  padding: @spacing-3 0;
+  border-bottom: 1rpx solid @gray-100;
+
+  &:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+
+  &:first-child {
+    padding-top: 0;
+  }
+}
+
+.info-icon {
+  font-size: @text-lg;
+  margin-right: @spacing-3;
+  flex-shrink: 0;
+}
+
+.info-content {
+  flex: 1;
+}
+
+.info-label {
+  font-size: @text-xs;
+  color: @gray-500;
+  display: block;
+  margin-bottom: @spacing-1;
+}
+
+.info-value {
+  font-size: @text-base;
+  color: @gray-900;
+  font-weight: 500;
+}
+
+.info-hint {
+  font-size: @text-xs;
+  color: @gray-500;
+  display: block;
+  margin-top: @spacing-1;
+}
+
+// 描述
+.description {
+  background: @bg-white;
+  border-radius: @rounded-xl;
+  padding: @spacing-4;
+  margin-bottom: @spacing-4;
+}
+
+.description-text {
+  font-size: @text-sm;
+  color: @gray-700;
+  line-height: 1.6;
+}
+
+// 发起人
+.creator {
+  display: flex;
+  align-items: center;
+  padding: @spacing-3 0;
+}
+
+.creator-avatar {
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: @rounded-full;
+  margin-right: @spacing-3;
+}
+
+.creator-name {
+  font-size: @text-sm;
+  color: @gray-600;
+}
+
+// 底部报名按钮
+.bottom-action {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: @spacing-4;
+  background: @bg-white;
+  box-shadow: 0 -4rpx 20rpx rgba(0, 0, 0, 0.05);
+  z-index: 100;
+
+  // 适配 iPhone 底部安全区
+  padding-bottom: calc(@spacing-4 + env(safe-area-inset-bottom));
+}
+
+.join-button {
+  border-radius: @rounded-xl !important;
+  font-size: @text-base !important;
+  font-weight: 600 !important;
+
+  // Chat Tool Mode 下的巨大按钮
+  &.huge {
+    height: 112rpx !important;
+    font-size: @text-lg !important;
+  }
+}

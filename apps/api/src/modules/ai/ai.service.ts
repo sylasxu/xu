@@ -27,7 +27,7 @@ export {
   type GenerateChatResult,
 } from './agent';
 
-import { db, users, conversations, conversationMessages, eq, desc, sql, inArray, and } from '@juchang/db';
+import { db, users, conversations, conversationMessages, aiRequests, eq, desc, sql, inArray, and } from '@juchang/db';
 import {
   streamText,
   createUIMessageStream,
@@ -38,13 +38,14 @@ import {
   type UIMessage,
 } from 'ai';
 import { randomUUID } from 'crypto';
+import type { ProcessorLogEntry } from '@juchang/db';
 
 // 新架构模块
 import { classifyIntent, type ClassifyResult } from './intent';
 import { getOrCreateThread, saveMessage, clearUserThreads, deleteThread } from './memory';
 import { getToolsByIntent, getToolWidgetType, getToolDisplayName } from './tools';
 import { buildXmlSystemPrompt, type PromptContext, type ActivityDraftForPrompt } from './prompts/xiaoju-v39';
-import { getModel, getDefaultChatModel, getModelByIntent } from './models/router';
+import { getModelByIntent } from './models/router';
 // Guardrails
 import { checkRateLimit } from './guardrails/rate-limiter';
 // Observability
@@ -88,7 +89,7 @@ import {
 // Evals
 import { evaluateResponseQuality } from './evals/runner';
 // User Action (A2UI 风格)
-import { extractUserAction, handleUserAction, type UserAction } from './user-action';
+import { handleUserAction, type UserAction } from './user-action';
 
 const logger = createLogger('ai.service');
 
@@ -211,9 +212,24 @@ export async function streamChat(request: ChatRequest): Promise<Response> {
   }
 
   // 2. 输入护栏检查 (Processor)
+  const processorLogs: ProcessorLogEntry[] = [];
   const guardStartTime = Date.now();
   const guardResult = sanitizeAndGuard(lastUserMessage, userId);
   const guardDuration = Date.now() - guardStartTime;
+  
+  // 记录 Input Guard Processor 日志
+  processorLogs.push({
+    processorName: 'input-guard',
+    executionTime: guardDuration,
+    success: !guardResult.blocked,
+    data: {
+      blocked: guardResult.blocked,
+      sanitized: guardResult.sanitized,
+      blockReason: guardResult.blockReason,
+      triggeredRules: guardResult.triggeredRules,
+    },
+    timestamp: new Date().toISOString(),
+  });
   
   if (guardResult.blocked) {
     logger.warn('Input blocked', { userId, reason: guardResult.blockReason, rules: guardResult.triggeredRules });
@@ -222,10 +238,32 @@ export async function streamChat(request: ChatRequest): Promise<Response> {
   const sanitizedMessage = guardResult.sanitized;
 
   // 2.5 P0 层：全局关键词匹配（v4.8 Digital Ascension）
+  let matchedKeywordId: string | null = null;
   const p0StartTime = Date.now();
   const { matchKeyword, incrementHitCount } = await import('../hot-keywords/hot-keywords.service');
   const matchedKeyword = await matchKeyword(sanitizedMessage);
   const p0Duration = Date.now() - p0StartTime;
+  
+  // 保存匹配的关键词 ID
+  if (matchedKeyword) {
+    matchedKeywordId = matchedKeyword.id;
+  }
+  
+  // 记录 P0 Match Processor 日志
+  processorLogs.push({
+    processorName: 'p0-match',
+    executionTime: p0Duration,
+    success: true,
+    data: {
+      matched: !!matchedKeyword,
+      keywordId: matchedKeyword?.id,
+      keyword: matchedKeyword?.keyword,
+      matchType: matchedKeyword?.matchType,
+      priority: matchedKeyword?.priority,
+      responseType: matchedKeyword?.responseType,
+    },
+    timestamp: new Date().toISOString(),
+  });
   
   // 保存 P0 匹配数据用于 trace
   const p0MatchData = matchedKeyword ? {
@@ -280,6 +318,20 @@ export async function streamChat(request: ChatRequest): Promise<Response> {
     userId: userId || undefined,
   });
   const intentDuration = Date.now() - intentStartTime;
+  
+  // 记录 P1 Intent Processor 日志
+  processorLogs.push({
+    processorName: 'p1-intent',
+    executionTime: intentDuration,
+    success: true,
+    data: {
+      intent: intentResult.intent,
+      method: intentResult.method,
+      confidence: intentResult.confidence,
+    },
+    timestamp: new Date().toISOString(),
+  });
+  
   logger.info('Intent classified', { intent: intentResult.intent, method: intentResult.method });
 
   // 5.5 Partner Matching 检查（找搭子追问流程）
@@ -318,11 +370,32 @@ export async function streamChat(request: ChatRequest): Promise<Response> {
   const userProfileStartTime = Date.now();
   systemPrompt = await injectUserProfile(systemPrompt, userId);
   const userProfileDuration = Date.now() - userProfileStartTime;
+  
+  // 记录 User Profile Processor 日志
+  processorLogs.push({
+    processorName: 'user-profile',
+    executionTime: userProfileDuration,
+    success: true,
+    data: {
+      hasProfile: !!userProfile,
+      preferencesCount: userProfile?.preferences?.length || 0,
+      locationsCount: userProfile?.frequentLocations?.length || 0,
+    },
+    timestamp: new Date().toISOString(),
+  });
 
   // [Processor 2] 注入语义召回历史
   const semanticRecallStartTime = Date.now();
   systemPrompt = await injectSemanticRecall(systemPrompt, sanitizedMessage, userId);
   const semanticRecallDuration = Date.now() - semanticRecallStartTime;
+  
+  // 记录 Semantic Recall Processor 日志
+  processorLogs.push({
+    processorName: 'semantic-recall',
+    executionTime: semanticRecallDuration,
+    success: true,
+    timestamp: new Date().toISOString(),
+  });
 
   // [Processor 3] Token 限制截断
   const tokenLimitStartTime = Date.now();
@@ -330,14 +403,35 @@ export async function streamChat(request: ChatRequest): Promise<Response> {
   systemPrompt = truncateByTokenLimit(systemPrompt, 12000);
   const tokenLimitDuration = Date.now() - tokenLimitStartTime;
   const truncated = systemPrompt.length < originalPromptLength;
+  
+  // 记录 Token Limit Processor 日志
+  processorLogs.push({
+    processorName: 'token-limit',
+    executionTime: tokenLimitDuration,
+    success: true,
+    data: {
+      truncated,
+      originalLength: originalPromptLength,
+      finalLength: systemPrompt.length,
+    },
+    timestamp: new Date().toISOString(),
+  });
 
   // 9. 执行 LLM 推理
   const traceSteps: TraceStep[] = [];
   let totalUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
   let aiResponseText = '';
+  
+  // 根据意图选择模型
+  const selectedModel = getModelByIntent(intentResult.intent === 'partner' ? 'reasoning' : 'chat');
+  
+  // 确定 modelId 用于日志记录
+  const modelId = intentResult.intent === 'partner' ? 'qwen-plus' : 
+                  intentResult.intent === 'create' ? 'qwen-max' : 
+                  'qwen-flash';
 
   const result = streamText({
-    model: getDefaultChatModel(),  // v4.6: Qwen 主力
+    model: selectedModel,
     system: systemPrompt,
     messages: aiMessages,
     tools,
@@ -417,8 +511,7 @@ export async function streamChat(request: ChatRequest): Promise<Response> {
         intent: intentResult.intent,
       });
 
-      // 记录指标 (v4.6: 动态模型 ID)
-      const modelId = 'qwen-flash';  // TODO: 从 streamText result 获取实际使用的模型
+      // 记录指标
       countAIRequest(modelId, 'success');
       recordAILatency(modelId, duration);
       recordMetricsTokenUsage(modelId, totalUsage.promptTokens, totalUsage.completionTokens);
@@ -438,12 +531,57 @@ export async function streamChat(request: ChatRequest): Promise<Response> {
 
       // [Processor 4] 保存对话历史
       if (userId) {
+        const saveHistoryStartTime = Date.now();
         await saveConversationHistory(userId, lastUserMessage, text || '', traceSteps as ToolCallTrace[]);
+        const saveHistoryDuration = Date.now() - saveHistoryStartTime;
+        
+        // 记录 Save History Processor 日志
+        processorLogs.push({
+          processorName: 'save-history',
+          executionTime: saveHistoryDuration,
+          success: true,
+          data: {
+            messagesSaved: 2, // user + assistant
+          },
+          timestamp: new Date().toISOString(),
+        });
 
         // [Processor 5] 异步提取用户偏好并更新画像
-        extractAndUpdatePreferences(userId, conversationHistory).catch((err: Error) =>
-          logger.warn('Failed to update user profile', { error: err.message })
-        );
+        extractAndUpdatePreferences(userId, conversationHistory).then(() => {
+          // 记录 Extract Preferences Processor 日志（异步）
+          processorLogs.push({
+            processorName: 'extract-preferences',
+            executionTime: 0, // 异步执行，不计入主流程
+            success: true,
+            timestamp: new Date().toISOString(),
+          });
+        }).catch((err: Error) => {
+          logger.warn('Failed to update user profile', { error: err.message });
+          processorLogs.push({
+            processorName: 'extract-preferences',
+            executionTime: 0,
+            success: false,
+            error: err.message,
+            timestamp: new Date().toISOString(),
+          });
+        });
+      }
+      
+      // 保存 AI 请求到数据库（包含 Processor 日志）
+      try {
+        await db.insert(aiRequests).values({
+          userId: userId || null,
+          modelId,
+          inputTokens: totalUsage.promptTokens,
+          outputTokens: totalUsage.completionTokens,
+          latencyMs: duration,
+          processorLog: processorLogs,
+          p0MatchKeyword: matchedKeywordId,
+          input: lastUserMessage.slice(0, 1000), // 限制长度
+          output: (text || '').slice(0, 1000),
+        });
+      } catch (err) {
+        logger.error('Failed to save AI request to database', { error: err });
       }
 
       // 异步评估响应质量（不阻塞响应）
@@ -833,7 +971,8 @@ ${state.collectedPreferences.location ? `- 📍 地点：${state.collectedPrefer
   return createUIMessageStreamResponse({ stream });
 }
 
-async function persistConversation(
+// @ts-ignore - 保留以备将来使用
+async function _persistConversation(
   userId: string,
   userMessage: string,
   assistantResponse: string,

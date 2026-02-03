@@ -55,6 +55,12 @@ export const notificationTypeEnum = pgEnum("notification_type", [
   "cancelled"       // 活动取消
 ]);
 
+// 通知发送方式 (v4.8 Chat Tool Mode)
+export const notificationMethodEnum = pgEnum("notification_method", [
+  "system_message",      // Chat Tool Mode 系统消息（群内事件）
+  "service_notification" // 微信订阅消息（跨群/私密事件）
+]);
+
 // ==========================================
 // 5. 🤝 搭子意向 (Partner Intent Domain)
 // ==========================================

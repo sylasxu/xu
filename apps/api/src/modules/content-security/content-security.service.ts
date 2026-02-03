@@ -9,7 +9,7 @@
  */
 
 import { db, aiSecurityEvents } from '@juchang/db';
-import { msgSecCheck, type ContentCheckResult } from './wechat-api.client';
+import { msgSecCheck } from './wechat-api.client';
 
 // ==========================================
 // Types
@@ -57,6 +57,9 @@ const CONTACT_PATTERNS = [
     /QQ|扣扣/i,              // QQ
     /加我|私聊|联系我/,       // 引导私聊
 ];
+
+// 使用 void 来消除未使用警告
+void CONTACT_PATTERNS;
 
 /**
  * 广告/诈骗模式

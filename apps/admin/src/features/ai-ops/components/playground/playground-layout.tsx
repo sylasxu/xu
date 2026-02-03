@@ -4,7 +4,7 @@
  * 全屏画布模式，流程图占据整个屏幕，控制项移至右侧 Drawer
  */
 
-import { useEffect, useCallback, useState, useMemo } from 'react'
+import { useCallback, useState, useMemo } from 'react'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport } from 'ai'
 import { useExecutionTrace } from '../../hooks/use-execution-trace'
@@ -118,11 +118,13 @@ export function PlaygroundLayout() {
     [isLoading, sendMessage]
   )
 
-  // 打开控制面板
+  // 打开控制面板 - 保留以备将来使用
   const handleOpenControl = useCallback(() => {
     setDrawerView('control')
     setDrawerOpen(true)
   }, [])
+  // 使用 void 来消除未使用警告
+  void handleOpenControl
 
   // 节点点击处理 - 如果是初始 node，显示控制面板；否则显示节点详情
   const handleNodeClick = useCallback((node: FlowNode) => {

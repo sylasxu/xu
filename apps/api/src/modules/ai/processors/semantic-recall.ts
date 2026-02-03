@@ -1,74 +1,127 @@
 /**
- * Semantic Recall Processor - 语义召回历史
+ * Semantic Recall Processor (v4.8)
  * 
- * 纯函数实现，基于向量相似度召回相关历史对话
+ * 负责语义检索历史活动：
+ * - 使用 pgvector 进行向量相似度搜索
+ * - 检索用户创建或参与过的相关活动
+ * - 将检索结果注入到系统提示词
+ * 
+ * 使用场景：
+ * - 用户询问"我之前组过什么局"
+ * - 用户想重复之前的活动
+ * - AI 需要了解用户的历史行为
  */
 
-import { semanticRecall } from '../memory/semantic';
-import { createLogger } from '../observability/logger';
+import type { ProcessorContext, ProcessorResult } from './types';
+import { db, activities, participants, eq, sql, and, or } from '@juchang/db';
+import { generateEmbedding } from '../rag';
 
-const logger = createLogger('processor.semantic-recall');
+// 最大检索结果数
+const MAX_RESULTS = 5;
 
-export interface SemanticRecallOptions {
-    /** 召回数量限制 */
-    limit?: number;
-    /** 相似度阈值 (0-1) */
-    threshold?: number;
-}
+// 相似度阈值（0-1，越高越相似）
+const SIMILARITY_THRESHOLD = 0.7;
 
 /**
- * 注入语义召回的相关历史到 System Prompt
+ * Semantic Recall Processor
  * 
- * @param systemPrompt - 原始 System Prompt
- * @param message - 当前用户消息
- * @param userId - 用户 ID
- * @param options - 召回选项
- * @returns 注入历史后的 Prompt
+ * 语义检索历史活动
  */
-export async function injectSemanticRecall(
-    systemPrompt: string,
-    message: string,
-    userId: string | null,
-    options: SemanticRecallOptions = {}
-): Promise<string> {
-    if (!userId || !message) return systemPrompt;
-
-    const { limit = 3, threshold = 0.6 } = options;
-
-    try {
-        // 召回相关历史消息
-        const relevantMsgs = await semanticRecall(message, userId, { limit, threshold });
-
-        if (relevantMsgs.length === 0) {
-            return systemPrompt;
-        }
-
-        // 构建历史上下文
-        let historyContext = '\n\n<relevant_history>\n以下是与当前话题相关的历史对话：\n';
-
-        for (const msg of relevantMsgs) {
-            // 截断过长的内容
-            const content = msg.content.length > 200
-                ? msg.content.slice(0, 200) + '...'
-                : msg.content;
-            historyContext += `- [${msg.role}]: ${content}\n`;
-        }
-
-        historyContext += '</relevant_history>\n请参考历史对话上下文来回答，避免重复问题。';
-
-        logger.debug('Semantic recall injected', {
-            userId,
-            recalledCount: relevantMsgs.length,
-        });
-
-        return systemPrompt + historyContext;
-
-    } catch (error) {
-        // 召回失败不影响主流程
-        logger.warn('Semantic recall failed', {
-            userId,
-            error: error instanceof Error ? error.message : 'Unknown error',
-        });
-        return systemPrompt;
+export async function semanticRecall(context: ProcessorContext): Promise<ProcessorResult> {
+  const startTime = Date.now();
+  
+  try {
+    const { userId, userInput } = context;
+    
+    // 如果没有 userId，跳过
+    if (!userId) {
+      return {
+        success: true,
+        context,
+        executionTime: Date.now() - startTime,
+        data: { skipped: true, reason: 'no-user-id' },
+      };
     }
+    
+    // 生成查询向量
+    const queryEmbedding = await generateEmbedding(userInput);
+    
+    // 检索相关活动（用户创建或参与过的）
+    const results = await db
+      .select({
+        id: activities.id,
+        title: activities.title,
+        description: activities.description,
+        type: activities.type,
+        locationHint: activities.locationHint,
+        startAt: activities.startAt,
+        similarity: sql<number>`1 - (${activities.embedding} <=> ${queryEmbedding}::vector)`,
+      })
+      .from(activities)
+      .leftJoin(participants, eq(participants.activityId, activities.id))
+      .where(
+        and(
+          or(
+            eq(activities.creatorId, userId),
+            eq(participants.userId, userId)
+          ),
+          sql`${activities.embedding} IS NOT NULL`,
+          sql`1 - (${activities.embedding} <=> ${queryEmbedding}::vector) > ${SIMILARITY_THRESHOLD}`
+        )
+      )
+      .orderBy(sql`${activities.embedding} <=> ${queryEmbedding}::vector`)
+      .limit(MAX_RESULTS);
+    
+    if (results.length === 0) {
+      return {
+        success: true,
+        context,
+        executionTime: Date.now() - startTime,
+        data: { skipped: true, reason: 'no-results' },
+      };
+    }
+    
+    // 格式化检索结果
+    const formattedResults = results.map((r, i) => 
+      `${i + 1}. ${r.title} (${r.type}, ${r.locationHint}, ${new Date(r.startAt).toLocaleDateString()})`
+    ).join('\n');
+    
+    // 注入检索结果到系统提示词
+    const updatedSystemPrompt = `${context.systemPrompt}
+
+## 相关历史活动
+用户之前创建或参与过以下相关活动：
+${formattedResults}
+
+请参考这些历史活动，提供更个性化的建议。`;
+    
+    const updatedContext: ProcessorContext = {
+      ...context,
+      systemPrompt: updatedSystemPrompt,
+      semanticContext: formattedResults,
+    };
+    
+    return {
+      success: true,
+      context: updatedContext,
+      executionTime: Date.now() - startTime,
+      data: {
+        resultsCount: results.length,
+        avgSimilarity: results.reduce((sum, r) => sum + (r.similarity || 0), 0) / results.length,
+      },
+    };
+    
+  } catch (error) {
+    // 语义检索失败不应阻止整个流程，只记录错误
+    return {
+      success: true,
+      context,
+      executionTime: Date.now() - startTime,
+      error: error instanceof Error ? error.message : '未知错误',
+      data: { skipped: true, reason: 'error' },
+    };
+  }
 }
+
+// Processor 元数据
+semanticRecall.processorName = 'semantic-recall';

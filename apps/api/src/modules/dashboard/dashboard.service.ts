@@ -1,5 +1,5 @@
 // Dashboard Service - MVP 简化版：只保留 Admin 基础统计
-import { db, users, activities, participants, eq, gte, desc, count, and, lte, lt, sql, inArray, not, partnerIntents, intentMatches, conversations, conversationMessages } from '@juchang/db';
+import { db, users, activities, participants, eq, gte, desc, count, and, lte, lt, sql, inArray, not, partnerIntents, intentMatches, conversations } from '@juchang/db';
 import type { 
   DashboardStats, 
   RecentActivity, 

@@ -1,7 +1,7 @@
 import { pgTable, uuid, varchar, text, timestamp, boolean, index } from "drizzle-orm/pg-core";
 import { users } from "./users";
 import { activities } from "./activities";
-import { notificationTypeEnum } from "./enums";
+import { notificationTypeEnum, notificationMethodEnum } from "./enums";
 import { createInsertSchema, createSelectSchema } from "drizzle-typebox";
 
 /**
@@ -25,6 +25,9 @@ export const notifications = pgTable("notifications", {
   
   // --- 关联 ---
   activityId: uuid("activity_id").references(() => activities.id),
+  
+  // --- v4.8 Chat Tool Mode: 通知发送方式 ---
+  notificationMethod: notificationMethodEnum("notification_method").default("service_notification").notNull(),
   
   isRead: boolean("is_read").default(false).notNull(),
   

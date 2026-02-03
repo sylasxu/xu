@@ -1,7 +1,7 @@
 # 聚场 (JuChang) 产品需求文档
 
-> **版本**：v4.8 (Skyline + Chat Tool Mode P0 + Digital Ascension)
-> **更新日期**：2026-01-26
+> **版本**：v4.8 (Skyline + Chat Tool Mode P0 + Digital Ascension + Processor Architecture)
+> **更新日期**：2026-02-03
 > **App 名称**：聚场 (JuChang)
 > **产品定位**：Personal Social Agent (个人社交代理人)
 > **核心 Slogan**：想怎么玩？跟小聚说说。

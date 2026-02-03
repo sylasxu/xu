@@ -1,0 +1,87 @@
+<!--
+  Chat Tool Mode - 活动详情页
+  Requirements: 4.1, 4.4, 4.5
+  
+  半屏布局，支持下滑关闭
+-->
+<view class="page-container {{isChatToolMode ? 'half-screen' : ''}}">
+  <!-- 下滑关闭指示器（仅半屏模式） -->
+  <view class="drag-indicator" wx:if="{{isChatToolMode}}" bindtap="onClose">
+    <view class="drag-bar"></view>
+  </view>
+
+  <!-- 加载状态 -->
+  <view class="loading-container" wx:if="{{loading}}">
+    <t-loading theme="circular" size="48rpx" text="加载中..." />
+  </view>
+
+  <!-- 活动详情 -->
+  <view class="content" wx:elif="{{activity}}">
+    <!-- 活动标题 -->
+    <view class="header">
+      <text class="title">{{activity.title}}</text>
+      <text class="type-badge">{{getTypeLabel(activity.type)}}</text>
+    </view>
+
+    <!-- 活动信息 -->
+    <view class="info-section">
+      <view class="info-item">
+        <text class="info-icon">📍</text>
+        <view class="info-content">
+          <text class="info-label">地点</text>
+          <text class="info-value">{{activity.locationName}}</text>
+          <text class="info-hint" wx:if="{{activity.locationHint}}">{{activity.locationHint}}</text>
+        </view>
+      </view>
+
+      <view class="info-item">
+        <text class="info-icon">⏰</text>
+        <view class="info-content">
+          <text class="info-label">时间</text>
+          <text class="info-value">{{formatTime(activity.startAt)}}</text>
+        </view>
+      </view>
+
+      <view class="info-item">
+        <text class="info-icon">👥</text>
+        <view class="info-content">
+          <text class="info-label">人数</text>
+          <text class="info-value">{{activity.currentParticipants}}/{{activity.maxParticipants}} 人</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- 活动描述 -->
+    <view class="description" wx:if="{{activity.description}}">
+      <text class="description-text">{{activity.description}}</text>
+    </view>
+
+    <!-- 发起人 -->
+    <view class="creator" wx:if="{{activity.creator}}">
+      <image 
+        class="creator-avatar" 
+        src="{{activity.creator.avatarUrl || '/static/avatar1.png'}}" 
+        mode="aspectFill"
+      />
+      <text class="creator-name">{{activity.creator.nickname || '匿名用户'}} 发起</text>
+    </view>
+  </view>
+
+  <!-- 底部报名按钮（固定） -->
+  <view class="bottom-action" wx:if="{{activity}}">
+    <t-button
+      class="join-button {{isChatToolMode ? 'huge' : ''}}"
+      theme="primary"
+      size="large"
+      block
+      loading="{{joining}}"
+      disabled="{{hasJoined || isFull || isCreator}}"
+      bindtap="onJoin"
+    >
+      <text wx:if="{{hasJoined}}">✅ 已报名</text>
+      <text wx:elif="{{isFull}}">人数已满</text>
+      <text wx:elif="{{isCreator}}">你是发起人</text>
+      <text wx:else>🙋‍♂️ 我要参加</text>
+    </t-button>
+  </view>
+</view>

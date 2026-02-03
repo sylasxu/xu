@@ -75,9 +75,10 @@ export {
   // Legacy exports
   getAIToolsV34,
   getToolsByIntent,
-  classifyIntent,
-  type IntentType,
 } from './tools';
+
+// Re-export classifyIntent and IntentType from intent module for backward compatibility
+export { classifyIntent, type IntentType } from './intent';
 
 export type {
   ToolContext,

@@ -1,5 +1,5 @@
 // Hot Keywords Service - 纯业务逻辑 (v4.8 Digital Ascension)
-import { db, globalKeywords, eq, and, sql, desc, inArray, toTimestamp } from '@juchang/db';
+import { db, globalKeywords, eq, and, sql, desc, toTimestamp } from '@juchang/db';
 import type {
   GlobalKeywordResponse,
   HotKeywordListItem,

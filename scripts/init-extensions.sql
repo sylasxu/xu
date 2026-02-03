@@ -1,5 +1,5 @@
 -- 数据库启动时自动开启核心插件
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS vector;
--- 甚至可以预创建 schema
+-- 预创建 schema
 CREATE SCHEMA IF NOT EXISTS app;

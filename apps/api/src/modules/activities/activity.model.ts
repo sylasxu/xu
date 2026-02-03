@@ -52,6 +52,9 @@ const ActivityDetailResponse = t.Object({
   updatedAt: t.String(),
   // 计算字段
   isArchived: t.Boolean({ description: '群聊是否已归档 (startAt + 24h < now)' }),
+  // Chat Tool Mode 字段 (v4.8)
+  groupOpenId: t.Union([t.String(), t.Null()], { description: '群聊标识' }),
+  dynamicMessageId: t.Union([t.String(), t.Null()], { description: '微信动态消息ID' }),
   // 关联数据
   creator: t.Union([CreatorInfo, t.Null()]),
   participants: t.Array(ParticipantInfo),

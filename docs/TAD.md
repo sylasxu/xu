@@ -1,7 +1,7 @@
 # 聚场 (JuChang) 技术架构文档
 
-> **版本**：v4.6 (Admin Cockpit Redesign + Agent-First + Generative UI + Partner Matching + AI Ops Persistence + RAG Semantic Search)
-> **更新日期**：2026-01-21
+> **版本**：v4.8 (Skyline + Chat Tool Mode + Processor Architecture + Hot Keywords P0)
+> **更新日期**：2026-02-03
 > **架构**：原生小程序 + Zustand Vanilla + Elysia API + Drizzle ORM
 
 ---
@@ -52,6 +52,9 @@
 │   │   │   ├── home/         # 首页 (Chat-First)
 │   │   │   ├── profile/      # 个人中心
 │   │   │   └── message/      # 消息中心
+│   │   ├── packageChatTool/  # Chat Tool Mode 独立分包 (v4.8 新增)
+│   │   │   └── pages/
+│   │   │       └── activity-detail/  # 活动详情页 (Skyline 半屏)
 │   │   ├── subpackages/      # 分包
 │   │   │   ├── activity/     # 活动相关
 │   │   │   │   ├── detail/   # 活动详情
@@ -70,13 +73,14 @@
 │   │   │   ├── login/        # 登录页
 │   │   │   └── setting/      # 设置页
 │   │   │       └── preference/ # 偏好设置页 (v4.4 新增)
-│   │   ├── components/       # 公共组件 (36 个)
+│   │   ├── components/       # 公共组件 (37 个)
 │   │   │   ├── custom-navbar/    # 自定义导航栏
 │   │   │   ├── ai-dock/          # 超级输入坞
 │   │   │   ├── chat-stream/      # 对话流容器
 │   │   │   ├── widget-dashboard/ # 进场欢迎卡片 (v4.4 含社交档案)
 │   │   │   ├── social-profile-card/ # 社交档案卡片 (v4.4 新增)
 │   │   │   ├── quick-prompts/    # 快捷入口组件 (v4.4 新增)
+│   │   │   ├── hot-chips/        # 热词胶囊组件 (v4.8 新增)
 │   │   │   ├── widget-draft/     # 意图解析卡片
 │   │   │   ├── widget-share/     # 创建成功卡片
 │   │   │   ├── widget-explore/   # 探索卡片 (Generative UI)
@@ -101,6 +105,7 @@
 │   │       ├── features/     # 功能模块
 │   │       │   ├── dashboard/      # 指挥舱 God View
 │   │       │   ├── ai-ops/         # AI Ops (Playground/对话审计/用量统计)
+│   │       │   ├── hot-keywords/   # P0 层热词管理 (v4.8 新增)
 │   │       │   ├── activities/     # 安全中心 - 活动管理
 │   │       │   ├── users/          # 用户管理
 │   │       │   └── settings/       # 系统设置
@@ -111,6 +116,8 @@
 │   │       │   │   │   ├── playground.tsx  # AI 调试场
 │   │       │   │   │   ├── conversations.tsx # 对话审计
 │   │       │   │   │   └── usage.tsx       # 用量统计（合并 Token + 额度）
+│   │       │   │   ├── hot-keywords/
+│   │       │   │   │   └── index.tsx       # 热词管理 (v4.8 新增)
 │   │       │   │   ├── safety/
 │   │       │   │   │   ├── moderation.tsx  # 风险审核
 │   │       │   │   │   └── activities.tsx  # 活动管理
@@ -128,13 +135,14 @@
 │       └── src/
 │           ├── index.ts      # 应用入口
 │           ├── setup.ts      # 全局插件
-│           └── modules/      # 功能模块 (15 个)
+│           └── modules/      # 功能模块 (16 个)
 │               ├── auth/         # 微信登录、手机号绑定
 │               ├── users/        # 用户 CRUD、额度
 │               ├── activities/   # 活动 CRUD、报名、附近搜索
 │               ├── participants/ # 参与者管理
 │               ├── chat/         # 活动群聊消息
 │               ├── ai/           # AI 解析、对话历史
+│               ├── hot-keywords/ # P0 层热词管理 (v4.8 新增)
 │               ├── dashboard/    # 首页数据聚合、God View
 │               ├── growth/       # 增长工具（海报工厂、热门洞察）
 │               ├── notifications/ # 通知管理
@@ -163,18 +171,19 @@
 | 表 | 说明 | 核心字段 |
 |---|------|---------|
 | `users` | 用户表 | wxOpenId, phoneNumber, nickname, avatarUrl, aiCreateQuotaToday, workingMemory |
-| `activities` | 活动表 | title, location, locationHint, startAt, type, status, embedding (v4.5) |
-| `participants` | 参与者表 | activityId, userId, status (joined/quit) |
+| `activities` | 活动表 | title, location, locationHint, startAt, type, status, embedding (v4.5), groupOpenId, dynamicMessageId (v4.8) |
+| `participants` | 参与者表 | activityId, userId, status (joined/quit), groupOpenId (v4.8) |
 | `conversations` | **AI 会话表** | userId, title, messageCount, lastMessageAt |
 | `conversation_messages` | **AI 对话消息表** | conversationId, userId, role, messageType, content, activityId |
 | `activity_messages` | **活动群聊消息表** | activityId, senderId, messageType, content |
-| `notifications` | 通知表 | userId, type, title, isRead, activityId |
+| `notifications` | 通知表 | userId, type, title, isRead, activityId, notificationType (v4.8) |
 | `partner_intents` | **搭子意向表 (v4.0)** | userId, type, tags, location, expiresAt, status |
 | `intent_matches` | **意向匹配表 (v4.0)** | intentAId, intentBId, tempOrganizerId, outcome |
 | `match_messages` | **匹配消息表 (v4.0)** | matchId, senderId, content |
-| `ai_conversation_metrics` | **AI 对话质量指标 (v4.6)** | conversationId, intentAccuracy, toolCallSuccess, latency |
-| `ai_sensitive_words` | **AI 敏感词表 (v4.6)** | word, level, category, isActive |
-| `ai_security_events` | **AI 安全事件表 (v4.6)** | userId, eventType, content, severity |
+| `global_keywords` | **全局热词表 (v4.8)** | keyword, matchType, responseType, responseContent, priority, hitCount, conversionCount |
+| `ai_requests` | **AI 请求记录 (v4.6)** | userId, modelId, inputTokens, outputTokens, latencyMs, processorLog, p0MatchKeyword (v4.8) |
+| `ai_tool_calls` | **AI 工具调用 (v4.6)** | requestId, toolName, durationMs, success |
+| `ai_eval_samples` | **AI 评估样本 (v4.6)** | input, output, intent, score |
 
 ### 4.2 conversations 表 (两层会话结构)
 
@@ -366,6 +375,79 @@ export const matchMessages = pgTable('match_messages', {
 - **CP-25**: 匹配只在无 tag 冲突、同类型、3km 内、score ≥ 80% 时创建
 - **CP-26**: Temp_Organizer 是最早创建意向的用户
 
+### 4.7 全局热词表 (v4.8 新增)
+
+```typescript
+// packages/db/src/schema/global_keywords.ts
+
+// 匹配方式枚举
+export const keywordMatchTypeEnum = pgEnum('keyword_match_type', [
+  'exact',   // 完全匹配
+  'prefix',  // 前缀匹配
+  'fuzzy'    // 模糊匹配
+]);
+
+// 响应类型枚举
+export const keywordResponseTypeEnum = pgEnum('keyword_response_type', [
+  'widget_explore',  // 探索卡片
+  'widget_draft',    // 草稿卡片
+  'text',            // 文本响应
+  'redirect'         // 跳转
+]);
+
+// global_keywords 表 - P0 层热词
+export const globalKeywords = pgTable('global_keywords', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  
+  // 关键词配置
+  keyword: varchar('keyword', { length: 100 }).notNull(),
+  matchType: keywordMatchTypeEnum('match_type').default('exact').notNull(),
+  
+  // 响应配置
+  responseType: keywordResponseTypeEnum('response_type').notNull(),
+  responseContent: jsonb('response_content').notNull(),  // 预设响应内容
+  
+  // 优先级和状态
+  priority: integer('priority').default(0).notNull(),  // 数字越大优先级越高
+  isActive: boolean('is_active').default(true).notNull(),
+  
+  // 有效期
+  validFrom: timestamp('valid_from'),
+  validUntil: timestamp('valid_until'),
+  
+  // 统计数据
+  hitCount: integer('hit_count').default(0).notNull(),
+  conversionCount: integer('conversion_count').default(0).notNull(),
+  
+  // 元数据
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+```
+
+**热词响应内容示例**：
+
+```typescript
+// responseType: 'widget_explore'
+{
+  "center": { "lat": 29.56, "lng": 106.55, "name": "仙女山" },
+  "radius": 5,
+  "activityTypes": ["outdoor", "travel"],
+  "title": "仙女山周边活动推荐"
+}
+
+// responseType: 'text'
+{
+  "text": "仙女山是重庆著名的旅游景点，想去玩的话可以试试说「帮我组个仙女山一日游」"
+}
+
+// responseType: 'redirect'
+{
+  "path": "/subpackages/activity/explore/index",
+  "params": { "keyword": "仙女山" }
+}
+```
+
 ---
 
 ## 5. API 模块设计
@@ -380,6 +462,7 @@ export const matchMessages = pgTable('match_messages', {
 | `participants` | `/participants` | 参与者管理 |
 | `chat` | `/chat` | 活动群聊消息 (activity_messages 表) |
 | `ai` | `/ai` | AI 解析 (SSE)，**意图分类**，**对话历史管理** (conversations 表) |
+| `hot-keywords` | `/hot-keywords` | **P0 层热词管理** (v4.8 新增) |
 | `dashboard` | `/dashboard` | 首页数据聚合、God View 实时概览 |
 | `growth` | `/growth` | 增长工具：海报工厂、热门洞察 |
 | `notifications` | `/notifications` | 通知管理 |
@@ -427,6 +510,17 @@ DELETE /ai/conversations  // 清空对话历史 (新对话)
 GET  /ai/sessions         // 获取会话列表 (Admin 对话审计)
 GET  /ai/sessions/:id     // 获取会话详情
 DELETE /ai/sessions/:id   // 删除会话
+
+// Hot Keywords (v4.8 新增：P0 层热词管理)
+GET  /hot-keywords              // 获取热词列表 (支持分页、筛选)
+POST /hot-keywords              // 创建热词
+GET  /hot-keywords/:id          // 获取热词详情
+PUT  /hot-keywords/:id          // 更新热词
+DELETE /hot-keywords/:id        // 删除热词
+POST /hot-keywords/match        // 匹配热词 (P0 层核心接口)
+POST /hot-keywords/:id/hit      // 记录热词命中
+POST /hot-keywords/:id/convert  // 记录热词转化
+GET  /hot-keywords/analytics    // 获取热词分析数据
 
 // Dashboard (v4.5 新增：God View 实时概览)
 GET  /dashboard/god-view  // 获取 God View 数据（实时概览/AI健康度/异常警报）
@@ -525,6 +619,98 @@ interface TrendInsight {
 - 发现新的活动类型机会
 - 优化 AI 提示词和工具选择
 
+### 5.6 Hot Keywords 模块 - P0 层热词管理 (v4.8 新增)
+
+**P0 层架构**：
+
+P0 层是意图识别引擎的第一层，在 NLP 处理之前进行全局关键词匹配，实现极速响应。
+
+```
+用户输入
+    │
+    ▼
+┌─────────────────┐
+│ P0: 热词匹配    │ ← matchKeyword() 
+│ (Global Keywords)│   支持 exact/prefix/fuzzy
+└────────┬────────┘
+         │
+    命中? ─┬─ Yes → 直接返回预设响应 (跳过 LLM)
+         │
+         └─ No → 继续到 P1 层 (意图识别)
+```
+
+**核心 API**：
+
+```typescript
+// POST /hot-keywords/match - P0 层核心接口
+interface MatchKeywordRequest {
+  userInput: string;
+  location?: { lat: number; lng: number };
+  timeRange?: 'morning' | 'afternoon' | 'evening' | 'night';
+}
+
+interface MatchKeywordResponse {
+  matched: boolean;
+  keyword?: {
+    id: string;
+    keyword: string;
+    matchType: 'exact' | 'prefix' | 'fuzzy';
+    responseType: 'widget_explore' | 'widget_draft' | 'text' | 'redirect';
+    responseContent: Record<string, unknown>;
+  };
+}
+```
+
+**热词匹配规则**：
+
+| 匹配方式 | 说明 | 示例 |
+|---------|------|------|
+| `exact` | 完全匹配 | "仙女山" → 仙女山活动卡片 |
+| `prefix` | 前缀匹配 | "仙女山攻略" → 仙女山活动卡片 |
+| `fuzzy` | 模糊匹配 | "想去仙女山玩" → 仙女山活动卡片 |
+
+**缓存策略**：
+
+```typescript
+// 热词缓存 (Redis)
+const CACHE_KEY = 'hot-keywords:active';
+const CACHE_TTL = 300; // 5 分钟
+
+// 缓存失效时机
+// 1. 创建/更新/删除热词时
+// 2. 热词状态变更时 (启用/停用)
+// 3. 热词过期时
+```
+
+**转化追踪**：
+
+```typescript
+// 转化追踪逻辑
+// 1. 用户点击 Hot Chip → 记录 hitCount
+// 2. 用户完成转化 (报名/发布) → 查询最近 30 分钟内的热词命中
+// 3. 如果找到关联热词 → 记录 conversionCount
+
+export async function trackConversion(userId: string): Promise<void> {
+  // 查询用户最近 30 分钟内的 AI 响应消息
+  const recentMessages = await getRecentMessages(userId, 30);
+  
+  // 查找 keywordContext
+  for (const msg of recentMessages) {
+    if (msg.content?.keywordContext?.keywordId) {
+      await incrementConversionCount(msg.content.keywordContext.keywordId);
+    }
+  }
+}
+```
+
+**Admin 管理界面**：
+
+| 功能 | 说明 |
+|------|------|
+| 热词列表 | 支持搜索、筛选（状态、匹配方式、响应类型）、批量操作 |
+| 热词表单 | 创建/编辑热词，支持 JSON 编辑器配置响应内容 |
+| 热词分析 | 命中率 Top 10 柱状图、转化率分析表格 |
+
 ### 5.5 SSE 事件 (v3.2)
 
 ```typescript
@@ -596,14 +782,15 @@ apps/api/src/modules/ai/
 ├── ai.model.ts           # TypeBox Schema 定义
 ├── ai.service.ts         # 核心服务（streamChat, 会话管理）
 │
-├── processors/           # v4.6 Processor 纯函数 (新增)
-│   ├── index.ts          # 统一导出
-│   ├── input-guard.ts    # 输入安全检查
-│   ├── user-profile.ts   # 用户画像注入
-│   ├── semantic-recall.ts # 语义召回历史
-│   ├── token-limit.ts    # Token 限制
-│   ├── save-history.ts   # 保存对话历史
-│   └── extract-preferences.ts # 偏好提取
+├── processors/           # v4.8 Processor 架构 (升级)
+│   ├── index.ts          # 统一导出 + executeProcessors 执行器
+│   ├── types.ts          # Processor, ProcessorContext, ProcessorResult 接口
+│   ├── input-guard.ts    # 输入安全检查 (敏感词/注入攻击/长度限制)
+│   ├── user-profile.ts   # 用户画像注入 (workingMemory → System Prompt)
+│   ├── semantic-recall.ts # 语义召回历史 (pgvector 相似度搜索)
+│   ├── token-limit.ts    # Token 限制截断 (防止超出模型上下文)
+│   ├── save-history.ts   # 保存对话历史 (conversations 表)
+│   └── extract-preferences.ts # 偏好提取 (LLM 异步提取 → workingMemory)
 │
 ├── user-action/          # v4.7 结构化用户操作模块 (新增)
 │   ├── index.ts          # 模块导出
@@ -647,12 +834,12 @@ apps/api/src/modules/ai/
 │   └── helpers/          # 工具辅助函数
 │       └── match.ts      # 匹配算法辅助
 │
-├── models/               # 模型路由模块 (v4.6 升级)
+├── models/               # 模型路由模块 (v4.8 升级)
 │   ├── index.ts          # 模块导出
-│   ├── types.ts          # ModelConfig, ChatParams
-│   ├── router.ts         # 模型选择、降级、重试、意图路由
+│   ├── types.ts          # ModelConfig, ChatParams, ModelIntent
+│   ├── router.ts         # getModelByIntent(), withFallback(), withRetry()
 │   └── adapters/         # 提供商适配器
-│       ├── qwen.ts       # Qwen3 适配 (v4.6 主力: flash/plus/max/rerank)
+│       ├── qwen.ts       # Qwen3 适配 (v4.8 主力: flash/plus/max/rerank)
 │       └── deepseek.ts   # DeepSeek 适配 (备选)
 │
 ├── prompts/              # 提示词模块
@@ -961,9 +1148,9 @@ if (maxSim > 0.5) {
 }
 ```
 
-### 6.7 模型路由 (Model Router) - v4.6 升级
+### 6.7 模型路由 (Model Router) - v4.8 升级
 
-**支持的模型 (v4.6 Qwen3 全家桶)**：
+**支持的模型 (v4.8 Qwen3 全家桶)**：
 
 | 提供商 | 模型 | 用途 |
 |--------|------|------|
@@ -975,7 +1162,7 @@ if (maxSim > 0.5) {
 | **Qwen** | `qwen3-rerank` | 检索重排序 |
 | DeepSeek | `deepseek-chat` | 备选 Chat |
 
-**意图路由 (v4.6 新增)**：
+**意图路由 (v4.8 getModelByIntent)**：
 
 ```typescript
 // 根据业务意图选择最合适的模型
@@ -989,19 +1176,25 @@ export function getModelByIntent(intent: 'chat' | 'reasoning' | 'agent' | 'visio
 }
 ```
 
-**降级策略**：
+**降级策略 (withFallback)**：
 
 ```typescript
 const DEFAULT_FALLBACK_CONFIG = {
-  primary: 'qwen',      // v4.6: 主力切换为 Qwen
-  fallback: 'zhipu',
+  primary: 'qwen',      // v4.8: 主力切换为 Qwen
+  fallback: 'deepseek', // 备选
   maxRetries: 2,
   retryDelay: 1000,
   enableFallback: true,
 };
+
+// 带降级的模型调用
+const result = await withFallback(
+  () => generateText({ model: qwen('qwen-flash'), prompt }),
+  () => generateText({ model: deepseek('deepseek-chat'), prompt })
+);
 ```
 
-**重试机制**：
+**重试机制 (withRetry)**：
 
 ```typescript
 // 带重试的模型调用
@@ -1191,7 +1384,7 @@ flowchart TD
     N --> END
 ```
 
-### 6.12 AI 请求流程 (v4.6 Processor 架构)
+### 6.12 AI 请求流程 (v4.8 Processor 架构)
 
 ```
 用户消息
@@ -1208,44 +1401,49 @@ flowchart TD
          │ (超限返回快速响应)
          ▼
 ┌─────────────────┐
-│ 2. 输入护栏     │ ← [Processor] sanitizeAndGuard()
+│ 2. P0 热词匹配  │ ← matchKeyword() 全局关键词
 └────────┬────────┘
-         │ (敏感词/注入攻击拦截)
+         │ (命中则直接返回预设响应，跳过 LLM)
          ▼
 ┌─────────────────┐
-│ 3. 构建上下文   │ ← 位置逆地理编码、用户昵称
+│ 3. 输入护栏     │ ← [Processor] InputGuardProcessor
+└────────┬────────┘
+         │ (敏感词/注入攻击/长度限制拦截)
+         ▼
+┌─────────────────┐
+│ 4. 构建上下文   │ ← 位置逆地理编码、用户昵称
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│ 4. 意图分类     │ ← classifyIntent(Regex优先/LLM兜底)
+│ 5. 意图分类     │ ← classifyIntent(Regex优先/LLM兜底)
 └────────┬────────┘
          │
          ├──────────────────┐
          │ (partner 意图)   │
          ▼                  ▼
 ┌─────────────────┐  ┌─────────────────┐
-│ 4.5 找搭子追问  │  │ 5. 闲聊快速响应 │
+│ 5.5 找搭子追问  │  │ 6. 闲聊快速响应 │
 │ (Partner Flow)  │  │ (chitchat)      │
 └────────┬────────┘  └─────────────────┘
          │
          ▼
 ┌─────────────────┐
-│ 6. 工具选择     │ ← getToolsByIntent(按意图加载)
+│ 7. 工具选择     │ ← getToolsByIntent(按意图加载)
 └────────┬────────┘
          │
          ▼
 ┌─────────────────────────────────────┐
-│ 7. Prompt + Processors (v4.6)      │
-│   [1] injectUserProfile()          │ ← 注入用户画像
-│   [2] injectSemanticRecall()       │ ← 语义召回历史
-│   [3] truncateByTokenLimit()       │ ← Token 限制
+│ 8. Prompt + Processors (v4.8)      │
+│   [1] UserProfileProcessor         │ ← 注入用户画像
+│   [2] SemanticRecallProcessor      │ ← 语义召回历史
+│   [3] TokenLimitProcessor          │ ← Token 限制截断
 └────────┬────────────────────────────┘
          │
          ▼
 ┌─────────────────┐
-│ 8. LLM 推理     │ ← streamText(Qwen: flash/plus/max)
-│   (流式输出)    │   tools 直接传入，无抽象层
+│ 9. LLM 推理     │ ← streamText(getModelByIntent())
+│   (流式输出)    │   Qwen: flash/plus/max 按意图选择
 └────────┬────────┘
          │
          ├─── onStepFinish ───┐
@@ -1258,15 +1456,125 @@ flowchart TD
          ├─── onFinish (Output Processors) ───┐
          │                                    ▼
          │            ┌─────────────────────────────────┐
-         │            │ 9. 响应后处理 (v4.6 Processors) │
-         │            │ [4] saveConversationHistory()   │
-         │            │ [5] extractAndUpdatePreferences()│
+         │            │ 10. 响应后处理 (v4.8 Processors)│
+         │            │ [4] SaveHistoryProcessor        │
+         │            │ [5] ExtractPreferencesProcessor │
          │            │ [6] evaluateResponseQuality()   │
          │            │ [7] recordConversationMetrics() │
          │            └─────────────────────────────────┘
          │
          ▼
     流式响应 (SSE)
+```
+
+### 6.12.1 Processor 架构详解 (v4.8)
+
+**设计理念**：
+Processor 是 AI 请求处理管道中的可插拔组件，每个 Processor 负责单一职责，通过 `executeProcessors()` 函数串联执行。
+
+**核心接口**：
+
+```typescript
+// Processor 接口
+interface Processor {
+  name: string;
+  description: string;
+  execute(context: ProcessorContext): Promise<ProcessorResult>;
+}
+
+// Processor 上下文
+interface ProcessorContext {
+  userId: string | null;
+  userInput: string;
+  systemPrompt: string;
+  messages: CoreMessage[];
+  metadata: Record<string, unknown>;
+}
+
+// Processor 执行结果
+interface ProcessorResult {
+  success: boolean;
+  context: ProcessorContext;  // 更新后的上下文
+  data?: Record<string, unknown>;
+  error?: string;
+  executionTime: number;
+}
+```
+
+**6 个核心 Processor**：
+
+| Processor | 阶段 | 职责 | 关键逻辑 |
+|-----------|------|------|---------|
+| `InputGuardProcessor` | 输入 | 安全检查 | 敏感词过滤、注入攻击检测、长度限制 |
+| `UserProfileProcessor` | 输入 | 用户画像注入 | 从 `users.workingMemory` 读取偏好，注入 System Prompt |
+| `SemanticRecallProcessor` | 输入 | 语义召回 | pgvector 相似度搜索历史活动，注入上下文 |
+| `TokenLimitProcessor` | 输入 | Token 限制 | 按模型上下文窗口截断消息历史 |
+| `SaveHistoryProcessor` | 输出 | 保存对话 | 将用户消息和 AI 响应保存到 `conversation_messages` |
+| `ExtractPreferencesProcessor` | 输出 | 偏好提取 | LLM 异步提取用户偏好，更新 `workingMemory` |
+
+**执行器函数**：
+
+```typescript
+// 执行 Processor 链
+export async function executeProcessors(
+  processors: Processor[],
+  initialContext: ProcessorContext
+): Promise<{
+  context: ProcessorContext;
+  logs: ProcessorLogEntry[];
+}> {
+  let context = initialContext;
+  const logs: ProcessorLogEntry[] = [];
+  
+  for (const processor of processors) {
+    const result = await processor.execute(context);
+    
+    logs.push({
+      processorName: processor.name,
+      executionTime: result.executionTime,
+      success: result.success,
+      data: result.data,
+      error: result.error,
+      timestamp: new Date().toISOString(),
+    });
+    
+    // 关键 Processor 失败时抛出错误
+    if (!result.success && processor.name === 'input-guard') {
+      throw new Error(`Processor ${processor.name} failed: ${result.error}`);
+    }
+    
+    context = result.context;
+  }
+  
+  return { context, logs };
+}
+```
+
+**与 AI Service 集成**：
+
+```typescript
+// ai.service.ts 中的使用示例
+const inputProcessors = [
+  inputGuardProcessor,
+  userProfileProcessor,
+  semanticRecallProcessor,
+  tokenLimitProcessor,
+];
+
+const { context, logs } = await executeProcessors(inputProcessors, {
+  userId,
+  userInput: message,
+  systemPrompt: XIAOJU_SYSTEM_PROMPT,
+  messages: [],
+  metadata: {},
+});
+
+// 记录 Processor 执行日志到 ai_requests.processorLog
+await recordAIRequest({
+  userId,
+  processorLog: JSON.stringify(logs),
+  // ...
+});
 ```
 
 ### 6.12 结构化用户操作 (User Action) - v4.7

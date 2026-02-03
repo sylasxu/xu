@@ -32,6 +32,8 @@ export * from "./match-messages";     // 匹配消息 (直接关联 matchId)
 export * from "./ai-conversation-metrics";
 export * from "./ai-sensitive-words";
 export * from "./ai-security-events";
+export * from "./ai-requests";        // v4.8 AI 请求日志
+export * from "./ai-tool-calls";      // v4.8 AI Tool 调用日志
 
 // 8. Global Keywords System (v4.8 Digital Ascension)
 export * from "./global_keywords";

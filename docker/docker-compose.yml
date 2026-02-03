@@ -2,13 +2,11 @@
 
 services:
   postgres:
-  # ⚠️ 关键 1：Compose 层面也要强制指定平台，防止拉错
     platform: linux/amd64
-    # 使用之前确定的构建配置
     build:
       context: ./postgres
       dockerfile: Dockerfile
-    image: juchang-postgres:custom
+    image: juchang-postgres:pgvector-postgis
     container_name: juchang-db
     restart: always
     ports:
@@ -17,19 +15,16 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
       POSTGRES_DB: juchang
-     # ⚠️ 关键 2：显式定义数据存储位置
-      # 虽然官方说 VOLUME 变了，但我们可以通过环境变量强行指定它存哪
-      # 这样可以避免路径混乱
       PGDATA: /var/lib/postgresql/data/pgdata
     command: 
       - "postgres"
       - "-c"
-      - "shared_buffers=256MB" # 给 PG 多点内存
+      - "shared_buffers=256MB"
       - "-c"
       - "max_connections=200"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./scripts/init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql
+      - ../scripts/init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d juchang"]
       interval: 10s

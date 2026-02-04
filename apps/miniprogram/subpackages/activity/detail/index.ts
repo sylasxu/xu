@@ -528,13 +528,14 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
 
     const { activityId, participantStatus, isCreator } = this.data;
 
-    if (!isCreator && participantStatus !== 'approved') {
-      wx.showToast({ title: '需要通过审核才能进入群聊', icon: 'none' });
+    // 创建者或已通过审核的参与者可以进入讨论区
+    if (!isCreator && participantStatus !== 'approved' && participantStatus !== 'joined') {
+      wx.showToast({ title: '需要报名才能进入讨论区', icon: 'none' });
       return;
     }
 
     wx.navigateTo({
-      url: `/pages/chat/index?activityId=${activityId}`,
+      url: `/subpackages/activity/discussion/index?id=${activityId}`,
     });
   },
 

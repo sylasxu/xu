@@ -19,7 +19,8 @@
         "draft-edit/index",
         "list/index",
         "explore/index",
-        "map-picker/index"
+        "map-picker/index",
+        "discussion/index"
       ]
     },
     {

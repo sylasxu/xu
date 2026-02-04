@@ -26,6 +26,7 @@ import { moderationController } from './modules/ai/moderation/moderation.control
 import { anomalyController } from './modules/ai/anomaly/anomaly.controller';
 import { growthController } from './modules/growth/growth.controller';
 import { hotKeywordsController } from './modules/hot-keywords/hot-keywords.controller';
+import { posterController } from './modules/poster/poster.controller';
 
 // 导入定时任务调度器
 import { startScheduler, stopScheduler, getJobStatuses } from './jobs';
@@ -56,6 +57,7 @@ const app = new Elysia()
         { name: 'Reports', description: '内容审核' },
         { name: 'Hot Keywords', description: '全局关键词' },
         { name: 'Hot Keywords - Admin', description: '全局关键词管理' },
+        { name: 'Poster', description: '海报生成' },
       ],
     },
     scalar: {
@@ -95,6 +97,7 @@ const app = new Elysia()
   .use(anomalyController)
   .use(growthController)
   .use(hotKeywordsController)
+  .use(posterController)
   // 健康检查
   .get('/', () => 'Hello Juchang API')
   .get('/health', () => ({ status: 'ok', timestamp: new Date().toISOString() }))

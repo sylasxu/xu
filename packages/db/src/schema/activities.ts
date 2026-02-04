@@ -49,10 +49,6 @@ export const activities = pgTable("activities", {
   // --- v4.5 语义搜索：向量字段 (Qwen text-embedding-v4, 1536 维) ---
   embedding: vector('embedding', { dimensions: 1536 }),
 
-  // --- v4.x 微信聊天工具模式 (Phase 2 预留) ---
-  groupOpenId: varchar('group_open_id', { length: 64 }),   // 关联的微信群 opengid
-  dynamicMessageId: varchar('dynamic_message_id', { length: 64 }), // 微信动态消息 activityId
-
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [

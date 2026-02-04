@@ -1,0 +1,11 @@
+{
+  "navigationBarTitleText": "活动讨论区",
+  "usingComponents": {
+    "t-navbar": "tdesign-miniprogram/navbar/navbar",
+    "t-icon": "tdesign-miniprogram/icon/icon",
+    "t-loading": "tdesign-miniprogram/loading/loading",
+    "t-toast": "tdesign-miniprogram/toast/toast",
+    "t-empty": "tdesign-miniprogram/empty/empty"
+  },
+  "navigationStyle": "custom"
+}

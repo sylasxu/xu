@@ -3,6 +3,11 @@ import { Elysia, t } from 'elysia';
 import { basePlugins, verifyAuth } from '../../setup';
 import { chatModel, ChatMessageResponseSchema, type ErrorResponse } from './chat.model';
 import { getMessages, sendMessage } from './chat.service';
+import { handleWsUpgrade, handleWsMessage, handleWsClose, startHeartbeatChecker, type WsData } from './chat.ws';
+import { createReport } from '../reports/report.service';
+
+// 启动心跳检测
+startHeartbeatChecker(10000);
 
 export const chatController = new Elysia({ prefix: '/chat' })
   .use(basePlugins)
@@ -92,4 +97,76 @@ export const chatController = new Elysia({ prefix: '/chat' })
         401: 'chat.error',
       },
     }
-  );
+  )
+
+  // 举报消息
+  .post(
+    '/:activityId/report',
+    async ({ params, body, set, jwt, headers }) => {
+      const user = await verifyAuth(jwt, headers);
+      if (!user) {
+        set.status = 401;
+        return {
+          code: 401,
+          msg: '未授权',
+        } satisfies ErrorResponse;
+      }
+
+      try {
+        await createReport({
+          type: 'message',
+          targetId: body.messageId,
+          reason: body.reason,
+        }, user.id);
+        return { msg: '举报成功' };
+      } catch (error: any) {
+        set.status = 400;
+        return {
+          code: 400,
+          msg: error.message || '举报失败',
+        } satisfies ErrorResponse;
+      }
+    },
+    {
+      detail: {
+        tags: ['Chat'],
+        summary: '举报消息',
+        description: '举报活动讨论区中的违规消息',
+      },
+      params: 'chat.activityIdParams',
+      body: 'chat.reportMessageRequest',
+      response: {
+        200: t.Object({ msg: t.String() }),
+        400: 'chat.error',
+        401: 'chat.error',
+      },
+    }
+  )
+
+  // WebSocket 实时通讯
+  .ws('/:activityId/ws', {
+    body: t.String(),
+    query: t.Object({
+      token: t.String({ description: 'JWT Token' }),
+    }),
+    
+    async open(ws) {
+      const activityId = (ws.data as any).params?.activityId;
+      const token = (ws.data as any).query?.token;
+      
+      if (!activityId || !token) {
+        ws.close(4000, 'Missing parameters');
+        return;
+      }
+
+      await handleWsUpgrade(ws as any, activityId, token);
+    },
+
+    async message(ws, message) {
+      await handleWsMessage(ws as any, message);
+    },
+
+    async close(ws) {
+      await handleWsClose(ws as any);
+    },
+  });

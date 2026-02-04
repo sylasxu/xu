@@ -1,0 +1,132 @@
+<!-- 活动讨论区页面 -->
+<view class="discussion-page">
+  <!-- 导航栏 -->
+  <t-navbar
+    title="活动讨论区"
+    left-arrow
+    bind:go-back="onBack"
+  >
+    <view slot="right" class="navbar-right">
+      <view class="online-badge" wx:if="{{isConnected}}">
+        <view class="online-dot"></view>
+        <text>{{onlineCount}}人在线</text>
+      </view>
+    </view>
+  </t-navbar>
+
+  <!-- 连接状态提示 -->
+  <view class="connection-status {{connectionStatus}}" wx:if="{{connectionStatus !== 'connected'}}">
+    <t-loading wx:if="{{connectionStatus === 'connecting' || connectionStatus === 'reconnecting'}}" size="32rpx" />
+    <text wx:if="{{connectionStatus === 'connecting'}}">正在连接...</text>
+    <text wx:if="{{connectionStatus === 'reconnecting'}}">正在重连...</text>
+    <text wx:if="{{connectionStatus === 'disconnected' && !isArchived}}">连接已断开</text>
+  </view>
+
+  <!-- 归档提示 -->
+  <view class="archived-banner" wx:if="{{isArchived}}">
+    <t-icon name="info-circle" size="32rpx" />
+    <text>讨论区已归档，仅可查看历史消息</text>
+  </view>
+
+  <!-- 消息列表 -->
+  <scroll-view
+    class="message-list"
+    scroll-y
+    scroll-into-view="{{scrollToView}}"
+    scroll-with-animation
+    enhanced
+    show-scrollbar="{{false}}"
+    bindscrolltoupper="onScrollToUpper"
+    bindscroll="onScroll"
+  >
+    <!-- 加载更多 -->
+    <view class="load-more" wx:if="{{isLoadingMore}}">
+      <t-loading size="32rpx" />
+      <text>加载中...</text>
+    </view>
+    <view class="load-more" wx:elif="{{!hasMore && messages.length > 0}}">
+      <text class="no-more">没有更多消息了</text>
+    </view>
+
+    <!-- 空状态 -->
+    <view class="empty-state" wx:if="{{messages.length === 0 && isConnected}}">
+      <t-empty description="还没有消息，快来说点什么吧~" />
+    </view>
+
+    <!-- 消息项 -->
+    <view
+      wx:for="{{messages}}"
+      wx:key="id"
+      id="msg-{{item.id}}"
+      class="message-item {{item.senderId === currentUserId ? 'self' : ''}} {{item.type === 'system' ? 'system' : ''}}"
+    >
+      <!-- 系统消息 -->
+      <view class="system-message" wx:if="{{item.type === 'system'}}">
+        <text>{{item.content}}</text>
+      </view>
+
+      <!-- 普通消息 -->
+      <block wx:else>
+        <!-- 头像 -->
+        <image
+          class="avatar"
+          src="{{item.senderAvatarUrl || '/static/avatar1.png'}}"
+          mode="aspectFill"
+          wx:if="{{item.senderId !== currentUserId}}"
+        />
+
+        <!-- 消息内容 -->
+        <view class="message-content">
+          <!-- 昵称 -->
+          <text class="nickname" wx:if="{{item.senderId !== currentUserId}}">
+            {{item.senderNickname || '匿名用户'}}
+          </text>
+          
+          <!-- 气泡 -->
+          <view class="bubble">
+            <text class="text">{{item.content}}</text>
+          </view>
+          
+          <!-- 时间 -->
+          <text class="time">{{item.formattedTime}}</text>
+        </view>
+
+        <!-- 自己的头像 -->
+        <image
+          class="avatar"
+          src="{{item.senderAvatarUrl || '/static/avatar1.png'}}"
+          mode="aspectFill"
+          wx:if="{{item.senderId === currentUserId}}"
+        />
+      </block>
+    </view>
+  </scroll-view>
+
+  <!-- 输入区域 -->
+  <view class="input-area" wx:if="{{!isArchived}}">
+    <view class="input-wrapper">
+      <input
+        class="input"
+        type="text"
+        placeholder="说点什么..."
+        placeholder-class="input-placeholder"
+        value="{{inputValue}}"
+        bindinput="onInput"
+        bindconfirm="onSend"
+        confirm-type="send"
+        disabled="{{!isConnected}}"
+        maxlength="500"
+      />
+      <view
+        class="send-btn {{inputValue.trim() ? 'active' : ''}}"
+        bindtap="onSend"
+      >
+        <t-icon name="send" size="40rpx" />
+      </view>
+    </view>
+    <view class="safe-area-bottom"></view>
+  </view>
+
+  <!-- Toast -->
+  <t-toast id="t-toast" />
+</view>

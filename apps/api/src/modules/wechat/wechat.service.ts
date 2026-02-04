@@ -28,70 +28,6 @@ export async function getAccessToken(): Promise<string> {
 }
 
 /**
- * 更新动态消息卡片
- * Chat Tool Mode 专用：更新群聊中的活动卡片辅标题
- */
-export async function updateDynamicMessage(
-  dynamicMessageId: string,
-  subtitle: string
-): Promise<void> {
-  const accessToken = await getAccessToken();
-  
-  const response = await fetch(
-    `https://api.weixin.qq.com/cgi-bin/message/custom/updatemsg?access_token=${accessToken}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        activity_id: dynamicMessageId,
-        target_state: 1,
-        template_info: {
-          parameter_list: [
-            { name: 'member_count', value: subtitle },
-          ],
-        },
-      }),
-    }
-  );
-
-  const data = await response.json();
-  
-  if (data.errcode !== 0) {
-    throw new Error(`更新动态消息失败: ${data.errmsg}`);
-  }
-}
-
-/**
- * 发送群聊系统消息
- * Chat Tool Mode 专用：在群聊中发送系统级通知
- */
-export async function sendGroupSystemMessage(
-  groupOpenId: string,
-  content: string
-): Promise<void> {
-  const accessToken = await getAccessToken();
-  
-  const response = await fetch(
-    `https://api.weixin.qq.com/cgi-bin/message/custom/send?access_token=${accessToken}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        touser: groupOpenId,
-        msgtype: 'text',
-        text: { content },
-      }),
-    }
-  );
-
-  const data = await response.json();
-  
-  if (data.errcode !== 0) {
-    throw new Error(`发送系统消息失败: ${data.errmsg}`);
-  }
-}
-
-/**
  * 发送订阅消息（服务通知）
  */
 export async function sendSubscribeMessage(
@@ -121,4 +57,53 @@ export async function sendSubscribeMessage(
   if (result.errcode !== 0) {
     throw new Error(`发送订阅消息失败: ${result.errmsg}`);
   }
+}
+
+/**
+ * 发送客服消息（48h 内有效）
+ * 用于活动讨论区离线通知
+ */
+export async function sendCustomerMessage(
+  openId: string,
+  content: string
+): Promise<boolean> {
+  const accessToken = await getAccessToken();
+  
+  const response = await fetch(
+    `https://api.weixin.qq.com/cgi-bin/message/custom/send?access_token=${accessToken}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        touser: openId,
+        msgtype: 'text',
+        text: { content },
+      }),
+    }
+  );
+
+  const data = await response.json();
+  return data.errcode === 0;
+}
+
+/**
+ * 生成小程序码
+ * 用于海报生成
+ */
+export async function generateQRCode(path: string): Promise<Buffer> {
+  const accessToken = await getAccessToken();
+  
+  const response = await fetch(
+    `https://api.weixin.qq.com/wxa/getwxacode?access_token=${accessToken}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        path,
+        width: 280,
+      }),
+    }
+  );
+
+  return Buffer.from(await response.arrayBuffer());
 }

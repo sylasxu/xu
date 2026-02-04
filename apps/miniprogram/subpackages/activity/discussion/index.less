@@ -1,0 +1,233 @@
+/* 活动讨论区页面样式 */
+@import '../../../styles/tokens.less';
+
+.discussion-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: @color-bg-layout;
+}
+
+/* 导航栏右侧 */
+.navbar-right {
+  display: flex;
+  align-items: center;
+  padding-right: 24rpx;
+}
+
+.online-badge {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  font-size: 24rpx;
+  color: @color-text-secondary;
+}
+
+.online-dot {
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 50%;
+  background: #52c41a;
+}
+
+/* 连接状态提示 */
+.connection-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12rpx;
+  padding: 16rpx 24rpx;
+  font-size: 24rpx;
+  color: @color-text-secondary;
+  background: @color-bg-container;
+  border-bottom: 1rpx solid @color-border;
+
+  &.connecting,
+  &.reconnecting {
+    color: @color-brand;
+  }
+
+  &.disconnected {
+    color: @color-error;
+  }
+}
+
+/* 归档提示 */
+.archived-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12rpx;
+  padding: 20rpx 24rpx;
+  font-size: 26rpx;
+  color: @color-warning;
+  background: fade(@color-warning, 10%);
+}
+
+/* 消息列表 */
+.message-list {
+  flex: 1;
+  padding: 24rpx;
+  overflow-y: auto;
+}
+
+/* 加载更多 */
+.load-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12rpx;
+  padding: 24rpx 0;
+  font-size: 24rpx;
+  color: @color-text-placeholder;
+
+  .no-more {
+    color: @color-text-placeholder;
+  }
+}
+
+/* 空状态 */
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 400rpx;
+}
+
+/* 消息项 */
+.message-item {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 32rpx;
+
+  /* 自己的消息 */
+  &.self {
+    flex-direction: row-reverse;
+
+    .message-content {
+      align-items: flex-end;
+    }
+
+    .nickname {
+      display: none;
+    }
+
+    .bubble {
+      background: @color-brand;
+      color: #fff;
+      border-radius: 24rpx 4rpx 24rpx 24rpx;
+    }
+
+    .time {
+      text-align: right;
+    }
+  }
+
+  /* 系统消息 */
+  &.system {
+    justify-content: center;
+    margin: 24rpx 0;
+  }
+}
+
+/* 头像 */
+.avatar {
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* 消息内容 */
+.message-content {
+  display: flex;
+  flex-direction: column;
+  max-width: 70%;
+  margin: 0 16rpx;
+}
+
+/* 昵称 */
+.nickname {
+  font-size: 24rpx;
+  color: @color-text-secondary;
+  margin-bottom: 8rpx;
+}
+
+/* 气泡 */
+.bubble {
+  padding: 20rpx 24rpx;
+  background: @color-bg-container;
+  border-radius: 4rpx 24rpx 24rpx 24rpx;
+  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.04);
+}
+
+.text {
+  font-size: 28rpx;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+/* 时间 */
+.time {
+  font-size: 22rpx;
+  color: @color-text-placeholder;
+  margin-top: 8rpx;
+}
+
+/* 系统消息 */
+.system-message {
+  padding: 8rpx 24rpx;
+  font-size: 24rpx;
+  color: @color-text-placeholder;
+  background: fade(@color-text-placeholder, 10%);
+  border-radius: 24rpx;
+}
+
+/* 输入区域 */
+.input-area {
+  background: @color-bg-container;
+  border-top: 1rpx solid @color-border;
+  padding: 16rpx 24rpx;
+}
+
+.input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.input {
+  flex: 1;
+  height: 72rpx;
+  padding: 0 24rpx;
+  font-size: 28rpx;
+  background: @color-bg-layout;
+  border-radius: 36rpx;
+}
+
+.input-placeholder {
+  color: @color-text-placeholder;
+}
+
+.send-btn {
+  width: 72rpx;
+  height: 72rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: @color-bg-layout;
+  color: @color-text-placeholder;
+  transition: all 0.2s;
+
+  &.active {
+    background: @color-brand;
+    color: #fff;
+  }
+}
+
+/* 安全区域 */
+.safe-area-bottom {
+  height: constant(safe-area-inset-bottom);
+  height: env(safe-area-inset-bottom);
+}

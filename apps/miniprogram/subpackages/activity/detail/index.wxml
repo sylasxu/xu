@@ -228,11 +228,11 @@
         <text>分享</text>
       </button>
       
-      <button wx:if="{{isCreator || participantStatus === 'approved'}}" 
+      <button wx:if="{{isCreator || participantStatus === 'approved' || participantStatus === 'joined'}}" 
               class="chat-btn flex flex-col items-center justify-center w-100 h-100 text-xs text-gray-600 ml-2" 
               bindtap="onEnterChat">
         <t-icon name="chat" size="40rpx" />
-        <text>群聊</text>
+        <text>讨论区</text>
       </button>
       
       <!-- 举报入口（非创建者可见） -->

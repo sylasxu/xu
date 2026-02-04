@@ -7,6 +7,7 @@ import { Elysia, t, type Static } from 'elysia';
  * MVP 接口：
  * - GET /chat/:activityId/messages - 获取消息列表（轮询）
  * - POST /chat/:activityId/messages - 发送消息
+ * - WS /chat/:activityId/ws - WebSocket 实时通讯
  */
 
 // 消息响应
@@ -49,6 +50,53 @@ const ErrorResponse = t.Object({
   msg: t.String(),
 });
 
+// ==========================================
+// WebSocket 消息类型 (v4.7)
+// ==========================================
+
+// 客户端 -> 服务端
+export const WsClientMessageSchema = t.Union([
+  t.Object({
+    type: t.Literal('message'),
+    content: t.String({ maxLength: 500 }),
+  }),
+  t.Object({
+    type: t.Literal('ping'),
+  }),
+]);
+
+// 服务端 -> 客户端
+export const WsServerMessageSchema = t.Object({
+  type: t.Union([
+    t.Literal('message'),   // 新消息
+    t.Literal('history'),   // 历史消息
+    t.Literal('online'),    // 在线人数
+    t.Literal('join'),      // 用户加入
+    t.Literal('leave'),     // 用户离开
+    t.Literal('error'),     // 错误
+    t.Literal('pong'),      // 心跳响应
+  ]),
+  data: t.Unknown(),
+  ts: t.Number(),
+});
+
+// WebSocket 错误码
+export const WsErrorCodes = {
+  UNAUTHORIZED: 4001,       // 未授权
+  NOT_PARTICIPANT: 4003,    // 未报名
+  NOT_FOUND: 4004,          // 活动不存在
+  HEARTBEAT_TIMEOUT: 4008,  // 心跳超时
+  ARCHIVED: 4010,           // 已归档
+  CONTENT_VIOLATION: 4022,  // 内容违规
+  RATE_LIMITED: 4029,       // 频率限制
+} as const;
+
+// 举报消息请求
+export const ReportMessageRequest = t.Object({
+  messageId: t.String({ format: 'uuid', description: '消息ID' }),
+  reason: t.String({ minLength: 1, maxLength: 500, description: '举报原因' }),
+});
+
 // 注册到 Elysia Model Plugin
 export const chatModel = new Elysia({ name: 'chatModel' })
   .model({
@@ -58,6 +106,9 @@ export const chatModel = new Elysia({ name: 'chatModel' })
     'chat.sendMessageResponse': SendMessageResponse,
     'chat.activityIdParams': ActivityIdParams,
     'chat.error': ErrorResponse,
+    'chat.wsClientMessage': WsClientMessageSchema,
+    'chat.wsServerMessage': WsServerMessageSchema,
+    'chat.reportMessageRequest': ReportMessageRequest,
   });
 
 // 导出 TS 类型
@@ -67,3 +118,6 @@ export type SendMessageRequest = Static<typeof SendMessageRequest>;
 export type SendMessageResponse = Static<typeof SendMessageResponse>;
 export type ActivityIdParams = Static<typeof ActivityIdParams>;
 export type ErrorResponse = Static<typeof ErrorResponse>;
+export type WsClientMessage = Static<typeof WsClientMessageSchema>;
+export type WsServerMessage = Static<typeof WsServerMessageSchema>;
+export type ReportMessageRequest = Static<typeof ReportMessageRequest>;

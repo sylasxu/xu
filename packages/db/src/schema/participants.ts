@@ -1,4 +1,4 @@
-import { pgTable, uuid, timestamp, index, unique, varchar } from "drizzle-orm/pg-core";
+import { pgTable, uuid, timestamp, index, unique } from "drizzle-orm/pg-core";
 import { users } from "./users";
 import { activities } from "./activities";
 import { participantStatusEnum } from "./enums";
@@ -20,9 +20,6 @@ export const participants = pgTable("participants", {
   
   // --- 状态 (MVP 简化) ---
   status: participantStatusEnum("status").default("joined").notNull(),
-  
-  // --- v4.8 Chat Tool Mode: 群成员标识 ---
-  groupOpenId: varchar("group_openid", { length: 128 }),
   
   joinedAt: timestamp("joined_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),

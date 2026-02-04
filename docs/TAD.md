@@ -1,7 +1,7 @@
 # 聚场 (JuChang) 技术架构文档
 
-> **版本**：v4.8 (Skyline + Chat Tool Mode + Processor Architecture + Hot Keywords P0)
-> **更新日期**：2026-02-03
+> **版本**：v4.9 (Unified Discussion + AI Poster + Processor Architecture + Hot Keywords P0)
+> **更新日期**：2026-02-04
 > **架构**：原生小程序 + Zustand Vanilla + Elysia API + Drizzle ORM
 
 ---
@@ -52,9 +52,6 @@
 │   │   │   ├── home/         # 首页 (Chat-First)
 │   │   │   ├── profile/      # 个人中心
 │   │   │   └── message/      # 消息中心
-│   │   ├── packageChatTool/  # Chat Tool Mode 独立分包 (v4.8 新增)
-│   │   │   └── pages/
-│   │   │       └── activity-detail/  # 活动详情页 (Skyline 半屏)
 │   │   ├── subpackages/      # 分包
 │   │   │   ├── activity/     # 活动相关
 │   │   │   │   ├── detail/   # 活动详情
@@ -63,7 +60,8 @@
 │   │   │   │   ├── draft-edit/ # 草稿编辑页
 │   │   │   │   ├── list/     # 活动列表页
 │   │   │   │   ├── map-picker/  # 地图选点页
-│   │   │   │   └── explore/  # 沉浸式地图页 (Generative UI)
+│   │   │   │   ├── explore/  # 沉浸式地图页 (Generative UI)
+│   │   │   │   └── discussion/ # 活动讨论区 (v4.9 新增)
 │   │   │   ├── legal/        # 法律文档
 │   │   │   │   ├── index     # 用户协议
 │   │   │   │   └── about/    # 关于聚场
@@ -151,7 +149,8 @@
 │               ├── feedbacks/    # 用户反馈 (v4.6)
 │               ├── transactions/ # 交易记录 (v4.6)
 │               ├── upload/       # 文件上传 (v4.6)
-│               └── wechat/       # 微信能力封装 (v4.6)
+│               ├── wechat/       # 微信能力封装 (v4.6)
+│               └── poster/       # AI 海报生成 (v4.9 新增)
 │
 ├── packages/
 │   ├── db/                   # Drizzle ORM
@@ -171,12 +170,12 @@
 | 表 | 说明 | 核心字段 |
 |---|------|---------|
 | `users` | 用户表 | wxOpenId, phoneNumber, nickname, avatarUrl, aiCreateQuotaToday, workingMemory |
-| `activities` | 活动表 | title, location, locationHint, startAt, type, status, embedding (v4.5), groupOpenId, dynamicMessageId (v4.8) |
-| `participants` | 参与者表 | activityId, userId, status (joined/quit), groupOpenId (v4.8) |
+| `activities` | 活动表 | title, location, locationHint, startAt, type, status, embedding (v4.5) |
+| `participants` | 参与者表 | activityId, userId, status (joined/quit) |
 | `conversations` | **AI 会话表** | userId, title, messageCount, lastMessageAt |
 | `conversation_messages` | **AI 对话消息表** | conversationId, userId, role, messageType, content, activityId |
 | `activity_messages` | **活动群聊消息表** | activityId, senderId, messageType, content |
-| `notifications` | 通知表 | userId, type, title, isRead, activityId, notificationType (v4.8) |
+| `notifications` | 通知表 | userId, type, title, isRead, activityId |
 | `partner_intents` | **搭子意向表 (v4.0)** | userId, type, tags, location, expiresAt, status |
 | `intent_matches` | **意向匹配表 (v4.0)** | intentAId, intentBId, tempOrganizerId, outcome |
 | `match_messages` | **匹配消息表 (v4.0)** | matchId, senderId, content |
@@ -460,9 +459,10 @@ export const globalKeywords = pgTable('global_keywords', {
 | `users` | `/users` | 用户资料管理 |
 | `activities` | `/activities` | 活动 CRUD、报名退出、**附近搜索** |
 | `participants` | `/participants` | 参与者管理 |
-| `chat` | `/chat` | 活动群聊消息 (activity_messages 表) |
+| `chat` | `/chat` | 活动群聊消息 (activity_messages 表)，**WebSocket 讨论区** (v4.9) |
 | `ai` | `/ai` | AI 解析 (SSE)，**意图分类**，**对话历史管理** (conversations 表) |
 | `hot-keywords` | `/hot-keywords` | **P0 层热词管理** (v4.8 新增) |
+| `poster` | `/poster` | **AI 海报生成** (v4.9 新增) |
 | `dashboard` | `/dashboard` | 首页数据聚合、God View 实时概览 |
 | `growth` | `/growth` | 增长工具：海报工厂、热门洞察 |
 | `notifications` | `/notifications` | 通知管理 |
@@ -486,9 +486,7 @@ POST /auth/bindPhone      // 绑定手机号
 GET  /users               // 获取用户列表 (分页、搜索)
 GET  /users/:id           // 获取用户详情
 PUT  /users/:id           // 更新用户信息
-GET  /users/:id/quota     // 获取用户额度
-
-// Activities
+GET  /users/:id/quota     // 获取用户额度// Activities
 POST /activities          // 创建活动 (从 draft 变 active)
 GET  /activities/:id      // 获取活动详情
 GET  /activities/mine     // 获取我相关的活动
@@ -498,9 +496,14 @@ DELETE /activities/:id    // 删除活动
 POST /activities/:id/join // 报名活动
 POST /activities/:id/quit // 退出活动
 
-// Chat (活动群聊)
+// Chat (活动群聊 + WebSocket 讨论区 v4.9)
 GET  /chat/:activityId/messages  // 获取消息列表
 POST /chat/:activityId/messages  // 发送消息
+WS   /chat/:activityId/ws        // WebSocket 连接 (v4.9 新增)
+POST /chat/:activityId/report    // 举报消息 (v4.9 新增)
+
+// Poster (AI 海报生成 v4.9 新增)
+POST /poster/generate            // 生成活动海报
 
 // AI (v3.9 扩展：AI 解析 + 对话历史 + 会话管理)
 POST /ai/chat             // AI 对话 (Data Stream，自动保存对话历史)
@@ -537,9 +540,7 @@ GET  /growth/trends           // 获取热门洞察（高频词/意图分布）
 type AIParseResponse = 
   | { intent: 'create'; widget: 'widget_draft'; data: ActivityDraft & { activityId: string } }
   | { intent: 'explore'; widget: 'widget_explore'; data: ExploreResponse }
-  | { intent: 'unknown'; widget: 'text'; data: { message: string } };
-
-interface ExploreResponse {
+  | { intent: 'unknown'; widget: 'text'; data: { message: string } };interface ExploreResponse {
   center: { lat: number; lng: number; name: string };
   results: ExploreResult[];
   title: string;
@@ -1811,6 +1812,277 @@ sequenceDiagram
 #### 6.15.3 对应 CP (Correctness Properties)
 - **CP-12 (Valid Geolocation)**: 活动必须包含有效的 PostGIS `POINT(lon, lat)`，否则无法进行基于距离的推荐。
 - **CP-15 (Author Modification)**: 只有 `creator_id` 匹配的用户才有权修改或发布该活动草稿。
+
+---
+
+## 6.16 WebSocket 架构 (v4.9 新增)
+
+活动讨论区基于 Elysia 原生 WebSocket 实现，提供实时通讯能力。
+
+### 6.16.1 架构概览
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     WebSocket 架构                               │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │
+│  │   小程序     │  │   小程序     │  │   小程序     │              │
+│  │ wx.connect  │  │ wx.connect  │  │ wx.connect  │              │
+│  │  Socket     │  │  Socket     │  │  Socket     │              │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘              │
+│         │                │                │                      │
+│         └────────────────┼────────────────┘                      │
+│                          │                                       │
+│                          ▼                                       │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │                 Elysia WebSocket Server                    │  │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        │  │
+│  │  │ Connection  │  │   Content   │  │   Message   │        │  │
+│  │  │    Pool     │  │  Security   │  │   Handler   │        │  │
+│  │  └─────────────┘  └─────────────┘  └─────────────┘        │  │
+│  └───────────────────────────────────────────────────────────┘  │
+│                          │                                       │
+│                          ▼                                       │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │                    PostgreSQL                              │  │
+│  │  activity_messages 表                                      │  │
+│  └───────────────────────────────────────────────────────────┘  │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 6.16.2 连接池管理
+
+```typescript
+// apps/api/src/modules/chat/connection-pool.ts
+// 纯函数式设计，无 class
+
+interface Connection {
+  ws: WebSocket;
+  userId: string;
+  activityId: string;
+  connectedAt: number;
+  lastPingAt: number;
+}
+
+// 内存存储（单实例部署）
+const pool = new Map<string, Connection>();
+const activityIndex = new Map<string, Set<string>>(); // activityId -> connIds
+
+// 纯函数操作
+export function addConnection(connId: string, conn: Connection): void;
+export function removeConnection(connId: string): void;
+export function getConnectionsByActivity(activityId: string): Connection[];
+export function broadcastToActivity(activityId: string, message: unknown): void;
+export function getOnlineCount(activityId: string): number;
+```
+
+### 6.16.3 WebSocket 消息协议
+
+```typescript
+// 客户端 -> 服务端
+type WsClientMessage = 
+  | { type: 'message'; content: string }
+  | { type: 'ping' };
+
+// 服务端 -> 客户端
+type WsServerMessage = {
+  type: 'message' | 'history' | 'online' | 'join' | 'leave' | 'error' | 'pong';
+  data: unknown;
+  ts: number;
+};
+```
+
+### 6.16.4 WebSocket 错误码
+
+| 错误码 | 说明 | 客户端处理 |
+|--------|------|-----------|
+| 4001 | 未授权 | 跳转登录 |
+| 4003 | 未报名 | 提示报名 |
+| 4004 | 活动不存在 | 返回上一页 |
+| 4010 | 已归档 | 显示只读模式 |
+| 4022 | 内容违规 | 提示修改内容 |
+| 4029 | 频率限制 | 稍后重试 |
+
+### 6.16.5 连接流程
+
+```mermaid
+sequenceDiagram
+    participant MP as 小程序
+    participant WS as chat 模块
+    participant CS as content-security
+    participant DB as PostgreSQL
+    
+    MP->>WS: ws://api/chat/:activityId/ws
+    Note over WS: 从 query 或 header 获取 token
+    WS->>DB: 验证用户 + 检查 participants
+    
+    alt 未报名 or 已归档
+        WS-->>MP: 关闭连接 (4003/4010)
+    else 已报名
+        WS-->>MP: 连接成功
+        WS->>DB: 加载最近 50 条消息
+        WS-->>MP: {type: 'history', data: messages}
+        WS-->>MP: {type: 'online', data: {count: N}}
+    end
+    
+    loop 消息循环
+        MP->>WS: {type: 'message', content: '...'}
+        WS->>CS: validateContent(content)
+        alt 内容违规
+            WS-->>MP: {type: 'error', data: {code: 4022}}
+        else 内容安全
+            WS->>DB: INSERT activity_messages
+            WS-->>MP: 广播给所有连接
+        end
+    end
+```
+
+---
+
+## 6.17 AI 海报技术实现 (v4.9 新增)
+
+AI 海报生成使用千问 VL 生成背景图，Puppeteer 合成最终海报。
+
+### 6.17.1 架构概览
+
+```
+用户请求生成海报
+    │
+    ▼
+┌─────────────────┐
+│ 1. 获取活动信息 │ ← activity.service.getActivityById()
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ 2. 生成背景图   │ ← 千问 VL (qwen-vl-max)
+│   (AI 生成)     │   根据活动类型生成独特背景
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ 3. 生成小程序码 │ ← wechat.service.generateQRCode()
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ 4. 合成海报     │ ← Puppeteer 渲染 HTML 模板
+│   (Puppeteer)   │   截图生成最终图片
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ 5. 上传 CDN     │ ← 返回海报 URL
+└─────────────────┘
+```
+
+### 6.17.2 海报模板
+
+```
+apps/api/src/modules/poster/templates/
+├── simple.html     # 简约风格
+├── vibrant.html    # 活力风格
+└── artistic.html   # 文艺风格
+```
+
+### 6.17.3 API 设计
+
+```typescript
+// POST /poster/generate
+interface GeneratePosterRequest {
+  activityId: string;
+  style: 'simple' | 'vibrant' | 'artistic';
+}
+
+interface GeneratePosterResponse {
+  posterUrl: string;
+  expiresAt: string;  // 24h 后过期
+}
+```
+
+### 6.17.4 技术约束
+
+| 约束 | 说明 |
+|------|------|
+| 生成时间 | ≤ 10 秒 |
+| 图片尺寸 | 750 x 1334 px |
+| 有效期 | 24 小时 |
+| 缓存策略 | 同一活动只生成一次 |
+
+---
+
+## 6.18 内容安全集成 (v4.9 新增)
+
+活动讨论区接入微信内容安全 API，确保消息内容合规。
+
+### 6.18.1 检测流程
+
+```
+用户发送消息
+    │
+    ▼
+┌─────────────────┐
+│ 1. 本地敏感词   │ ← 快速过滤明显违规词
+│   快速过滤      │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ 2. 微信 API     │ ← msgSecCheck 异步检测
+│   内容检测      │
+└────────┬────────┘
+         │
+    检测结果
+    ┌────┴────┐
+    │ 通过    │ 违规
+    ▼         ▼
+┌─────────┐  ┌─────────┐
+│ 持久化  │  │ 拒绝    │
+│ + 广播  │  │ + 记录  │
+└─────────┘  └─────────┘
+```
+
+### 6.18.2 API 调用
+
+```typescript
+// content-security.service.ts
+export async function validateContent(
+  content: string,
+  options: { userId: string; scene: 'message' | 'activity' }
+): Promise<{ pass: boolean; reason?: string }> {
+  // 1. 本地敏感词快速过滤
+  const localResult = checkLocalSensitiveWords(content);
+  if (!localResult.pass) {
+    return localResult;
+  }
+  
+  // 2. 微信 msgSecCheck API
+  const wxResult = await callMsgSecCheck(content, options);
+  return wxResult;
+}
+```
+
+### 6.18.3 违规处理
+
+| 违规类型 | 处理方式 |
+|---------|---------|
+| 敏感词 | 拒绝发送，提示用户修改 |
+| 广告 | 拒绝发送，记录日志 |
+| 色情/暴力 | 拒绝发送，标记用户 |
+| 政治敏感 | 拒绝发送，记录日志 |
+
+### 6.18.4 举报机制
+
+```typescript
+// POST /chat/:activityId/report
+interface ReportMessageRequest {
+  messageId: string;
+  reason: 'spam' | 'harassment' | 'inappropriate' | 'other';
+  description?: string;
+}
+```
 
 ---
 

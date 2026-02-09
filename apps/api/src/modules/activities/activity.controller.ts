@@ -6,6 +6,7 @@ import {
   getActivitiesList,
   getMyActivities,
   getActivityById,
+  getPublicActivityById,
   createActivity, 
   updateActivityStatus,
   deleteActivity,
@@ -116,6 +117,36 @@ export const activityController = new Elysia({ prefix: '/activities' })
         200: 'activity.myActivitiesResponse',
         401: 'activity.error',
         500: 'activity.error',
+      },
+    }
+  )
+
+  // ==========================================
+  // v5.0: 公开活动详情（无需认证，含讨论区预览）
+  // ==========================================
+  .get(
+    '/:id/public',
+    async ({ params, set }) => {
+      const activity = await getPublicActivityById(params.id);
+      if (!activity) {
+        set.status = 404;
+        return {
+          code: 404,
+          msg: '活动不存在',
+        } satisfies ErrorResponse;
+      }
+      return activity;
+    },
+    {
+      detail: {
+        tags: ['Activities'],
+        summary: '获取活动公开详情（无需认证）',
+        description: '获取活动公开信息，含参与者列表和讨论区预览。不包含敏感信息。',
+      },
+      params: 'activity.idParams',
+      response: {
+        200: 'activity.publicResponse',
+        404: 'activity.error',
       },
     }
   )

@@ -48,11 +48,15 @@ export const participantStatusEnum = pgEnum("participant_status", [
 
 // 通知类型 (MVP 简化为 5 种)
 export const notificationTypeEnum = pgEnum("notification_type", [
-  "join",           // 有人报名
-  "quit",           // 有人退出
-  "activity_start", // 活动即将开始
-  "completed",      // 活动成局
-  "cancelled"       // 活动取消
+  "join",              // 有人报名（通知创建者）
+  "quit",              // 有人退出
+  "activity_start",    // 活动即将开始
+  "completed",         // 活动成局
+  "cancelled",         // 活动取消
+  // v5.0 新增
+  "new_participant",   // 有新人报名（通知所有已报名参与者）
+  "post_activity",     // 活动结束后反馈推送
+  "activity_reminder"  // 活动前 1 小时提醒
 ]);
 
 // ==========================================

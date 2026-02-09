@@ -1,9 +1,9 @@
 // Notification Service - MVP 简化版 + Admin 扩展
-import { db, notifications, users, eq, count, and, desc } from '@juchang/db';
+import { db, notifications, users, participants, eq, count, and, desc } from '@juchang/db';
 import type { NotificationListQuery, NotificationListResponse, UnreadCountResponse } from './notification.model';
 
 // 通知类型枚举值
-const NOTIFICATION_TYPES = ['join', 'quit', 'activity_start', 'completed', 'cancelled'] as const;
+const NOTIFICATION_TYPES = ['join', 'quit', 'activity_start', 'completed', 'cancelled', 'new_participant', 'post_activity', 'activity_reminder'] as const;
 type NotificationType = typeof NOTIFICATION_TYPES[number];
 
 /** 类型守卫：检查是否为有效的通知类型 */
@@ -294,6 +294,96 @@ export async function notifyCancelled(
     content: `「${activityTitle}」已取消`,
     activityId,
   });
+}
+
+// ==========================================
+// v5.0: 新增通知函数
+// ==========================================
+
+/**
+ * v5.0: 通知所有已报名参与者有新人加入
+ * 排除新加入者和创建者（创建者已通过 notifyJoin 收到通知）
+ */
+export async function notifyNewParticipant(
+  activityId: string,
+  activityTitle: string,
+  newMemberName: string,
+  newMemberId: string,
+  creatorId: string,
+) {
+  const joinedParticipants = await db
+    .select({ userId: participants.userId })
+    .from(participants)
+    .where(and(
+      eq(participants.activityId, activityId),
+      eq(participants.status, 'joined'),
+    ));
+
+  const excludeIds = new Set([newMemberId, creatorId]);
+
+  for (const p of joinedParticipants) {
+    if (excludeIds.has(p.userId)) continue;
+    createNotification({
+      userId: p.userId,
+      type: 'new_participant',
+      title: `${newMemberName} 也来了！`,
+      content: `「${activityTitle}」又多了一位小伙伴`,
+      activityId,
+    }).catch(err => console.error('Failed to create new_participant notification:', err));
+  }
+}
+
+/**
+ * v5.0: 活动结束后反馈推送
+ */
+export async function notifyPostActivity(
+  activityId: string,
+  activityTitle: string,
+) {
+  const joinedParticipants = await db
+    .select({ userId: participants.userId })
+    .from(participants)
+    .where(and(
+      eq(participants.activityId, activityId),
+      eq(participants.status, 'joined'),
+    ));
+
+  for (const p of joinedParticipants) {
+    createNotification({
+      userId: p.userId,
+      type: 'post_activity',
+      title: '玩得怎么样？',
+      content: `「${activityTitle}」结束了，来聊聊感受吧～`,
+      activityId,
+    }).catch(err => console.error('Failed to create post_activity notification:', err));
+  }
+}
+
+/**
+ * v5.0: 活动前 1 小时提醒
+ */
+export async function notifyActivityReminder(
+  activityId: string,
+  activityTitle: string,
+  locationName: string,
+) {
+  const joinedParticipants = await db
+    .select({ userId: participants.userId })
+    .from(participants)
+    .where(and(
+      eq(participants.activityId, activityId),
+      eq(participants.status, 'joined'),
+    ));
+
+  for (const p of joinedParticipants) {
+    createNotification({
+      userId: p.userId,
+      type: 'activity_reminder',
+      title: '活动马上开始啦！',
+      content: `「${activityTitle}」还有 1 小时开始，地点：${locationName}`,
+      activityId,
+    }).catch(err => console.error('Failed to create activity_reminder notification:', err));
+  }
 }
 
 // ==========================================

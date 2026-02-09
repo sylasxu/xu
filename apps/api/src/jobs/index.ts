@@ -5,7 +5,8 @@
 export { startScheduler, stopScheduler, getJobStatuses } from './scheduler';
 export { processExpiredFulfillments } from './fulfillment-timeout';
 export { processExpiredDisputes } from './dispute-timeout';
-export { updateActivityStatuses } from './activity-status';
+export { processPostActivity } from './post-activity';
+export { processActivityReminder } from './activity-reminder';
 // v4.0 Partner Intent Jobs
 export { expireOldIntents, handleExpiredMatches } from './intent-jobs';
 // AI 运营任务

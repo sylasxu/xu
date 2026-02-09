@@ -12,7 +12,8 @@
 
 import { processExpiredFulfillments } from './fulfillment-timeout';
 import { processExpiredDisputes } from './dispute-timeout';
-import { updateActivityStatuses } from './activity-status';
+import { processPostActivity } from './post-activity';
+import { processActivityReminder } from './activity-reminder';
 import { expireOldIntents, handleExpiredMatches } from './intent-jobs';
 import { runAnomalyDetection } from './anomaly-detection';
 import { runContentModeration } from './content-moderation';
@@ -40,9 +41,15 @@ const jobs: ScheduledJob[] = [
     isRunning: false,
   },
   {
-    name: '活动状态自动更新',
+    name: 'Post-Activity 自动完成',
     interval: 5 * 60 * 1000, // 每5分钟执行
-    handler: updateActivityStatuses,
+    handler: processPostActivity,
+    isRunning: false,
+  },
+  {
+    name: '活动前提醒',
+    interval: 5 * 60 * 1000, // 每5分钟执行
+    handler: processActivityReminder,
     isRunning: false,
   },
   // v4.0 Partner Intent Jobs

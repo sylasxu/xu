@@ -1,8 +1,8 @@
 # 聚场 (JuChang) 技术架构文档
 
-> **版本**：v4.9 (Unified Discussion + AI Poster + Processor Architecture + Hot Keywords P0)
-> **更新日期**：2026-02-04
-> **架构**：原生小程序 + Zustand Vanilla + Elysia API + Drizzle ORM
+> **版本**：v5.0 (Web Invitation + Theme System + Activity Lifecycle)
+> **更新日期**：2026-02-10
+> **架构**：原生小程序 + Zustand Vanilla + Elysia API + Drizzle ORM + Next.js Web
 
 ---
 
@@ -35,6 +35,10 @@
 | **小程序** | 微信开发者工具 (Native) | TS + LESS，零运行时 |
 | **小程序状态** | Zustand (Vanilla) | 极简状态管理，~2KB |
 | **Admin 后台** | Vite + React + TanStack | Eden Treaty 调用 API |
+| **Web 应用** | Next.js 15 (App Router) | SSR + React 19 + Tailwind CSS 4 |
+| **Web Chat UI** | AI SDK Elements | Copy-paste 模式安装，20+ 组件开箱即用 |
+| **Web 动态背景** | React Bits | Aurora、Ballpit、Particles 等动效组件 |
+| **Web API 客户端** | Eden Treaty | 类型安全 HTTP 客户端，统一调用 Elysia API |
 | **API 网关** | Elysia | Bun 原生高性能框架 |
 | **数据库** | PostgreSQL + PostGIS | LBS 地理查询 |
 | **ORM** | Drizzle ORM | TypeScript Native |
@@ -129,6 +133,36 @@
 │   │       │   └── login.tsx
 │   │       └── lib/          # Eden Treaty
 │   │
+│   ├── web/                  # Next.js 15 Web 应用 (v5.0 新增)
+│   │   ├── app/              # App Router 路由
+│   │   │   ├── layout.tsx          # 根布局（全局样式、字体）
+│   │   │   ├── page.tsx            # 首页（重定向到 /chat）
+│   │   │   ├── invite/
+│   │   │   │   └── [id]/
+│   │   │   │       └── page.tsx    # SSR 活动邀请函（OG Tags + 动态背景）
+│   │   │   └── chat/
+│   │   │       └── page.tsx        # 小聚对话（AI SDK Elements）
+│   │   ├── components/       # 组件
+│   │   │   ├── ai-elements/        # AI SDK Elements 组件（copy-paste 模式）
+│   │   │   │   ├── conversation.tsx
+│   │   │   │   ├── message.tsx
+│   │   │   │   ├── reasoning.tsx
+│   │   │   │   └── prompt-input.tsx
+│   │   │   ├── invite/             # 邀请函页面组件
+│   │   │   │   ├── theme-background.tsx   # React Bits 动态背景渲染器
+│   │   │   │   ├── activity-card.tsx      # 活动信息卡片
+│   │   │   │   ├── discussion-preview.tsx # 讨论区预览
+│   │   │   │   └── wechat-redirect.tsx    # 微信跳转引导
+│   │   │   └── ui/                 # shadcn/ui 基础组件
+│   │   ├── lib/              # 工具库
+│   │   │   ├── eden.ts             # Eden Treaty 客户端（所有 API 调用）
+│   │   │   ├── themes.ts           # 预设主题配置（与 API 端同步）
+│   │   │   └── wechat.ts           # 微信环境检测工具
+│   │   ├── next.config.ts
+│   │   ├── package.json
+│   │   ├── tailwind.config.ts
+│   │   └── tsconfig.json
+│   │
 │   └── api/                  # Elysia API
 │       └── src/
 │           ├── index.ts      # 应用入口
@@ -163,14 +197,14 @@
 
 ---
 
-## 4. 数据库 Schema (v4.6 - 13 表)
+## 4. 数据库 Schema (v5.0 - 14 表)
 
 ### 4.1 表结构概览
 
 | 表 | 说明 | 核心字段 |
 |---|------|---------|
 | `users` | 用户表 | wxOpenId, phoneNumber, nickname, avatarUrl, aiCreateQuotaToday, workingMemory |
-| `activities` | 活动表 | title, location, locationHint, startAt, type, status, embedding (v4.5) |
+| `activities` | 活动表 | title, location, locationHint, startAt, type, status, embedding (v4.5), **theme** (v5.0), **themeConfig** (v5.0) |
 | `participants` | 参与者表 | activityId, userId, status (joined/quit) |
 | `conversations` | **AI 会话表** | userId, title, messageCount, lastMessageAt |
 | `conversation_messages` | **AI 对话消息表** | conversationId, userId, role, messageType, content, activityId |
@@ -270,6 +304,27 @@ export const activityStatusEnum = pgEnum('activity_status', [
 ]);
 ```
 
+### 4.4.1 通知类型枚举 (v5.0 扩展)
+
+```typescript
+export const notificationTypeEnum = pgEnum("notification_type", [
+  "join",              // 有人报名（通知创建者）
+  "quit",              // 有人退出
+  "activity_start",    // 活动即将开始
+  "completed",         // 活动成局
+  "cancelled",         // 活动取消
+  // v5.0 新增
+  "new_participant",   // 有新人报名（通知所有已报名参与者，不含新加入者和创建者）
+  "post_activity",     // 活动结束后反馈推送（startAt + 2h 自动触发）
+  "activity_reminder"  // 活动前 1 小时提醒（通知所有参与者）
+]);
+```
+
+**v5.0 通知场景**：
+- `new_participant`：用户报名成功后，通知所有已报名参与者（不含新加入者和创建者），内容为 "XX 也来了！「活动标题」又多了一位小伙伴"
+- `post_activity`：活动 startAt + 2h 后自动完成，推送反馈通知 "玩得怎么样？「活动标题」结束了，来聊聊感受吧～"
+- `activity_reminder`：活动 startAt - 1h 时提醒 "活动马上开始啦！「活动标题」还有 1 小时开始，地点：XX"
+
 ### 4.5 其他表结构
 
 ```typescript
@@ -288,7 +343,7 @@ export const users = pgTable("users", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-// activities 表 (v4.5 新增 embedding 列)
+// activities 表 (v5.0 新增 theme/themeConfig 字段)
 export const activities = pgTable("activities", {
   id: uuid("id").primaryKey().defaultRandom(),
   creatorId: uuid("creator_id").notNull().references(() => users.id),
@@ -303,10 +358,26 @@ export const activities = pgTable("activities", {
   maxParticipants: integer("max_participants").default(4).notNull(),
   currentParticipants: integer("current_participants").default(1).notNull(),
   status: activityStatusEnum("status").default("draft").notNull(),
+  theme: varchar("theme", { length: 20 }).default("auto").notNull(),  // v5.0: 活动主题 (auto/aurora/party/minimal/neon/warm/sport/custom)
+  themeConfig: jsonb("theme_config").$type<ThemeConfig>(),  // v5.0: 主题配置 JSON (Background Studio 导出)
   embedding: vector("embedding", { dimensions: 1536 }),  // v4.5: Qwen text-embedding-v4 向量
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
+
+// v5.0: ThemeConfig 类型定义
+export interface ThemeConfig {
+  background: {
+    component: 'Aurora' | 'Ballpit' | 'Particles' | 'Threads' | 'Gradient' | 'Squares';
+    config: Record<string, unknown>;  // Background Studio 导出的参数
+  };
+  textEffect?: 'split' | 'blur' | 'gradient' | 'shiny';
+  colorScheme?: {
+    primary: string;
+    secondary: string;
+    text: string;
+  };
+}
 
 // v4.5: HNSW 索引用于向量相似度搜索
 // CREATE INDEX activities_embedding_idx ON activities USING hnsw (embedding vector_cosine_ops);
@@ -457,7 +528,7 @@ export const globalKeywords = pgTable('global_keywords', {
 |------|---------|------|
 | `auth` | `/auth` | 微信登录、手机号绑定 |
 | `users` | `/users` | 用户资料管理 |
-| `activities` | `/activities` | 活动 CRUD、报名退出、**附近搜索** |
+| `activities` | `/activities` | 活动 CRUD、报名退出、**附近搜索**、**公开详情** (v5.0) |
 | `participants` | `/participants` | 参与者管理 |
 | `chat` | `/chat` | 活动群聊消息 (activity_messages 表)，**WebSocket 讨论区** (v4.9) |
 | `ai` | `/ai` | AI 解析 (SSE)，**意图分类**，**对话历史管理** (conversations 表) |
@@ -489,11 +560,12 @@ PUT  /users/:id           // 更新用户信息
 GET  /users/:id/quota     // 获取用户额度// Activities
 POST /activities          // 创建活动 (从 draft 变 active)
 GET  /activities/:id      // 获取活动详情
+GET  /activities/:id/public // 获取活动公开详情（无需认证，含讨论区预览）(v5.0 新增)
 GET  /activities/mine     // 获取我相关的活动
 GET  /activities/nearby   // 获取附近活动 (Generative UI)
 PATCH /activities/:id/status  // 更新活动状态
 DELETE /activities/:id    // 删除活动
-POST /activities/:id/join // 报名活动
+POST /activities/:id/join // 报名活动 (v5.0: 新增系统消息 + 全员通知)
 POST /activities/:id/quit // 退出活动
 
 // Chat (活动群聊 + WebSocket 讨论区 v4.9)
@@ -730,6 +802,34 @@ type SSEEvent =
   // 通用
   | { type: 'error'; data: { message: string } }
   | { type: 'done' };
+```
+
+---
+
+### 5.7 定时任务 (Scheduled Jobs)
+
+定时任务通过 `apps/api/src/jobs/scheduler.ts` 统一注册和管理，使用 `setInterval` 实现周期性执行。
+
+| 任务 | 文件 | 频率 | 说明 |
+|------|------|------|------|
+| 意向过期 | `jobs/intent-expiry.ts` | 每 5 分钟 | 将超过 24h 的 partner_intents 标记为 expired |
+| 匹配过期 | `jobs/match-expiry.ts` | 每 5 分钟 | 将超过 6h 的 intent_matches 标记为 expired |
+| 额度重置 | `jobs/quota-reset.ts` | 每 5 分钟 | 重置用户每日 AI 创建额度 |
+| **Post-Activity 自动完成** | `jobs/post-activity.ts` | 每 5 分钟 | **v5.0 新增**：startAt + 2h 后自动将 active → completed，推送 `post_activity` 反馈通知 |
+| **活动前提醒** | `jobs/activity-reminder.ts` | 每 5 分钟 | **v5.0 新增**：startAt - 1h 时向所有参与者发送 `activity_reminder` 提醒通知 |
+
+**v5.0 新增任务详解**：
+
+```typescript
+// jobs/post-activity.ts - Post-Activity 自动完成
+// 逻辑：查找 startAt + 2h < now 且 status = 'active' 的活动
+//       → 更新状态为 completed
+//       → 调用 notifyPostActivity() 推送反馈通知给所有参与者
+
+// jobs/activity-reminder.ts - 活动前提醒
+// 逻辑：查找 startAt - 1h < now < startAt 且 status = 'active' 的活动
+//       → 调用 notifyActivityReminder() 推送提醒通知给所有参与者
+//       → 防重复：通过 notifications 表唯一性约束避免重复发送
 ```
 
 ---
@@ -2086,6 +2186,193 @@ interface ReportMessageRequest {
 
 ---
 
+## 6.19 apps/web 架构 (v5.0 新增)
+
+apps/web 是面向用户的 H5 Web 应用，基于 Next.js 15 构建，提供跨平台活动邀请函和 AI 对话入口，支撑 Digital Ascension 战略（PRD 0.4），让聚场的活动链接能在抖音、小红书、直播间、线下海报等微信外平台传播。
+
+### 6.19.1 技术选型决策
+
+**为什么 apps/web 用 Next.js 而非 Vite SPA（与 admin 不同）？**
+
+| 维度 | Vite SPA (admin) | Next.js (web) |
+|------|-----------------|---------------|
+| OG Tags | 需要 API 层 bot detection | SSR 天然生成，零额外工作 |
+| AI Chat UI | 从零写流式渲染 | AI SDK Elements 20+ 组件开箱即用 |
+| SEO | 无 | `/invite` 页面可被搜索引擎索引 |
+| 定位 | 内部管理工具 | 面向用户的公开页面 |
+
+**关键约束**：
+- Next.js 只做前端渲染层，**不使用 API Routes**
+- 所有数据请求走 Elysia API，统一使用 Eden Treaty
+- AI 对话也通过 Eden Treaty 调用 `POST /ai/chat`（流式响应）
+- **Mobile-First 响应式设计**：所有页面以移动端为基准设计，桌面端通过 `max-w-lg`（邀请函）/ `max-w-2xl`（对话页）居中约束内容宽度
+
+### 6.19.2 技术栈
+
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| Next.js | 15 | SSR + App Router |
+| React | 19 | UI 框架 |
+| Tailwind CSS | 4 | 样式系统 |
+| AI SDK Elements | latest | Chat UI 组件（copy-paste 模式，类似 shadcn/ui） |
+| React Bits | latest | 动态背景组件（Aurora、Ballpit、Particles 等） |
+| Eden Treaty | latest | 类型安全 HTTP 客户端，统一调用 Elysia API |
+
+### 6.19.3 目录结构
+
+```
+apps/web/
+├── app/                           # App Router 路由
+│   ├── layout.tsx                 # 根布局（全局样式、字体）
+│   ├── page.tsx                   # 首页（重定向到 /chat）
+│   ├── invite/
+│   │   └── [id]/
+│   │       └── page.tsx           # SSR 活动邀请函（OG Tags + 动态背景）
+│   └── chat/
+│       └── page.tsx               # 小聚对话（AI SDK Elements）
+├── components/
+│   ├── ai-elements/               # AI SDK Elements 组件（copy-paste 模式）
+│   │   ├── conversation.tsx       # 对话容器
+│   │   ├── message.tsx            # 消息气泡
+│   │   ├── reasoning.tsx          # 思考过程展示
+│   │   └── prompt-input.tsx       # 输入框
+│   ├── invite/                    # 邀请函页面组件
+│   │   ├── theme-background.tsx   # React Bits 动态背景渲染器
+│   │   ├── activity-card.tsx      # 活动信息卡片
+│   │   ├── discussion-preview.tsx # 讨论区预览
+│   │   └── wechat-redirect.tsx    # 微信跳转引导
+│   └── ui/                        # shadcn/ui 基础组件
+├── lib/
+│   ├── eden.ts                    # Eden Treaty 客户端（所有 API 调用）
+│   ├── themes.ts                  # 预设主题配置（与 API 端同步）
+│   └── wechat.ts                  # 微信环境检测工具
+├── next.config.ts
+├── package.json                   # @juchang/web
+├── tailwind.config.ts
+└── tsconfig.json
+```
+
+### 6.19.4 路由设计
+
+| 路由 | 渲染模式 | 认证 | 说明 |
+|------|---------|------|------|
+| `/invite/[id]` | SSR | 无需认证 | 活动邀请函，自动生成 OG Tags |
+| `/chat` | CSR | 无需认证 | 小聚 AI 对话，小程序降级方案 |
+
+### 6.19.5 邀请函页面 (`/invite/[id]`)
+
+**SSR 数据流**：
+
+```
+Next.js SSR
+    │
+    ▼
+┌─────────────────┐
+│ generateMetadata │ ← 生成 OG Tags（og:title, og:description, og:url）
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Eden Treaty     │ ← GET /activities/:id/public（无需认证）
+│ 获取活动数据    │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ resolveTheme    │ ← 根据 theme/themeConfig/type 解析最终主题
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────────────────────────────┐
+│ 页面组件组合                             │
+│ ┌─────────────────────────────────────┐ │
+│ │ ThemeBackground (React Bits 动态背景) │ │
+│ │ ┌─────────────────────────────────┐ │ │
+│ │ │ ActivityCard (活动信息卡片)      │ │ │
+│ │ │ DiscussionPreview (讨论区预览)  │ │ │
+│ │ │ WechatRedirect (微信跳转引导)   │ │ │
+│ │ └─────────────────────────────────┘ │ │
+│ └─────────────────────────────────────┘ │
+└─────────────────────────────────────────┘
+```
+
+**OG Tags 生成**：
+- `og:title` = 活动标题
+- `og:description` = "已有X人报名 · 地点 · 时间"（FOMO 文案）
+- `og:url` = `https://juchang.app/invite/{activityId}`
+
+**React Bits 动态背景**：
+- 使用 `next/dynamic` 动态导入（`ssr: false`），避免 SSR 报错
+- 根据 `ThemeConfig.background.component` 渲染对应组件（Aurora/Ballpit/Particles/Threads/Gradient/Squares）
+- 6 种预设主题：aurora（极光）、party（派对）、minimal（简约）、neon（霓虹）、warm（暖色）、sport（运动）
+
+**微信环境检测与跳转**：
+- 微信内：显示"打开小程序"按钮，使用 URL Scheme 跳转
+- 非微信：显示小程序码供用户扫码
+- 跳转路径：`subpackages/activity/detail/index?id={activityId}`
+
+### 6.19.6 对话页面 (`/chat`)
+
+**技术实现**：
+- 使用 AI SDK Elements 组件（Conversation、Message、Reasoning、PromptInput）
+- 通过 Eden Treaty 调用 `POST /ai/chat` 端点（流式响应）
+- 支持流式文本渲染和 Reasoning（思考过程）展示
+- 作为小程序的降级方案，在小程序不可用时承接用户
+
+**组件映射**：
+
+| AI SDK Element | 用途 |
+|---------------|------|
+| `Conversation` | 对话容器，管理消息列表 |
+| `Message` | 消息气泡，区分用户/AI |
+| `Reasoning` | AI 思考过程展示（可折叠） |
+| `PromptInput` | 输入框 + 发送按钮 |
+
+### 6.19.7 Eden Treaty 客户端
+
+```typescript
+// apps/web/lib/eden.ts
+import { treaty } from '@elysiajs/eden';
+import type { App } from '@juchang/api';
+
+export const eden = treaty<App>(process.env.NEXT_PUBLIC_API_URL!);
+```
+
+所有 API 调用统一通过此客户端，包括：
+- `eden.activities({ id }).public.get()` — 获取活动公开详情
+- `eden.ai.chat.post({ message, stream: true })` — AI 对话（流式）
+
+### 6.19.8 预设主题配置
+
+```typescript
+// apps/web/lib/themes.ts
+// 与 apps/api/src/modules/activities/theme-presets.ts 保持同步
+
+// 活动类型 → 预设主题映射
+const ACTIVITY_TYPE_THEME_MAP: Record<string, string> = {
+  food: 'warm',
+  entertainment: 'party',
+  sports: 'sport',
+  boardgame: 'neon',
+  other: 'minimal',
+};
+
+// 6 种预设主题配置（含 React Bits 组件参数 + 配色方案）
+const PRESET_THEMES: Record<string, ThemeConfig> = {
+  aurora: { background: { component: 'Aurora', config: { ... } }, colorScheme: { ... } },
+  party: { background: { component: 'Ballpit', config: { ... } }, colorScheme: { ... } },
+  minimal: { background: { component: 'Gradient', config: { ... } }, colorScheme: { ... } },
+  neon: { background: { component: 'Threads', config: { ... } }, colorScheme: { ... } },
+  warm: { background: { component: 'Gradient', config: { ... } }, colorScheme: { ... } },
+  sport: { background: { component: 'Particles', config: { ... } }, colorScheme: { ... } },
+};
+
+// 主题解析函数
+function resolveThemeConfig(theme: string, themeConfig: ThemeConfig | null, activityType: string): ThemeConfig;
+```
+
+---
+
 ## 7. 小程序架构
 
 ### 7.1 Zustand Vanilla Store
@@ -2585,12 +2872,14 @@ cd docker && docker-compose up -d
 # 数据库操作
 bun run db:migrate      # 执行迁移
 bun run db:generate     # 生成迁移文件
+bun run db:push         # 直接同步 Schema（开发用）
 bun run db:seed         # 填充种子数据
 
 # 开发服务
 bun run dev             # 启动所有服务
 bun run dev:api         # 仅启动 API
 bun run dev:admin       # 仅启动 Admin
+bun run dev --filter=@juchang/web  # 仅启动 Web (v5.0 新增)
 
 # 代码生成
 bun run gen:api         # 生成 Orval SDK
@@ -2639,6 +2928,14 @@ bun run gen:api         # 生成 Orval SDK
 - **CP-20**: AI 对话自动持久化 - 有 userId 时保存到 conversation_messages
 - **CP-21**: Tool 返回的 activityId 自动关联到 AI 响应消息
 - **CP-22**: 按 activityId 查询时返回完整会话上下文（不只是关联消息）
+
+### 12.7 Web 邀请函 + 活动生命周期 (v5.0 新增)
+
+- **CP-27**: 主题解析一致性 - `resolveThemeConfig(theme, themeConfig, type)` 必须返回有效的 ThemeConfig：`theme='custom'` 且 themeConfig 非空时返回 themeConfig；`theme='auto'` 时根据活动类型映射预设主题；未知值返回 minimal 预设
+- **CP-28**: 公开 API 数据安全 - `GET /activities/:id/public` 响应中不得包含 creatorId、location 精确 GPS 坐标、任何用户的 phoneNumber 或 wxOpenId
+- **CP-29**: 报名系统消息一致性 - 每次成功 joinActivity 后，activity_messages 表必须新增一条 `messageType='system'` 的消息；所有已报名参与者（不含新加入者和创建者）必须收到 `new_participant` 通知；创建者必须收到 `join` 通知（保持不变）
+- **CP-30**: Post-Activity 自动完成 - 所有 `status='active'` 且 `startAt + 2h < now` 的活动必须被定时任务更新为 `completed`，且所有参与者必须收到 `post_activity` 通知
+- **CP-31**: SSR OG 标签完整性 - `/invite/:id` 页面的 SSR 响应 HTML head 中必须包含 `og:title`（活动标题）、`og:description`（包含报名人数信息）、`og:url`（当前页面 URL）
 
 ---
 

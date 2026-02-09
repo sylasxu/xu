@@ -1,9 +1,26 @@
-import { pgTable, uuid, varchar, text, timestamp, integer, index } from "drizzle-orm/pg-core";
+import { pgTable, uuid, varchar, text, timestamp, integer, index, jsonb } from "drizzle-orm/pg-core";
 import { geometry } from "drizzle-orm/pg-core";
 import { users } from "./users";
 import { activityTypeEnum, activityStatusEnum } from "./enums";
 import { vector } from "./custom-types";
 import { createInsertSchema, createSelectSchema } from "drizzle-typebox";
+
+/**
+ * v5.0: 活动主题配置类型
+ * 存储 React Bits Background Studio 导出的动态背景参数
+ */
+export interface ThemeConfig {
+  background: {
+    component: 'Aurora' | 'Ballpit' | 'Particles' | 'Threads' | 'Gradient' | 'Squares';
+    config: Record<string, unknown>;
+  };
+  textEffect?: 'split' | 'blur' | 'gradient' | 'shiny';
+  colorScheme?: {
+    primary: string;
+    secondary: string;
+    text: string;
+  };
+}
 
 /**
  * 活动表 (MVP 精简版)
@@ -45,6 +62,10 @@ export const activities = pgTable("activities", {
 
   // --- 状态 (v3.3 默认 draft，符合 AI 解析 → 用户确认的工作流) ---
   status: activityStatusEnum("status").default("draft").notNull(),
+
+  // --- v5.0 主题系统 ---
+  theme: varchar("theme", { length: 20 }).default("auto").notNull(),
+  themeConfig: jsonb("theme_config").$type<ThemeConfig>(),
 
   // --- v4.5 语义搜索：向量字段 (Qwen text-embedding-v4, 1536 维) ---
   embedding: vector('embedding', { dimensions: 1536 }),

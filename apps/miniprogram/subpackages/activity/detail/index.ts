@@ -3,6 +3,8 @@
  * Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 10.1-10.7, 16.1-16.6
  */
 import { getActivitiesById, postActivitiesByIdJoin, deleteActivitiesById, patchActivitiesByIdStatus } from '../../../src/api/endpoints/activities/activities';
+import { getActivitiesByIdPublic } from '../../../src/api/endpoints/activities/activities-custom';
+import type { RecentMessage } from '../../../src/api/endpoints/activities/activities-custom';
 import { getUsersById } from '../../../src/api/endpoints/users/users';
 import { useAppStore } from '../../../src/stores/app';
 import type { ActivityDetailResponse } from '../../../src/api/model';
@@ -20,7 +22,7 @@ interface User {
 interface Participant {
   id: string;
   userId: string;
-  status: 'pending' | 'approved' | 'rejected';
+  status: 'pending' | 'approved' | 'rejected' | 'joined';
   user?: User;
 }
 
@@ -67,7 +69,7 @@ interface PageData {
   isHotActivity: boolean;
   useFastPass: boolean;
   fastPassPrice: number;
-  participantStatus: 'pending' | 'approved' | 'rejected' | null;
+  participantStatus: 'pending' | 'approved' | 'rejected' | 'joined' | null;
   isCreator: boolean;
   // 管理操作面板
   showManageSheet: boolean;
@@ -77,6 +79,8 @@ interface PageData {
   pendingAction: 'join' | null;
   // 举报弹窗
   showReportSheet: boolean;
+  // v5.0: 讨论区预览
+  recentMessages: RecentMessage[];
 }
 
 interface PageOptions {
@@ -114,6 +118,8 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     pendingAction: null,
     // 举报弹窗
     showReportSheet: false,
+    // v5.0: 讨论区预览
+    recentMessages: [],
   },
 
   onLoad(options: PageOptions) {
@@ -184,6 +190,9 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
           isCreator,
           participantStatus,
         });
+
+        // v5.0: 异步加载讨论区预览消息（不阻塞主流程）
+        this.loadRecentMessages(id);
       } else {
         throw new Error((response.data as { msg?: string })?.msg || '获取活动详情失败');
       }
@@ -194,6 +203,21 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
         error: true,
         errorMsg: (error as Error).message || '加载失败，请重试',
       });
+    }
+  },
+
+  /** v5.0: 从公开端点加载讨论区预览消息 */
+  async loadRecentMessages(id: string) {
+    try {
+      const response = await getActivitiesByIdPublic(id);
+      if (response.status === 200) {
+        this.setData({
+          recentMessages: response.data.recentMessages || [],
+        });
+      }
+    } catch (error) {
+      // 讨论区预览加载失败不影响主流程
+      console.error('加载讨论区预览失败', error);
     }
   },
 
@@ -505,9 +529,16 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
           showJoinDialog: false,
           joinMessage: '',
           useFastPass: false,
-          participantStatus: 'pending',
+          participantStatus: 'joined',  // v5.0: 直接设为 joined
         });
         this.loadActivityDetail(activityId);
+
+        // v5.0: 报名成功后自动跳转讨论区
+        setTimeout(() => {
+          wx.navigateTo({
+            url: `/subpackages/activity/discussion/index?id=${activityId}`,
+          });
+        }, 800); // 等 toast 显示后跳转
       } else {
         throw new Error((response.data as { msg?: string })?.msg || '报名失败');
       }
@@ -555,23 +586,16 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
       };
     }
 
-    // 计算空位数
-    const vacancy = (activity.maxParticipants || 0) - (activity.currentParticipants || 0);
-    
-    // 生成骚气标题 - Requirements: 13.2
-    // 优先使用 AI 生成的标题，否则根据活动信息生成
+    // v5.0: 分享卡片优化 - 包含报名人数制造 FOMO - Requirements: 9.1
+    const currentCount = activity.currentParticipants || 0;
+    const maxCount = activity.maxParticipants || 0;
+    const vacancy = maxCount - currentCount;
+
     let shareTitle = '';
     if (vacancy > 0) {
-      // 还有空位
-      shareTitle = `🔥 ${activity.title}，${vacancy}缺1，速来！`;
+      shareTitle = `已有${currentCount}人报名，还差${vacancy}人！| ${activity.title}`;
     } else {
-      // 已满员
-      shareTitle = `🎉 ${activity.title}，已满员！`;
-    }
-    
-    // 添加地点信息（如果有）
-    if (activity.locationName) {
-      shareTitle = `${shareTitle.replace('！', '')}@${activity.locationName}！`;
+      shareTitle = `已满员！| ${activity.title}`;
     }
 
     return {

@@ -11,6 +11,7 @@ export * from './endpoints/users/users'
 
 // 活动相关
 export * from './endpoints/activities/activities'
+export * from './endpoints/activities/activities-custom'
 
 // AI 相关
 export * from './endpoints/ai/ai'

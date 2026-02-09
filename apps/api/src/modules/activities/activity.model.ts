@@ -220,6 +220,47 @@ const NearbyActivitiesResponse = t.Object({
 });
 
 // ==========================================
+// v5.0: 公开活动详情（无需认证）
+// ==========================================
+
+// 公开活动参与者信息（仅头像+昵称）
+const PublicParticipantInfo = t.Object({
+  nickname: t.Union([t.String(), t.Null()]),
+  avatarUrl: t.Union([t.String(), t.Null()]),
+});
+
+// 公开活动讨论区消息预览
+const PublicMessagePreview = t.Object({
+  senderNickname: t.Union([t.String(), t.Null()]),
+  senderAvatar: t.Union([t.String(), t.Null()]),
+  content: t.String(),
+  createdAt: t.String(),
+});
+
+// 公开活动详情响应（排除敏感字段）
+const PublicActivityResponse = t.Object({
+  id: t.String(),
+  title: t.String(),
+  description: t.Union([t.String(), t.Null()]),
+  startAt: t.String(),
+  locationName: t.String(),
+  locationHint: t.String(),
+  type: t.String(),
+  status: t.String(),
+  maxParticipants: t.Number(),
+  currentParticipants: t.Number(),
+  theme: t.String(),
+  themeConfig: t.Union([t.Any(), t.Null()]),
+  isArchived: t.Boolean(),
+  creator: t.Object({
+    nickname: t.Union([t.String(), t.Null()]),
+    avatarUrl: t.Union([t.String(), t.Null()]),
+  }),
+  participants: t.Array(PublicParticipantInfo),
+  recentMessages: t.Array(PublicMessagePreview),
+});
+
+// ==========================================
 // 创建活动相关
 // ==========================================
 
@@ -310,6 +351,8 @@ export const activityModel = new Elysia({ name: 'activityModel' })
     'activity.nearbyQuery': NearbyActivitiesQuery,
     'activity.nearbyItem': NearbyActivityItem,
     'activity.nearbyResponse': NearbyActivitiesResponse,
+    // v5.0 公开活动详情
+    'activity.publicResponse': PublicActivityResponse,
     // 创建活动
     'activity.createRequest': CreateActivityRequest,
     'activity.publishDraftRequest': PublishDraftRequest,
@@ -335,6 +378,7 @@ export type AdminActivitiesResponse = Static<typeof AdminActivitiesResponse>;
 export type NearbyActivitiesQuery = Static<typeof NearbyActivitiesQuery>;
 export type NearbyActivityItem = Static<typeof NearbyActivityItem>;
 export type NearbyActivitiesResponse = Static<typeof NearbyActivitiesResponse>;
+export type PublicActivityResponse = Static<typeof PublicActivityResponse>;
 export type CreateActivityRequest = Static<typeof CreateActivityRequest>;
 export type PublishDraftRequest = Static<typeof PublishDraftRequest>;
 export type UpdateStatusRequest = Static<typeof UpdateStatusRequest>;

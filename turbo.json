@@ -10,7 +10,7 @@
     "dev": {
       "cache": false,
       "persistent": true,
-      "env": ["NODE_ENV", "API_PORT", "DATABASE_URL", "JWT_SECRET"]
+      "env": ["NODE_ENV", "API_PORT", "DATABASE_URL", "JWT_SECRET", "NEXT_PUBLIC_API_URL"]
     },
     "@juchang/miniprogram#dev": {
       "cache": false,

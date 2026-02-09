@@ -10,6 +10,7 @@ import { t } from 'elysia';
 import { tool, jsonSchema } from 'ai';
 import { toJsonSchema } from '@juchang/utils';
 import { db, activities, participants, users, eq, and, desc, sql } from '@juchang/db';
+import { ACTIVITY_TYPE_THEME_MAP, PRESET_THEMES } from '../../../modules/activities/theme-presets';
 
 // ============ Schema 定义 ============
 
@@ -124,6 +125,10 @@ export function createActivityDraftTool(userId: string | null) {
       try {
         const { location, startAt, ...activityData } = params;
         
+        // v5.0: 根据活动类型自动分配主题
+        const themeName = ACTIVITY_TYPE_THEME_MAP[activityData.type] || 'minimal';
+        const themeConfig = PRESET_THEMES[themeName] || PRESET_THEMES.minimal;
+
         const [newActivity] = await db
           .insert(activities)
           .values({
@@ -133,6 +138,8 @@ export function createActivityDraftTool(userId: string | null) {
             startAt: new Date(startAt),
             currentParticipants: 1,
             status: 'draft',
+            theme: themeName,
+            themeConfig,
           })
           .returning({ id: activities.id });
         

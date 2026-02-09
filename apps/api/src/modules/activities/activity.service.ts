@@ -1,5 +1,5 @@
 // Activity Service - 纯业务逻辑 (MVP 简化版 + v3.2 附近搜索)
-import { db, activities, users, participants, eq, sql, and, gt, like, inArray, desc } from '@juchang/db';
+import { db, activities, users, participants, activityMessages, eq, sql, and, gt, like, inArray, desc } from '@juchang/db';
 import type {
   ActivityDetailResponse,
   ActivityListItem,
@@ -10,12 +10,13 @@ import type {
   NearbyActivitiesResponse,
   ActivitiesListQuery,
   ActivitiesListResponse,
+  PublicActivityResponse,
 } from './activity.model';
 import { deductAiCreateQuota } from '../users/user.service';
 import { indexActivity, deleteIndex } from '../ai/rag';
 import { addInterestVector } from '../ai/memory';
 import { validateFields } from '../content-security';
-import { notifyJoin } from '../notifications/notification.service';
+import { notifyJoin, notifyNewParticipant } from '../notifications/notification.service';
 
 // 群聊归档时间：活动开始后 24 小时
 const ARCHIVE_HOURS = 24;
@@ -332,6 +333,89 @@ export async function getActivityById(id: string): Promise<ActivityDetailRespons
       status: p.status,
       joinedAt: p.joinedAt?.toISOString() || null,
       user: p.userInfo || null,
+    })),
+  };
+}
+
+/**
+ * v5.0: 获取活动公开详情（无需认证，含讨论区预览）
+ * 排除敏感字段（creatorId, location 精确坐标, phoneNumber）
+ */
+export async function getPublicActivityById(activityId: string): Promise<PublicActivityResponse | null> {
+  // 1. 查询活动基础信息 + 发起人
+  const [activity] = await db
+    .select({
+      id: activities.id,
+      title: activities.title,
+      description: activities.description,
+      startAt: activities.startAt,
+      locationName: activities.locationName,
+      locationHint: activities.locationHint,
+      type: activities.type,
+      status: activities.status,
+      maxParticipants: activities.maxParticipants,
+      currentParticipants: activities.currentParticipants,
+      theme: activities.theme,
+      themeConfig: activities.themeConfig,
+      creatorNickname: users.nickname,
+      creatorAvatarUrl: users.avatarUrl,
+    })
+    .from(activities)
+    .leftJoin(users, eq(activities.creatorId, users.id))
+    .where(eq(activities.id, activityId))
+    .limit(1);
+
+  if (!activity) return null;
+
+  // 2. 查询参与者列表（最多 10 人，头像+昵称）
+  const participantList = await db
+    .select({
+      nickname: users.nickname,
+      avatarUrl: users.avatarUrl,
+    })
+    .from(participants)
+    .innerJoin(users, eq(participants.userId, users.id))
+    .where(and(eq(participants.activityId, activityId), eq(participants.status, 'joined')))
+    .limit(10);
+
+  // 3. 查询最近 3 条讨论区消息
+  const recentMessages = await db
+    .select({
+      senderNickname: users.nickname,
+      senderAvatar: users.avatarUrl,
+      content: activityMessages.content,
+      createdAt: activityMessages.createdAt,
+    })
+    .from(activityMessages)
+    .leftJoin(users, eq(activityMessages.senderId, users.id))
+    .where(eq(activityMessages.activityId, activityId))
+    .orderBy(desc(activityMessages.createdAt))
+    .limit(3);
+
+  return {
+    id: activity.id,
+    title: activity.title,
+    description: activity.description,
+    startAt: activity.startAt.toISOString(),
+    locationName: activity.locationName,
+    locationHint: activity.locationHint,
+    type: activity.type,
+    status: activity.status,
+    maxParticipants: activity.maxParticipants,
+    currentParticipants: activity.currentParticipants,
+    theme: activity.theme,
+    themeConfig: activity.themeConfig,
+    isArchived: calculateIsArchived(activity.startAt),
+    creator: {
+      nickname: activity.creatorNickname,
+      avatarUrl: activity.creatorAvatarUrl,
+    },
+    participants: participantList,
+    recentMessages: recentMessages.reverse().map(m => ({
+      senderNickname: m.senderNickname,
+      senderAvatar: m.senderAvatar,
+      content: m.content,
+      createdAt: m.createdAt.toISOString(),
     })),
   };
 }
@@ -717,14 +801,39 @@ export async function joinActivity(activityId: string, userId: string): Promise<
     .where(eq(users.id, userId));
 
   // v4.8: 发送通知给活动创建者 (异步，不阻塞主流程)
+  // v5.0: 查询新加入者昵称，用于系统消息和通知
+  const [joiner] = await db
+    .select({ nickname: users.nickname })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  const joinerName = joiner?.nickname || '新成员';
+
   notifyJoin(
     activity.creatorId,
     activityId,
     activity.title,
-    'someone' // TODO: 获取用户昵称
+    joinerName
   ).catch(err => {
     console.error('Failed to send join notification:', err);
   });
+
+  // v5.0: 发送系统消息到讨论区 "XX 刚刚加入了！"
+  db.insert(activityMessages).values({
+    activityId,
+    senderId: null,
+    messageType: 'system',
+    content: `${joinerName} 刚刚加入了！`,
+  }).catch(err => console.error('Failed to send join system message:', err));
+
+  // v5.0: 通知所有已报名参与者（不含新加入者和创建者）
+  notifyNewParticipant(
+    activityId,
+    activity.title,
+    joinerName,
+    userId,
+    activity.creatorId
+  ).catch(err => console.error('Failed to notify participants:', err));
 
   // v4.8: 如果是群内活动，更新动态消息卡片 (异步，不阻塞主流程)
   if (activity.groupOpenId && activity.dynamicMessageId) {

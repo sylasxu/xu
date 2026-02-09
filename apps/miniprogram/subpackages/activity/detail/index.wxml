@@ -221,6 +221,24 @@
       </view>
     </view>
     
+    <!-- 讨论区预览 -->
+    <view wx:if="{{recentMessages.length > 0}}" class="bg-white p-4 mb-2">
+      <view class="flex items-center justify-between mb-3">
+        <text class="text-lg font-semibold text-gray-900">讨论区</text>
+        <view class="flex items-center" bindtap="onEnterChat">
+          <text class="text-sm text-brand">查看更多</text>
+          <t-icon name="chevron-right" size="32rpx" color="#5B75FB" />
+        </view>
+      </view>
+      <view wx:for="{{recentMessages}}" wx:key="index" class="discussion-msg-item flex items-start gap-2 {{index < recentMessages.length - 1 ? 'mb-3' : ''}}">
+        <image class="discussion-msg-avatar flex-shrink-0 rounded-full" src="{{item.senderAvatar}}" mode="aspectFill" />
+        <view class="flex-1 min-w-0">
+          <text class="block text-xs text-gray-400 mb-1">{{item.senderNickname}}</text>
+          <text class="block text-sm text-gray-900 line-clamp-2">{{item.content}}</text>
+        </view>
+      </view>
+    </view>
+    
     <!-- 底部操作栏 -->
     <view class="bottom-bar flex items-center px-4 py-3">
       <button class="share-btn flex flex-col items-center justify-center w-100 h-100 text-xs text-gray-600" open-type="share">

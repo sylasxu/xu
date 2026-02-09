@@ -33,6 +33,7 @@
     "dev:api": "turbo run dev --filter=@juchang/api",
     "dev:admin": "turbo run dev --filter=@juchang/admin",
     "dev:mp": "turbo run dev --filter=@juchang/miniprogram",
+    "dev:web": "turbo run dev --filter=@juchang/web",
     "dev:api:clean": "node scripts/dev-api-clean.js",
     "dev:full": "node scripts/dev-with-api-watch.js",
     "--- API GENERATION ---": "echo 'API 代码生成'",

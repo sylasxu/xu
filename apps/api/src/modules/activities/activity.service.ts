@@ -427,6 +427,16 @@ export async function createActivity(
   data: CreateActivityRequest,
   creatorId: string
 ): Promise<{ id: string }> {
+  // CP-9: 检查手机号绑定
+  const [creator] = await db
+    .select({ phoneNumber: users.phoneNumber })
+    .from(users)
+    .where(eq(users.id, creatorId))
+    .limit(1);
+  if (!creator?.phoneNumber) {
+    throw new Error('请先绑定手机号才能发布活动');
+  }
+
   // 检查并扣减额度
   const hasQuota = await deductAiCreateQuota(creatorId);
   if (!hasQuota) {
@@ -698,6 +708,16 @@ export async function deleteActivity(activityId: string, userId: string): Promis
  * 报名活动
  */
 export async function joinActivity(activityId: string, userId: string): Promise<{ id: string }> {
+  // CP-9: 检查手机号绑定
+  const [joiningUser] = await db
+    .select({ phoneNumber: users.phoneNumber })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!joiningUser?.phoneNumber) {
+    throw new Error('请先绑定手机号才能报名活动');
+  }
+
   // 检查活动是否存在
   const [activity] = await db
     .select()
@@ -835,17 +855,8 @@ export async function joinActivity(activityId: string, userId: string): Promise<
     activity.creatorId
   ).catch(err => console.error('Failed to notify participants:', err));
 
-  // v4.8: 如果是群内活动，更新动态消息卡片 (异步，不阻塞主流程)
-  if (activity.groupOpenId && activity.dynamicMessageId) {
-    import('../wechat/wechat.service').then(({ updateDynamicMessage }) => {
-      updateDynamicMessage(
-        activity.dynamicMessageId!,
-        `${activity.currentParticipants + 1}人已参与`
-      ).catch(err => {
-        console.error('Failed to update dynamic message:', err);
-      });
-    });
-  }
+  // v4.8: 动态消息卡片更新 — TODO: 待微信能力模块重构后接入
+  // if (activity.groupOpenId && activity.dynamicMessageId) { ... }
 
   // v4.5: 异步更新用户兴趣向量 (不阻塞主流程)
   updateUserInterestVector(userId, activityId).catch(err => {

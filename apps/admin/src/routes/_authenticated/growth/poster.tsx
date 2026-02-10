@@ -63,7 +63,7 @@ function PosterFactoryPage() {
       <Main>
         <div className='mb-6 flex items-center gap-3'>
           <Image className='h-6 w-6' />
-          <h1 className='text-2xl font-bold'>海报工厂</h1>
+          <h1 className='text-2xl font-bold'>文案工厂</h1>
         </div>
 
         <div className='grid gap-6 lg:grid-cols-2'>

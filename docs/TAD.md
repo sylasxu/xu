@@ -124,7 +124,7 @@
 │   │       │   │   │   ├── moderation.tsx  # 风险审核
 │   │       │   │   │   └── activities.tsx  # 活动管理
 │   │       │   │   ├── growth/
-│   │       │   │   │   ├── poster.tsx      # 海报工厂
+│   │       │   │   │   ├── copywriting.tsx # 文案工厂
 │   │       │   │   │   └── trends.tsx      # 热门洞察
 │   │       │   │   ├── users/
 │   │       │   │   │   └── index.tsx       # 用户列表
@@ -167,7 +167,7 @@
 │       └── src/
 │           ├── index.ts      # 应用入口
 │           ├── setup.ts      # 全局插件
-│           └── modules/      # 功能模块 (16 个)
+│           └── modules/      # 功能模块 (12 个)
 │               ├── auth/         # 微信登录、手机号绑定
 │               ├── users/        # 用户 CRUD、额度
 │               ├── activities/   # 活动 CRUD、报名、附近搜索
@@ -176,15 +176,10 @@
 │               ├── ai/           # AI 解析、对话历史
 │               ├── hot-keywords/ # P0 层热词管理 (v4.8 新增)
 │               ├── dashboard/    # 首页数据聚合、God View
-│               ├── growth/       # 增长工具（海报工厂、热门洞察）
+│               ├── growth/       # 增长工具（文案工厂、热门洞察）
 │               ├── notifications/ # 通知管理
 │               ├── reports/      # 举报管理
-│               ├── content-security/ # 内容安全检测 (v4.6)
-│               ├── feedbacks/    # 用户反馈 (v4.6)
-│               ├── transactions/ # 交易记录 (v4.6)
-│               ├── upload/       # 文件上传 (v4.6)
-│               ├── wechat/       # 微信能力封装 (v4.6)
-│               └── poster/       # AI 海报生成 (v4.9 新增)
+│               └── content-security/ # 内容安全检测、微信 API 封装 (v4.6)
 │
 ├── packages/
 │   ├── db/                   # Drizzle ORM
@@ -533,16 +528,11 @@ export const globalKeywords = pgTable('global_keywords', {
 | `chat` | `/chat` | 活动群聊消息 (activity_messages 表)，**WebSocket 讨论区** (v4.9) |
 | `ai` | `/ai` | AI 解析 (SSE)，**意图分类**，**对话历史管理** (conversations 表) |
 | `hot-keywords` | `/hot-keywords` | **P0 层热词管理** (v4.8 新增) |
-| `poster` | `/poster` | **AI 海报生成** (v4.9 新增) |
 | `dashboard` | `/dashboard` | 首页数据聚合、God View 实时概览 |
-| `growth` | `/growth` | 增长工具：海报工厂、热门洞察 |
+| `growth` | `/growth` | 增长工具：文案工厂、热门洞察 |
 | `notifications` | `/notifications` | 通知管理 |
 | `reports` | `/reports` | 举报管理 |
-| `content-security` | `/content-security` | 内容安全检测 (v4.6) |
-| `feedbacks` | `/feedbacks` | 用户反馈 (v4.6) |
-| `transactions` | `/transactions` | 交易记录 (v4.6) |
-| `upload` | `/upload` | 文件上传 (v4.6) |
-| `wechat` | `/wechat` | 微信能力封装 (v4.6) |
+| `content-security` | `/content-security` | 内容安全检测、微信 API 封装 (v4.6) |
 
 **设计原则**：API 模块按功能领域划分，而非按页面划分。对话历史 (conversations) 属于 AI 功能领域，归入 `ai` 模块。
 
@@ -574,8 +564,8 @@ POST /chat/:activityId/messages  // 发送消息
 WS   /chat/:activityId/ws        // WebSocket 连接 (v4.9 新增)
 POST /chat/:activityId/report    // 举报消息 (v4.9 新增)
 
-// Poster (AI 海报生成 v4.9 新增)
-POST /poster/generate            // 生成活动海报
+// Poster (已废弃，v5.0 被 H5 邀请函替代)
+// POST /poster/generate  ← 已移除
 
 // AI (v3.9 扩展：AI 解析 + 对话历史 + 会话管理)
 POST /ai/chat             // AI 对话 (Data Stream，自动保存对话历史)
@@ -601,7 +591,7 @@ GET  /hot-keywords/analytics    // 获取热词分析数据
 GET  /dashboard/god-view  // 获取 God View 数据（实时概览/AI健康度/异常警报）
 
 // Growth (v4.5 新增：增长工具)
-POST /growth/poster/generate  // 生成海报文案（小红书风格）
+POST /growth/poster/generate  // 生成文案（小红书风格）
 GET  /growth/trends           // 获取热门洞察（高频词/意图分布）
 ```
 
@@ -634,7 +624,7 @@ interface ExploreResult {
 
 ### 5.4 Growth 模块 - 增长工具 (v4.5 新增)
 
-**海报工厂 (Poster Factory)**：
+**文案工厂 (Copywriting Factory)**：
 
 ```typescript
 // POST /growth/poster/generate
@@ -2041,73 +2031,10 @@ sequenceDiagram
 
 ---
 
-## 6.17 AI 海报技术实现 (v4.9 新增)
+## 6.17 ~~AI 海报技术实现~~ (v5.0 废弃)
 
-AI 海报生成使用千问 VL 生成背景图，Puppeteer 合成最终海报。
-
-### 6.17.1 架构概览
-
-```
-用户请求生成海报
-    │
-    ▼
-┌─────────────────┐
-│ 1. 获取活动信息 │ ← activity.service.getActivityById()
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ 2. 生成背景图   │ ← 千问 VL (qwen-vl-max)
-│   (AI 生成)     │   根据活动类型生成独特背景
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ 3. 生成小程序码 │ ← wechat.service.generateQRCode()
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ 4. 合成海报     │ ← Puppeteer 渲染 HTML 模板
-│   (Puppeteer)   │   截图生成最终图片
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ 5. 上传 CDN     │ ← 返回海报 URL
-└─────────────────┘
-```
-
-### 6.17.2 海报模板
-
-```
-apps/api/src/modules/poster/templates/
-├── simple.html     # 简约风格
-├── vibrant.html    # 活力风格
-└── artistic.html   # 文艺风格
-```
-
-### 6.17.3 API 设计
-
-```typescript
-// POST /poster/generate
-interface GeneratePosterRequest {
-  activityId: string;
-  style: 'simple' | 'vibrant' | 'artistic';
-}
-
-interface GeneratePosterResponse {
-  posterUrl: string;
-  expiresAt: string;  // 24h 后过期
-}
-```
-
-### 6.17.4 技术约束
-
-| 约束 | 说明 |
-|------|------|
-| 生成时间 | ≤ 10 秒 |
-| 图片尺寸 | 750 x 1334 px |
+> **v5.0 调整**：Puppeteer 截图海报方案已被 H5 邀请函（`/invite/:id`）完全替代。`poster` 模块已从代码中移除。
+> 详见 PRD 1.5 节和 TAD 6.19 节（apps/web 架构）。
 | 有效期 | 24 小时 |
 | 缓存策略 | 同一活动只生成一次 |
 
@@ -2629,7 +2556,7 @@ const isExpired = (draft: ActivityDraft) => {
 | **首页** | 数据大屏 | God View 实时概览 |
 | **导航** | 功能平铺 | 分层聚焦（指挥舱/AI Ops/安全/增长） |
 | **AI 调试** | 分散的配置页 | 统一 Playground |
-| **增长工具** | 无 | 海报工厂 + 热门洞察 |
+| **增长工具** | 无 | 文案工厂 + 热门洞察 |
 
 **导航结构**：
 
@@ -2647,7 +2574,7 @@ AI Ops
   └── 活动管理 - 活动列表（状态管理/删除）
 
 增长 (Growth)
-  ├── 海报工厂 - 生成小红书文案（活动描述 → 文案 + 标签）
+  ├── 文案工厂 - 生成小红书文案（活动描述 → 文案 + 标签）
   └── 热门洞察 - 用户需求趋势（高频词/意图分布）
 
 用户 (Users)
@@ -2668,7 +2595,7 @@ AI Ops
 **新增功能**：
 - ✅ God View 实时概览（生死攸关的数据）
 - ✅ Playground 统一调试（模拟身份/思维链/Tool 追踪）
-- ✅ 海报工厂（小红书文案生成）
+- ✅ 文案工厂（小红书文案生成）
 - ✅ 热门洞察（用户需求趋势分析）
 - ✅ 风险审核（一键处理违规内容）
 
@@ -3002,56 +2929,9 @@ page {
 
 ## 14. Future Roadmap (Phase 2)
 
-### 14.1 AI 海报生成 API
+### 14.1 ~~AI 海报生成 API~~ (已被 H5 邀请函替代)
 
-> **Phase 2: 视觉增长引擎** - 当需要破圈传播时上线
-
-**API 端点**：`POST /share/poster`
-
-**调用方**：小程序、Admin 后台
-
-**架构设计**：
-```
-客户端点击"生成海报" 
-  → POST /share/poster { activityId }
-  → Elysia API 组装数据 
-  → (可选) AI 生成背景图 (Flux/SDXL)
-  → Puppeteer 渲染 HTML 模板 
-  → 截图上传 CDN 
-  → 返回 { posterUrl }
-```
-
-**技术栈**：
-| 层级 | 技术 | 说明 |
-|------|------|------|
-| API 层 | Elysia `/share/poster` | 统一入口，供小程序和 Admin 调用 |
-| 渲染层 | Puppeteer + HTML | CSS 就是画笔，Halo Card 样式 100% 复用 |
-| 内容层 | Flux/SDXL API | AI 生成独一无二的活动背景图 |
-| 组装层 | Puppeteer Composition | 二维码 + AI 图 + 文字信息拼接 |
-| 存储层 | CDN (OSS/S3) | 海报图片持久化存储 |
-
-**API 设计**：
-```typescript
-// POST /share/poster
-// Request
-{ activityId: string; style?: 'default' | 'cyberpunk' | 'minimal' }
-
-// Response
-{ 
-  posterUrl: string;      // CDN 链接
-  cached: boolean;        // 是否命中缓存
-  generatedAt: string;    // 生成时间
-}
-```
-
-**核心优势**：
-- **CSS 复用**：Halo Card 样式代码 100% 复用，无需重写 Canvas 绘图逻辑
-- **高级效果**：支持 `backdrop-filter`、`mask-image` 等小程序 Canvas 无法实现的效果
-- **AI 增强**：每次生成独特背景图，刺激用户反复创建活动
-
-**缓存策略**：
-- 同一活动只生成一次，后续直接返回 CDN 链接
-- 活动信息更新后自动失效缓存
+> **v5.0 调整**：此方案已被 H5 邀请函（`/invite/:id`）完全替代，不再计划实现。详见 TAD 6.19 节。
 
 ---
 

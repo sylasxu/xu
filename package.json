@@ -14,7 +14,7 @@
     "clean": "turbo run clean && rm -rf node_modules **/*/node_modules",
     "--- ENV ---": "echo '环境变量管理'",
     "env:init": "node scripts/init-env.js",
-    "--- dockerSTRUCTURE ---": "echo '基础设施控制'",
+    "--- DOCKER ---": "echo '基础设施控制'",
     "docker:up": "docker compose -f docker/docker-compose.yml up -d",
     "docker:down": "docker compose -f docker/docker-compose.yml down",
     "docker:logs": "docker compose -f docker/docker-compose.yml logs -f",
@@ -27,8 +27,7 @@
     "db:reset": "bun run docker:down && bun run docker:up && sleep 3 && bun run db:push",
     "db:seed": "turbo run seed --filter=@juchang/db",
     "--- DEVELOPMENT ---": "echo '开发启动'",
-    "dev": "turbo run dev --filter=@juchang/api --filter=@juchang/admin",
-    "dev:core": "turbo run dev --filter=@juchang/api --filter=@juchang/admin",
+    "dev": "turbo run dev --filter=@juchang/api --filter=@juchang/admin --filter=@juchang/web",
     "dev:all": "turbo run dev",
     "dev:api": "turbo run dev --filter=@juchang/api",
     "dev:admin": "turbo run dev --filter=@juchang/admin",
@@ -68,8 +67,5 @@
     "typescript": "^5.9.3",
     "@types/node": "^24.10.1"
   },
-  "dependencies": {
-    "@dagrejs/dagre": "^2.0.3",
-    "@xyflow/react": "^12.10.0"
-  }
+  "dependencies": {}
 }

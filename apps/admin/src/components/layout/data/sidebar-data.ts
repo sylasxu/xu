@@ -81,7 +81,7 @@ export const sidebarData: SidebarData = {
       title: '增长',
       items: [
         {
-          title: '海报工厂',
+          title: '文案工厂',
           url: '/growth/poster',
           icon: Image,
         },

@@ -5,8 +5,9 @@
  */
 
 import { db, conversationMessages, aiConversationMetrics, sql, desc, and, gte, isNotNull } from '@juchang/db'
-import { generateObject } from 'ai'
-import { z } from 'zod'
+import { generateObject, jsonSchema } from 'ai'
+import { t } from 'elysia'
+import { toJsonSchema } from '@juchang/utils'
 import { intentDisplayNames } from '../ai/intent/definitions'
 import type { IntentType } from '../ai/intent/types'
 import { getDeepSeekChat } from '../ai/models/adapters/deepseek'
@@ -38,7 +39,7 @@ interface TrendInsight {
 }
 
 /**
- * 生成海报文案
+ * 生成文案（文案工厂）
  * 
  * TODO: 接入 AI 生成真实文案
  */
@@ -87,6 +88,18 @@ function extractKeywords(text: string): string[] {
   const commonWords = ['火锅', '周末', '约饭', '重庆', '美食', '运动', '电影', '咖啡', '聚会']
   return commonWords.filter(word => text.includes(word))
 }
+
+/**
+ * 高频关键词提取 Schema（用于 LLM generateObject）
+ */
+const KeywordExtractionSchema = t.Object({
+  keywords: t.Array(t.Object({
+    word: t.String({ description: '关键词' }),
+    count: t.Number({ description: '出现次数' }),
+  }), { maxItems: 20, description: '高频关键词列表，按出现次数降序排列' })
+})
+
+type KeywordExtraction = typeof KeywordExtractionSchema.static
 
 /**
  * 获取热门洞察
@@ -155,12 +168,7 @@ export async function getTrendInsights(period: '7d' | '30d'): Promise<TrendInsig
     try {
       const result = await generateObject({
         model: getDeepSeekChat(),
-        schema: z.object({
-          keywords: z.array(z.object({
-            word: z.string().describe('关键词'),
-            count: z.number().describe('出现次数'),
-          })).max(20).describe('高频关键词列表，按出现次数降序排列')
-        }),
+        schema: jsonSchema<KeywordExtraction>(toJsonSchema(KeywordExtractionSchema) as any),
         prompt: `分析以下用户消息，提取高频关键词 Top 20（按出现次数排序）。
 只提取有意义的词，如：活动类型（火锅、篮球、麻将）、地点（观音桥、南坪）、时间（周末、明晚）。
 不要提取太通用的词如"的"、"了"、"是"。

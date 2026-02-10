@@ -34,7 +34,7 @@ export const growthController = new Elysia({ prefix: '/growth' })
     {
       detail: {
         tags: ['Growth'],
-        summary: '生成海报文案',
+        summary: '生成文案',
         description: '根据活动描述生成小红书风格的文案',
       },
       body: 'growth.generatePosterRequest',

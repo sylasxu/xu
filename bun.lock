@@ -4,10 +4,6 @@
   "workspaces": {
     "": {
       "name": "juchang",
-      "dependencies": {
-        "@dagrejs/dagre": "^2.0.3",
-        "@xyflow/react": "^12.10.0",
-      },
       "devDependencies": {
         "tsx": "^4.20.6",
         "turbo": "^2.6.1",
@@ -275,10 +271,6 @@
     "@borewit/text-codec": ["@borewit/text-codec@0.1.1", "", {}, "sha512-5L/uBxmjaCIX5h8Z+uu+kA9BQLkc/Wl06UGR5ajNRxu+/XjonB5i8JpgFMrPj3LXTCPA0pv8yxUvbUi+QthGGA=="],
 
     "@commander-js/extra-typings": ["@commander-js/extra-typings@14.0.0", "", { "peerDependencies": { "commander": "~14.0.0" } }, "sha512-hIn0ncNaJRLkZrxBIp5AsW/eXEHNKYQBh0aPdoUqNgD+Io3NIykQqpKFyKcuasZhicGaEZJX/JBSIkZ4e5x8Dg=="],
-
-    "@dagrejs/dagre": ["@dagrejs/dagre@2.0.3", "https://tencent-ssv-npm.pkg.coding.net/tanlive/web/@dagrejs/dagre/-/dagre-2.0.3.tgz", { "dependencies": { "@dagrejs/graphlib": "2.2.4" } }, "sha512-ig9Vg52tsijTIKNgW9BAeUVBhDRvqlZ2a6FQ6i41YcPpoAy7VXXt2qye22PXRecGSjAp0OEEVUBhJ4oS9BnBzQ=="],
-
-    "@dagrejs/graphlib": ["@dagrejs/graphlib@2.2.4", "https://tencent-ssv-npm.pkg.coding.net/tanlive/web/@dagrejs/graphlib/-/graphlib-2.2.4.tgz", {}, "sha512-mepCf/e9+SKYy1d02/UkvSy6+6MoyXhVxP8lLDfA7BPE1X1d4dR0sZznmbM8/XVJ1GPM+Svnx7Xj6ZweByWUkw=="],
 
     "@date-fns/tz": ["@date-fns/tz@1.4.1", "", {}, "sha512-P5LUNhtbj6YfI3iJjw5EL9eUAG6OitD0W3fWQcpQjDRc/QIsL0tRNuO1PcDvPccWL1fSTXXdE1ds+l95DV/OFA=="],
 

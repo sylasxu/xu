@@ -1,428 +1,384 @@
 /**
- * Flow Graph Builder
- * 
- * 从 ExecutionTrace 构建流程图数据
+ * Flow Graph Builder (v2 - 静态管线 + Trace 驱动)
+ *
+ * 核心变化：从"根据 trace 动态构建节点"改为"预渲染所有节点 + trace 驱动状态更新"
+ *
+ * - buildStaticPipeline(): 生成 7 层静态管线（所有节点 pending）
+ * - applyTraceToGraph(): 根据 ExecutionTrace 更新节点状态和数据
  */
 
-import type { ExecutionTrace, TraceStep, ExtendedStepType } from '../../../types/trace';
-import type { 
-  FlowGraphData, 
-  FlowNode, 
+import type { ExecutionTrace, TraceStep, ExtendedStepType } from '../../../types/trace'
+import type {
+  FlowGraphData,
+  FlowNode,
   FlowEdge,
-  InputNodeData,
-  P0MatchNodeData,
-  P1IntentNodeData,
-  ProcessorNodeData,
-  LLMNodeData,
-  ToolNodeData,
-  OutputNodeData,
-  ProcessorType,
+  FlowNodeType,
   FlowNodeStatus,
-} from '../../../types/flow';
-import { getLayoutedElements } from './layout';
+} from '../../../types/flow'
+
+// ============ 常量 ============
+
+const NODE_WIDTH = 200
+const NODE_HEIGHT = 64
+const LAYER_GAP = 80    // 层间距 ≥48px
+const NODE_GAP = 32     // 节点间距 ≥24px
+
+/** 管线层配置 */
+interface LayerNodeConfig {
+  nodeId: string
+  type: FlowNodeType
+  label: string
+  traceType: string
+  processorType?: string
+}
+
+interface LayerConfig {
+  id: string
+  nodes: LayerNodeConfig[]
+}
+
+export const PIPELINE_LAYERS: LayerConfig[] = [
+  {
+    id: 'L1',
+    nodes: [
+      { nodeId: 'input', type: 'input', label: '用户输入', traceType: 'input' },
+    ],
+  },
+  {
+    id: 'L2',
+    nodes: [
+      { nodeId: 'input-guard', type: 'processor', label: 'Input Guard', traceType: 'processor', processorType: 'input-guard' },
+      { nodeId: 'p0-match', type: 'p0-match', label: 'P0 匹配', traceType: 'p0-match' },
+    ],
+  },
+  {
+    id: 'L3',
+    nodes: [
+      { nodeId: 'p1-intent', type: 'p1-intent', label: 'P1 意图', traceType: 'p1-intent' },
+    ],
+  },
+  {
+    id: 'L4',
+    nodes: [
+      { nodeId: 'user-profile', type: 'processor', label: 'User Profile', traceType: 'processor', processorType: 'user-profile' },
+      { nodeId: 'semantic-recall', type: 'processor', label: 'Semantic Recall', traceType: 'processor', processorType: 'semantic-recall' },
+      { nodeId: 'token-limit', type: 'processor', label: 'Token Limit', traceType: 'processor', processorType: 'token-limit' },
+    ],
+  },
+  {
+    id: 'L5',
+    nodes: [
+      { nodeId: 'llm', type: 'llm', label: 'LLM 推理', traceType: 'llm' },
+    ],
+  },
+  {
+    id: 'L6',
+    nodes: [
+      { nodeId: 'tool-placeholder', type: 'tool', label: 'Tool 调用', traceType: 'tool' },
+    ],
+  },
+  {
+    id: 'L7',
+    nodes: [
+      { nodeId: 'output', type: 'output', label: '输出', traceType: 'output' },
+    ],
+  },
+]
+
+
+// P0 命中时需要跳过的节点 ID
+const SKIPPABLE_NODE_IDS = [
+  'p1-intent',
+  'user-profile',
+  'semantic-recall',
+  'token-limit',
+  'llm',
+  'tool-placeholder',
+]
+
+// ============ buildStaticPipeline ============
 
 /**
- * 从 ExecutionTrace 构建流程图
+ * 生成静态管线：所有节点 pending 状态，连线虚线灰色
  */
-export function buildFlowGraph(trace: ExecutionTrace | null): FlowGraphData {
-  if (!trace) {
-    return { nodes: [], edges: [] };
-  }
+export function buildStaticPipeline(): FlowGraphData {
+  const nodes: FlowNode[] = []
+  const edges: FlowEdge[] = []
 
-  const nodes: FlowNode[] = [];
-  const edges: FlowEdge[] = [];
-  let nodeIndex = 0;
-  let prevNodeId: string | null = null;
+  // 计算画布总宽度（取最宽层的宽度）
+  const maxNodesInLayer = Math.max(...PIPELINE_LAYERS.map(l => l.nodes.length))
+  const canvasWidth = maxNodesInLayer * NODE_WIDTH + (maxNodesInLayer - 1) * NODE_GAP
 
-  // 1. Input 节点
-  const inputStep = trace.steps.find(s => s.type === 'input');
-  if (inputStep) {
-    nodes.push(createInputNode(nodeIndex++, inputStep));
-    prevNodeId = nodes[nodes.length - 1].id;
-  }
+  PIPELINE_LAYERS.forEach((layer, layerIndex) => {
+    const y = layerIndex * (NODE_HEIGHT + LAYER_GAP)
+    const layerWidth = layer.nodes.length * NODE_WIDTH + (layer.nodes.length - 1) * NODE_GAP
+    const offsetX = (canvasWidth - layerWidth) / 2
 
-  // 2. Input Guard 节点
-  const inputGuardStep = trace.steps.find(
-    s => (s.type as ExtendedStepType) === 'processor' && 
-         (s.data as any).processorType === 'input-guard'
-  );
-  if (inputGuardStep) {
-    nodes.push(createProcessorNode(nodeIndex++, inputGuardStep, 'input-guard'));
-    if (prevNodeId) {
-      edges.push(createEdge(prevNodeId, nodes[nodes.length - 1].id));
-    }
-    prevNodeId = nodes[nodes.length - 1].id;
-  }
+    layer.nodes.forEach((cfg, nodeIndex) => {
+      const x = offsetX + nodeIndex * (NODE_WIDTH + NODE_GAP)
 
-  // 3. P0 Match 节点
-  const p0Step = trace.steps.find(s => (s.type as ExtendedStepType) === 'p0-match');
-  if (p0Step) {
-    nodes.push(createP0MatchNode(nodeIndex++, p0Step));
-    if (prevNodeId) {
-      edges.push(createEdge(prevNodeId, nodes[nodes.length - 1].id));
-    }
-    prevNodeId = nodes[nodes.length - 1].id;
+      nodes.push({
+        id: cfg.nodeId,
+        type: cfg.type as string,
+        position: { x, y },
+        draggable: false,
+        data: {
+          type: cfg.type,
+          status: 'pending' as FlowNodeStatus,
+          label: cfg.label,
+          subtitle: undefined,
+          processorType: cfg.processorType,
+        },
+      } as FlowNode)
+    })
+  })
 
-    // 如果 P0 命中，直接连接到 Output
-    const p0Data = p0Step.data as any;
-    if (p0Data.matched) {
-      // 创建 Output 节点
-      const outputStep = trace.steps.find(s => s.type === 'output');
-      if (outputStep) {
-        nodes.push(createOutputNode(nodeIndex++, outputStep, trace));
-        if (prevNodeId) {
-          edges.push(createEdge(prevNodeId, nodes[nodes.length - 1].id, true));
-        }
+  // 生成连线：每层连接到下一层
+  for (let i = 0; i < PIPELINE_LAYERS.length - 1; i++) {
+    const currentLayer = PIPELINE_LAYERS[i]
+    const nextLayer = PIPELINE_LAYERS[i + 1]
+
+    for (const src of currentLayer.nodes) {
+      for (const tgt of nextLayer.nodes) {
+        edges.push(createPendingEdge(src.nodeId, tgt.nodeId))
       }
-      // 计算 downstreamNodes 并应用布局
-      return applyLayout(addDownstreamNodes({ nodes, edges }));
     }
   }
 
-  // 4. P1 Intent 节点
-  const p1Step = trace.steps.find(s => (s.type as ExtendedStepType) === 'p1-intent');
-  if (p1Step) {
-    nodes.push(createP1IntentNode(nodeIndex++, p1Step));
-    if (prevNodeId) {
-      edges.push(createEdge(prevNodeId, nodes[nodes.length - 1].id));
-    }
-    prevNodeId = nodes[nodes.length - 1].id;
-  }
+  return { nodes, edges }
+}
 
-  // 5. Processor 节点（User Profile, Working Memory, Semantic Recall, Token Limit）
-  const processorTypes: ProcessorType[] = [
-    'user-profile',
-    'working-memory',
-    'semantic-recall',
-    'token-limit',
-  ];
 
-  for (const processorType of processorTypes) {
-    const processorStep = trace.steps.find(
-      s => (s.type as ExtendedStepType) === 'processor' && 
-           (s.data as any).processorType === processorType
-    );
-    if (processorStep) {
-      nodes.push(createProcessorNode(nodeIndex++, processorStep, processorType));
-      if (prevNodeId) {
-        edges.push(createEdge(prevNodeId, nodes[nodes.length - 1].id));
+// ============ applyTraceToGraph ============
+
+/**
+ * 根据 ExecutionTrace 更新节点状态和数据
+ *
+ * 1. 遍历 trace.steps，通过 type + processorType 匹配节点
+ * 2. P0 命中时将 P1~LLM 标记为 skipped
+ * 3. Tool 节点动态处理（多个 tool step → 多个 tool 节点）
+ * 4. 更新连线样式
+ * 5. 更新节点 subtitle
+ */
+export function applyTraceToGraph(
+  graph: FlowGraphData,
+  trace: ExecutionTrace,
+): FlowGraphData {
+  // 深拷贝避免 mutation
+  const nodes: FlowNode[] = graph.nodes.map(n => ({
+    ...n,
+    data: { ...n.data },
+  }))
+  let edges: FlowEdge[] = graph.edges.map(e => ({ ...e }))
+
+  let p0Matched = false
+
+  // 1. 遍历 trace steps，匹配并更新节点
+  for (const step of trace.steps) {
+    const stepType = step.type as ExtendedStepType
+    const stepData = step.data as unknown as Record<string, unknown>
+    const processorType = stepData.processorType as string | undefined
+
+    // 查找匹配的节点
+    const matchedNode = nodes.find(n => {
+      const nd = n.data as Record<string, unknown>
+      if (stepType === 'processor' && processorType) {
+        return nd.type === 'processor' && nd.processorType === processorType
       }
-      prevNodeId = nodes[nodes.length - 1].id;
-    }
-  }
-
-  // 6. LLM 节点
-  const llmStep = trace.steps.find(s => s.type === 'llm');
-  if (llmStep) {
-    nodes.push(createLLMNode(nodeIndex++, llmStep));
-    if (prevNodeId) {
-      edges.push(createEdge(prevNodeId, nodes[nodes.length - 1].id));
-    }
-    prevNodeId = nodes[nodes.length - 1].id;
-  }
-
-  // 7. Tool 节点
-  const toolSteps = trace.steps.filter(s => s.type === 'tool');
-  for (const toolStep of toolSteps) {
-    nodes.push(createToolNode(nodeIndex++, toolStep));
-    if (prevNodeId) {
-      edges.push(createEdge(prevNodeId, nodes[nodes.length - 1].id));
-    }
-    prevNodeId = nodes[nodes.length - 1].id;
-  }
-
-  // 8. 后处理 Processor 节点
-  const postProcessorTypes: ProcessorType[] = ['save-history', 'extract-preferences'];
-  for (const processorType of postProcessorTypes) {
-    const processorStep = trace.steps.find(
-      s => (s.type as ExtendedStepType) === 'processor' && 
-           (s.data as any).processorType === processorType
-    );
-    if (processorStep) {
-      nodes.push(createProcessorNode(nodeIndex++, processorStep, processorType));
-      if (prevNodeId) {
-        edges.push(createEdge(prevNodeId, nodes[nodes.length - 1].id));
+      if (stepType === 'tool') {
+        // tool 节点特殊处理（见下方）
+        return false
       }
-      prevNodeId = nodes[nodes.length - 1].id;
+      return nd.type === stepType
+    })
+
+    if (matchedNode) {
+      matchedNode.data = {
+        ...matchedNode.data,
+        status: mapStepStatus(step.status),
+        subtitle: extractSubtitle(step),
+        stepData: step.data,
+        duration: step.duration,
+        error: step.error,
+        startedAt: step.startedAt,
+        completedAt: step.completedAt,
+      }
+    }
+
+    // P0 命中检测
+    if (stepType === 'p0-match' && stepData.matched === true) {
+      p0Matched = true
     }
   }
 
-  // 9. Output 节点
-  const outputStep = trace.steps.find(s => s.type === 'output');
-  if (outputStep) {
-    nodes.push(createOutputNode(nodeIndex++, outputStep, trace));
-    if (prevNodeId) {
-      edges.push(createEdge(prevNodeId, nodes[nodes.length - 1].id));
+  // 2. P0 命中 → 跳过后续节点
+  if (p0Matched) {
+    for (const node of nodes) {
+      if (SKIPPABLE_NODE_IDS.includes(node.id)) {
+        node.data = { ...node.data, status: 'skipped' as FlowNodeStatus }
+      }
     }
   }
 
-  // 计算 downstreamNodes 并应用布局
-  return applyLayout(addDownstreamNodes({ nodes, edges }));
+  // 3. Tool 节点动态处理
+  const toolSteps = trace.steps.filter(s => s.type === 'tool')
+  if (toolSteps.length > 0) {
+    // 移除占位 tool 节点
+    const toolPlaceholderIndex = nodes.findIndex(n => n.id === 'tool-placeholder')
+    if (toolPlaceholderIndex !== -1) {
+      nodes.splice(toolPlaceholderIndex, 1)
+    }
+    // 移除与占位节点相关的边
+    edges = edges.filter(e => e.source !== 'tool-placeholder' && e.target !== 'tool-placeholder')
+
+    // 计算 tool 节点位置（与占位节点同层）
+    const layerIndex = PIPELINE_LAYERS.findIndex(l => l.id === 'L6')
+    const y = layerIndex * (NODE_HEIGHT + LAYER_GAP)
+    const maxNodesInLayer = Math.max(...PIPELINE_LAYERS.map(l => l.nodes.length))
+    const canvasWidth = maxNodesInLayer * NODE_WIDTH + (maxNodesInLayer - 1) * NODE_GAP
+    const toolLayerWidth = toolSteps.length * NODE_WIDTH + (toolSteps.length - 1) * NODE_GAP
+    const offsetX = (canvasWidth - toolLayerWidth) / 2
+
+    toolSteps.forEach((step, i) => {
+      const toolData = step.data as unknown as Record<string, unknown>
+      const toolId = `tool-${i}`
+      nodes.push({
+        id: toolId,
+        type: 'tool',
+        position: { x: offsetX + i * (NODE_WIDTH + NODE_GAP), y },
+        draggable: false,
+        data: {
+          type: 'tool' as FlowNodeType,
+          status: mapStepStatus(step.status),
+          label: (toolData.toolDisplayName as string) || (toolData.toolName as string) || 'Tool',
+          subtitle: extractSubtitle(step),
+          stepData: step.data,
+          toolName: toolData.toolName,
+          toolDisplayName: toolData.toolDisplayName,
+          input: toolData.input,
+          output: toolData.output,
+          widgetType: toolData.widgetType,
+          duration: step.duration,
+          startedAt: step.startedAt,
+          completedAt: step.completedAt,
+        },
+      } as FlowNode)
+
+      // LLM → Tool 边
+      edges.push(createStyledEdge('llm', toolId, mapStepStatus(step.status)))
+      // Tool → Output 边
+      edges.push(createStyledEdge(toolId, 'output', mapStepStatus(step.status)))
+    })
+  }
+
+  // 4. 更新所有边的样式（根据源节点状态）
+  edges = edges.map(edge => {
+    const sourceNode = nodes.find(n => n.id === edge.source)
+    if (!sourceNode) return edge
+    const status = sourceNode.data.status as FlowNodeStatus
+    return { ...edge, ...getEdgeStyle(status) }
+  })
+
+  return { nodes, edges }
 }
 
-// ============ Node Creation Functions ============
-
-function createInputNode(index: number, step: TraceStep): FlowNode {
-  const data = step.data as any;
-  return {
-    id: `node-${index}`,
-    type: 'input',
-    position: { x: 0, y: 0 },
-    data: {
-      type: 'input',
-      status: mapStepStatus(step.status),
-      label: '用户输入',
-      text: data.text || '',
-      charCount: data.text?.length || 0,
-      duration: step.duration,
-      startedAt: step.startedAt,
-      completedAt: step.completedAt,
-      userId: data.userId,
-      source: data.source,
-      location: data.location,
-    } as InputNodeData,
-  };
-}
-
-function createP0MatchNode(index: number, step: TraceStep): FlowNode {
-  const data = step.data as any;
-  return {
-    id: `node-${index}`,
-    type: 'p0-match',
-    position: { x: 0, y: 0 },
-    data: {
-      type: 'p0-match',
-      status: mapStepStatus(step.status),
-      label: 'P0: 关键词匹配',
-      matched: data.matched || false,
-      keyword: data.keyword,
-      matchType: data.matchType,
-      priority: data.priority,
-      responseType: data.responseType,
-      responseContent: data.responseContent,
-      hitCount: data.statistics?.hitCount,
-      conversionCount: data.statistics?.conversionCount,
-      conversionRate: data.statistics?.conversionRate,
-      cacheHit: data.cacheHit,
-      duration: step.duration,
-      startedAt: step.startedAt,
-      completedAt: step.completedAt,
-    } as P0MatchNodeData,
-  };
-}
-
-function createP1IntentNode(index: number, step: TraceStep): FlowNode {
-  const data = step.data as any;
-  return {
-    id: `node-${index}`,
-    type: 'p1-intent',
-    position: { x: 0, y: 0 },
-    data: {
-      type: 'p1-intent',
-      status: mapStepStatus(step.status),
-      label: 'P1: 意图识别',
-      intent: data.intent || 'unknown',
-      method: data.method || 'regex',
-      confidence: data.confidence,
-      regexRules: data.regexRules,
-      llmDetails: data.llmDetails,
-      duration: step.duration,
-      startedAt: step.startedAt,
-      completedAt: step.completedAt,
-    } as P1IntentNodeData,
-  };
-}
-
-function createProcessorNode(index: number, step: TraceStep, processorType: ProcessorType): FlowNode {
-  const data = step.data as any;
-  const metrics = data.metrics || {};
-  
-  return {
-    id: `node-${index}`,
-    type: 'processor',
-    position: { x: 0, y: 0 },
-    data: {
-      type: 'processor',
-      status: mapStepStatus(step.status),
-      label: getProcessorLabel(processorType),
-      processorType,
-      fieldCount: metrics.fieldCount,
-      summary: data.output?.workingMemorySummary || data.output?.summary,
-      resultCount: data.output?.resultCount || metrics.resultCount,
-      currentTokens: metrics.currentTokens || data.output?.currentTokens,
-      maxTokens: metrics.maxTokens || data.config?.maxTokens,
-      duration: step.duration,
-      startedAt: step.startedAt,
-      completedAt: step.completedAt,
-    } as ProcessorNodeData,
-  };
-}
-
-function createLLMNode(index: number, step: TraceStep): FlowNode {
-  const data = step.data as any;
-  return {
-    id: `node-${index}`,
-    type: 'llm',
-    position: { x: 0, y: 0 },
-    data: {
-      type: 'llm',
-      status: mapStepStatus(step.status),
-      label: 'LLM 推理',
-      model: data.model || 'unknown',
-      inputTokens: data.inputTokens || 0,
-      outputTokens: data.outputTokens || 0,
-      totalTokens: data.totalTokens || 0,
-      temperature: data.temperature,
-      maxTokens: data.maxTokens,
-      systemPrompt: data.systemPrompt,
-      inputMessages: data.inputMessages,
-      output: data.output,
-      timeToFirstToken: data.timeToFirstToken,
-      tokensPerSecond: data.tokensPerSecond,
-      cost: data.cost,
-      duration: step.duration,
-      startedAt: step.startedAt,
-      completedAt: step.completedAt,
-    } as LLMNodeData,
-  };
-}
-
-function createToolNode(index: number, step: TraceStep): FlowNode {
-  const data = step.data as any;
-  return {
-    id: `node-${index}`,
-    type: 'tool',
-    position: { x: 0, y: 0 },
-    data: {
-      type: 'tool',
-      status: mapStepStatus(step.status),
-      label: data.toolDisplayName || data.toolName || 'Tool',
-      toolName: data.toolName || '',
-      toolDisplayName: data.toolDisplayName || data.toolName || '',
-      input: data.input || {},
-      output: data.output,
-      widgetType: data.widgetType,
-      evaluation: data.evaluation,
-      duration: step.duration,
-      startedAt: step.startedAt,
-      completedAt: step.completedAt,
-    } as ToolNodeData,
-  };
-}
-
-function createOutputNode(index: number, step: TraceStep, trace: ExecutionTrace): FlowNode {
-  // 计算统计信息
-  const toolSteps = trace.steps.filter(s => s.type === 'tool');
-  const llmStep = trace.steps.find(s => s.type === 'llm');
-  const llmData = llmStep?.data as any;
-  
-  const totalDuration = trace.completedAt 
-    ? new Date(trace.completedAt).getTime() - new Date(trace.startedAt).getTime()
-    : 0;
-  
-  return {
-    id: `node-${index}`,
-    type: 'output',
-    position: { x: 0, y: 0 },
-    data: {
-      type: 'output',
-      status: mapStepStatus(step.status),
-      label: '最终输出',
-      responseType: trace.output?.toolCalls?.length ? 'tool_calls' : 'text',
-      itemCount: trace.output?.toolCalls?.length || 0,
-      totalDuration,
-      totalTokens: llmData?.totalTokens,
-      totalCost: trace.totalCost,
-      toolCallCount: toolSteps.length,
-      evaluationPassed: toolSteps.every(s => {
-        const toolData = s.data as any;
-        return !toolData.evaluation || toolData.evaluation.passed;
-      }),
-      duration: step.duration,
-      startedAt: step.startedAt,
-      completedAt: step.completedAt,
-    } as OutputNodeData,
-  };
-}
 
 // ============ Helper Functions ============
 
-/**
- * 为每个节点添加 downstreamNodes 字段
- */
-function addDownstreamNodes(graph: FlowGraphData): FlowGraphData {
-  const { nodes, edges } = graph;
-  
-  // 为每个节点计算下游节点
-  nodes.forEach(node => {
-    const downstreamEdges = edges.filter(edge => edge.source === node.id);
-    const downstreamNodeIds = downstreamEdges.map(edge => edge.target);
-    
-    if (downstreamNodeIds.length > 0) {
-      node.data.downstreamNodes = downstreamNodeIds;
-    }
-    
-    // 提取 metadata
-    if (node.data.type === 'llm') {
-      const llmData = node.data as LLMNodeData;
-      node.data.metadata = {
-        inputTokens: llmData.inputTokens,
-        outputTokens: llmData.outputTokens,
-        cost: llmData.cost,
-      };
-    } else if (node.data.type === 'p0-match') {
-      const p0Data = node.data as P0MatchNodeData;
-      node.data.metadata = {
-        cacheHit: p0Data.cacheHit,
-      };
-    }
-  });
-  
-  return { nodes, edges };
+function mapStepStatus(status: string): FlowNodeStatus {
+  switch (status) {
+    case 'pending': return 'pending'
+    case 'running': return 'running'
+    case 'success': return 'success'
+    case 'error': return 'error'
+    default: return 'pending'
+  }
 }
 
-function createEdge(source: string, target: string, animated = false): FlowEdge {
+/** 从 step data 提取关键指标作为 subtitle */
+function extractSubtitle(step: TraceStep): string | undefined {
+  const data = step.data as unknown as Record<string, unknown>
+  const type = step.type as ExtendedStepType
+
+  if (step.duration !== undefined && step.duration > 0) {
+    const durationStr = step.duration < 1000
+      ? `${step.duration}ms`
+      : `${(step.duration / 1000).toFixed(1)}s`
+
+    if (type === 'llm') {
+      const tokens = data.totalTokens as number | undefined
+      return tokens ? `${tokens} tokens · ${durationStr}` : durationStr
+    }
+    return durationStr
+  }
+
+  if (type === 'input') {
+    const text = data.text as string | undefined
+    return text ? `${text.length} 字符` : undefined
+  }
+
+  return undefined
+}
+
+/** 创建 pending 状态的边（虚线灰色） */
+function createPendingEdge(source: string, target: string): FlowEdge {
   return {
     id: `edge-${source}-${target}`,
     source,
     target,
-    animated,
     type: 'smoothstep',
-    style: { 
-      stroke: 'hsl(var(--primary))',
-      strokeWidth: 2,
+    animated: false,
+    style: {
+      stroke: 'hsl(var(--muted-foreground) / 0.3)',
+      strokeWidth: 1.5,
+      strokeDasharray: '6 4',
     },
-  };
-}
-
-function applyLayout(graph: FlowGraphData): FlowGraphData {
-  return getLayoutedElements(graph.nodes, graph.edges);
-}
-
-function mapStepStatus(status: string): FlowNodeStatus {
-  switch (status) {
-    case 'pending':
-      return 'pending';
-    case 'running':
-      return 'running';
-    case 'success':
-      return 'success';
-    case 'error':
-      return 'error';
-    default:
-      return 'pending';
   }
 }
 
-function getProcessorLabel(type: ProcessorType): string {
-  const labels: Record<ProcessorType, string> = {
-    'input-guard': 'Input Guard',
-    'user-profile': 'User Profile',
-    'working-memory': 'Working Memory',
-    'semantic-recall': 'Semantic Recall',
-    'token-limit': 'Token Limit',
-    'save-history': 'Save History',
-    'extract-preferences': 'Extract Preferences',
-  };
-  return labels[type] || type;
+/** 创建带状态样式的边 */
+function createStyledEdge(source: string, target: string, status: FlowNodeStatus): FlowEdge {
+  return {
+    id: `edge-${source}-${target}`,
+    source,
+    target,
+    type: 'smoothstep',
+    ...getEdgeStyle(status),
+  }
+}
+
+/** 根据源节点状态获取边样式 */
+function getEdgeStyle(status: FlowNodeStatus): Pick<FlowEdge, 'animated' | 'style'> {
+  switch (status) {
+    case 'pending':
+      return {
+        animated: false,
+        style: { stroke: 'hsl(var(--muted-foreground) / 0.3)', strokeWidth: 1.5, strokeDasharray: '6 4' },
+      }
+    case 'running':
+      return {
+        animated: true,
+        style: { stroke: 'hsl(var(--primary))', strokeWidth: 2 },
+      }
+    case 'success':
+      return {
+        animated: false,
+        style: { stroke: 'hsl(var(--foreground) / 0.4)', strokeWidth: 2 },
+      }
+    case 'error':
+      return {
+        animated: false,
+        style: { stroke: 'hsl(var(--destructive))', strokeWidth: 2 },
+      }
+    case 'skipped':
+      return {
+        animated: false,
+        style: { stroke: 'hsl(var(--muted-foreground) / 0.15)', strokeWidth: 1, strokeDasharray: '4 4' },
+      }
+    default:
+      return {
+        animated: false,
+        style: { stroke: 'hsl(var(--muted-foreground) / 0.3)', strokeWidth: 1.5, strokeDasharray: '6 4' },
+      }
+  }
 }

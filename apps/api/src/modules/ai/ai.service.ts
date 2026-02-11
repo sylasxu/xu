@@ -640,11 +640,15 @@ export async function streamChat(request: ChatRequest): Promise<Response> {
     totalUsage,
     aiResponseText,
     lastUserMessage,
+    source,
+    userId: userId || null,
+    modelId,
     // Processor 数据
     inputGuard: {
       duration: guardDuration,
       blocked: false,
       sanitized: sanitizedMessage,
+      triggeredRules: guardResult.triggeredRules || [],
     },
     p0Match: p0MatchData as {
       matched: boolean;
@@ -666,6 +670,9 @@ export async function streamChat(request: ChatRequest): Promise<Response> {
     },
     semanticRecall: {
       duration: semanticRecallDuration,
+      query: sanitizedMessage,
+      resultCount: 0,
+      topScore: 0,
     },
     tokenLimit: {
       duration: tokenLimitDuration,
@@ -1015,11 +1022,15 @@ function wrapWithTrace(result: ReturnType<typeof streamText>, ctx: {
   totalUsage: { promptTokens: number; completionTokens: number; totalTokens: number };
   aiResponseText: string;
   lastUserMessage: string;
+  source: string;
+  userId: string | null;
+  modelId: string;
   // Processor 数据
   inputGuard?: {
     duration: number;
     blocked: boolean;
     sanitized: string;
+    triggeredRules?: string[];
   };
   p0Match?: {
     matched: boolean;
@@ -1041,6 +1052,9 @@ function wrapWithTrace(result: ReturnType<typeof streamText>, ctx: {
   };
   semanticRecall?: {
     duration: number;
+    query?: string;
+    resultCount?: number;
+    topScore?: number;
   };
   tokenLimit?: {
     duration: number;
@@ -1071,7 +1085,7 @@ function wrapWithTrace(result: ReturnType<typeof streamText>, ctx: {
 
       writer.write({
         type: 'data-trace-step',
-        data: { id: `${ctx.requestId}-input`, type: 'input', name: '用户输入', startedAt: ctx.startedAt, completedAt: ctx.startedAt, status: 'success', duration: 0, data: { text: ctx.lastUserMessage } },
+        data: { id: `${ctx.requestId}-input`, type: 'input', name: '用户输入', startedAt: ctx.startedAt, completedAt: ctx.startedAt, status: 'success', duration: 0, data: { text: ctx.lastUserMessage, source: ctx.source, userId: ctx.userId } },
         transient: true,
       });
 
@@ -1093,6 +1107,7 @@ function wrapWithTrace(result: ReturnType<typeof streamText>, ctx: {
               output: {
                 blocked: ctx.inputGuard.blocked,
                 sanitized: ctx.inputGuard.sanitized,
+                triggeredRules: ctx.inputGuard.triggeredRules || [],
               },
               config: {
                 maxLength: 500,
@@ -1198,6 +1213,11 @@ function wrapWithTrace(result: ReturnType<typeof streamText>, ctx: {
             duration: ctx.semanticRecall.duration,
             data: {
               processorType: 'semantic-recall',
+              output: {
+                query: ctx.semanticRecall.query || '',
+                resultCount: ctx.semanticRecall.resultCount || 0,
+                topScore: ctx.semanticRecall.topScore || 0,
+              },
               config: {
                 enabled: true,
               },
@@ -1240,7 +1260,7 @@ function wrapWithTrace(result: ReturnType<typeof streamText>, ctx: {
 
       writer.write({
         type: 'data-trace-step',
-        data: { id: llmStepId, type: 'llm', name: 'LLM 推理', startedAt: llmStartedAt, status: 'running', data: { model: 'qwen', inputTokens: 0, outputTokens: 0, totalTokens: 0 } },
+        data: { id: llmStepId, type: 'llm', name: 'LLM 推理', startedAt: llmStartedAt, status: 'running', data: { model: ctx.modelId, inputTokens: 0, outputTokens: 0, totalTokens: 0 } },
         transient: true,
       });
 
@@ -1251,20 +1271,28 @@ function wrapWithTrace(result: ReturnType<typeof streamText>, ctx: {
 
           writer.write({
             type: 'data-trace-step-update',
-            data: { stepId: llmStepId, completedAt: llmCompletedAt, status: 'success', duration: llmDuration, data: { model: 'qwen', inputTokens: ctx.totalUsage.promptTokens, outputTokens: ctx.totalUsage.completionTokens, totalTokens: ctx.totalUsage.totalTokens } },
+            data: { stepId: llmStepId, completedAt: llmCompletedAt, status: 'success', duration: llmDuration, data: { model: ctx.modelId, inputTokens: ctx.totalUsage.promptTokens, outputTokens: ctx.totalUsage.completionTokens, totalTokens: ctx.totalUsage.totalTokens } },
             transient: true,
           });
 
           for (const step of ctx.traceSteps) {
             writer.write({
               type: 'data-trace-step',
-              data: { id: `${ctx.requestId}-tool-${step.toolCallId}`, type: 'tool', name: getToolDisplayName(step.toolName), startedAt: llmCompletedAt, completedAt: llmCompletedAt, status: 'success', duration: 0, data: { toolName: step.toolName, input: step.args, output: step.result, widgetType: getToolWidgetType(step.toolName) } },
+              data: { id: `${ctx.requestId}-tool-${step.toolCallId}`, type: 'tool', name: getToolDisplayName(step.toolName), startedAt: llmCompletedAt, completedAt: llmCompletedAt, status: 'success', duration: 0, data: { toolName: step.toolName, toolDisplayName: getToolDisplayName(step.toolName), input: step.args, output: step.result, widgetType: getToolWidgetType(step.toolName) } },
               transient: true,
             });
           }
 
           const completedAt = new Date().toISOString();
           const totalDuration = new Date(completedAt).getTime() - new Date(ctx.startedAt).getTime();
+
+          // Output step
+          writer.write({
+            type: 'data-trace-step',
+            data: { id: `${ctx.requestId}-output`, type: 'output', name: '输出', startedAt: llmCompletedAt, completedAt, status: 'success', duration: totalDuration, data: { text: ctx.aiResponseText || '', toolCallCount: ctx.traceSteps.length } },
+            transient: true,
+          });
+
           writer.write({
             type: 'data-trace-end',
             data: { requestId: ctx.requestId, completedAt, totalDuration, status: 'completed', output: { text: ctx.aiResponseText || null, toolCalls: ctx.traceSteps.map(s => ({ name: s.toolName, input: s.args, output: s.result })) } },

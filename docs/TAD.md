@@ -2670,78 +2670,118 @@ interface GodViewData {
 
 ### 9.5 AI Playground 执行追踪
 
-Admin 后台的 AI Playground 支持两种模式：
+Admin 后台的 AI Playground（路由 `/_authenticated/ai-ops/playground`）采用 Mastra 风格的全屏 Flow Graph + 右侧 Drawer 架构，支持两种模式：
 
 | 模式 | API 参数 | 用途 |
 |------|---------|------|
 | **Trace 模式** | `trace: true` | 调试用，返回完整执行追踪数据 |
 | **生产模式** | `trace: false` | 模拟小程序真实调用，验证最终返回值 |
 
-#### 9.5.1 流程图可视化 (v4.6+)
+#### 9.5.1 流程图可视化 (v4.8 重构)
 
-AI Playground 使用流程图（Flow Graph）替代传统文本日志，可视化展示 AI 执行链路的每一个步骤。
+AI Playground 使用全屏流程图（Flow Graph）作为页面主体，所有管线节点预渲染为 7 层分层布局，trace 数据驱动节点状态实时流转。右侧 Drawer 承载对话、配置、节点详情三种视图。
+
+**架构**：
+```
+PlaygroundLayout (全屏容器)
+├── Header (透明浮层，pointer-events-none)
+├── FlowGraph (ReactFlow 画布，占满屏幕)
+│   └── Pipeline Nodes (7 层预渲染)
+├── RoundSelector (轮次选择器浮层)
+├── SessionStatsBar (底部统计浮层)
+└── PlaygroundDrawer (右侧 Sheet 480px)
+    ├── ChatView (对话视图)
+    ├── SettingsView (配置视图)
+    └── NodeDetailView (节点详情视图)
+```
 
 **核心功能**：
-- **可视化调试**：从用户输入到最终输出的完整执行链路一目了然
-- **节点级配置**：点击节点查看详细数据和配置项
-- **性能分析**：每个节点显示耗时、Token 消耗、费用等关键指标
-- **降级路径追踪**：清晰展示 P0 → P1 → P2 的降级逻辑
+- **全屏画布**：Flow Graph 占据整个页面，Header 透明浮层叠加
+- **预渲染管线**：所有节点初始为 pending 状态（灰色虚线），trace 数据驱动状态流转
+- **灰度优先视觉**：pending 灰色虚线、running primary 脉冲、success 边框加深、error 红色边框、skipped 半透明
+- **三合一 Drawer**：对话（useChat + Tool 卡片）、配置（Mock 设置 + 模型参数 + Trace 开关）、节点详情
+- **多轮追踪**：轮次选择器切换查看不同轮次的 trace 状态
+- **会话统计**：底部浮层显示模型名称、轮次数、Token 消耗、耗时、费用
 
-**执行链路节点**：
-1. **Input** → 用户输入
-2. **Input Guard** → 输入验证 (Processor)
-3. **P0 Match** → 全局关键词匹配
-   - 如果命中 → 直接跳到 Output
-   - 如果未命中 → 继续到 P1
-4. **P1 Intent** → 意图识别 (Regex/LLM)
-5. **User Profile** → 用户画像注入 (Processor)
-6. **Semantic Recall** → 语义召回 (Processor)
-7. **Token Limit** → Token 限制 (Processor)
-8. **LLM** → LLM 推理
-9. **Tool Calls** → 工具调用 (可能多个)
-10. **Output** → 最终输出
+**7 层分层布局**（从上到下，TB 方向）：
 
-**节点详情 Drawer**：
-- 点击任意节点，右侧打开抽屉显示详细信息
-- P0 节点：匹配详情、统计数据、缓存状态
-- P1 节点：意图类型、识别方法、置信度
-- Processor 节点：输入输出数据、配置项、性能指标
-- LLM 节点：模型配置、System Prompt、Token 统计、费用
-- Tool 节点：输入参数、输出结果、执行日志、评估结果
+| 层 | 节点 | 说明 |
+|----|------|------|
+| L1 | Input | 用户输入 |
+| L2 | Input Guard + P0 Match | 并排，快速过滤阶段 |
+| L3 | P1 Intent | 意图识别 |
+| L4 | User Profile + Semantic Recall + Token Limit | 并排，Context 增强阶段 |
+| L5 | LLM | 核心推理 |
+| L6 | Tool(s) | 动态数量，横向展开 |
+| L7 | Output | 最终输出 |
 
-**实时更新**：
-- 流式接收 trace 数据，实时更新节点状态
-- 节点状态指示器：灰色 (pending)、蓝色 (running)、绿色 (success)、红色 (error)
+- 同层节点水平居中排列，层间距 80px，节点间距 32px，节点宽度 200px
+- P0 命中时 P1~Tool 节点标记为 skipped（半透明虚线）
+- Tool 节点根据实际 trace 中的 tool steps 动态生成
+
+**节点详情 Drawer**（点击节点自动打开）：
+- Input：输入文本、字符数、来源（source）、用户 ID
+- Input Guard：拦截状态、净化文本、触发规则（triggeredRules）、最大长度配置
+- P0 Match：命中状态、关键词、匹配类型（exact/prefix/fuzzy）、优先级、响应类型
+- P1 Intent：意图类型（中文映射）、识别方法（regex/llm）、置信度
+- User Profile：偏好数量、常去地点数量
+- Semantic Recall：启用状态、搜索查询、召回结果数、最高相似度
+- Token Limit：截断状态、原始/截断后长度、Token 限制值
+- LLM：模型名（实际 modelId）、输入/输出/总 Token、生成速度（前端计算）、System Prompt（可展开）
+- Tool：工具名（中英文映射）、输入/输出 JSON 查看器、Widget 类型
+- Output：AI 回复全文、Tool 调用列表、总耗时、总 Token、费用估算
+- Error：红色高亮错误信息
+
+**模型配置**（v4.8 更新为 Qwen3）：
+- 模型选择：qwen-flash（免费）/ qwen-plus / qwen-max
+- 默认模型：qwen-flash
+- 费用计算：`QWEN_PRICE` 定价表（qwen-flash 免费，qwen-plus ¥0.8/2.0 per M tokens，qwen-max ¥2.0/6.0 per M tokens）
+- Temperature（0-2）、MaxTokens（256-8192）
 
 **技术实现**：
-- 前端：@xyflow/react + Dagre 自动布局
-- 后端：SSE (Server-Sent Events) 流式发送 trace 事件
-- 节点宽度：240px，高度自适应
-- 布局方向：LR (从左到右)
+- 前端：@xyflow/react (ReactFlow) + @ai-sdk/react (useChat) + shadcn/ui
+- 布局：自定义 `buildStaticPipeline()` 分层算法（TB 方向，非 Dagre）
+- 状态更新：`applyTraceToGraph()` 根据 ExecutionTrace 更新节点状态和数据
+- 后端：SSE 流式发送 trace 事件（data-trace-start / data-trace-step / data-trace-step-update / data-trace-end）
+- API 调用：Eden Treaty `unwrap(api.ai.welcome.get({}))` 获取欢迎数据
+- Transport：`DefaultChatTransport` 配置 source=admin, trace, modelParams
 
 **已知限制**：
 - Save History 和 Extract Preferences Processor 因架构限制暂不显示（在 onFinish 中异步执行）
 
-#### 9.5.2 Trace 模式显示内容
+#### 9.5.2 后端 Trace 数据增强 (v4.8)
+
+`wrapWithTrace` 函数发送的 trace 数据包含以下增强字段：
+
+| 步骤 | 增强字段 | 说明 |
+|------|---------|------|
+| Input | `source`, `userId` | 请求来源和用户 ID |
+| Input Guard | `triggeredRules` | 触发的规则名称列表 |
+| LLM | `model` = 实际 modelId | 从硬编码 'qwen' 改为 qwen-flash/qwen-plus/qwen-max |
+| Semantic Recall | `query`, `resultCount`, `topScore` | 搜索查询、结果数、最高相似度 |
+| Tool | `toolDisplayName` | 中文工具名称 |
+| Output（新增步骤） | `text`, `toolCallCount` | AI 回复全文和 Tool 调用数量 |
+
+#### 9.5.3 Trace 模式显示内容
 
 **Trace 模式显示内容**：
-- LLM 推理信息（模型、tokens、耗时）
-- 意图分类（explore/create/manage/idle）
-- Tool 调用详情（input 参数 + output 返回值）
-- 质量评估结果（语气、相关性、上下文评分）
-- System Prompt 查看
-- AI 输出完整 JSON
+- 完整 7 层管线节点状态流转
+- LLM 推理信息（模型、tokens、耗时、生成速度）
+- 意图分类（create/explore/manage/partner/idle/chitchat）
+- Tool 调用详情（input 参数 + output 返回值 + Widget 类型）
+- System Prompt 查看（可展开代码块）
+- 会话统计（模型名、轮次、Token、耗时、费用）
 
 **生产模式隐藏内容**：
+- ❌ 管线节点状态流转
 - ❌ 意图分类
 - ❌ Tool input（参数）
-- ❌ 评估结果
-- ❌ System Prompt 按钮
+- ❌ System Prompt
+- ❌ 会话统计
 
 **生产模式保留内容**：
-- ✅ LLM 推理信息
+- ✅ 对话视图（消息气泡 + Tool 结果卡片）
 - ✅ Tool output（返回值）
-- ✅ AI 输出完整 JSON（原样展示，用于排查问题）
 
 ---
 

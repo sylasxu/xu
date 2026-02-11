@@ -5,7 +5,7 @@
  * 支持追加模式，保留所有轮次的追踪记录。
  */
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import type { 
   ExecutionTrace, 
   TraceStep, 
@@ -13,8 +13,9 @@ import type {
   TraceEvent,
   ModelParams,
   IntentType,
+  SessionStats,
 } from '../types/trace'
-import { DEFAULT_MODEL_PARAMS } from '../types/trace'
+import { DEFAULT_MODEL_PARAMS, calculateSessionStats } from '../types/trace'
 
 interface UseExecutionTraceReturn {
   /** 所有轮次的追踪数据（最新在前） */
@@ -23,6 +24,10 @@ interface UseExecutionTraceReturn {
   modelParams: ModelParams
   /** 设置模型参数 */
   setModelParams: (params: ModelParams) => void
+  /** 最新轮次的 System Prompt */
+  systemPrompt: string | null
+  /** 会话统计（累计） */
+  sessionStats: SessionStats
   /** 处理追踪事件 */
   handleTraceEvent: (event: TraceEvent) => void
   /** 处理追踪开始（追加新轮次） */
@@ -42,9 +47,16 @@ interface UseExecutionTraceReturn {
 export function useExecutionTrace(): UseExecutionTraceReturn {
   const [traces, setTraces] = useState<ExecutionTrace[]>([])
   const [modelParams, setModelParams] = useState<ModelParams>(DEFAULT_MODEL_PARAMS)
+  const [systemPrompt, setSystemPrompt] = useState<string | null>(null)
 
   // 当前是否正在执行（最新轮次状态为 running）
   const isStreaming = traces.length > 0 && traces[0].status === 'running'
+
+  // 会话统计（累计）
+  const sessionStats = useMemo(
+    () => calculateSessionStats(traces, modelParams.model),
+    [traces, modelParams.model],
+  )
 
   /** 处理追踪开始 - 追加新轮次到数组前面 */
   const handleTraceStart = useCallback((
@@ -67,6 +79,10 @@ export function useExecutionTrace(): UseExecutionTraceReturn {
     }
     // 追加到数组前面（最新在前）
     setTraces(prev => [newTrace, ...prev])
+    // 保存最新轮次的 systemPrompt
+    if (systemPrompt) {
+      setSystemPrompt(systemPrompt)
+    }
   }, [])
 
   /** 处理追踪步骤 - 更新最新轮次 */
@@ -138,12 +154,15 @@ export function useExecutionTrace(): UseExecutionTraceReturn {
   /** 清空所有追踪 */
   const clearTrace = useCallback(() => {
     setTraces([])
+    setSystemPrompt(null)
   }, [])
 
   return {
     traces,
     modelParams,
     setModelParams,
+    systemPrompt,
+    sessionStats,
     handleTraceEvent,
     handleTraceStart,
     handleTraceStep,

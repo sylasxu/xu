@@ -41,36 +41,6 @@ export interface ExecutionTrace {
   intentMethod?: 'regex' | 'llm'
   /** AI 输出摘要 */
   output?: TraceOutput
-  /** Memory 上下文 (v4.5) */
-  memory?: MemoryContext
-  /** RAG 搜索结果 (v4.5) */
-  rag?: RAGSearchResult
-}
-
-/** Memory 上下文 (v4.5) */
-export interface MemoryContext {
-  /** 用户画像字段数 */
-  profileFieldCount: number
-  /** 历史消息数 */
-  historyMessageCount: number
-  /** 工作记忆摘要 */
-  workingMemorySummary?: string
-}
-
-/** RAG 搜索结果 (v4.5) */
-export interface RAGSearchResult {
-  /** 搜索查询 */
-  query: string
-  /** 结果数量 */
-  resultCount: number
-  /** 最高相似度分数 */
-  topScore: number
-  /** 搜索结果列表 */
-  results: Array<{
-    activityId: string
-    title: string
-    score: number
-  }>
 }
 
 /** AI 输出摘要 */
@@ -145,13 +115,6 @@ export type TraceStepData =
   | LLMStepData
   | ToolStepData
   | OutputStepData
-
-/** 扩展步骤数据联合类型 */
-export type ExtendedTraceStepData =
-  | TraceStepData
-  | ProcessorStepData
-  | P0MatchStepData
-  | P1IntentStepData
 
 /** 用户输入步骤数据 */
 export interface InputStepData {
@@ -274,58 +237,6 @@ export interface OutputStepData {
   text: string
 }
 
-// ============ Extended Step Data Types (for Flow Visualization) ============
-
-/** Processor 类型 */
-export type ProcessorType =
-  | 'input-guard'
-  | 'user-profile'
-  | 'working-memory'
-  | 'semantic-recall'
-  | 'token-limit'
-  | 'save-history'
-  | 'extract-preferences';
-
-/** Processor 步骤数据 */
-export interface ProcessorStepData {
-  processorType: ProcessorType;
-  input?: unknown;
-  output?: unknown;
-  config?: Record<string, unknown>;
-  metrics?: Record<string, number>;
-}
-
-/** P0 Match 步骤数据 */
-export interface P0MatchStepData {
-  matched: boolean;
-  keyword?: string;
-  matchType?: 'exact' | 'prefix' | 'fuzzy';
-  priority?: number;
-  responseType?: string;
-  responseContent?: Record<string, unknown>;
-  statistics?: {
-    hitCount: number;
-    conversionCount: number;
-    conversionRate: number;
-  };
-  cacheHit?: boolean;
-}
-
-/** P1 Intent 步骤数据 */
-export interface P1IntentStepData {
-  intent: string;
-  method: 'regex' | 'llm';
-  confidence?: number;
-  regexRules?: Array<{ pattern: string; intent: string }>;
-  llmDetails?: {
-    model: string;
-    prompt: string;
-    inputTokens: number;
-    outputTokens: number;
-    duration: number;
-  };
-}
-
 // ============ Type Guards ============
 
 /** 检查是否为用户输入步骤数据 */
@@ -434,7 +345,7 @@ export type TraceEvent = TraceStartEvent | TraceStepEvent | TraceEndEvent
 /** 模型参数 */
 export interface ModelParams {
   /** 模型名称 */
-  model: 'deepseek'
+  model: 'qwen-flash' | 'qwen-plus' | 'qwen-max'
   /** Temperature (0-2) */
   temperature: number
   /** 最大输出 Token 数 (256-8192) */
@@ -443,7 +354,7 @@ export interface ModelParams {
 
 /** 默认模型参数 */
 export const DEFAULT_MODEL_PARAMS: ModelParams = {
-  model: 'deepseek',
+  model: 'qwen-flash',
   temperature: 0,
   maxTokens: 2048,
 }
@@ -460,14 +371,15 @@ export interface SessionStats {
   estimatedCost: number
 }
 
-/** DeepSeek 价格 (USD per token) */
-const DEEPSEEK_PRICE = {
-  input: 0.14 / 1_000_000,   // $0.14/M tokens
-  output: 0.28 / 1_000_000,  // $0.28/M tokens
+/** Qwen3 定价 (USD per token) */
+export const QWEN_PRICE: Record<string, { input: number; output: number }> = {
+  'qwen-flash': { input: 0.0 / 1_000_000, output: 0.0 / 1_000_000 },  // 免费
+  'qwen-plus': { input: 0.8 / 1_000_000, output: 2.0 / 1_000_000 },
+  'qwen-max': { input: 2.0 / 1_000_000, output: 6.0 / 1_000_000 },
 }
 
 /** 计算会话统计 */
-export function calculateSessionStats(traces: ExecutionTrace[]): SessionStats {
+export function calculateSessionStats(traces: ExecutionTrace[], model: string = 'qwen-flash'): SessionStats {
   let totalTokens = 0
   let totalDuration = 0
   let inputTokens = 0
@@ -489,10 +401,11 @@ export function calculateSessionStats(traces: ExecutionTrace[]): SessionStats {
     }
   }
 
-  // 计算费用
+  // 计算费用（根据当前模型定价）
+  const price = QWEN_PRICE[model] || QWEN_PRICE['qwen-flash']
   const estimatedCost = 
-    inputTokens * DEEPSEEK_PRICE.input + 
-    outputTokens * DEEPSEEK_PRICE.output
+    inputTokens * price.input + 
+    outputTokens * price.output
 
   return {
     totalRounds: traces.length,

@@ -1,7 +1,8 @@
 /**
- * PlaygroundLayout Component (v4.0 - Fullscreen Canvas)
- * 
- * 全屏画布模式，流程图占据整个屏幕，控制项移至右侧 Drawer
+ * PlaygroundLayout Component (v5 - Mastra-style)
+ *
+ * 全屏画布 + 右侧 Drawer + 浮层统计 + 轮次选择
+ * 编排所有子组件，管理全局状态
  */
 
 import { useCallback, useState, useMemo } from 'react'
@@ -9,9 +10,10 @@ import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport } from 'ai'
 import { useExecutionTrace } from '../../hooks/use-execution-trace'
 import { FlowTracePanel } from '../flow/flow-trace-panel'
-import { UnifiedDrawer } from './unified-drawer'
+import { PlaygroundDrawer, type DrawerView } from './playground-drawer'
+import { SessionStatsBar } from './session-stats-bar'
+import { RoundSelector } from './round-selector'
 import type { MockSettings } from './mock-settings-panel'
-import type { ConversationStats } from './stats-panel'
 import type { FlowNode } from '../../types/flow'
 import type { TraceStep, TraceStatus, IntentType } from '../../types/trace'
 import { API_BASE_URL } from '@/lib/eden'
@@ -22,32 +24,40 @@ import { ConfigDrawer } from '@/components/config-drawer'
 import { ProfileDropdown } from '@/components/profile-dropdown'
 
 export function PlaygroundLayout() {
-  // Drawer 状态 - 默认关闭，点击 node 才打开
-  const [drawerOpen, setDrawerOpen] = useState(false)
-  const [drawerView, setDrawerView] = useState<'control' | 'node'>('control')
+  // Drawer 状态
+  const [drawerOpen, setDrawerOpen] = useState(true)
+  const [drawerView, setDrawerView] = useState<DrawerView>('chat')
   const [selectedNode, setSelectedNode] = useState<FlowNode | null>(null)
-  
-  // 控制面板状态
+  const [selectedRound, setSelectedRound] = useState(0)
+
+  // 配置状态
   const [traceEnabled, setTraceEnabled] = useState(true)
   const [mockSettings, setMockSettings] = useState<MockSettings>({
     userType: 'with_phone',
     location: 'guanyinqiao',
   })
-  const [stats] = useState<ConversationStats | null>(null)
 
   // Trace 管理
   const {
     traces,
     modelParams,
+    setModelParams,
+    systemPrompt,
+    sessionStats,
     clearTrace,
     handleTraceStart,
     handleTraceStep,
     handleTraceEnd,
     updateTraceStep,
-    isStreaming,
   } = useExecutionTrace()
 
-  // 创建 transport
+  // 最新轮次的 traceOutput
+  const traceOutput = useMemo(() => {
+    const trace = traces[selectedRound]
+    return trace?.output ?? null
+  }, [traces, selectedRound])
+
+  // Transport 配置
   const transport = useMemo(() => {
     const token = localStorage.getItem('admin_token')
     return new DefaultChatTransport({
@@ -65,8 +75,8 @@ export function PlaygroundLayout() {
     })
   }, [modelParams, traceEnabled])
 
-  // 使用 useChat hook
-  const { sendMessage, status } = useChat({
+  // useChat hook
+  const { messages, sendMessage, stop, setMessages, status } = useChat({
     transport,
     onData: (dataPart) => {
       if (dataPart && typeof dataPart === 'object' && 'type' in dataPart) {
@@ -82,6 +92,8 @@ export function PlaygroundLayout() {
             intentMethod?: 'regex' | 'llm'
           }
           handleTraceStart(data.requestId, data.startedAt, data.systemPrompt, data.tools, data.intent, data.intentMethod)
+          // 新轮次开始时，自动选中最新轮次
+          setSelectedRound(0)
         } else if (part.type === 'data-trace-step') {
           handleTraceStep(part.data as TraceStep)
         } else if (part.type === 'data-trace-step-update') {
@@ -115,54 +127,36 @@ export function PlaygroundLayout() {
       if (!text.trim() || isLoading) return
       sendMessage({ text: text.trim() })
     },
-    [isLoading, sendMessage]
+    [isLoading, sendMessage],
   )
 
-  // 打开控制面板 - 保留以备将来使用
-  const handleOpenControl = useCallback(() => {
-    setDrawerView('control')
-    setDrawerOpen(true)
-  }, [])
-  // 使用 void 来消除未使用警告
-  void handleOpenControl
+  // 清空
+  const handleClear = useCallback(() => {
+    clearTrace()
+    setMessages([])
+    setSelectedRound(0)
+    setSelectedNode(null)
+  }, [clearTrace, setMessages])
 
-  // 节点点击处理 - 如果是初始 node，显示控制面板；否则显示节点详情
+  // 停止生成
+  const handleStop = useCallback(() => {
+    stop()
+  }, [stop])
+
+  // 节点点击 → 打开 Drawer node-detail 视图
   const handleNodeClick = useCallback((node: FlowNode) => {
     setSelectedNode(node)
-    // 如果是初始的发送消息 node，显示控制面板
-    if (node.id === 'initial-input') {
-      setDrawerView('control')
-    } else {
-      setDrawerView('node')
-    }
+    setDrawerView('node-detail')
     setDrawerOpen(true)
   }, [])
 
-  // 关联节点跳转
-  const handleNodeJump = useCallback(
-    (nodeId: string) => {
-      // TODO: 实现真正的节点跳转逻辑
-      console.log('Jump to node:', nodeId)
-    },
-    []
-  )
-
-  // 获取所有节点（用于关联节点跳转）
-  const allNodes = useMemo(() => {
-    const latestTrace = traces[traces.length - 1]
-    if (!latestTrace) return []
-    // 这里应该从 buildFlowGraph 返回的 nodes 中获取
-    // 简化处理：返回空数组
-    return []
-  }, [traces])
-
   return (
-    <div className='relative h-screen w-screen overflow-hidden'>
-      {/* 透明 Header - 绝对定位浮在画布上方 */}
-      <Header className='pointer-events-none absolute left-0 right-0 top-0 z-40 bg-transparent border-b-0'>
-        <div className='pointer-events-auto flex items-center gap-3'>
-          <Search className='bg-background/80 backdrop-blur-md' />
-          <div className='ms-auto flex items-center gap-2'>
+    <div className="relative h-screen w-screen overflow-hidden">
+      {/* 透明 Header */}
+      <Header className="pointer-events-none absolute left-0 right-0 top-0 z-40 bg-transparent border-b-0">
+        <div className="pointer-events-auto flex items-center gap-3">
+          <Search className="bg-background/80 backdrop-blur-md" />
+          <div className="ms-auto flex items-center gap-2">
             <ThemeSwitch />
             <ConfigDrawer />
             <ProfileDropdown />
@@ -171,24 +165,42 @@ export function PlaygroundLayout() {
       </Header>
 
       {/* 全屏流程图 */}
-      <FlowTracePanel traces={traces} isStreaming={isStreaming} onNodeClick={handleNodeClick} />
+      <FlowTracePanel
+        traces={traces}
+        selectedRound={selectedRound}
+        onNodeClick={handleNodeClick}
+      />
 
-      {/* 统一的右侧 Drawer - 默认打开 */}
-      <UnifiedDrawer
+      {/* 轮次选择器 */}
+      <RoundSelector
+        rounds={traces.length}
+        selectedRound={selectedRound}
+        onRoundChange={setSelectedRound}
+      />
+
+      {/* 底部统计栏 */}
+      <SessionStatsBar model={modelParams.model} stats={sessionStats} />
+
+      {/* 右侧 Drawer */}
+      <PlaygroundDrawer
         open={drawerOpen}
         onOpenChange={setDrawerOpen}
         view={drawerView}
         onViewChange={setDrawerView}
+        messages={messages}
+        onSendMessage={handleSendMessage}
+        onClear={handleClear}
+        onStop={handleStop}
+        isLoading={isLoading}
         mockSettings={mockSettings}
         onMockSettingsChange={setMockSettings}
+        modelParams={modelParams}
+        onModelParamsChange={setModelParams}
         traceEnabled={traceEnabled}
         onTraceEnabledChange={setTraceEnabled}
-        onSendMessage={handleSendMessage}
-        onClear={clearTrace}
-        stats={stats}
         selectedNode={selectedNode}
-        allNodes={allNodes}
-        onNodeClick={handleNodeJump}
+        systemPrompt={systemPrompt}
+        traceOutput={traceOutput}
       />
     </div>
   )

@@ -2361,11 +2361,13 @@ J2C 转化率 = 先参局后组局的用户数 / 历史总参与者数
 - **用户管理**：用户列表、权限管理、行为分析
 - **活动管理**：活动列表、审核、数据分析
 - **热词管理**：P0 层全局关键词配置、响应内容编辑、统计分析
-- **AI Playground**：AI 对话调试工具，支持流程图可视化执行链路（v4.6+）
-  - 可视化展示从用户输入到最终输出的完整执行路径
-  - 节点级调试：点击节点查看详细数据、配置项、性能指标
-  - 实时更新：流式接收 trace 数据，实时显示节点状态
-  - 降级路径追踪：清晰展示 P0 → P1 → P2 的降级逻辑
+- **AI Playground**：Mastra 风格的全屏 AI 调试面板（v4.8 重构）
+  - 全屏 Flow Graph 画布：7 层分层布局预渲染完整管线（Input → Input Guard/P0 Match → P1 Intent → User Profile/Semantic Recall/Token Limit → LLM → Tool(s) → Output）
+  - 灰度优先视觉：pending 灰色虚线、running 蓝色脉冲、success 边框加深、error 红色、skipped 半透明
+  - 三合一 Drawer（480px Sheet）：对话视图（useChat + Tool 结果卡片 + 欢迎状态）、配置视图（Mock 身份/位置 + Qwen3 模型选择 + Temperature/MaxTokens + Trace 开关）、节点详情视图（按节点类型渲染调试信息）
+  - 实时状态流转：SSE trace 数据驱动节点依次亮起，P0 命中时后续节点标记为 skipped
+  - 多轮追踪：轮次选择器切换查看不同轮次的 trace 状态
+  - 会话统计浮层：模型名称、轮次数、Token 消耗、耗时、费用估算（Qwen3 定价）
 
 **J2C 转化率 SQL**：
 ```sql

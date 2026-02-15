@@ -54,7 +54,9 @@ export {
   buildAskPreferenceWidget,
   buildShareWidget,
   buildErrorWidget,
-  getToolNamesForIntent,
+  // 新版统一入口
+  resolveToolsForIntent,
+  getToolNamesByIntent,
   getAllTools,
   getTool,
   // Tool factories
@@ -72,9 +74,10 @@ export {
   getMyIntentsTool,
   cancelIntentTool,
   confirmMatchTool,
-  // Legacy exports
+  // Legacy exports (deprecated)
   getAIToolsV34,
   getToolsByIntent,
+  getToolNamesForIntent,
 } from './tools';
 
 // Re-export classifyIntent and IntentType from intent module for backward compatibility
@@ -184,7 +187,7 @@ export * from './evals';
 
 // Legacy exports from ai.service.ts (for backward compatibility)
 export {
-  streamChat,
+  handleChatStream,
   checkAIQuota,
   consumeAIQuota,
   getWelcomeCard,

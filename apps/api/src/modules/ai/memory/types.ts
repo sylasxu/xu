@@ -7,21 +7,21 @@
 import type { Conversation, Message } from '@juchang/db';
 
 /**
- * Thread（会话）- 对应 conversations 表
+ * ConversationThread（会话）- 对应 conversations 表
  * 直接复用 DB 类型
  */
-export type Thread = Conversation;
+export type ConversationThread = Conversation;
 
 /**
- * ThreadMessage（消息）- 对应 conversationMessages 表
+ * ConversationThreadMessage（消息）- 对应 conversation_messages 表
  * 直接复用 DB 类型
  */
-export type ThreadMessage = Message;
+export type ConversationThreadMessage = Message;
 
 /**
- * 简化的消息格式（用于 AI 上下文）
+ * RecalledMessage（语义召回的历史消息片段）
  */
-export interface SimpleMessage {
+export interface RecalledMessage {
   role: 'user' | 'assistant';
   content: string;
 }

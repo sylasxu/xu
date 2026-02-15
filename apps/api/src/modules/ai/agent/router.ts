@@ -26,7 +26,7 @@ export interface RouteResult {
   /** 置信度 */
   confidence: number;
   /** 分类方法 */
-  method: 'regex' | 'llm';
+  method: 'regex' | 'llm' | 'p0' | 'p1' | 'p2';
 }
 
 /**

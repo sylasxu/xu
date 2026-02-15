@@ -209,7 +209,7 @@ export function extractPreferencesSimple(
 /**
  * 智能提取偏好（优先 LLM，降级到简单提取）
  */
-export async function extractPreferences(
+export async function extractPreferencesFromConversation(
   conversationHistory: Array<{ role: string; content: string }>,
   options: { useLLM?: boolean } = {}
 ): Promise<PreferenceExtraction> {

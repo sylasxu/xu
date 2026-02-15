@@ -17,6 +17,7 @@
 
 import type { ProcessorContext, ProcessorResult } from './types';
 import { db, users, eq } from '@juchang/db';
+import { hasPreferenceSignal } from '../memory/preference-signal';
 
 // 活动类型关键词映射
 const ACTIVITY_TYPE_KEYWORDS: Record<string, string[]> = {
@@ -83,7 +84,7 @@ function extractPreferencesFromText(text: string): {
  * 
  * 从对话中提取用户偏好
  */
-export async function extractPreferences(context: ProcessorContext): Promise<ProcessorResult> {
+export async function extractPreferencesProcessor(context: ProcessorContext): Promise<ProcessorResult> {
   const startTime = Date.now();
   
   try {
@@ -96,6 +97,21 @@ export async function extractPreferences(context: ProcessorContext): Promise<Pro
         context,
         executionTime: Date.now() - startTime,
         data: { skipped: true, reason: 'no-user-id' },
+      };
+    }
+    
+    // 偏好信号前置检查：仅当检测到偏好信号时才触发提取
+    const recentMsgs = messages.slice(-5).map(m => ({
+      role: String((m as unknown as Record<string, unknown>).role ?? 'user'),
+      content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+    }));
+    
+    if (!hasPreferenceSignal(recentMsgs)) {
+      return {
+        success: true,
+        context,
+        executionTime: Date.now() - startTime,
+        data: { skipped: true, reason: 'no-preference-signal' },
       };
     }
     
@@ -179,4 +195,4 @@ export async function extractPreferences(context: ProcessorContext): Promise<Pro
 }
 
 // Processor 元数据
-extractPreferences.processorName = 'extract-preferences';
+extractPreferencesProcessor.processorName = 'extract-preferences-processor';

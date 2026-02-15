@@ -39,7 +39,7 @@ const MAX_INPUT_LENGTH = 2000;
  * 
  * 检查用户输入的安全性
  */
-export async function inputGuard(context: ProcessorContext): Promise<ProcessorResult> {
+export async function inputGuardProcessor(context: ProcessorContext): Promise<ProcessorResult> {
   const startTime = Date.now();
   
   try {
@@ -108,4 +108,4 @@ export async function inputGuard(context: ProcessorContext): Promise<ProcessorRe
 }
 
 // Processor 元数据
-inputGuard.processorName = 'input-guard';
+inputGuardProcessor.processorName = 'input-guard-processor';

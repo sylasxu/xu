@@ -23,8 +23,13 @@ export type IntentType =
 
 /**
  * 分类方法
+ * - regex: 旧版正则匹配（兼容）
+ * - llm: 旧版 LLM 分类（兼容）
+ * - p0: P0 层全局关键词匹配
+ * - p1: P1 层 Feature_Combination 规则引擎
+ * - p2: P2 层 LLM Few-shot 分类
  */
-export type ClassifyMethod = 'regex' | 'llm';
+export type ClassifyMethod = 'regex' | 'llm' | 'p0' | 'p1' | 'p2';
 
 /**
  * 分类结果
@@ -38,6 +43,8 @@ export interface ClassifyResult {
   method: ClassifyMethod;
   /** 匹配的正则模式（regex 方法时） */
   matchedPattern?: string;
+  /** P1 层命中的特征信号列表 */
+  p1Features?: string[];
 }
 
 /**

@@ -1,6 +1,7 @@
 // 连接池管理模块
 // 纯函数式设计，无 class
 
+// @ts-ignore - bun types available at runtime
 import type { ServerWebSocket } from 'bun';
 
 export interface Connection {

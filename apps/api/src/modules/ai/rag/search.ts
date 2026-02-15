@@ -466,11 +466,11 @@ function mapRowToActivity(row: any): Activity {
     maxParticipants: row.max_participants,
     currentParticipants: row.current_participants,
     status: row.status,
+    theme: row.theme ?? 'auto',
+    themeConfig: row.theme_config ?? null,
     embedding: row.embedding,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    groupOpenId: row.group_open_id ?? null,
-    dynamicMessageId: row.dynamic_message_id ?? null,
   };
 }
 

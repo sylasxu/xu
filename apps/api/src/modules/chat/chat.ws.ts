@@ -1,4 +1,5 @@
 // WebSocket 处理器 - 活动讨论区实时通讯
+// @ts-ignore - bun types available at runtime
 import type { ServerWebSocket } from 'bun';
 import { db, activityMessages, activities, participants, users, eq, and, desc } from '@juchang/db';
 import { verifyToken } from '../auth/auth.service';

@@ -6,9 +6,9 @@
 
 // Types
 export type {
-  Thread,
-  ThreadMessage,
-  SimpleMessage,
+  ConversationThread,
+  ConversationThreadMessage,
+  RecalledMessage,
   UserProfile,
   SaveMessageParams,
   SessionWindowConfig,
@@ -85,7 +85,7 @@ export type {
 export {
   extractPreferencesWithLLM,
   extractPreferencesSimple,
-  extractPreferences,
+  extractPreferencesFromConversation,
 } from './extractor';
 
 // Semantic Search - 语义召回

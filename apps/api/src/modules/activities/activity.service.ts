@@ -324,8 +324,8 @@ export async function getActivityById(id: string): Promise<ActivityDetailRespons
     createdAt: activity.createdAt.toISOString(),
     updatedAt: activity.updatedAt.toISOString(),
     isArchived: calculateIsArchived(activity.startAt),
-    groupOpenId: activity.groupOpenId,
-    dynamicMessageId: activity.dynamicMessageId,
+    groupOpenId: null,
+    dynamicMessageId: null,
     creator: creator || null,
     participants: participantsList.map(p => ({
       id: p.id,

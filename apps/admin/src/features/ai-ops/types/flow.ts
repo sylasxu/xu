@@ -10,8 +10,8 @@ import type { Node, Edge } from '@xyflow/react';
 export type FlowNodeType =
   | 'input'              // 用户输入
   | 'input-guard'        // Input Guard Processor
-  | 'p0-match'           // P0 关键词匹配
-  | 'p1-intent'          // P1 意图识别
+  | 'keyword-match'      // P0 关键词匹配
+  | 'intent-classify'    // P1 意图识别
   | 'processor'          // 通用 Processor（User Profile, Working Memory, etc.）
   | 'llm'                // LLM 推理
   | 'tool'               // Tool 调用（包含 Evaluation）
@@ -53,7 +53,7 @@ export interface InputNodeData extends BaseFlowNodeData {
 
 /** P0 Match 节点数据 */
 export interface P0MatchNodeData extends BaseFlowNodeData {
-  type: 'p0-match';
+  type: 'keyword-match';
   matched: boolean;
   keyword?: string;
   matchType?: 'exact' | 'prefix' | 'fuzzy';
@@ -68,7 +68,7 @@ export interface P0MatchNodeData extends BaseFlowNodeData {
 
 /** P1 Intent 节点数据 */
 export interface P1IntentNodeData extends BaseFlowNodeData {
-  type: 'p1-intent';
+  type: 'intent-classify';
   intent: string;
   method: 'regex' | 'llm';
   confidence?: number;

@@ -1,7 +1,7 @@
 import { db, sql, conversationMessages, eq, and } from '@juchang/db';
 import { getEmbedding } from '../models/router';
 import { createLogger } from '../observability/logger';
-import type { SimpleMessage } from './types';
+import type { RecalledMessage } from './types';
 
 const logger = createLogger('MemorySemantic');
 
@@ -18,7 +18,7 @@ export async function semanticRecall(
     query: string,
     userId: string,
     options?: { limit?: number; threshold?: number }
-): Promise<SimpleMessage[]> {
+): Promise<RecalledMessage[]> {
     const { limit = 5, threshold = 0.5 } = options || {};
 
     try {

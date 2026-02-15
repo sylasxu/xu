@@ -54,7 +54,7 @@ function estimateMessagesTokens(messages: Message[]): number {
  * 
  * 限制和截断消息以符合 Token 限制
  */
-export async function tokenLimit(context: ProcessorContext): Promise<ProcessorResult> {
+export async function tokenLimitProcessor(context: ProcessorContext): Promise<ProcessorResult> {
   const startTime = Date.now();
   
   try {
@@ -135,4 +135,4 @@ export async function tokenLimit(context: ProcessorContext): Promise<ProcessorRe
 }
 
 // Processor 元数据
-tokenLimit.processorName = 'token-limit';
+tokenLimitProcessor.processorName = 'token-limit-processor';

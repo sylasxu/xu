@@ -16,7 +16,7 @@ import {
   updateEnhancedUserProfile,
 } from '../memory/working';
 import { saveMessage } from '../memory/store';
-import { extractPreferences } from '../memory/extractor';
+import { extractPreferencesFromConversation } from '../memory/extractor';
 import { semanticRecall } from '../memory/semantic';
 import { checkInput, sanitizeInput } from '../guardrails/input-guard';
 import { checkOutput, sanitizeOutput } from '../guardrails/output-guard';
@@ -357,7 +357,7 @@ async function extractPreferencesAsync(
   }
 
   // 提取偏好
-  const extraction = await extractPreferences(history, { useLLM: true });
+  const extraction = await extractPreferencesFromConversation(history, { useLLM: true });
 
   // 如果提取到偏好，更新用户画像
   if (extraction.preferences.length > 0 || extraction.frequentLocations.length > 0) {

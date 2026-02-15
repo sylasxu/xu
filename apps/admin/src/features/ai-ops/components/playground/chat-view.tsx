@@ -121,8 +121,6 @@ export function ChatView({ messages, onSendMessage, onClear, onStop, isLoading }
 /** 消息气泡 */
 function MessageBubble({ message, isStreaming }: { message: UIMessage; isStreaming: boolean }) {
   const isUser = message.role === 'user'
-  const isLast = false // 简化处理，StreamingText 自行判断
-
   // 提取文本内容和 tool 调用
   const textParts = message.parts?.filter((p) => p.type === 'text') ?? []
   const toolParts = message.parts?.filter((p) => p.type === 'tool-invocation') ?? []
@@ -153,7 +151,7 @@ function MessageBubble({ message, isStreaming }: { message: UIMessage; isStreami
         {toolParts.length > 0 && (
           <div className="mt-2 space-y-2">
             {toolParts.map((part, i) => {
-              const toolPart = part as {
+              const toolPart = part as unknown as {
                 type: 'tool-invocation'
                 toolInvocation: {
                   toolName: string
@@ -195,7 +193,7 @@ function ToolCard({
           <span className="text-xs text-muted-foreground animate-pulse">执行中...</span>
         )}
       </div>
-      {isComplete && invocation.result && (
+      {isComplete && invocation.result != null && (
         <ToolResultPreview toolName={invocation.toolName} result={invocation.result} />
       )}
     </div>
@@ -271,7 +269,7 @@ function WelcomeState({ onSendMessage }: { onSendMessage: (text: string) => void
     staleTime: 5 * 60 * 1000,
   })
 
-  const quickActions = welcome?.quickActions ?? [
+  const quickActions = (welcome as any)?.quickActions ?? [
     { text: '帮我组个局', icon: '🎯' },
     { text: '附近有什么好玩的', icon: '🗺️' },
     { text: '找个搭子', icon: '🤝' },

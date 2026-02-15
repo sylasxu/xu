@@ -40,6 +40,7 @@ import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenti
 import { Route as AuthenticatedAiOpsUsageRouteImport } from './routes/_authenticated/ai-ops/usage'
 import { Route as AuthenticatedAiOpsPlaygroundRouteImport } from './routes/_authenticated/ai-ops/playground'
 import { Route as AuthenticatedAiOpsConversationsRouteImport } from './routes/_authenticated/ai-ops/conversations'
+import { Route as AuthenticatedAiOpsConfigRouteImport } from './routes/_authenticated/ai-ops/config'
 import { Route as AuthenticatedActivitiesIdRouteImport } from './routes/_authenticated/activities/$id'
 import { Route as AuthenticatedHotKeywordsIdEditRouteImport } from './routes/_authenticated/hot-keywords/$id.edit'
 import { Route as AuthenticatedAiOpsSecurityModerationRouteImport } from './routes/_authenticated/ai-ops/security/moderation'
@@ -214,6 +215,12 @@ const AuthenticatedAiOpsConversationsRoute =
     path: '/ai-ops/conversations',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedAiOpsConfigRoute =
+  AuthenticatedAiOpsConfigRouteImport.update({
+    id: '/ai-ops/config',
+    path: '/ai-ops/config',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedActivitiesIdRoute =
   AuthenticatedActivitiesIdRouteImport.update({
     id: '/activities/$id',
@@ -253,6 +260,7 @@ export interface FileRoutesByFullPath {
   '/legal/$type': typeof LegalTypeRoute
   '/': typeof AuthenticatedIndexRoute
   '/activities/$id': typeof AuthenticatedActivitiesIdRoute
+  '/ai-ops/config': typeof AuthenticatedAiOpsConfigRoute
   '/ai-ops/conversations': typeof AuthenticatedAiOpsConversationsRouteWithChildren
   '/ai-ops/playground': typeof AuthenticatedAiOpsPlaygroundRoute
   '/ai-ops/usage': typeof AuthenticatedAiOpsUsageRoute
@@ -288,6 +296,7 @@ export interface FileRoutesByTo {
   '/legal/$type': typeof LegalTypeRoute
   '/': typeof AuthenticatedIndexRoute
   '/activities/$id': typeof AuthenticatedActivitiesIdRoute
+  '/ai-ops/config': typeof AuthenticatedAiOpsConfigRoute
   '/ai-ops/conversations': typeof AuthenticatedAiOpsConversationsRouteWithChildren
   '/ai-ops/playground': typeof AuthenticatedAiOpsPlaygroundRoute
   '/ai-ops/usage': typeof AuthenticatedAiOpsUsageRoute
@@ -326,6 +335,7 @@ export interface FileRoutesById {
   '/legal/$type': typeof LegalTypeRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/activities/$id': typeof AuthenticatedActivitiesIdRoute
+  '/_authenticated/ai-ops/config': typeof AuthenticatedAiOpsConfigRoute
   '/_authenticated/ai-ops/conversations': typeof AuthenticatedAiOpsConversationsRouteWithChildren
   '/_authenticated/ai-ops/playground': typeof AuthenticatedAiOpsPlaygroundRoute
   '/_authenticated/ai-ops/usage': typeof AuthenticatedAiOpsUsageRoute
@@ -364,6 +374,7 @@ export interface FileRouteTypes {
     | '/legal/$type'
     | '/'
     | '/activities/$id'
+    | '/ai-ops/config'
     | '/ai-ops/conversations'
     | '/ai-ops/playground'
     | '/ai-ops/usage'
@@ -399,6 +410,7 @@ export interface FileRouteTypes {
     | '/legal/$type'
     | '/'
     | '/activities/$id'
+    | '/ai-ops/config'
     | '/ai-ops/conversations'
     | '/ai-ops/playground'
     | '/ai-ops/usage'
@@ -436,6 +448,7 @@ export interface FileRouteTypes {
     | '/legal/$type'
     | '/_authenticated/'
     | '/_authenticated/activities/$id'
+    | '/_authenticated/ai-ops/config'
     | '/_authenticated/ai-ops/conversations'
     | '/_authenticated/ai-ops/playground'
     | '/_authenticated/ai-ops/usage'
@@ -692,6 +705,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAiOpsConversationsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/ai-ops/config': {
+      id: '/_authenticated/ai-ops/config'
+      path: '/ai-ops/config'
+      fullPath: '/ai-ops/config'
+      preLoaderRoute: typeof AuthenticatedAiOpsConfigRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/activities/$id': {
       id: '/_authenticated/activities/$id'
       path: '/activities/$id'
@@ -760,6 +780,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedSettingsRouteRoute: typeof AuthenticatedSettingsRouteRouteWithChildren
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedActivitiesIdRoute: typeof AuthenticatedActivitiesIdRoute
+  AuthenticatedAiOpsConfigRoute: typeof AuthenticatedAiOpsConfigRoute
   AuthenticatedAiOpsConversationsRoute: typeof AuthenticatedAiOpsConversationsRouteWithChildren
   AuthenticatedAiOpsPlaygroundRoute: typeof AuthenticatedAiOpsPlaygroundRoute
   AuthenticatedAiOpsUsageRoute: typeof AuthenticatedAiOpsUsageRoute
@@ -783,6 +804,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedSettingsRouteRoute: AuthenticatedSettingsRouteRouteWithChildren,
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedActivitiesIdRoute: AuthenticatedActivitiesIdRoute,
+  AuthenticatedAiOpsConfigRoute: AuthenticatedAiOpsConfigRoute,
   AuthenticatedAiOpsConversationsRoute:
     AuthenticatedAiOpsConversationsRouteWithChildren,
   AuthenticatedAiOpsPlaygroundRoute: AuthenticatedAiOpsPlaygroundRoute,

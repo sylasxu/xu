@@ -270,3 +270,26 @@ async function getWxPhoneNumber(code: string): Promise<WxPhoneResponse> {
     throw new Error('获取手机号失败');
   }
 }
+
+
+/**
+ * 验证 JWT Token（用于 WebSocket 等无法使用 Elysia jwt 装饰器的场景）
+ * 返回用户信息或 null
+ */
+export async function verifyToken(token: string): Promise<{ id: string; role: string } | null> {
+  try {
+    const secret = process.env.JWT_SECRET || 'dev-secret-key-change-in-production';
+    const { jwtVerify } = await import('jose');
+    const encoder = new TextEncoder();
+    const { payload } = await jwtVerify(token, encoder.encode(secret));
+
+    if (!payload.id || typeof payload.id !== 'string') {
+      return null;
+    }
+
+    return { id: payload.id as string, role: (payload.role as string) || 'user' };
+  } catch (error) {
+    console.error('[Auth] Token 验证失败:', error);
+    return null;
+  }
+}

@@ -92,6 +92,13 @@
       "when": 1770021872188,
       "tag": "0012_complete_leech",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1771095580664,
+      "tag": "0013_normal_warlock",
+      "breakpoints": true
     }
   ]
 }

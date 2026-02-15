@@ -1,7 +1,7 @@
 # 聚场 (JuChang) 技术架构文档
 
-> **版本**：v5.0 (Web Invitation + Theme System + Activity Lifecycle)
-> **更新日期**：2026-02-10
+> **版本**：v5.1 (AI Core Enhancement)
+> **更新日期**：2026-02-15
 > **架构**：原生小程序 + Zustand Vanilla + Elysia API + Drizzle ORM + Next.js Web
 
 ---
@@ -192,7 +192,7 @@
 
 ---
 
-## 4. 数据库 Schema (v5.0 - 14 表)
+## 4. 数据库 Schema (v5.1 - 16 表)
 
 ### 4.1 表结构概览
 
@@ -209,6 +209,8 @@
 | `intent_matches` | **意向匹配表 (v4.0)** | intentAId, intentBId, tempOrganizerId, outcome |
 | `match_messages` | **匹配消息表 (v4.0)** | matchId, senderId, content |
 | `global_keywords` | **全局热词表 (v4.8)** | keyword, matchType, responseType, responseContent, priority, hitCount, conversionCount |
+| `ai_configs` | **AI 配置表 (v5.1)** | configKey, configValue (JSONB), category, description, version, updatedBy |
+| `ai_config_history` | **AI 配置变更历史 (v5.1)** | configKey, configValue, version, updatedAt, updatedBy |
 | `ai_requests` | **AI 请求记录 (v4.6)** | userId, modelId, inputTokens, outputTokens, latencyMs, processorLog, p0MatchKeyword (v4.8) |
 | `ai_tool_calls` | **AI 工具调用 (v4.6)** | requestId, toolName, durationMs, success |
 | `ai_eval_samples` | **AI 评估样本 (v4.6)** | input, output, intent, score |
@@ -513,6 +515,47 @@ export const globalKeywords = pgTable('global_keywords', {
 }
 ```
 
+### 4.8 AI 配置表 (v5.1 新增)
+
+```typescript
+// packages/db/src/schema/ai-configs.ts
+
+/** AI 配置表 - 存储可配置参数（意图分类规则、Few-shot 样例、模型路由等） */
+export const aiConfigs = pgTable("ai_configs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  configKey: varchar("config_key", { length: 100 }).notNull().unique(),  // 如 'intent.feature_rules'
+  configValue: jsonb("config_value").notNull(),                          // JSONB 配置值
+  category: varchar("category", { length: 50 }).notNull(),               // intent | memory | model | processor
+  description: text("description"),
+  version: integer("version").notNull().default(1),                      // 每次更新自增
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedBy: varchar("updated_by", { length: 100 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** AI 配置变更历史表 - 每次更新时旧版本复制到此表，支持回滚 */
+export const aiConfigHistory = pgTable("ai_config_history", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  configKey: varchar("config_key", { length: 100 }).notNull(),
+  configValue: jsonb("config_value").notNull(),
+  version: integer("version").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  updatedBy: varchar("updated_by", { length: 100 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+```
+
+**配置分类 (category)**：
+
+| 分类 | 说明 | 配置键示例 |
+|------|------|-----------|
+| `intent` | 意图分类 | `intent.feature_rules`, `intent.few_shot_examples`, `intent.confidence_threshold` |
+| `memory` | 记忆系统 | `memory.temporal_decay`, `memory.preference_cleanup` |
+| `model` | 模型路由 | `model.intent_mapping`, `model.fallback_strategy` |
+| `processor` | 处理器管线 | `processor.pipeline_config`, `processor.disabled_processors` |
+
+**版本管理**：每次更新配置时，当前版本自动复制到 `ai_config_history` 表，版本号递增。支持通过 API 回滚到任意历史版本。
+
 ---
 
 ## 5. API 模块设计
@@ -586,6 +629,13 @@ POST /hot-keywords/match        // 匹配热词 (P0 层核心接口)
 POST /hot-keywords/:id/hit      // 记录热词命中
 POST /hot-keywords/:id/convert  // 记录热词转化
 GET  /hot-keywords/analytics    // 获取热词分析数据
+
+// AI Config (v5.1 新增：AI 参数配置管理)
+GET  /ai/configs                       // 获取所有配置（按 category 分组）
+GET  /ai/configs/:configKey            // 获取单个配置
+PUT  /ai/configs/:configKey            // 更新配置（自动递增版本号，保存历史）
+GET  /ai/configs/:configKey/history    // 获取配置变更历史
+POST /ai/configs/:configKey/rollback   // 回滚到指定版本
 
 // Dashboard (v4.5 新增：God View 实时概览)
 GET  /dashboard/god-view  // 获取 God View 数据（实时概览/AI健康度/异常警报）
@@ -871,19 +921,26 @@ apps/api/src/modules/ai/
 ├── index.ts              # 模块入口，统一导出
 ├── ai.controller.ts      # HTTP 路由控制器
 ├── ai.model.ts           # TypeBox Schema 定义
-├── ai.service.ts         # 核心服务（streamChat, 会话管理）
+├── ai.service.ts         # 核心服务（handleChatStream, 会话管理）
 │
-├── processors/           # v4.8 Processor 架构 (升级)
-│   ├── index.ts          # 统一导出 + executeProcessors 执行器
-│   ├── types.ts          # Processor, ProcessorContext, ProcessorResult 接口
+├── processors/           # v5.1 Processor 管线架构 (纯函数)
+│   ├── index.ts          # 统一导出 + runProcessors/runPostLLMProcessors/runAsyncProcessors 编排器
+│   ├── types.ts          # ProcessorFn, ProcessorContext, ProcessorResult, ProcessorConfig, ProcessorMetadata
+│   ├── pipeline.ts       # 管线注册表 + buildPreLLMPipeline 工厂函数
 │   ├── input-guard.ts    # 输入安全检查 (敏感词/注入攻击/长度限制)
+│   ├── keyword-match.ts  # P0 关键词匹配 (v5.1 新增，从 handleChatStream 提取)
+│   ├── intent-classify.ts # P1+P2 意图分类 (v5.1 新增，三层漏斗级联)
 │   ├── user-profile.ts   # 用户画像注入 (workingMemory → System Prompt)
-│   ├── semantic-recall.ts # 语义召回历史 (pgvector 相似度搜索)
+│   ├── semantic-recall.ts # 语义召回历史 (pgvector + rerank，v5.1 增强)
 │   ├── token-limit.ts    # Token 限制截断 (防止超出模型上下文)
 │   ├── save-history.ts   # 保存对话历史 (conversations 表)
-│   └── extract-preferences.ts # 偏好提取 (LLM 异步提取 → workingMemory)
+│   └── extract-preferences.ts # 偏好提取 (偏好信号前置检查 + LLM 异步提取)
 │
-├── user-action/          # v4.7 结构化用户操作模块 (新增)
+├── config/               # v5.1 AI 参数配置模块 (新增)
+│   ├── config.controller.ts # 配置 CRUD + 版本历史 + 回滚 API
+│   └── config.service.ts    # 配置加载服务 (内存缓存 TTL 30s + 数据库 + 默认值降级)
+│
+├── user-action/          # v4.7 结构化用户操作模块
 │   ├── index.ts          # 模块导出
 │   ├── types.ts          # UserAction, UserActionType, ActionResult
 │   └── handler.ts        # Action 处理器 (跳过 LLM，直接调用 Service)
@@ -897,30 +954,35 @@ apps/api/src/modules/ai/
 │   ├── search.ts         # search(), indexActivity(), deleteIndex()
 │   └── utils.ts          # enrichActivityText(), generateEmbedding()
 │
-├── intent/               # 意图识别模块
+├── intent/               # 意图识别模块 (v5.1 增强)
 │   ├── index.ts          # 模块导出
 │   ├── types.ts          # IntentType, ClassifyResult
 │   ├── definitions.ts    # 意图模式定义
-│   ├── classifier.ts     # 分类器（Regex + LLM）
+│   ├── classifier.ts     # 分类器入口
+│   ├── feature-combination.ts # P1 Feature_Combination 规则引擎 (v5.1 新增)
+│   ├── llm-classifier.ts     # P2 LLM Few-shot 分类器 (v5.1 新增)
 │   └── router.ts         # 意图路由（Tool 选择）
 │
-├── memory/               # 记忆系统模块
+├── memory/               # 记忆系统模块 (v5.1 增强)
 │   ├── index.ts          # 模块导出
-│   ├── types.ts          # Thread, Message, UserProfile
+│   ├── types.ts          # ConversationThread, ConversationThreadMessage, RecalledMessage
 │   ├── store.ts          # 会话存储（conversations 表）
-│   ├── working.ts        # 工作记忆（用户画像）
-│   └── extractor.ts      # LLM 偏好提取
+│   ├── working.ts        # 工作记忆（EnhancedUserProfile + mentionCount + 偏好合并）
+│   ├── extractor.ts      # LLM 偏好提取 (extractPreferencesFromConversation)
+│   ├── temporal-decay.ts # 时间衰减函数 (v5.1 新增)
+│   ├── preference-signal.ts # 偏好信号前置检查 (v5.1 新增)
+│   └── importance.ts     # Importance_Score 计算 (v5.1 新增)
 │
 ├── tools/                # 工具系统模块 (整合式架构)
 │   ├── index.ts          # 统一导出所有 Tools
 │   ├── types.ts          # ToolContext, ToolResult
 │   ├── widgets.ts        # Widget 构建器
-│   ├── registry.ts       # 工具注册表
+│   ├── registry.ts       # 工具注册表 (resolveToolsForIntent, getToolNamesByIntent)
 │   ├── executor.ts       # Tool 执行器
 │   ├── create-tool.ts    # v4.5 Tool 工厂函数 (Mastra 风格)
-│   ├── activity-tools.ts # 活动相关 Tools (createDraft, refineDraft, publishActivity, joinActivity, getMyActivities)
-│   ├── query-tools.ts    # 查询相关 Tools (getActivityDetail, askPreference)
-│   ├── partner-tools.ts  # 找搭子 Tools (createPartnerIntent, getMyIntents, confirmMatch)
+│   ├── activity-tools.ts # 活动相关 Tools
+│   ├── query-tools.ts    # 查询相关 Tools
+│   ├── partner-tools.ts  # 找搭子 Tools
 │   ├── explore-nearby.ts # 探索附近 (v4.5 升级为 RAG 语义搜索)
 │   └── helpers/          # 工具辅助函数
 │       └── match.ts      # 匹配算法辅助
@@ -977,7 +1039,7 @@ apps/api/src/modules/ai/
     └── detector.ts
 ```
 
-### 6.3 意图识别 (Intent Classification)
+### 6.3 意图识别 (Intent Classification) - v5.1 三层漏斗架构
 
 **意图类型**：
 
@@ -989,34 +1051,62 @@ apps/api/src/modules/ai/
 | `partner` | 找搭子 | "找搭子"、"谁组我就去" |
 | `chitchat` | 闲聊 | 无明确意图的对话 |
 | `idle` | 空闲 | 暂停、等待 |
+| `unknown` | 未知 | 三层漏斗均无法确定时的兜底 |
 
-**分类策略**：
+**三层漏斗级联 (P0 → P1 → P2)**：
+
+```
+用户输入
+  │
+  ▼
+P0: keyword-match-processor（全局关键词精确匹配）
+  │ 命中 → 直接返回预设响应（零延迟，无 LLM）
+  │ 未命中 ↓
+  ▼
+P1: Feature_Combination 规则引擎（intent/feature-combination.ts）
+  │ 置信度 ≥ 0.7 → 返回分类结果
+  │ 置信度 < 0.7 → 升级到 P2
+  │ 异常 → 降级到 P2，标记 degraded: true
+  ▼
+P2: LLM Few-shot 分类器（intent/llm-classifier.ts）
+  │ 成功 → 返回分类结果
+  │ 失败 → 降级到最近有效意图 / unknown
+```
+
+**P1 Feature_Combination 规则引擎**：
+
+基于多信号组合的规则匹配，置信度公式：`min(baseConfidence + hitCount × signalBoost, maxConfidence)`
 
 ```typescript
-// 1. 优先使用 Regex 快速分类（零延迟）
-const regexResult = classifyByRegex(message);
-if (regexResult.confidence > 0.8) return regexResult;
+interface FeatureCombinationRule {
+  intent: string;
+  signals: FeatureSignal[];      // 关键词/正则信号列表
+  baseConfidence: number;        // 基础置信度 (如 0.3)
+  signalBoost: number;           // 每命中一个信号的增量 (如 0.15)
+  maxConfidence: number;         // 置信度上限 (如 0.95)
+}
 
-// 2. 复杂场景使用 LLM 分类
-const llmResult = await classifyWithLLM(message, context);
-return llmResult;
+// 规则可通过数据库配置动态加载
+const rules = await getConfigValue('intent.feature_rules', DEFAULT_FEATURE_RULES);
+```
+
+**P2 LLM Few-shot 分类器**：
+
+使用 5-8 个标注样例进行 Few-shot prompting，替代长规则描述。内置 Edit_Distance_Cache（TTL 5 分钟，LRU 上限 1000 条），编辑距离 < 3 的相似输入复用缓存结果。
+
+```typescript
+// Few-shot 样例可通过数据库配置动态加载
+const examples = await getConfigValue('intent.few_shot_examples', DEFAULT_FEW_SHOT_EXAMPLES);
 ```
 
 **意图路由**：根据意图动态加载 Tools，减少 Token 消耗
 
 ```typescript
 // 不同意图加载不同 Tools
-switch (intent) {
-  case 'create':
-    return { createActivityDraft, refineDraft, publishActivity };
-  case 'explore':
-    return { exploreNearby, getActivityDetail, joinActivity };
-  case 'partner':
-    return { createPartnerIntent, getMyIntents, confirmMatch };
-}
+const tools = resolveToolsForIntent(userId, intent, options);
 ```
 
-### 6.4 记忆系统 (Memory System)
+### 6.4 记忆系统 (Memory System) - v5.1 增强
 
 聚场的记忆系统参考 Mastra 架构，支持三种类型的记忆：
 
@@ -1024,7 +1114,7 @@ switch (intent) {
 |---------|------|---------|------|
 | **工作记忆** (Working Memory) | 用户画像、偏好、禁忌 | `users.workingMemory` | ✅ 已实现 |
 | **对话历史** (Conversation History) | 会话消息记录 | `conversations` + `conversation_messages` | ✅ 已实现 |
-| **语义回忆** (Semantic Recall) | 向量检索相关活动 | `activities.embedding` | ✅ v4.5 已实现 |
+| **语义回忆** (Semantic Recall) | 向量检索相关活动 + 对话消息 | `activities.embedding` + `conversation_messages` | ✅ v5.1 增强 |
 
 **两层会话结构**：
 
@@ -1050,42 +1140,92 @@ interface EnhancedPreference {
   sentiment: 'like' | 'dislike' | 'neutral';
   value: string;           // "火锅"、"周末"
   confidence: number;      // 0-1 置信度
-  updatedAt: Date;         // 更新时间（用于时效性判断）
+  mentionCount: number;    // 提及次数（v5.1 新增，初始值 1）
+  updatedAt: Date;         // 更新时间（用于时间衰减计算）
 }
+```
+
+**时间衰减函数 (v5.1 新增)**：
+
+偏好的有效性随时间递减，避免过时偏好影响推荐：
+
+```typescript
+// memory/temporal-decay.ts
+function calculateTemporalDecay(daysSinceUpdate: number): number {
+  if (daysSinceUpdate <= 7) return 1.0;           // 0-7天: 完全有效
+  if (daysSinceUpdate <= 30) return 0.3 + 0.7 * (30 - daysSinceUpdate) / 23;  // 7-30天: 线性→0.3
+  if (daysSinceUpdate <= 90) return 0.1 + 0.2 * (90 - daysSinceUpdate) / 60;  // 30-90天: 线性→0.1
+  return 0;                                        // >90天: 完全失效
+}
+
+// 综合分数 = confidence × temporalDecay
+function calculatePreferenceScore(preference: EnhancedPreference): number {
+  const decay = calculateTemporalDecay(daysSince(preference.updatedAt));
+  return preference.confidence * decay;
+}
+```
+
+**偏好合并与冲突处理 (v5.1 增强)**：
+
+```typescript
+// 矛盾偏好冲突处理：通过 category + value 匹配
+// sentiment 不同时覆盖情感标签，旧偏好 confidence 降低 50%
+// 同一偏好再次提及时 mentionCount + 1，confidence + 0.1（上限 1.0）
+```
+
+**偏好清理策略 (v5.1 新增)**：
+
+偏好数量 > 30 时，自动移除 `confidence < 0.2` 且 `updatedAt` 超过 30 天的偏好。
+
+**偏好信号前置检查 (v5.1 新增)**：
+
+仅当用户输入包含偏好信号关键词（"喜欢"、"不吃"、"讨厌"等）时才触发 LLM 偏好提取，避免无效调用。
+
+**Importance_Score (v5.1 新增)**：
+
+消息保存到 `conversation_messages` 时计算重要性分数，用于语义召回排序：
+
+```typescript
+// memory/importance.ts
+interface ImportanceFactors {
+  hasToolCall: boolean;      // 包含工具调用
+  hasActivityRef: boolean;   // 关联活动
+  hasPreference: boolean;    // 包含偏好信息
+  isLongMessage: boolean;    // 长消息（>100字）
+}
+
+// 基础分 0.3，每个 factor +0.175，上限 1.0
+function calculateImportanceScore(factors: ImportanceFactors): number;
 ```
 
 **偏好提取与更新**：
 
 ```typescript
-// 异步使用 LLM 从对话中提取偏好
-const extraction = await extractPreferences(conversationHistory, { useLLM: true });
-if (extraction.preferences.length > 0) {
-  // 合并新偏好，新偏好覆盖旧偏好（置信度更高或旧偏好超过 7 天）
-  await updateEnhancedUserProfile(userId, extraction);
-}
+// 异步使用 LLM 从对话中提取偏好（仅在检测到偏好信号时触发）
+// 通过 extract-preferences-processor 在 Async 阶段执行，不阻塞响应
 ```
 
 **对话历史 (Conversation History)**：
 
 - 24 小时会话窗口：同一用户 24h 内的消息归入同一会话
-- 自动保存：`streamChat` 的 `onFinish` 回调自动保存对话
+- 自动保存：`handleChatStream` 的 `onFinish` 回调通过 `runPostLLMProcessors` 自动保存对话
 - 活动关联：Tool 返回的 `activityId` 自动关联到消息
 
-**语义回忆 (Semantic Recall)** - v4.5 已实现：
+**语义回忆 (Semantic Recall) - v5.1 增强**：
 
-基于 pgvector 的活动语义搜索，支持自然语言查询匹配活动：
+基于 pgvector 的混合语义搜索，同时搜索 `activities` 和 `conversation_messages` 表：
 
 ```typescript
-// RAG 混合检索：Hard Filter (SQL) + Soft Rank (Vector)
-const results = await search({
-  semanticQuery: '想找人一起打羽毛球',
-  filters: {
-    location: { lat: 29.56, lng: 106.55, radiusInKm: 5 },
-    type: 'sports',
-  },
-  userId: 'xxx', // 用于 MaxSim 个性化
-});
+// semantic-recall-processor 增强：
+// - 搜索范围：activities 表 + conversation_messages 表
+// - 相似度阈值：从 0.7 降低至 0.5
+// - 重排序：合并结果后使用 qwen3-rerank 重排序
+// - 返回 top-K 结果（K=5），优先返回高 Importance_Score 的消息
 ```
+
+**画像 Prompt 构建 (v5.1 增强)**：
+
+`buildProfilePrompt` 按 `confidence × temporalDecay` 综合分数降序排列偏好，排除综合分数为 0（超过 90 天）的偏好。
 
 **用户兴趣向量 (MaxSim 策略)**：
 
@@ -1106,6 +1246,10 @@ if (maxSim > 0.5) {
   finalScore = similarity * (1 + 0.2 * maxSim);
 }
 ```
+
+**Post-Activity Flow 兴趣向量更新 (v5.1 新增)**：
+
+用户参与活动并给出正面反馈时，自动更新 InterestVector，确保 MaxSim 个性化推荐使用最新的用户兴趣数据。
 
 ### 6.5 工具系统 (Tool System)
 
@@ -1558,114 +1702,116 @@ flowchart TD
     流式响应 (SSE)
 ```
 
-### 6.12.1 Processor 架构详解 (v4.8)
+### 6.12.1 Processor 架构详解 (v5.1 纯函数 + 三阶段模型)
 
 **设计理念**：
-Processor 是 AI 请求处理管道中的可插拔组件，每个 Processor 负责单一职责，通过 `executeProcessors()` 函数串联执行。
+Processor 是 AI 请求处理管道中的可插拔纯函数组件，每个 Processor 负责单一职责。v5.1 从 class 接口重构为纯函数签名，通过 `runProcessors()` / `runPostLLMProcessors()` / `runAsyncProcessors()` 三个编排器分阶段执行。
 
 **核心接口**：
 
 ```typescript
-// Processor 接口
-interface Processor {
-  name: string;
-  description: string;
-  execute(context: ProcessorContext): Promise<ProcessorResult>;
-}
+// processors/types.ts
 
-// Processor 上下文
+/** Processor 纯函数签名 */
+type ProcessorFn = {
+  (context: ProcessorContext): Promise<ProcessorResult>;
+  processorName: string;  // 元数据，用于日志和调试
+};
+
+/** Processor 上下文（处理器间唯一的数据传递通道） */
 interface ProcessorContext {
   userId: string | null;
-  userInput: string;
+  rawUserInput: string;       // 原始输入（用于 trace/DB）
+  userInput: string;          // 净化后输入（用于后续处理）
   systemPrompt: string;
-  messages: CoreMessage[];
-  metadata: Record<string, unknown>;
+  messages: Message[];
+  metadata: ProcessorMetadata;  // 结构化元数据（v5.1 增强）
 }
 
-// Processor 执行结果
+/** 结构化元数据（处理器间类型安全的数据传递） */
+interface ProcessorMetadata {
+  keywordMatch?: { matched: boolean; keywordId?: string; keyword?: string; matchType?: string; priority?: number; responseType?: string };
+  intentClassify?: { intent: string; confidence: number; method: 'p0' | 'p1' | 'p2'; matchedPattern?: string; p1Features?: string[]; degraded?: boolean };
+  userProfile?: { injected: boolean; preferencesCount: number };
+  semanticRecall?: { resultsCount: number; avgSimilarity: number };
+  conversationSummary?: string;
+  [key: string]: unknown;
+}
+
+/** Processor 执行结果 */
 interface ProcessorResult {
   success: boolean;
   context: ProcessorContext;  // 更新后的上下文
   data?: Record<string, unknown>;
   error?: string;
-  executionTime: number;
+  executionTime: number;      // 毫秒
+}
+
+/** Processor 配置（支持条件执行和并行组） */
+interface ProcessorConfig {
+  processor: ProcessorFn;
+  condition?: (ctx: ProcessorContext) => boolean;  // 返回 false 时跳过
+  parallelGroup?: string;  // 相同 parallelGroup 的连续处理器并行执行
 }
 ```
 
-**6 个核心 Processor**：
+**8 个核心 Processor（纯函数）**：
 
 | Processor | 阶段 | 职责 | 关键逻辑 |
 |-----------|------|------|---------|
-| `InputGuardProcessor` | 输入 | 安全检查 | 敏感词过滤、注入攻击检测、长度限制 |
-| `UserProfileProcessor` | 输入 | 用户画像注入 | 从 `users.workingMemory` 读取偏好，注入 System Prompt |
-| `SemanticRecallProcessor` | 输入 | 语义召回 | pgvector 相似度搜索历史活动，注入上下文 |
-| `TokenLimitProcessor` | 输入 | Token 限制 | 按模型上下文窗口截断消息历史 |
-| `SaveHistoryProcessor` | 输出 | 保存对话 | 将用户消息和 AI 响应保存到 `conversation_messages` |
-| `ExtractPreferencesProcessor` | 输出 | 偏好提取 | LLM 异步提取用户偏好，更新 `workingMemory` |
+| `inputGuardProcessor` | Pre-LLM (预检查) | 安全检查 | 敏感词过滤、注入攻击检测、长度限制 |
+| `keywordMatchProcessor` | Pre-LLM (预检查) | P0 关键词匹配 | 全局热词精确匹配，命中后直接返回预设响应 |
+| `intentClassifyProcessor` | Pre-LLM (管线) | P1+P2 意图分类 | Feature_Combination → LLM Few-shot 级联 |
+| `userProfileProcessor` | Pre-LLM (管线, 并行) | 用户画像注入 | 从 `workingMemory` 读取偏好，注入 System Prompt |
+| `semanticRecallProcessor` | Pre-LLM (管线, 并行) | 语义召回 | pgvector 搜索 + qwen3-rerank 重排序 |
+| `tokenLimitProcessor` | Pre-LLM (管线) | Token 限制 | 按模型上下文窗口截断消息历史 |
+| `saveHistoryProcessor` | Post-LLM | 保存对话 | 将用户消息和 AI 响应保存到 `conversation_messages` |
+| `extractPreferencesProcessor` | Async | 偏好提取 | 偏好信号前置检查 + LLM 异步提取，更新 `workingMemory` |
 
-**执行器函数**：
+**三阶段执行模型**：
+
+| 阶段 | 编排器 | 执行策略 | 失败行为 |
+|------|--------|---------|---------|
+| Pre-LLM | `runProcessors()` | 串行 + 条件并行（`parallelGroup`） | 任一失败 → 停止后续 + `createDirectResponse` |
+| Post-LLM | `runPostLLMProcessors()` | 串行 | 失败 → 记录日志，继续执行后续处理器 |
+| Async | `runAsyncProcessors()` | `Promise.allSettled` 并行 | 失败 → 静默记录日志，不影响响应 |
+
+**管线工厂函数**：
 
 ```typescript
-// 执行 Processor 链
-export async function executeProcessors(
-  processors: Processor[],
-  initialContext: ProcessorContext
-): Promise<{
-  context: ProcessorContext;
-  logs: ProcessorLogEntry[];
-}> {
-  let context = initialContext;
-  const logs: ProcessorLogEntry[] = [];
-  
-  for (const processor of processors) {
-    const result = await processor.execute(context);
-    
-    logs.push({
-      processorName: processor.name,
-      executionTime: result.executionTime,
-      success: result.success,
-      data: result.data,
-      error: result.error,
-      timestamp: new Date().toISOString(),
-    });
-    
-    // 关键 Processor 失败时抛出错误
-    if (!result.success && processor.name === 'input-guard') {
-      throw new Error(`Processor ${processor.name} failed: ${result.error}`);
-    }
-    
-    context = result.context;
-  }
-  
-  return { context, logs };
-}
+// processors/pipeline.ts
+// 内置处理器按设计文档顺序注册：
+//   intent-classify → [user-profile ∥ semantic-recall] → token-limit
+// 支持通过数据库配置禁用特定处理器
+const preLLMConfigs = await buildPreLLMPipeline();
 ```
 
-**与 AI Service 集成**：
+**并行组 context 合并策略**：
+
+相同 `parallelGroup` 的处理器使用 `Promise.all` 并行执行，结果合并策略：
+- `systemPrompt`：按声明顺序拼接各处理器注入的段落
+- `metadata`：浅合并各处理器的命名空间
+- 其他字段（`messages`、`userInput` 等）：取最后一个处理器的值
+
+**与 handleChatStream 集成**：
 
 ```typescript
-// ai.service.ts 中的使用示例
-const inputProcessors = [
-  inputGuardProcessor,
-  userProfileProcessor,
-  semanticRecallProcessor,
-  tokenLimitProcessor,
-];
+// ai.service.ts 中的使用
+// 1. 预检查：input-guard + keyword-match（独立执行）
+const guardResult = await inputGuardProcessor(guardContext);
+const keywordResult = await keywordMatchProcessor(initialContext);
 
-const { context, logs } = await executeProcessors(inputProcessors, {
-  userId,
-  userInput: message,
-  systemPrompt: XIAOJU_SYSTEM_PROMPT,
-  messages: [],
-  metadata: {},
-});
+// 2. Pre-LLM 管线：intent-classify → [user-profile ∥ semantic-recall] → token-limit
+const preLLMConfigs = await buildPreLLMPipeline();
+const { context, logs, success } = await runProcessors(preLLMConfigs, keywordResult.context);
 
-// 记录 Processor 执行日志到 ai_requests.processorLog
-await recordAIRequest({
-  userId,
-  processorLog: JSON.stringify(logs),
-  // ...
-});
+// 3. LLM 推理 (streamText)
+
+// 4. Post-LLM：save-history
+await runPostLLMProcessors([{ processor: saveHistoryProcessor }], postLLMContext);
+
+// 5. Async：extract-preferences（火并忘）
+runAsyncProcessors([{ processor: extractPreferencesProcessor }], postLLMContext);
 ```
 
 ### 6.12 结构化用户操作 (User Action) - v4.7
@@ -2903,6 +3049,28 @@ bun run gen:api         # 生成 Orval SDK
 - **CP-29**: 报名系统消息一致性 - 每次成功 joinActivity 后，activity_messages 表必须新增一条 `messageType='system'` 的消息；所有已报名参与者（不含新加入者和创建者）必须收到 `new_participant` 通知；创建者必须收到 `join` 通知（保持不变）
 - **CP-30**: Post-Activity 自动完成 - 所有 `status='active'` 且 `startAt + 2h < now` 的活动必须被定时任务更新为 `completed`，且所有参与者必须收到 `post_activity` 通知
 - **CP-31**: SSR OG 标签完整性 - `/invite/:id` 页面的 SSR 响应 HTML head 中必须包含 `og:title`（活动标题）、`og:description`（包含报名人数信息）、`og:url`（当前页面 URL）
+
+### 12.8 AI 核心系统增强 (v5.1 新增)
+
+**Processor 架构**：
+- **CP-32**: Pre-LLM 管线失败即停 - `runProcessors` 中任一处理器返回 `success: false` 时，必须立即停止后续处理器执行并返回 `createDirectResponse`
+- **CP-33**: Post-LLM 容错继续 - `runPostLLMProcessors` 中处理器失败时，必须记录日志但继续执行后续处理器，不影响用户响应
+- **CP-34**: 并行组 context 合并一致性 - 相同 `parallelGroup` 的处理器并行执行后，`systemPrompt` 必须按声明顺序拼接，`metadata` 必须浅合并所有处理器的命名空间
+- **CP-35**: 处理器间数据隔离 - 所有处理器间数据传递必须通过 `context.metadata`，禁止闭包变量
+
+**意图分类**：
+- **CP-36**: 三层漏斗级联顺序 - P0（keyword-match）命中时不得进入 P1/P2；P1 置信度 ≥ 0.7 时不得进入 P2
+- **CP-37**: P1 异常降级 - Feature_Combination 规则引擎异常时必须降级到 P2 LLM 分类，并标记 `metadata.intentClassify.degraded: true`
+- **CP-38**: Edit_Distance_Cache 一致性 - 编辑距离 < 3 且未过期的缓存条目必须复用，缓存上限 1000 条 LRU 淘汰
+
+**记忆系统**：
+- **CP-39**: 时间衰减正确性 - 超过 90 天的偏好 `temporalDecay` 必须为 0，`buildProfilePrompt` 必须排除综合分数为 0 的偏好
+- **CP-40**: 偏好冲突处理 - 同一 `category + value` 的偏好 `sentiment` 变化时，旧偏好 `confidence` 必须降低 50%
+- **CP-41**: 偏好清理阈值 - 偏好数量 > 30 时，`confidence < 0.2` 且 `updatedAt` 超过 30 天的偏好必须被移除
+
+**配置模块**：
+- **CP-42**: 配置版本单调递增 - `setConfigValue` 每次调用后版本号必须 +1，旧版本必须复制到 `ai_config_history`
+- **CP-43**: 配置降级安全 - `getConfigValue` 数据库加载失败时必须返回代码默认值，不得抛出异常
 
 ---
 

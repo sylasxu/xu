@@ -3,8 +3,9 @@ import { Elysia, t } from 'elysia';
 import { basePlugins, verifyAuth } from '../../setup';
 import { chatModel, ChatMessageResponseSchema, type ErrorResponse } from './chat.model';
 import { getMessages, sendMessage } from './chat.service';
-import { handleWsUpgrade, handleWsMessage, handleWsClose, startHeartbeatChecker, type WsData } from './chat.ws';
+import { handleWsUpgrade, handleWsMessage, handleWsClose, startHeartbeatChecker } from './chat.ws';
 import { createReport } from '../reports/report.service';
+import type { ReportReason } from '../reports/report.model';
 
 // 启动心跳检测
 startHeartbeatChecker(10000);
@@ -102,7 +103,7 @@ export const chatController = new Elysia({ prefix: '/chat' })
   // 举报消息
   .post(
     '/:activityId/report',
-    async ({ params, body, set, jwt, headers }) => {
+    async ({ body, set, jwt, headers }) => {
       const user = await verifyAuth(jwt, headers);
       if (!user) {
         set.status = 401;
@@ -116,7 +117,7 @@ export const chatController = new Elysia({ prefix: '/chat' })
         await createReport({
           type: 'message',
           targetId: body.messageId,
-          reason: body.reason,
+          reason: body.reason as ReportReason,
         }, user.id);
         return { msg: '举报成功' };
       } catch (error: any) {

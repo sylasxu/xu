@@ -38,7 +38,10 @@ export * from "./ai-tool-calls";      // v4.8 AI Tool 调用日志
 // 8. Global Keywords System (v4.8 Digital Ascension)
 export * from "./global_keywords";
 
-// 9. Relations (must be last to avoid circular imports)
+// 9. AI Config System (v4.8 AI 参数配置)
+export * from "./ai-configs";
+
+// 10. Relations (must be last to avoid circular imports)
 export * from "./relations";
 
 // ==========================================

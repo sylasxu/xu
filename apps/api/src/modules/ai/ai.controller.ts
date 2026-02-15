@@ -5,7 +5,7 @@ import { aiModel, type ErrorResponse, type ConversationMessageType } from './ai.
 import {
   checkAIQuota,
   consumeAIQuota,
-  streamChat,
+  handleChatStream,
   clearConversations,
   getWelcomeCard,
   // v3.8：两层会话结构
@@ -237,7 +237,7 @@ export const aiController = new Elysia({ prefix: '/ai' })
 
       try {
         // 获取 Data Stream Response (v3.7 支持模型参数, v4.7 支持 userAction)
-        const response = await streamChat({
+        const response = await handleChatStream({
           messages: messages as any, // AI SDK UIMessage 格式
           userId: effectiveUserId,
           location: effectiveLocation,

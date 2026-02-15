@@ -5,7 +5,7 @@
  * 显示：模型名称 | 轮次数 | Token 消耗 | 耗时 | 费用
  */
 
-import { formatCost, formatDuration, type SessionStats } from '../../types/trace'
+import { formatCost, formatDuration, QWEN_PRICE, type SessionStats } from '../../types/trace'
 
 interface SessionStatsBarProps {
   model: string
@@ -14,6 +14,11 @@ interface SessionStatsBarProps {
 
 export function SessionStatsBar({ model, stats }: SessionStatsBarProps) {
   if (stats.totalRounds === 0) return null
+
+  const price = QWEN_PRICE[model]
+  const priceLabel = price
+    ? `输入 ¥${(price.input * 1_000_000).toFixed(1)}/M · 输出 ¥${(price.output * 1_000_000).toFixed(1)}/M`
+    : undefined
 
   return (
     <div className="absolute bottom-4 left-1/2 z-30 -translate-x-1/2 rounded-lg border bg-background/80 backdrop-blur-md px-4 py-2">
@@ -26,7 +31,9 @@ export function SessionStatsBar({ model, stats }: SessionStatsBarProps) {
         <Separator />
         <span>{formatDuration(stats.totalDuration)}</span>
         <Separator />
-        <span>${formatCost(stats.estimatedCost)}</span>
+        <span title={priceLabel ?? undefined} className="cursor-help">
+          ${formatCost(stats.estimatedCost)}
+        </span>
       </div>
     </div>
   )

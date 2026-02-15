@@ -15,7 +15,7 @@ export type StepStatus = 'pending' | 'running' | 'success' | 'error'
 export type StepType = 'input' | 'prompt' | 'llm' | 'tool' | 'output'
 
 /** 扩展步骤类型（包含 Processor 和 P0/P1） */
-export type ExtendedStepType = StepType | 'processor' | 'p0-match' | 'p1-intent'
+export type ExtendedStepType = StepType | 'processor' | 'keyword-match' | 'intent-classify'
 
 /** 执行追踪 */
 export interface ExecutionTrace {

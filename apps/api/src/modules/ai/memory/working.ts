@@ -10,11 +10,12 @@
 import { db, users, eq } from '@juchang/db';
 import type { UserProfile } from './types';
 import type { PreferenceExtraction, PreferenceCategory, PreferenceSentiment } from './extractor';
+import { calculatePreferenceScore } from './temporal-decay';
 
 // ============ 类型定义 ============
 
 /**
- * 增强的偏好项（支持置信度和时效性）
+ * 增强的偏好项（支持置信度、时效性和提及次数）
  */
 export interface EnhancedPreference {
   category: PreferenceCategory;
@@ -22,6 +23,8 @@ export interface EnhancedPreference {
   sentiment: PreferenceSentiment;
   confidence: number;
   updatedAt: Date;
+  /** 提及次数，初始值 1 */
+  mentionCount: number;
 }
 
 /**
@@ -45,6 +48,8 @@ interface StoredEnhancedProfile {
     sentiment: PreferenceSentiment;
     confidence: number;
     updatedAt: string;
+    /** 提及次数，初始值 1 */
+    mentionCount?: number;
   }>;
   frequentLocations: string[];
   lastUpdated: string;
@@ -345,6 +350,7 @@ export function parseEnhancedProfile(content: string | null): EnhancedUserProfil
       preferences: stored.preferences.map(p => ({
         ...p,
         updatedAt: new Date(p.updatedAt),
+        mentionCount: p.mentionCount ?? 1,
       })),
       frequentLocations: stored.frequentLocations,
       lastUpdated: new Date(stored.lastUpdated),
@@ -386,6 +392,7 @@ export function convertToEnhancedProfile(oldProfile: UserProfile): EnhancedUserP
       sentiment: 'like',
       confidence: 0.5, // 旧数据置信度较低
       updatedAt: now,
+      mentionCount: 1,
     });
   }
 
@@ -397,6 +404,7 @@ export function convertToEnhancedProfile(oldProfile: UserProfile): EnhancedUserP
       sentiment: 'dislike',
       confidence: 0.5,
       updatedAt: now,
+      mentionCount: 1,
     });
   }
 
@@ -409,7 +417,13 @@ export function convertToEnhancedProfile(oldProfile: UserProfile): EnhancedUserP
 }
 
 /**
- * 合并增强版偏好（新偏好覆盖旧偏好，保留时效性）
+ * 合并增强版偏好（支持矛盾偏好冲突处理和 mentionCount 累加）
+ *
+ * 合并策略：
+ * 1. 通过 `category + value` 匹配已有偏好
+ * 2. 同一偏好再次提及：mentionCount + 1，confidence + 0.1（上限 1.0）
+ * 3. 矛盾偏好（sentiment 不同）：覆盖情感标签，旧偏好 confidence 降低 50%，新偏好 mentionCount 设为 1
+ * 4. 全新偏好：直接添加，mentionCount 为 1
  */
 export function mergeEnhancedPreferences(
   existing: EnhancedPreference[],
@@ -420,19 +434,34 @@ export function mergeEnhancedPreferences(
   // 先添加现有偏好
   for (const pref of existing) {
     const key = `${pref.category}:${pref.value.toLowerCase()}`;
-    merged.set(key, pref);
+    merged.set(key, { ...pref });
   }
   
-  // 新偏好覆盖旧偏好
+  // 处理新偏好
   for (const pref of newPrefs) {
     const key = `${pref.category}:${pref.value.toLowerCase()}`;
     const existingPref = merged.get(key);
     
-    // 如果新偏好置信度更高，或者旧偏好太旧（超过 7 天），则覆盖
-    if (!existingPref || 
-        pref.confidence > existingPref.confidence ||
-        (Date.now() - existingPref.updatedAt.getTime()) > 7 * 24 * 60 * 60 * 1000) {
-      merged.set(key, { ...pref, updatedAt: new Date() });
+    if (!existingPref) {
+      // 全新偏好，直接添加
+      merged.set(key, { ...pref, mentionCount: pref.mentionCount ?? 1, updatedAt: new Date() });
+    } else if (existingPref.sentiment !== pref.sentiment) {
+      // 矛盾偏好冲突处理：覆盖情感标签，旧偏好 confidence 降低 50%
+      merged.set(key, {
+        ...existingPref,
+        sentiment: pref.sentiment,
+        confidence: existingPref.confidence * 0.5,
+        mentionCount: 1,
+        updatedAt: new Date(),
+      });
+    } else {
+      // 同一偏好再次提及：mentionCount + 1，confidence + 0.1（上限 1.0）
+      merged.set(key, {
+        ...existingPref,
+        mentionCount: existingPref.mentionCount + 1,
+        confidence: Math.min(existingPref.confidence + 0.1, 1.0),
+        updatedAt: new Date(),
+      });
     }
   }
   
@@ -455,30 +484,41 @@ export function extractionToEnhancedPreferences(
     sentiment: p.sentiment,
     confidence: p.confidence,
     updatedAt: now,
+    mentionCount: 1,
   }));
 }
 
 /**
  * 构建用户画像 Prompt 片段
+ *
+ * 按 confidence × temporalDecay 综合分数降序排列偏好，
+ * 排除综合分数为 0（超过 90 天）的偏好。
  */
 export function buildProfilePrompt(profile: EnhancedUserProfile): string {
   if (profile.preferences.length === 0 && profile.frequentLocations.length === 0) {
     return '';
   }
 
+  const now = new Date();
+
+  // 过滤掉综合分数为 0 的偏好（超过 90 天），按综合分数降序排列
+  const scoredPrefs = profile.preferences
+    .map(p => ({ pref: p, score: calculatePreferenceScore(p, now) }))
+    .filter(({ score }) => score > 0)
+    .sort((a, b) => b.score - a.score);
+
   const lines: string[] = ['<user_profile>'];
   lines.push('以下是用户的偏好信息，请在回复时参考：');
   lines.push('');
   
-  // 喜好（按置信度排序，取前 5 个）
-  const likes = profile.preferences
-    .filter(p => p.sentiment === 'like')
-    .sort((a, b) => b.confidence - a.confidence)
+  // 喜好（取前 5 个）
+  const likes = scoredPrefs
+    .filter(({ pref }) => pref.sentiment === 'like')
     .slice(0, 5);
   
   if (likes.length > 0) {
     lines.push('## 用户喜好');
-    for (const pref of likes) {
+    for (const { pref } of likes) {
       const categoryLabel = getCategoryLabel(pref.category);
       lines.push(`- ${pref.value}（${categoryLabel}）`);
     }
@@ -486,14 +526,13 @@ export function buildProfilePrompt(profile: EnhancedUserProfile): string {
   }
   
   // 不喜欢/禁忌（这些更重要，要特别注意）
-  const dislikes = profile.preferences
-    .filter(p => p.sentiment === 'dislike')
-    .sort((a, b) => b.confidence - a.confidence)
+  const dislikes = scoredPrefs
+    .filter(({ pref }) => pref.sentiment === 'dislike')
     .slice(0, 5);
   
   if (dislikes.length > 0) {
     lines.push('## ⚠️ 用户禁忌（重要）');
-    for (const pref of dislikes) {
+    for (const { pref } of dislikes) {
       const categoryLabel = getCategoryLabel(pref.category);
       lines.push(`- ${pref.value}（${categoryLabel}）`);
     }
@@ -542,14 +581,39 @@ export async function getEnhancedUserProfile(userId: string): Promise<EnhancedUs
 }
 
 /**
- * 保存增强版用户画像
+ * 保存增强版用户画像（含偏好清理策略）
+ *
+ * 清理规则：偏好数量 > 30 时，移除 confidence < 0.2 且 updatedAt 超过 30 天的偏好
  */
 export async function saveEnhancedUserProfile(
   userId: string,
   profile: EnhancedUserProfile
 ): Promise<void> {
-  const content = serializeEnhancedProfile(profile);
+  const cleaned = cleanupPreferences(profile);
+  const content = serializeEnhancedProfile(cleaned);
   await updateWorkingMemory(userId, content);
+}
+
+/**
+ * 偏好清理策略
+ *
+ * 当偏好数量超过 30 条时，移除低置信度且过期的偏好
+ * 移除条件：confidence < 0.2 且 updatedAt 距今超过 30 天
+ */
+export function cleanupPreferences(profile: EnhancedUserProfile): EnhancedUserProfile {
+  if (profile.preferences.length <= 30) return profile;
+
+  const now = new Date();
+  const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+
+  const cleaned = profile.preferences.filter((p) => {
+    const isLowConfidence = p.confidence < 0.2;
+    const isOld = now.getTime() - p.updatedAt.getTime() > thirtyDaysMs;
+    // 移除同时满足低置信度和过期的偏好
+    return !(isLowConfidence && isOld);
+  });
+
+  return { ...profile, preferences: cleaned };
 }
 
 /**
@@ -717,6 +781,8 @@ interface StoredEnhancedProfileWithVectors {
     sentiment: PreferenceSentiment;
     confidence: number;
     updatedAt: string;
+    /** 提及次数，初始值 1 */
+    mentionCount?: number;
   }>;
   frequentLocations: string[];
   lastUpdated: string;

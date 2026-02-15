@@ -15,6 +15,7 @@ import { deepseekProvider } from './adapters/deepseek';
 import { qwenProvider, getQwenEmbeddings, qwenRerank, getQwenModelByIntent } from './adapters/qwen';
 import type { ModelProvider, ModelProviderName, FallbackConfig, RerankResponse } from './types';
 import { DEFAULT_FALLBACK_CONFIG, ACTIVE_MODELS } from './types';
+import { getConfigValue } from '../config/config.service';
 
 /**
  * 提供商映射
@@ -37,10 +38,11 @@ export function setFallbackConfig(config: Partial<FallbackConfig>): void {
 }
 
 /**
- * 获取降级配置
+ * 获取降级配置（优先从数据库加载，降级到内存/默认值）
  */
-export function getFallbackConfig(): FallbackConfig {
-  return { ...fallbackConfig };
+export async function getFallbackConfig(): Promise<FallbackConfig> {
+  const dbConfig = await getConfigValue<Partial<FallbackConfig>>('model.fallback_config', {});
+  return { ...fallbackConfig, ...dbConfig };
 }
 
 /**

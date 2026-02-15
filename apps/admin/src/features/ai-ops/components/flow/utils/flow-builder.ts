@@ -48,13 +48,13 @@ export const PIPELINE_LAYERS: LayerConfig[] = [
     id: 'L2',
     nodes: [
       { nodeId: 'input-guard', type: 'processor', label: 'Input Guard', traceType: 'processor', processorType: 'input-guard' },
-      { nodeId: 'p0-match', type: 'p0-match', label: 'P0 匹配', traceType: 'p0-match' },
+      { nodeId: 'keyword-match', type: 'keyword-match', label: 'P0 匹配', traceType: 'keyword-match' },
     ],
   },
   {
     id: 'L3',
     nodes: [
-      { nodeId: 'p1-intent', type: 'p1-intent', label: 'P1 意图', traceType: 'p1-intent' },
+      { nodeId: 'intent-classify', type: 'intent-classify', label: 'P1 意图', traceType: 'intent-classify' },
     ],
   },
   {
@@ -88,7 +88,7 @@ export const PIPELINE_LAYERS: LayerConfig[] = [
 
 // P0 命中时需要跳过的节点 ID
 const SKIPPABLE_NODE_IDS = [
-  'p1-intent',
+  'intent-classify',
   'user-profile',
   'semantic-recall',
   'token-limit',
@@ -206,7 +206,7 @@ export function applyTraceToGraph(
     }
 
     // P0 命中检测
-    if (stepType === 'p0-match' && stepData.matched === true) {
+    if (stepType === 'keyword-match' && stepData.matched === true) {
       p0Matched = true
     }
   }

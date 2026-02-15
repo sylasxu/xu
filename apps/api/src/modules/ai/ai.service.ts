@@ -5,8 +5,8 @@
  * 
  * v4.5 更新：
  * - 新增 Agent 封装层 (Mastra 风格)
- * - streamChat/generateChat 委托给 agent/chat.ts
- * - 保留原有 streamChat 实现用于兼容
+ * - handleChatStream/generateChat 委托给 agent/chat.ts
+ * - 保留原有 handleChatStream 实现用于兼容
  * 
  * 模块依赖：
  * - agent/ - Agent 核心 (v4.5 新增)
@@ -41,9 +41,9 @@ import { randomUUID } from 'crypto';
 import type { ProcessorLogEntry } from '@juchang/db';
 
 // 新架构模块
-import { classifyIntent, type ClassifyResult } from './intent';
+import { type ClassifyResult } from './intent';
 import { getOrCreateThread, saveMessage, clearUserThreads, deleteThread } from './memory';
-import { getToolsByIntent, getToolWidgetType, getToolDisplayName } from './tools';
+import { resolveToolsForIntent, getToolWidgetType, getToolDisplayName } from './tools';
 import { buildXmlSystemPrompt, type PromptContext, type ActivityDraftForPrompt } from './prompts/xiaoju-v39';
 import { getModelByIntent } from './models/router';
 // Guardrails
@@ -65,15 +65,17 @@ import {
   getEnhancedUserProfile,
   buildProfilePrompt,
 } from './memory/working';
-// Processors (v4.6 纯函数)
+// Processors (v4.9 管线架构)
 import {
-  sanitizeAndGuard,
-  injectUserProfile,
-  injectSemanticRecall,
-  truncateByTokenLimit,
-  saveConversationHistory,
-  extractAndUpdatePreferences,
-  type ToolCallTrace,
+  inputGuardProcessor,
+  keywordMatchProcessor,
+  saveHistoryProcessor,
+  extractPreferencesProcessor,
+  runProcessors,
+  runPostLLMProcessors,
+  runAsyncProcessors,
+  buildPreLLMPipeline,
+  type ProcessorContext,
 } from './processors';
 // Partner Matching - 找搭子追问流程
 import {
@@ -88,7 +90,7 @@ import {
 } from './workflow/partner-matching';
 // Evals
 import { evaluateResponseQuality } from './evals/runner';
-// User Action (A2UI 风格)
+// User Action — A2UI (Action-to-UI: 结构化用户操作直接映射为 UI 响应)
 import { handleUserAction, type UserAction } from './user-action';
 
 const logger = createLogger('ai.service');
@@ -105,7 +107,7 @@ export interface ChatRequest {
   draftContext?: { activityId: string; currentDraft: ActivityDraftForPrompt };
   trace?: boolean;
   modelParams?: { temperature?: number; maxTokens?: number };
-  /** A2UI 风格：结构化用户操作，跳过 LLM 意图识别 */
+  /** A2UI：结构化用户操作，跳过 LLM 意图识别直接执行 */
   userAction?: UserAction;
 }
 
@@ -150,11 +152,11 @@ export async function consumeAIQuota(userId: string): Promise<boolean> {
 // AI Chat 核心
 // ==========================================
 
-export async function streamChat(request: ChatRequest): Promise<Response> {
+export async function handleChatStream(request: ChatRequest): Promise<Response> {
   const { messages, userId, location, source, draftContext, trace, modelParams, userAction } = request;
   const startTime = Date.now();
 
-  // 0. A2UI: 检查是否为结构化 userAction
+  // 0. A2UI: 检查是否为结构化 userAction（跳过 LLM 意图识别）
   if (userAction) {
     logger.info('Processing user action (A2UI)', { 
       action: userAction.action, 
@@ -191,7 +193,7 @@ export async function streamChat(request: ChatRequest): Promise<Response> {
     
     // 如果 action 失败且不回退，返回错误
     if (!actionResult.success && !actionResult.fallbackToLLM) {
-      return createQuickResponse(actionResult.error || '操作失败', trace);
+      return createDirectResponse(actionResult.error || '操作失败', trace);
     }
   }
 
@@ -202,104 +204,45 @@ export async function streamChat(request: ChatRequest): Promise<Response> {
       || (m as unknown as { content?: string })?.content
       || '',
   }));
-  const lastUserMessage = conversationHistory.filter(m => m.role === 'user').pop()?.content || '';
+  const rawUserInput = conversationHistory.filter(m => m.role === 'user').pop()?.content || '';
 
   // 1. 频率限制检查
   const rateLimitResult = checkRateLimit(userId, { maxRequests: 30, windowSeconds: 60 });
   if (!rateLimitResult.allowed) {
     logger.warn('Rate limit exceeded', { userId, retryAfter: rateLimitResult.retryAfter });
-    return createQuickResponse('请求太频繁了，休息一下再来吧～', trace);
+    return createDirectResponse('请求太频繁了，休息一下再来吧～', trace);
   }
 
-  // 2. 输入护栏检查 (Processor)
+  // 2. 输入护栏检查 (inputGuardProcessor)
   const processorLogs: ProcessorLogEntry[] = [];
-  const guardStartTime = Date.now();
-  const guardResult = sanitizeAndGuard(lastUserMessage, userId);
-  const guardDuration = Date.now() - guardStartTime;
-  
-  // 记录 Input Guard Processor 日志
-  processorLogs.push({
-    processorName: 'input-guard',
-    executionTime: guardDuration,
-    success: !guardResult.blocked,
-    data: {
-      blocked: guardResult.blocked,
-      sanitized: guardResult.sanitized,
-      blockReason: guardResult.blockReason,
-      triggeredRules: guardResult.triggeredRules,
-    },
-    timestamp: new Date().toISOString(),
-  });
-  
-  if (guardResult.blocked) {
-    logger.warn('Input blocked', { userId, reason: guardResult.blockReason, rules: guardResult.triggeredRules });
-    return createQuickResponse(guardResult.suggestedResponse || '这个话题我帮不了你 😅', trace);
-  }
-  const sanitizedMessage = guardResult.sanitized;
-
-  // 2.5 P0 层：全局关键词匹配（v4.8 Digital Ascension）
-  let matchedKeywordId: string | null = null;
-  const p0StartTime = Date.now();
-  const { matchKeyword, incrementHitCount } = await import('../hot-keywords/hot-keywords.service');
-  const matchedKeyword = await matchKeyword(sanitizedMessage);
-  const p0Duration = Date.now() - p0StartTime;
-  
-  // 保存匹配的关键词 ID
-  if (matchedKeyword) {
-    matchedKeywordId = matchedKeyword.id;
-  }
-  
-  // 记录 P0 Match Processor 日志
-  processorLogs.push({
-    processorName: 'p0-match',
-    executionTime: p0Duration,
-    success: true,
-    data: {
-      matched: !!matchedKeyword,
-      keywordId: matchedKeyword?.id,
-      keyword: matchedKeyword?.keyword,
-      matchType: matchedKeyword?.matchType,
-      priority: matchedKeyword?.priority,
-      responseType: matchedKeyword?.responseType,
-    },
-    timestamp: new Date().toISOString(),
-  });
-  
-  // 保存 P0 匹配数据用于 trace
-  const p0MatchData = matchedKeyword ? {
-    matched: true as const,
-    keyword: matchedKeyword.keyword,
-    matchType: matchedKeyword.matchType,
-    priority: matchedKeyword.priority,
-    responseType: matchedKeyword.responseType,
-    duration: p0Duration,
-  } : {
-    matched: false as const,
-    duration: p0Duration,
+  const guardContext: ProcessorContext = {
+    userId,
+    messages: [],
+    rawUserInput,
+    userInput: rawUserInput.trim().slice(0, 2000),
+    systemPrompt: '',
+    metadata: {},
   };
-  
-  if (matchedKeyword) {
-    logger.info('P0 keyword matched', { 
-      keywordId: matchedKeyword.id, 
-      keyword: matchedKeyword.keyword,
-      matchType: matchedKeyword.matchType,
-      userId: userId || 'anon',
-    });
-    
-    // 增加命中次数（异步，不阻塞）
-    incrementHitCount(matchedKeyword.id).catch(err => {
-      logger.error('Failed to increment hit count', { error: err });
-    });
-    
-    // 返回预设响应（包含 widget 和 keywordContext）
-    return createKeywordResponse(matchedKeyword, trace, userId, sanitizedMessage);
-  }
+  const guardResult = await inputGuardProcessor(guardContext);
+  processorLogs.push({
+    processorName: inputGuardProcessor.processorName,
+    executionTime: guardResult.executionTime,
+    success: guardResult.success,
+    data: guardResult.data,
+    error: guardResult.error,
+    timestamp: new Date().toISOString(),
+  });
 
-  // 3. 构建上下文
+  if (!guardResult.success) {
+    logger.warn('Input blocked', { userId, error: guardResult.error });
+    return createDirectResponse('这个话题我帮不了你 😅', trace);
+  }
+  const sanitizedInput = guardContext.userInput;
+
+  // ── Pre-LLM 管线阶段 ──
+  // 2.5 构建上下文（promptContext 需要在 ProcessorContext 之前准备好）
   const locationName = location ? await reverseGeocode(location[1], location[0]) : undefined;
   const userNickname = userId ? await getUserNickname(userId) : undefined;
-
-  // 4. 获取用户工作记忆（增强版用户画像）
   const userProfile = userId ? await getEnhancedUserProfile(userId) : null;
 
   const promptContext: PromptContext = {
@@ -310,37 +253,84 @@ export async function streamChat(request: ChatRequest): Promise<Response> {
     workingMemory: userProfile ? buildProfilePrompt(userProfile) : null,
   };
 
-  // 5. 意图分类
-  const intentStartTime = Date.now();
-  const intentResult = await classifyIntent(sanitizedMessage, {
-    hasDraftContext: !!draftContext,
-    conversationHistory,
-    userId: userId || undefined,
-  });
-  const intentDuration = Date.now() - intentStartTime;
-  
-  // 记录 P1 Intent Processor 日志
+  // 构建初始 ProcessorContext（所有处理器间数据通过 context.metadata 传递）
+  const initialContext: ProcessorContext = {
+    userId,
+    messages: conversationHistory.map(m => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content })),
+    rawUserInput,
+    userInput: sanitizedInput,
+    systemPrompt: buildXmlSystemPrompt(promptContext),
+    metadata: {},
+  };
+
+  // 2.6 P0 层：keyword-match-processor（独立预检查，命中后直接返回）
+  const keywordResult = await keywordMatchProcessor(initialContext);
   processorLogs.push({
-    processorName: 'p1-intent',
-    executionTime: intentDuration,
-    success: true,
-    data: {
-      intent: intentResult.intent,
-      method: intentResult.method,
-      confidence: intentResult.confidence,
-    },
+    processorName: keywordMatchProcessor.processorName,
+    executionTime: keywordResult.executionTime,
+    success: keywordResult.success,
+    data: keywordResult.data,
+    error: keywordResult.error,
     timestamp: new Date().toISOString(),
   });
-  
+
+  const keywordMeta = keywordResult.context.metadata.keywordMatch;
+  const matchedKeywordId = keywordMeta?.matched ? (keywordMeta.keywordId ?? null) : null;
+
+  if (keywordMeta?.matched) {
+    logger.info('P0 keyword matched', {
+      keywordId: keywordMeta.keywordId,
+      keyword: keywordMeta.keyword,
+      matchType: keywordMeta.matchType,
+      userId: userId || 'anon',
+    });
+
+    // 增加命中次数（异步，不阻塞）
+    const { incrementHitCount } = await import('../hot-keywords/hot-keywords.service');
+    if (keywordMeta.keywordId) {
+      incrementHitCount(keywordMeta.keywordId).catch(err => {
+        logger.error('Failed to increment hit count', { error: err });
+      });
+    }
+
+    // 返回预设响应（需要完整的 keyword 对象，从 hot-keywords 服务重新获取）
+    const { matchKeyword } = await import('../hot-keywords/hot-keywords.service');
+    const matchedKeyword = await matchKeyword(sanitizedInput);
+    if (matchedKeyword) {
+      return createKeywordResponse(matchedKeyword, trace, userId, sanitizedInput);
+    }
+    // 降级：metadata 标记命中但无法获取完整 keyword 对象，继续后续流程
+  }
+
+  // 3. 运行 Pre-LLM 管线：intent-classify → [user-profile ∥ semantic-recall] → token-limit
+  const preLLMConfigs = await buildPreLLMPipeline();
+  const { context: preLLMContext, logs: pipelineLogs, success: pipelineSuccess } = await runProcessors(preLLMConfigs, keywordResult.context);
+  processorLogs.push(...pipelineLogs);
+
+  if (!pipelineSuccess) {
+    logger.warn('Pre-LLM pipeline failed', { logs: pipelineLogs.filter(l => !l.success) });
+    return createDirectResponse('处理请求时遇到问题，请稍后再试～', trace);
+  }
+
+  // 4. 从 context.metadata 提取意图分类结果
+  const intentClassifyMeta = preLLMContext.metadata.intentClassify;
+  const intentResult: ClassifyResult = intentClassifyMeta ? {
+    intent: intentClassifyMeta.intent,
+    confidence: intentClassifyMeta.confidence,
+    method: intentClassifyMeta.method,
+    matchedPattern: intentClassifyMeta.matchedPattern,
+    p1Features: intentClassifyMeta.p1Features,
+  } : { intent: 'unknown' as const, confidence: 0, method: 'p1' as const };
+
   logger.info('Intent classified', { intent: intentResult.intent, method: intentResult.method });
 
-  // 5.5 Partner Matching 检查（找搭子追问流程）
+  // 5. Partner Matching 检查（找搭子追问流程）
   if (intentResult.intent === 'partner' && userId) {
     const thread = await getOrCreateThread(userId);
     const partnerMatchingState = await recoverPartnerMatchingState(thread.id);
 
     if (shouldStartPartnerMatching('partner', partnerMatchingState)) {
-      return handlePartnerMatchingFlow(request, partnerMatchingState, thread.id, sanitizedMessage, intentResult);
+      return handlePartnerMatchingFlow(request, partnerMatchingState, thread.id, sanitizedInput, intentResult);
     }
   }
 
@@ -351,10 +341,15 @@ export async function streamChat(request: ChatRequest): Promise<Response> {
 
   // 7. 获取工具集
   const userLocation = location ? { lat: location[1], lng: location[0] } : null;
-  const tools = getToolsByIntent(userId, intentResult.intent, !!draftContext, userLocation);
+  const tools = resolveToolsForIntent(userId, intentResult.intent, {
+    hasDraftContext: !!draftContext,
+    location: userLocation,
+  });
   logger.debug('Tools selected', { tools: Object.keys(tools) });
 
-  // 8. 构建 System Prompt + Processors 处理
+  // 8. 使用管线处理后的 systemPrompt（已包含 user-profile + semantic-recall + token-limit）
+  const systemPrompt = preLLMContext.systemPrompt;
+
   const uiMessages: UIMessage[] = messages.map((m, i) => ({
     id: `msg-${i}`,
     role: m.role,
@@ -363,62 +358,8 @@ export async function streamChat(request: ChatRequest): Promise<Response> {
   }));
   const aiMessages = await convertToModelMessages(uiMessages);
 
-  // 构建基础 System Prompt
-  let systemPrompt = buildXmlSystemPrompt(promptContext);
-
-  // [Processor 1] 注入用户画像
-  const userProfileStartTime = Date.now();
-  systemPrompt = await injectUserProfile(systemPrompt, userId);
-  const userProfileDuration = Date.now() - userProfileStartTime;
-  
-  // 记录 User Profile Processor 日志
-  processorLogs.push({
-    processorName: 'user-profile',
-    executionTime: userProfileDuration,
-    success: true,
-    data: {
-      hasProfile: !!userProfile,
-      preferencesCount: userProfile?.preferences?.length || 0,
-      locationsCount: userProfile?.frequentLocations?.length || 0,
-    },
-    timestamp: new Date().toISOString(),
-  });
-
-  // [Processor 2] 注入语义召回历史
-  const semanticRecallStartTime = Date.now();
-  systemPrompt = await injectSemanticRecall(systemPrompt, sanitizedMessage, userId);
-  const semanticRecallDuration = Date.now() - semanticRecallStartTime;
-  
-  // 记录 Semantic Recall Processor 日志
-  processorLogs.push({
-    processorName: 'semantic-recall',
-    executionTime: semanticRecallDuration,
-    success: true,
-    timestamp: new Date().toISOString(),
-  });
-
-  // [Processor 3] Token 限制截断
-  const tokenLimitStartTime = Date.now();
-  const originalPromptLength = systemPrompt.length;
-  systemPrompt = truncateByTokenLimit(systemPrompt, 12000);
-  const tokenLimitDuration = Date.now() - tokenLimitStartTime;
-  const truncated = systemPrompt.length < originalPromptLength;
-  
-  // 记录 Token Limit Processor 日志
-  processorLogs.push({
-    processorName: 'token-limit',
-    executionTime: tokenLimitDuration,
-    success: true,
-    data: {
-      truncated,
-      originalLength: originalPromptLength,
-      finalLength: systemPrompt.length,
-    },
-    timestamp: new Date().toISOString(),
-  });
-
   // 9. 执行 LLM 推理
-  const traceSteps: TraceStep[] = [];
+  const toolCallRecords: TraceStep[] = [];
   let totalUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
   let aiResponseText = '';
   
@@ -440,7 +381,7 @@ export async function streamChat(request: ChatRequest): Promise<Response> {
     stopWhen: [stepCountIs(5), hasToolCall('askPreference')],
     onStepFinish: (step) => {
       // 记录每一步的详细信息
-      const stepNumber = traceSteps.length + 1;
+      const stepNumber = toolCallRecords.length + 1;
       const stepType = (step as any).stepType; // 'initial' | 'continue' | 'tool-result'
 
       logger.debug('AI step finished', {
@@ -454,8 +395,8 @@ export async function streamChat(request: ChatRequest): Promise<Response> {
 
       // 收集 Tool Calls
       for (const tc of step.toolCalls || []) {
-        if (!traceSteps.find(s => s.toolCallId === tc.toolCallId)) {
-          traceSteps.push({
+        if (!toolCallRecords.find(s => s.toolCallId === tc.toolCallId)) {
+          toolCallRecords.push({
             toolName: tc.toolName,
             toolCallId: tc.toolCallId,
             args: (tc as any).args,
@@ -472,7 +413,7 @@ export async function streamChat(request: ChatRequest): Promise<Response> {
 
       // 收集 Tool Results
       for (const tr of step.toolResults || []) {
-        const existing = traceSteps.find(s => s.toolCallId === tr.toolCallId);
+        const existing = toolCallRecords.find(s => s.toolCallId === tr.toolCallId);
         if (existing) {
           existing.result = (tr as any).result;
 
@@ -490,7 +431,7 @@ export async function streamChat(request: ChatRequest): Promise<Response> {
       if (stepNumber >= 5) {
         logger.warn('Max steps reached', {
           stepNumber,
-          toolCalls: traceSteps.map(s => s.toolName),
+          toolCalls: toolCallRecords.map(s => s.toolName),
         });
       }
     },
@@ -523,47 +464,43 @@ export async function streamChat(request: ChatRequest): Promise<Response> {
         totalTokens: totalUsage.totalTokens,
         cacheHitTokens: rawUsage.promptCacheHitTokens,
         cacheMissTokens: rawUsage.promptCacheMissTokens,
-      }, traceSteps.map(s => ({ toolName: s.toolName })), {
+      }, toolCallRecords.map(s => ({ toolName: s.toolName })), {
         model: modelId,
         source,
         intent: intentResult.intent,
       });
 
-      // [Processor 4] 保存对话历史
+      // ── Post-LLM 阶段：通过管线编排保存对话历史 ──
       if (userId) {
-        const saveHistoryStartTime = Date.now();
-        await saveConversationHistory(userId, lastUserMessage, text || '', traceSteps as ToolCallTrace[]);
-        const saveHistoryDuration = Date.now() - saveHistoryStartTime;
-        
-        // 记录 Save History Processor 日志
-        processorLogs.push({
-          processorName: 'save-history',
-          executionTime: saveHistoryDuration,
-          success: true,
-          data: {
-            messagesSaved: 2, // user + assistant
+        // 构建 Post-LLM context，包含 AI 响应数据
+        const postLLMContext: ProcessorContext = {
+          ...preLLMContext,
+          messages: [
+            ...preLLMContext.messages,
+            { role: 'assistant' as const, content: text || '' },
+          ],
+          metadata: {
+            ...preLLMContext.metadata,
+            conversationId: undefined,
+            activityId: (toolCallRecords.find(tc => (tc.result as any)?.activityId)?.result as any)?.activityId,
           },
-          timestamp: new Date().toISOString(),
-        });
+        };
 
-        // [Processor 5] 异步提取用户偏好并更新画像
-        extractAndUpdatePreferences(userId, conversationHistory).then(() => {
-          // 记录 Extract Preferences Processor 日志（异步）
-          processorLogs.push({
-            processorName: 'extract-preferences',
-            executionTime: 0, // 异步执行，不计入主流程
-            success: true,
-            timestamp: new Date().toISOString(),
-          });
+        // Post-LLM: save-history（失败时记录日志，不影响响应）
+        const { logs: postLLMLogs } = await runPostLLMProcessors(
+          [{ processor: saveHistoryProcessor }],
+          postLLMContext
+        );
+        processorLogs.push(...postLLMLogs);
+
+        // Async: extract-preferences（火并忘，不阻塞响应）
+        runAsyncProcessors(
+          [{ processor: extractPreferencesProcessor }],
+          postLLMContext
+        ).then(({ logs: asyncLogs }) => {
+          processorLogs.push(...asyncLogs);
         }).catch((err: Error) => {
-          logger.warn('Failed to update user profile', { error: err.message });
-          processorLogs.push({
-            processorName: 'extract-preferences',
-            executionTime: 0,
-            success: false,
-            error: err.message,
-            timestamp: new Date().toISOString(),
-          });
+          logger.warn('Async processors failed', { error: err.message });
         });
       }
       
@@ -577,7 +514,7 @@ export async function streamChat(request: ChatRequest): Promise<Response> {
           latencyMs: duration,
           processorLog: processorLogs,
           p0MatchKeyword: matchedKeywordId,
-          input: lastUserMessage.slice(0, 1000), // 限制长度
+          input: rawUserInput.slice(0, 1000), // 限制长度
           output: (text || '').slice(0, 1000),
         });
       } catch (err) {
@@ -586,31 +523,31 @@ export async function streamChat(request: ChatRequest): Promise<Response> {
 
       // 异步评估响应质量（不阻塞响应）
       evaluateResponseQuality({
-        input: lastUserMessage,
+        input: rawUserInput,
         output: text || '',
         expectedIntent: intentResult.intent,
-        actualToolCalls: traceSteps.map(s => s.toolName),
+        actualToolCalls: toolCallRecords.map(s => s.toolName),
       }).then(evalResult => {
         if (evalResult.score < 0.6) {
           logger.warn('Low quality response detected', {
             score: evalResult.score,
             details: evalResult.details,
-            input: lastUserMessage.slice(0, 50),
+            input: rawUserInput.slice(0, 50),
           });
         }
       }).catch(() => { });
 
       // 记录对话质量指标到数据库（异步，不阻塞响应）
-      const conversionInfo = extractConversionInfo(traceSteps.map(s => ({ toolName: s.toolName, result: s.result })));
-      const toolsSucceeded = traceSteps.filter(s => s.result && !(s.result as any)?.error).length;
-      const toolsFailed = traceSteps.length - toolsSucceeded;
+      const conversionInfo = extractConversionInfo(toolCallRecords.map(s => ({ toolName: s.toolName, result: s.result })));
+      const toolsSucceeded = toolCallRecords.filter(s => s.result && !(s.result as any)?.error).length;
+      const toolsFailed = toolCallRecords.length - toolsSucceeded;
 
       recordConversationMetrics({
         userId: userId || undefined,
         intent: intentResult.intent,
         intentConfidence: intentResult.confidence,
         intentRecognized: intentResult.intent !== 'unknown',
-        toolsCalled: traceSteps.map(s => s.toolName),
+        toolsCalled: toolCallRecords.map(s => s.toolName),
         toolsSucceeded,
         toolsFailed,
         inputTokens: totalUsage.promptTokens,
@@ -630,55 +567,55 @@ export async function streamChat(request: ChatRequest): Promise<Response> {
     return result.toUIMessageStreamResponse();
   }
 
-  return wrapWithTrace(result, {
+  return createTracedStreamResponse(result, {
     requestId: randomUUID(),
     startedAt: new Date().toISOString(),
     intent: intentResult,
     systemPrompt,
     tools,
-    traceSteps,
+    toolCallRecords,
     totalUsage,
     aiResponseText,
-    lastUserMessage,
+    rawUserInput,
     source,
     userId: userId || null,
     modelId,
-    // Processor 数据
+    // Processor 数据（从 processorLogs 提取）
     inputGuard: {
-      duration: guardDuration,
+      duration: guardResult.executionTime,
       blocked: false,
-      sanitized: sanitizedMessage,
-      triggeredRules: guardResult.triggeredRules || [],
+      sanitized: sanitizedInput,
+      triggeredRules: [],
     },
-    p0Match: p0MatchData as {
-      matched: boolean;
-      keyword?: string;
-      matchType?: string;
-      priority?: number;
-      responseType?: string;
-      duration: number;
+    keywordMatch: {
+      matched: keywordMeta?.matched ?? false,
+      keyword: keywordMeta?.keyword,
+      matchType: keywordMeta?.matchType,
+      priority: keywordMeta?.priority,
+      responseType: keywordMeta?.responseType,
+      duration: keywordResult.executionTime,
     },
-    p1Intent: {
+    intentClassify: {
       intent: intentResult.intent,
       method: intentResult.method,
       confidence: intentResult.confidence,
-      duration: intentDuration,
+      duration: findLogDuration(processorLogs, 'intent-classify-processor'),
     },
     userProfile: {
-      duration: userProfileDuration,
+      duration: findLogDuration(processorLogs, 'user-profile-processor'),
       profile: userProfile,
     },
     semanticRecall: {
-      duration: semanticRecallDuration,
-      query: sanitizedMessage,
-      resultCount: 0,
-      topScore: 0,
+      duration: findLogDuration(processorLogs, 'semantic-recall-processor'),
+      query: sanitizedInput,
+      resultCount: (findLogData(processorLogs, 'semantic-recall-processor') as any)?.resultsCount ?? 0,
+      topScore: (findLogData(processorLogs, 'semantic-recall-processor') as any)?.avgSimilarity ?? 0,
     },
     tokenLimit: {
-      duration: tokenLimitDuration,
-      truncated,
-      originalLength: originalPromptLength,
-      finalLength: systemPrompt.length,
+      duration: findLogDuration(processorLogs, 'token-limit-processor'),
+      truncated: (findLogData(processorLogs, 'token-limit-processor') as any)?.truncated ?? false,
+      originalLength: (findLogData(processorLogs, 'token-limit-processor') as any)?.originalLength ?? 0,
+      finalLength: (findLogData(processorLogs, 'token-limit-processor') as any)?.finalLength ?? 0,
     },
   });
 }
@@ -687,7 +624,17 @@ export async function streamChat(request: ChatRequest): Promise<Response> {
 // 辅助函数
 // ==========================================
 
-function createQuickResponse(text: string, trace?: boolean): Response {
+/** 从 processorLogs 中查找指定处理器的执行时间 */
+function findLogDuration(logs: ProcessorLogEntry[], processorName: string): number {
+  return logs.find(l => l.processorName === processorName)?.executionTime ?? 0;
+}
+
+/** 从 processorLogs 中查找指定处理器的输出数据 */
+function findLogData(logs: ProcessorLogEntry[], processorName: string): Record<string, unknown> | undefined {
+  return logs.find(l => l.processorName === processorName)?.data;
+}
+
+function createDirectResponse(text: string, trace?: boolean): Response {
   const stream = createUIMessageStream({
     execute: ({ writer }) => {
       writer.write({ type: 'text-delta', delta: text, id: randomUUID() });
@@ -738,7 +685,7 @@ async function createKeywordResponse(
           role: 'assistant',
           messageType: keyword.responseType as any,
           content: {
-            ...keyword.responseContent,
+            ...keyword.responseContent as Record<string, unknown>,
             keywordContext,
           },
         });
@@ -1012,16 +959,16 @@ async function _persistConversation(
   }
 }
 
-function wrapWithTrace(result: ReturnType<typeof streamText>, ctx: {
+function createTracedStreamResponse(result: ReturnType<typeof streamText>, ctx: {
   requestId: string;
   startedAt: string;
   intent: ClassifyResult;
   systemPrompt: string;
   tools: Record<string, unknown>;
-  traceSteps: TraceStep[];
+  toolCallRecords: TraceStep[];
   totalUsage: { promptTokens: number; completionTokens: number; totalTokens: number };
   aiResponseText: string;
-  lastUserMessage: string;
+  rawUserInput: string;
   source: string;
   userId: string | null;
   modelId: string;
@@ -1032,7 +979,7 @@ function wrapWithTrace(result: ReturnType<typeof streamText>, ctx: {
     sanitized: string;
     triggeredRules?: string[];
   };
-  p0Match?: {
+  keywordMatch?: {
     matched: boolean;
     keyword?: string;
     matchType?: string;
@@ -1040,7 +987,7 @@ function wrapWithTrace(result: ReturnType<typeof streamText>, ctx: {
     responseType?: string;
     duration: number;
   };
-  p1Intent?: {
+  intentClassify?: {
     intent: string;
     method: string;
     confidence?: number;
@@ -1085,7 +1032,7 @@ function wrapWithTrace(result: ReturnType<typeof streamText>, ctx: {
 
       writer.write({
         type: 'data-trace-step',
-        data: { id: `${ctx.requestId}-input`, type: 'input', name: '用户输入', startedAt: ctx.startedAt, completedAt: ctx.startedAt, status: 'success', duration: 0, data: { text: ctx.lastUserMessage, source: ctx.source, userId: ctx.userId } },
+        data: { id: `${ctx.requestId}-input`, type: 'input', name: '用户输入', startedAt: ctx.startedAt, completedAt: ctx.startedAt, status: 'success', duration: 0, data: { text: ctx.rawUserInput, source: ctx.source, userId: ctx.userId } },
         transient: true,
       });
 
@@ -1119,49 +1066,49 @@ function wrapWithTrace(result: ReturnType<typeof streamText>, ctx: {
         });
       }
 
-      // P0 Match trace
-      if (ctx.p0Match) {
-        const p0CompletedAt = new Date(new Date(ctx.startedAt).getTime() + (ctx.inputGuard?.duration || 0) + ctx.p0Match.duration).toISOString();
+      // P0 关键词匹配 (Keyword Match) trace
+      if (ctx.keywordMatch) {
+        const keywordMatchCompletedAt = new Date(new Date(ctx.startedAt).getTime() + (ctx.inputGuard?.duration || 0) + ctx.keywordMatch.duration).toISOString();
         writer.write({
           type: 'data-trace-step',
           data: {
-            id: `${ctx.requestId}-p0-match`,
-            type: 'p0-match',
+            id: `${ctx.requestId}-keyword-match`,
+            type: 'keyword-match',
             name: 'P0: 关键词匹配',
             startedAt: new Date(new Date(ctx.startedAt).getTime() + (ctx.inputGuard?.duration || 0)).toISOString(),
-            completedAt: p0CompletedAt,
+            completedAt: keywordMatchCompletedAt,
             status: 'success',
-            duration: ctx.p0Match.duration,
+            duration: ctx.keywordMatch.duration,
             data: {
-              matched: ctx.p0Match.matched,
-              keyword: ctx.p0Match.keyword,
-              matchType: ctx.p0Match.matchType,
-              priority: ctx.p0Match.priority,
-              responseType: ctx.p0Match.responseType,
+              matched: ctx.keywordMatch.matched,
+              keyword: ctx.keywordMatch.keyword,
+              matchType: ctx.keywordMatch.matchType,
+              priority: ctx.keywordMatch.priority,
+              responseType: ctx.keywordMatch.responseType,
             },
           },
           transient: true,
         });
       }
 
-      // P1 Intent trace
-      if (ctx.p1Intent) {
-        const p1StartTime = new Date(ctx.startedAt).getTime() + (ctx.inputGuard?.duration || 0) + (ctx.p0Match?.duration || 0);
-        const p1CompletedAt = new Date(p1StartTime + ctx.p1Intent.duration).toISOString();
+      // 意图分类 (Intent Classify) trace
+      if (ctx.intentClassify) {
+        const intentClassifyStartTime = new Date(ctx.startedAt).getTime() + (ctx.inputGuard?.duration || 0) + (ctx.keywordMatch?.duration || 0);
+        const intentClassifyCompletedAt = new Date(intentClassifyStartTime + ctx.intentClassify.duration).toISOString();
         writer.write({
           type: 'data-trace-step',
           data: {
-            id: `${ctx.requestId}-p1-intent`,
-            type: 'p1-intent',
+            id: `${ctx.requestId}-intent-classify`,
+            type: 'intent-classify',
             name: 'P1: 意图识别',
-            startedAt: new Date(p1StartTime).toISOString(),
-            completedAt: p1CompletedAt,
+            startedAt: new Date(intentClassifyStartTime).toISOString(),
+            completedAt: intentClassifyCompletedAt,
             status: 'success',
-            duration: ctx.p1Intent.duration,
+            duration: ctx.intentClassify.duration,
             data: {
-              intent: ctx.p1Intent.intent,
-              method: ctx.p1Intent.method,
-              confidence: ctx.p1Intent.confidence,
+              intent: ctx.intentClassify.intent,
+              method: ctx.intentClassify.method,
+              confidence: ctx.intentClassify.confidence,
             },
           },
           transient: true,
@@ -1170,7 +1117,7 @@ function wrapWithTrace(result: ReturnType<typeof streamText>, ctx: {
 
       // User Profile Processor trace
       if (ctx.userProfile) {
-        const profileStartTime = new Date(ctx.startedAt).getTime() + (ctx.inputGuard?.duration || 0) + (ctx.p0Match?.duration || 0) + (ctx.p1Intent?.duration || 0);
+        const profileStartTime = new Date(ctx.startedAt).getTime() + (ctx.inputGuard?.duration || 0) + (ctx.keywordMatch?.duration || 0) + (ctx.intentClassify?.duration || 0);
         const profileCompletedAt = new Date(profileStartTime + ctx.userProfile.duration).toISOString();
         writer.write({
           type: 'data-trace-step',
@@ -1199,7 +1146,7 @@ function wrapWithTrace(result: ReturnType<typeof streamText>, ctx: {
 
       // Semantic Recall Processor trace
       if (ctx.semanticRecall) {
-        const recallStartTime = new Date(ctx.startedAt).getTime() + (ctx.inputGuard?.duration || 0) + (ctx.p0Match?.duration || 0) + (ctx.p1Intent?.duration || 0) + (ctx.userProfile?.duration || 0);
+        const recallStartTime = new Date(ctx.startedAt).getTime() + (ctx.inputGuard?.duration || 0) + (ctx.keywordMatch?.duration || 0) + (ctx.intentClassify?.duration || 0) + (ctx.userProfile?.duration || 0);
         const recallCompletedAt = new Date(recallStartTime + ctx.semanticRecall.duration).toISOString();
         writer.write({
           type: 'data-trace-step',
@@ -1229,7 +1176,7 @@ function wrapWithTrace(result: ReturnType<typeof streamText>, ctx: {
 
       // Token Limit Processor trace
       if (ctx.tokenLimit) {
-        const tokenStartTime = new Date(ctx.startedAt).getTime() + (ctx.inputGuard?.duration || 0) + (ctx.p0Match?.duration || 0) + (ctx.p1Intent?.duration || 0) + (ctx.userProfile?.duration || 0) + (ctx.semanticRecall?.duration || 0);
+        const tokenStartTime = new Date(ctx.startedAt).getTime() + (ctx.inputGuard?.duration || 0) + (ctx.keywordMatch?.duration || 0) + (ctx.intentClassify?.duration || 0) + (ctx.userProfile?.duration || 0) + (ctx.semanticRecall?.duration || 0);
         const tokenCompletedAt = new Date(tokenStartTime + ctx.tokenLimit.duration).toISOString();
         writer.write({
           type: 'data-trace-step',
@@ -1275,7 +1222,7 @@ function wrapWithTrace(result: ReturnType<typeof streamText>, ctx: {
             transient: true,
           });
 
-          for (const step of ctx.traceSteps) {
+          for (const step of ctx.toolCallRecords) {
             writer.write({
               type: 'data-trace-step',
               data: { id: `${ctx.requestId}-tool-${step.toolCallId}`, type: 'tool', name: getToolDisplayName(step.toolName), startedAt: llmCompletedAt, completedAt: llmCompletedAt, status: 'success', duration: 0, data: { toolName: step.toolName, toolDisplayName: getToolDisplayName(step.toolName), input: step.args, output: step.result, widgetType: getToolWidgetType(step.toolName) } },
@@ -1289,13 +1236,13 @@ function wrapWithTrace(result: ReturnType<typeof streamText>, ctx: {
           // Output step
           writer.write({
             type: 'data-trace-step',
-            data: { id: `${ctx.requestId}-output`, type: 'output', name: '输出', startedAt: llmCompletedAt, completedAt, status: 'success', duration: totalDuration, data: { text: ctx.aiResponseText || '', toolCallCount: ctx.traceSteps.length } },
+            data: { id: `${ctx.requestId}-output`, type: 'output', name: '输出', startedAt: llmCompletedAt, completedAt, status: 'success', duration: totalDuration, data: { text: ctx.aiResponseText || '', toolCallCount: ctx.toolCallRecords.length } },
             transient: true,
           });
 
           writer.write({
             type: 'data-trace-end',
-            data: { requestId: ctx.requestId, completedAt, totalDuration, status: 'completed', output: { text: ctx.aiResponseText || null, toolCalls: ctx.traceSteps.map(s => ({ name: s.toolName, input: s.args, output: s.result })) } },
+            data: { requestId: ctx.requestId, completedAt, totalDuration, status: 'completed', output: { text: ctx.aiResponseText || null, toolCalls: ctx.toolCallRecords.map(s => ({ name: s.toolName, input: s.args, output: s.result })) } },
             transient: true,
           });
         },

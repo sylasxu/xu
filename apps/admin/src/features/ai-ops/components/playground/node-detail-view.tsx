@@ -2,7 +2,7 @@
  * NodeDetailView Component
  *
  * Drawer 节点详情视图：根据节点 type 渲染对应的详情内容
- * 严格对齐后端 wrapWithTrace 发送的 data-trace-step 数据
+ * 严格对齐后端 createTracedStreamResponse 发送的 data-trace-step 数据
  */
 
 import { useState } from 'react'
@@ -115,9 +115,9 @@ function NodeContent({
   switch (data.type) {
     case 'input':
       return <InputDetail data={data} />
-    case 'p0-match':
+    case 'keyword-match':
       return <P0MatchDetail data={data} />
-    case 'p1-intent':
+    case 'intent-classify':
       return <P1IntentDetail data={data} />
     case 'processor':
       return <ProcessorDetail data={data} />
@@ -303,7 +303,7 @@ function ProcessorDetail({ data }: { data: FlowNodeData & { type: 'processor' } 
 }
 
 /** P0 Match 详情 */
-function P0MatchDetail({ data }: { data: FlowNodeData & { type: 'p0-match' } }) {
+function P0MatchDetail({ data }: { data: FlowNodeData & { type: 'keyword-match' } }) {
   return (
     <div className="space-y-3">
       <DetailRow label="命中状态">
@@ -336,7 +336,7 @@ function P0MatchDetail({ data }: { data: FlowNodeData & { type: 'p0-match' } }) 
 }
 
 /** P1 Intent 详情 */
-function P1IntentDetail({ data }: { data: FlowNodeData & { type: 'p1-intent' } }) {
+function P1IntentDetail({ data }: { data: FlowNodeData & { type: 'intent-classify' } }) {
   const intentLabel = INTENT_DISPLAY_NAMES[data.intent as IntentType] ?? data.intent
   const methodLabel = INTENT_METHOD_NAMES[data.method] ?? data.method
 

@@ -2361,13 +2361,29 @@ J2C 转化率 = 先参局后组局的用户数 / 历史总参与者数
 - **用户管理**：用户列表、权限管理、行为分析
 - **活动管理**：活动列表、审核、数据分析
 - **热词管理**：P0 层全局关键词配置、响应内容编辑、统计分析
-- **AI Playground**：Mastra 风格的全屏 AI 调试面板（v4.8 重构）
+- **AI 参数配置** (v5.1 新增)：AI 系统可配置参数的可视化管理
+  - Tab 分类展示：意图分类、记忆系统、模型路由、处理器管线
+  - Feature_Combination 规则编辑器：新增/修改/删除意图分类规则（intent、signals、baseConfidence、signalBoost、maxConfidence），保存时校验规则格式
+  - Few-shot 样例编辑器：新增/修改/删除标注样例（input、intent、explanation），限制 5-8 个
+  - 模型路由编辑器：配置意图→模型映射、降级策略、重试参数
+  - 处理器管线编辑器：调整处理器执行顺序、启用/禁用处理器、配置并行组
+  - 配置版本历史：展示变更历史列表（版本号、修改时间、修改人），支持一键回滚到任意历史版本
+- **AI Playground** (v5.1 增强)：Mastra 风格的全屏 AI 调试面板
   - 全屏 Flow Graph 画布：7 层分层布局预渲染完整管线（Input → Input Guard/P0 Match → P1 Intent → User Profile/Semantic Recall/Token Limit → LLM → Tool(s) → Output）
   - 灰度优先视觉：pending 灰色虚线、running 蓝色脉冲、success 边框加深、error 红色、skipped 半透明
   - 三合一 Drawer（480px Sheet）：对话视图（useChat + Tool 结果卡片 + 欢迎状态）、配置视图（Mock 身份/位置 + Qwen3 模型选择 + Temperature/MaxTokens + Trace 开关）、节点详情视图（按节点类型渲染调试信息）
+  - 处理器瀑布图 (v5.1 新增)：以瀑布图形式展示每个处理器的名称、执行时间条形图、输入/输出摘要，点击打开详情 Drawer
+  - 处理器参数配置 (v5.1 新增)：在节点详情 Drawer 中为可配置处理器展示参数表单（semantic-recall 相似度阈值/top-K/rerank 开关、token-limit 最大 Token 数、intent-classify P1→P2 升级阈值等），修改后通过配置 API 实时保存
+  - Tool Calls 时间线 (v5.1 新增)：以时间线形式展示每个 Tool 的名称、输入参数、返回结果和执行耗时
+  - 意图分类 Trace (v5.1 新增)：展示分类层级（P0/P1/P2）、匹配模式、置信度分数和分类耗时
+  - System Prompt Diff (v5.1 新增)：展示最终系统提示词，高亮标注各注入段落来源，支持与基础模板的 diff 对比
+  - Memory Inspector (v5.1 新增)：展示当前用户的 Working Memory 内容（偏好类别、情感、置信度、mentionCount、最后更新时间）
+  - 意图分类 A/B 对比 (v5.1 新增)：对同一输入分别展示 P0/P1/P2 的分类结果及置信度
+  - 用户画像模拟 (v5.1 新增)：手动编辑 EnhancedUserProfile，以模拟画像重新执行请求观察个性化效果差异
+  - 会话回放 (v5.1 新增)：选择历史会话按时间顺序逐条回放消息，展示每条消息对应的 Trace 数据
   - 实时状态流转：SSE trace 数据驱动节点依次亮起，P0 命中时后续节点标记为 skipped
   - 多轮追踪：轮次选择器切换查看不同轮次的 trace 状态
-  - 会话统计浮层：模型名称、轮次数、Token 消耗、耗时、费用估算（Qwen3 定价）
+  - 会话统计浮层：模型名称、轮次数、Token 消耗、耗时、费用估算（Qwen3 定价，v5.1 增加预估成本字段）
 
 **J2C 转化率 SQL**：
 ```sql

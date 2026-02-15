@@ -39,7 +39,9 @@ export type {
 } from './widgets';
 
 // ============ Registry ============
-export { getToolNamesForIntent, getToolsForIntent, getAllTools, getTool } from './registry';
+export { resolveToolsForIntent, getToolNamesByIntent, getAllTools, getTool } from './registry';
+// 向后兼容（已废弃）
+export { getToolNamesForIntent, getToolsForIntent } from './registry';
 
 // ============ Activity Tools ============
 export {
@@ -108,15 +110,9 @@ import {
 
 import { exploreNearbyTool } from './explore-nearby';
 
-import {
-  createPartnerIntentTool,
-  getMyIntentsTool,
-  cancelIntentTool,
-  confirmMatchTool,
-} from './partner-tools';
-
 // IntentType 已移至 ../intent/types.ts，这里导入使用
 import type { IntentType } from '../intent/types';
+import { resolveToolsForIntent } from './registry';
 
 /**
  * 获取所有 AI Tools（完整版）
@@ -137,6 +133,7 @@ export function getAIToolsV34(userId: string | null) {
 }
 
 /**
+ * @deprecated 使用 resolveToolsForIntent 替代
  * 根据意图动态获取 Tools（精简版）
  */
 export function getToolsByIntent(
@@ -145,100 +142,8 @@ export function getToolsByIntent(
   hasDraftContext: boolean,
   userLocation?: { lat: number; lng: number } | null
 ) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const tools: Record<string, any> = {};
-  
-  switch (intent) {
-    case 'create':
-      tools.createActivityDraft = createActivityDraftTool(userId);
-      if (hasDraftContext) {
-        tools.refineDraft = refineDraftTool(userId);
-        tools.publishActivity = publishActivityTool(userId);
-      }
-      tools.getDraft = getDraftTool(userId);
-      break;
-      
-    case 'explore':
-      tools.exploreNearby = exploreNearbyTool(userId);
-      tools.getActivityDetail = getActivityDetailTool(userId);
-      tools.joinActivity = joinActivityTool(userId);
-      tools.askPreference = askPreferenceTool(userId);
-      tools.createPartnerIntent = createPartnerIntentTool(userId, userLocation || null);
-      break;
-      
-    case 'manage':
-      tools.getMyActivities = getMyActivitiesTool(userId);
-      tools.cancelActivity = cancelActivityTool(userId);
-      tools.getActivityDetail = getActivityDetailTool(userId);
-      break;
-      
-    case 'partner':
-      tools.createPartnerIntent = createPartnerIntentTool(userId, userLocation || null);
-      tools.getMyIntents = getMyIntentsTool(userId);
-      tools.cancelIntent = cancelIntentTool(userId);
-      tools.confirmMatch = confirmMatchTool(userId);
-      tools.askPreference = askPreferenceTool(userId);
-      break;
-    
-    // 新增的意图类型处理
-    case 'modify':
-      // 修改意图 - 类似 create，但更侧重修改现有草稿
-      if (hasDraftContext) {
-        tools.refineDraft = refineDraftTool(userId);
-        tools.publishActivity = publishActivityTool(userId);
-      }
-      tools.getDraft = getDraftTool(userId);
-      tools.createActivityDraft = createActivityDraftTool(userId);
-      break;
-    
-    case 'confirm':
-      // 确认意图 - 发布活动或确认匹配
-      if (hasDraftContext) {
-        tools.publishActivity = publishActivityTool(userId);
-      }
-      tools.confirmMatch = confirmMatchTool(userId);
-      break;
-    
-    case 'deny':
-    case 'cancel':
-      // 拒绝/取消意图
-      tools.cancelActivity = cancelActivityTool(userId);
-      tools.cancelIntent = cancelIntentTool(userId);
-      break;
-    
-    case 'share':
-      // 分享意图 - 获取活动详情用于分享
-      tools.getActivityDetail = getActivityDetailTool(userId);
-      tools.getMyActivities = getMyActivitiesTool(userId);
-      break;
-    
-    case 'join':
-      // 报名意图
-      tools.exploreNearby = exploreNearbyTool(userId);
-      tools.getActivityDetail = getActivityDetailTool(userId);
-      tools.joinActivity = joinActivityTool(userId);
-      break;
-    
-    case 'show_activity':
-      // 展示活动意图
-      tools.getMyActivities = getMyActivitiesTool(userId);
-      tools.getActivityDetail = getActivityDetailTool(userId);
-      break;
-      
-    case 'idle':
-    case 'chitchat':
-      // 闲聊/空闲 - 不提供工具
-      break;
-      
-    case 'unknown':
-    default:
-      // 未知意图 - 提供基础工具集
-      tools.createActivityDraft = createActivityDraftTool(userId);
-      tools.exploreNearby = exploreNearbyTool(userId);
-      tools.askPreference = askPreferenceTool(userId);
-      tools.createPartnerIntent = createPartnerIntentTool(userId, userLocation || null);
-      break;
-  }
-  
-  return tools;
+  return resolveToolsForIntent(userId, intent, {
+    hasDraftContext,
+    location: userLocation,
+  });
 }

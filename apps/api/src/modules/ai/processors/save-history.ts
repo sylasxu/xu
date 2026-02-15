@@ -17,7 +17,7 @@ import { db, conversations, conversationMessages, eq, sql } from '@juchang/db';
  * 
  * 保存对话历史到数据库
  */
-export async function saveHistory(context: ProcessorContext): Promise<ProcessorResult> {
+export async function saveHistoryProcessor(context: ProcessorContext): Promise<ProcessorResult> {
   const startTime = Date.now();
   
   try {
@@ -34,7 +34,7 @@ export async function saveHistory(context: ProcessorContext): Promise<ProcessorR
     }
     
     // 获取或创建会话
-    const conversationId = metadata?.conversationId as string | undefined;
+    const conversationId = metadata.conversationId as string | undefined;
     
     let finalConversationId = conversationId;
     
@@ -75,7 +75,7 @@ export async function saveHistory(context: ProcessorContext): Promise<ProcessorR
     }
     
     if (lastAssistantMessage) {
-      const activityId = metadata?.activityId as string | undefined;
+      const activityId = metadata.activityId as string | undefined;
       
       messagesToSave.push({
         conversationId: finalConversationId,
@@ -123,4 +123,4 @@ export async function saveHistory(context: ProcessorContext): Promise<ProcessorR
 }
 
 // Processor 元数据
-saveHistory.processorName = 'save-history';
+saveHistoryProcessor.processorName = 'save-history-processor';

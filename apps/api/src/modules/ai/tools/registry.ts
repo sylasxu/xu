@@ -3,6 +3,10 @@
  * 
  * 管理所有 AI Tools 的注册和获取
  * 支持按意图动态加载 Tools
+ * 
+ * v4.9: 合并工具解析函数
+ * - resolveToolsForIntent: 统一的工具实例解析入口（合并原 getToolsByIntent + getToolsForIntent）
+ * - getToolNamesByIntent: 统一的工具名称解析入口（合并原 getToolsForIntent(router) + getToolNamesForIntent）
  */
 
 import type { IntentType } from '../intent/types';
@@ -38,15 +42,15 @@ const INTENT_TOOL_MAP: Record<IntentType, string[]> = {
   explore: ['exploreNearby', 'getActivityDetail', 'joinActivity', 'askPreference', 'createPartnerIntent'],
   manage: ['getMyActivities', 'cancelActivity', 'getActivityDetail'],
   partner: ['createPartnerIntent', 'getMyIntents', 'cancelIntent', 'confirmMatch', 'askPreference'],
-  idle: [], // 空闲意图不需要 Tool
-  chitchat: [], // 闲聊意图不需要 Tool
-  modify: ['getDraft', 'refineDraft', 'publishActivity'], // 修改草稿
-  confirm: ['publishActivity', 'confirmMatch'], // 确认操作
-  deny: [], // 拒绝操作
-  cancel: ['cancelActivity', 'cancelIntent'], // 取消操作
-  share: ['getActivityDetail', 'getMyActivities'], // 分享活动
-  join: ['exploreNearby', 'getActivityDetail', 'joinActivity'], // 报名活动
-  show_activity: ['getMyActivities', 'getActivityDetail'], // 展示活动
+  idle: [],
+  chitchat: [],
+  modify: ['getDraft', 'refineDraft', 'publishActivity', 'createActivityDraft'],
+  confirm: ['publishActivity', 'confirmMatch'],
+  deny: [],
+  cancel: ['cancelActivity', 'cancelIntent'],
+  share: ['getActivityDetail', 'getMyActivities'],
+  join: ['exploreNearby', 'getActivityDetail', 'joinActivity'],
+  show_activity: ['getMyActivities', 'getActivityDetail'],
   unknown: ['createActivityDraft', 'exploreNearby', 'askPreference', 'createPartnerIntent'],
 };
 
@@ -74,47 +78,115 @@ const TOOL_FACTORIES: Record<string, ToolFactory> = {
 
 /**
  * 获取意图对应的 Tool 名称列表
- */
-export function getToolNamesForIntent(intent: IntentType): string[] {
-  return INTENT_TOOL_MAP[intent] || INTENT_TOOL_MAP.unknown;
-}
-
-/**
- * 根据意图获取 Tools（动态加载，减少 Token）
  * 
- * @param context - Tool 上下文
+ * 统一入口，合并原 intent/router.ts 的 getToolsForIntent 和 registry.ts 的 getToolNamesForIntent。
+ * 返回 string[]（工具名称），用于日志、trace、条件判断等场景。
+ * 
  * @param intent - 意图类型
- * @param hasDraftContext - 是否有草稿上下文
+ * @param options - 可选的上下文选项，用于动态调整工具列表
  */
-export function getToolsForIntent(
-  context: ToolContext,
+export function getToolNamesByIntent(
   intent: IntentType,
-  hasDraftContext: boolean
-): Record<string, unknown> {
-  const { userId, location } = context;
-  const tools: Record<string, unknown> = {};
-
-  // 根据意图获取 Tool 名称列表
-  let toolNames = getToolNamesForIntent(intent);
+  options: {
+    hasDraftContext?: boolean;
+    hasLocation?: boolean;
+    isLoggedIn?: boolean;
+  } = {}
+): string[] {
+  let toolNames = [...(INTENT_TOOL_MAP[intent] || INTENT_TOOL_MAP.unknown)];
 
   // 创建意图：根据草稿上下文调整
   if (intent === 'create') {
-    if (hasDraftContext) {
+    if (options.hasDraftContext) {
       toolNames = ['refineDraft', 'publishActivity', 'getDraft'];
     } else {
       toolNames = ['createActivityDraft', 'getDraft'];
     }
   }
 
-  // 实例化 Tools
+  // 有草稿上下文时，确保修改意图包含草稿工具
+  if (options.hasDraftContext && intent === 'modify') {
+    if (!toolNames.includes('refineDraft')) toolNames.push('refineDraft');
+    if (!toolNames.includes('publishActivity')) toolNames.push('publishActivity');
+  }
+
+  // 无位置时，explore 意图添加询问偏好工具
+  if (!options.hasLocation && intent === 'explore') {
+    if (!toolNames.includes('askPreference')) {
+      toolNames.unshift('askPreference');
+    }
+  }
+
+  // 未登录时，移除需要登录的工具
+  if (options.isLoggedIn === false) {
+    const loginRequiredTools = [
+      'createActivityDraft', 'publishActivity', 'joinActivity',
+      'cancelActivity', 'getMyActivities', 'createPartnerIntent',
+      'confirmMatch', 'cancelIntent', 'getMyIntents',
+    ];
+    toolNames = toolNames.filter(t => !loginRequiredTools.includes(t));
+  }
+
+  return toolNames;
+}
+
+/**
+ * 统一的工具实例解析入口
+ * 
+ * 合并原 tools/index.ts 的 getToolsByIntent 和 tools/registry.ts 的 getToolsForIntent。
+ * 返回 Record<string, unknown>（实例化的工具对象），用于传递给 LLM。
+ * 
+ * @param userId - 用户 ID
+ * @param intent - 意图类型
+ * @param options - 上下文选项
+ */
+export function resolveToolsForIntent(
+  userId: string | null,
+  intent: IntentType,
+  options: {
+    hasDraftContext?: boolean;
+    location?: { lat: number; lng: number } | null;
+  } = {}
+): Record<string, any> {
+  const toolNames = getToolNamesByIntent(intent, {
+    hasDraftContext: options.hasDraftContext,
+  });
+
+  const tools: Record<string, any> = {};
+
   for (const name of toolNames) {
     const factory = TOOL_FACTORIES[name];
     if (factory) {
-      tools[name] = factory(userId, location);
+      tools[name] = factory(userId, options.location);
     }
   }
 
   return tools;
+}
+
+// ==========================================
+// 向后兼容的旧函数（已废弃，将在后续版本移除）
+// ==========================================
+
+/**
+ * @deprecated 使用 getToolNamesByIntent 替代
+ */
+export function getToolNamesForIntent(intent: IntentType): string[] {
+  return getToolNamesByIntent(intent);
+}
+
+/**
+ * @deprecated 使用 resolveToolsForIntent 替代
+ */
+export function getToolsForIntent(
+  context: ToolContext,
+  intent: IntentType,
+  hasDraftContext: boolean
+): Record<string, unknown> {
+  return resolveToolsForIntent(context.userId, intent, {
+    hasDraftContext,
+    location: context.location,
+  });
 }
 
 /**

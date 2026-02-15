@@ -31,8 +31,8 @@ interface FlowGraphProps {
 
 const nodeTypes: NodeTypes = {
   input: InputNode,
-  'p0-match': P0MatchNode,
-  'p1-intent': P1IntentNode,
+  'keyword-match': P0MatchNode,
+  'intent-classify': P1IntentNode,
   processor: ProcessorNode,
   llm: LLMNode,
   tool: ToolNode,

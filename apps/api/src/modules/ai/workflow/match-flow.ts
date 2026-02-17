@@ -135,7 +135,7 @@ export const matchFlowDefinition: WorkflowDefinition<MatchFlowData> = {
 /**
  * 创建匹配确认流程
  */
-export function createMatchFlow(
+export async function createMatchFlow(
   userId: string,
   matchData: Omit<MatchFlowData, 'confirmed' | 'activityId'>
 ) {

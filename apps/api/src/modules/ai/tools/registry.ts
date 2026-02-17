@@ -1,16 +1,20 @@
 /**
  * Tool Registry - 工具注册表
- * 
+ *
  * 管理所有 AI Tools 的注册和获取
  * 支持按意图动态加载 Tools
- * 
+ *
  * v4.9: 合并工具解析函数
  * - resolveToolsForIntent: 统一的工具实例解析入口（合并原 getToolsByIntent + getToolsForIntent）
  * - getToolNamesByIntent: 统一的工具名称解析入口（合并原 getToolsForIntent(router) + getToolNamesForIntent）
+ *
+ * v5.0: 动态配置
+ * - INTENT_TOOL_MAP 通过 getConfigValue('tools.intent_map', ...) 动态配置
+ * - 清理废弃函数
  */
 
 import type { IntentType } from '../intent/types';
-import type { ToolContext } from './types';
+import { getConfigValue } from '../config/config.service';
 
 // 导入所有 Tool 工厂函数
 import {
@@ -35,9 +39,9 @@ import {
 } from './partner-tools';
 
 /**
- * 意图到 Tool 的映射配置
+ * 意图到 Tool 的默认映射配置
  */
-const INTENT_TOOL_MAP: Record<IntentType, string[]> = {
+const INTENT_TOOL_MAP: Record<string, string[]> = {
   create: ['createActivityDraft', 'getDraft', 'refineDraft', 'publishActivity'],
   explore: ['exploreNearby', 'getActivityDetail', 'joinActivity', 'askPreference', 'createPartnerIntent'],
   manage: ['getMyActivities', 'cancelActivity', 'getActivityDetail'],
@@ -78,22 +82,25 @@ const TOOL_FACTORIES: Record<string, ToolFactory> = {
 
 /**
  * 获取意图对应的 Tool 名称列表
- * 
+ *
  * 统一入口，合并原 intent/router.ts 的 getToolsForIntent 和 registry.ts 的 getToolNamesForIntent。
  * 返回 string[]（工具名称），用于日志、trace、条件判断等场景。
- * 
+ *
+ * v5.0: 映射通过 getConfigValue('tools.intent_map', INTENT_TOOL_MAP) 动态配置
+ *
  * @param intent - 意图类型
  * @param options - 可选的上下文选项，用于动态调整工具列表
  */
-export function getToolNamesByIntent(
+export async function getToolNamesByIntent(
   intent: IntentType,
   options: {
     hasDraftContext?: boolean;
     hasLocation?: boolean;
     isLoggedIn?: boolean;
-  } = {}
-): string[] {
-  let toolNames = [...(INTENT_TOOL_MAP[intent] || INTENT_TOOL_MAP.unknown)];
+  } = {},
+): Promise<string[]> {
+  const intentMap = await getConfigValue('tools.intent_map', INTENT_TOOL_MAP);
+  let toolNames = [...(intentMap[intent] || intentMap.unknown || [])];
 
   // 创建意图：根据草稿上下文调整
   if (intent === 'create') {
@@ -132,23 +139,23 @@ export function getToolNamesByIntent(
 
 /**
  * 统一的工具实例解析入口
- * 
+ *
  * 合并原 tools/index.ts 的 getToolsByIntent 和 tools/registry.ts 的 getToolsForIntent。
  * 返回 Record<string, unknown>（实例化的工具对象），用于传递给 LLM。
- * 
+ *
  * @param userId - 用户 ID
  * @param intent - 意图类型
  * @param options - 上下文选项
  */
-export function resolveToolsForIntent(
+export async function resolveToolsForIntent(
   userId: string | null,
   intent: IntentType,
   options: {
     hasDraftContext?: boolean;
     location?: { lat: number; lng: number } | null;
-  } = {}
-): Record<string, any> {
-  const toolNames = getToolNamesByIntent(intent, {
+  } = {},
+): Promise<Record<string, any>> {
+  const toolNames = await getToolNamesByIntent(intent, {
     hasDraftContext: options.hasDraftContext,
   });
 
@@ -164,51 +171,12 @@ export function resolveToolsForIntent(
   return tools;
 }
 
-// ==========================================
-// 向后兼容的旧函数（已废弃，将在后续版本移除）
-// ==========================================
-
-/**
- * @deprecated 使用 getToolNamesByIntent 替代
- */
-export function getToolNamesForIntent(intent: IntentType): string[] {
-  return getToolNamesByIntent(intent);
-}
-
-/**
- * @deprecated 使用 resolveToolsForIntent 替代
- */
-export function getToolsForIntent(
-  context: ToolContext,
-  intent: IntentType,
-  hasDraftContext: boolean
-): Record<string, unknown> {
-  return resolveToolsForIntent(context.userId, intent, {
-    hasDraftContext,
-    location: context.location,
-  });
-}
-
-/**
- * 获取所有 Tools（完整版，兼容旧代码）
- */
-export function getAllTools(context: ToolContext): Record<string, unknown> {
-  const { userId, location } = context;
-  const tools: Record<string, unknown> = {};
-
-  for (const [name, factory] of Object.entries(TOOL_FACTORIES)) {
-    tools[name] = factory(userId, location);
-  }
-
-  return tools;
-}
-
 /**
  * 获取单个 Tool
  */
 export function getTool(
   name: string,
-  context: ToolContext
+  context: { userId: string | null; location?: { lat: number; lng: number } | null },
 ): unknown | undefined {
   const factory = TOOL_FACTORIES[name];
   if (!factory) return undefined;

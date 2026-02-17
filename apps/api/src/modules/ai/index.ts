@@ -24,7 +24,7 @@ export {
   intentPatterns,
   intentPriority,
   draftModifyPatterns,
-  getToolsForIntent as getToolsForIntentNew,
+  isChitchatIntent,
 } from './intent';
 
 export type {
@@ -36,8 +36,8 @@ export type {
 // Memory Module
 export * from './memory';
 
-// Agent Module (v4.5)
-export * from './agent';
+// Agent Module (v4.5) - 已废弃，功能由 Processor 架构替代
+// export * from './agent'; // REMOVED
 
 // RAG Module (v4.5)
 export * from './rag';
@@ -57,8 +57,12 @@ export {
   // 新版统一入口
   resolveToolsForIntent,
   getToolNamesByIntent,
-  getAllTools,
   getTool,
+  // Executor
+  withTimeout,
+  executeToolWithMetrics,
+  executeTool,
+  executeTools,
   // Tool factories
   createActivityDraftTool,
   getDraftTool,
@@ -77,7 +81,6 @@ export {
   // Legacy exports (deprecated)
   getAIToolsV34,
   getToolsByIntent,
-  getToolNamesForIntent,
 } from './tools';
 
 // Re-export classifyIntent and IntentType from intent module for backward compatibility

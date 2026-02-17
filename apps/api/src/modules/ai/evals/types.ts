@@ -120,6 +120,7 @@ export interface EvalRunResult {
 export const DEFAULT_EVAL_CONFIG = {
   concurrency: 3,
   timeout: 30000,
+  passThreshold: 0.6,
   saveResults: true,
 };
 

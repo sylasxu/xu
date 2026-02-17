@@ -8,6 +8,8 @@
 
 import type { GuardResult, InputGuardConfig, RiskLevel } from './types';
 import { DEFAULT_INPUT_GUARD_CONFIG } from './types';
+import { getConfigValue } from '../config/config.service';
+import { db, aiSensitiveWords, eq } from '@juchang/db';
 
 // 延迟导入避免循环依赖
 let recordSecurityEventFn: ((event: {
@@ -47,7 +49,7 @@ const INJECTION_PATTERNS = [
 ];
 
 /**
- * 敏感词列表（基础）
+ * 敏感词列表（基础硬编码）
  */
 const SENSITIVE_WORDS = [
   // 政治敏感
@@ -61,14 +63,43 @@ const SENSITIVE_WORDS = [
 ];
 
 /**
+ * 动态敏感词缓存（从 ai_sensitive_words 表加载）
+ */
+let cachedDynamicSensitiveWords: string[] | null = null;
+let dynamicCacheExpiry = 0;
+const DYNAMIC_CACHE_TTL = 5 * 60 * 1000; // 5 分钟
+
+/**
+ * 从数据库加载启用状态的敏感词（带 5 分钟内存缓存）
+ */
+async function getDynamicSensitiveWords(): Promise<string[]> {
+  if (cachedDynamicSensitiveWords && Date.now() < dynamicCacheExpiry) {
+    return cachedDynamicSensitiveWords;
+  }
+  try {
+    const rows = await db
+      .select({ word: aiSensitiveWords.word })
+      .from(aiSensitiveWords)
+      .where(eq(aiSensitiveWords.isActive, true));
+    cachedDynamicSensitiveWords = rows.map(r => r.word);
+    dynamicCacheExpiry = Date.now() + DYNAMIC_CACHE_TTL;
+    return cachedDynamicSensitiveWords;
+  } catch {
+    // 数据库加载失败时返回已有缓存或空数组
+    return cachedDynamicSensitiveWords ?? [];
+  }
+}
+
+/**
  * 检查输入
  */
-export function checkInput(
+export async function checkInput(
   input: string,
   config: Partial<InputGuardConfig> = {},
   context?: { userId?: string }
-): GuardResult {
-  const cfg = { ...DEFAULT_INPUT_GUARD_CONFIG, ...config };
+): Promise<GuardResult> {
+  const dynamicConfig = await getConfigValue<Partial<InputGuardConfig>>('guardrails.input_config', {});
+  const cfg = { ...DEFAULT_INPUT_GUARD_CONFIG, ...dynamicConfig, ...config };
   const triggeredRules: string[] = [];
   let riskLevel: RiskLevel = 'low';
   let triggerWord: string | undefined;
@@ -109,8 +140,10 @@ export function checkInput(
   
   // 3. 敏感词检测
   if (cfg.enableSensitiveWordDetection) {
+    const dynamicWords = await getDynamicSensitiveWords();
     const allSensitiveWords = [
       ...SENSITIVE_WORDS,
+      ...dynamicWords,
       ...(cfg.customSensitiveWords || []),
     ];
     
@@ -187,8 +220,8 @@ export function sanitizeInput(input: string): string {
 /**
  * 快速检查（仅检查是否应该阻止）
  */
-export function shouldBlock(input: string): boolean {
-  const result = checkInput(input);
+export async function shouldBlock(input: string): Promise<boolean> {
+  const result = await checkInput(input);
   return result.blocked;
 }
 

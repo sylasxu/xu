@@ -142,7 +142,7 @@ export const draftFlowDefinition: WorkflowDefinition<DraftFlowData> = {
 /**
  * 创建草稿确认流程
  */
-export function createDraftFlow(
+export async function createDraftFlow(
   userId: string,
   draft: Omit<DraftFlowData, 'modifications' | 'published'>
 ) {

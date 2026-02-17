@@ -28,5 +28,5 @@ export {
 
 // Router
 export {
-  getToolsForIntent,
+  isChitchatIntent,
 } from './router';

@@ -11,6 +11,7 @@
 
 import { db, aiConversationMetrics } from '@juchang/db';
 import { createLogger } from './logger';
+import { getConfigValue } from '../config/config.service';
 
 const logger = createLogger('quality-metrics');
 
@@ -39,6 +40,9 @@ export interface ConversationMetricsData {
   // 性能
   latencyMs?: number;
   
+  // 输出
+  outputLength?: number;
+  
   // 转化追踪
   activityCreated?: boolean;
   activityJoined?: boolean;
@@ -49,26 +53,46 @@ export interface ConversationMetricsData {
 }
 
 /**
- * 计算对话质量评分
- * 
- * 公式：0.4 * intentConfidence + 0.6 * (toolsSucceeded / max(toolsCalled.length, 1))
- * 
- * - 意图识别置信度占 40%
- * - Tool 调用成功率占 60%
+ * 计算对话质量评分（四维加权）
+ *
+ * 公式：intent * w1 + tool * w2 + latency * w3 + length * w4
+ *
+ * - 意图识别置信度（默认权重 0.3）
+ * - Tool 调用成功率（默认权重 0.3）
+ * - 延迟合理性（默认权重 0.2）：< 3s 满分，3-10s 线性衰减，> 10s 为 0
+ * - 输出长度合理性（默认权重 0.2）：10-2000 字符满分，< 10 为 0.3，> 2000 为 0.7
  */
-export function calculateQualityScore(data: ConversationMetricsData): number {
-  const intentConfidence = data.intentConfidence ?? 0.5;
+export async function calculateQualityScore(data: ConversationMetricsData): Promise<number> {
+  const weights = await getConfigValue('quality.score_weights', {
+    intent: 0.3,
+    tool: 0.3,
+    latency: 0.2,
+    length: 0.2,
+  });
+
+  // 意图置信度
+  const intentScore = data.intentConfidence ?? 0.5;
+
+  // Tool 成功率
   const toolsCalled = data.toolsCalled?.length ?? 0;
   const toolsSucceeded = data.toolsSucceeded ?? 0;
-  
-  // 如果没有 Tool 调用，Tool 成功率视为 1（不扣分）
-  const toolSuccessRate = toolsCalled > 0 
-    ? toolsSucceeded / toolsCalled 
-    : 1;
-  
-  const score = 0.4 * intentConfidence + 0.6 * toolSuccessRate;
-  
-  return Math.round(score * 100) / 100; // 保留两位小数
+  const toolScore = toolsCalled > 0 ? toolsSucceeded / toolsCalled : 1;
+
+  // 延迟合理性：< 3s 满分，3-10s 线性衰减，> 10s 为 0
+  const latency = data.latencyMs ?? 3000;
+  const latencyScore = latency <= 3000 ? 1 : latency >= 10000 ? 0 : (10000 - latency) / 7000;
+
+  // 输出长度合理性：10-2000 字符满分，< 10 为 0.3，> 2000 为 0.7
+  const len = data.outputLength ?? 0;
+  const lengthScore = len >= 10 && len <= 2000 ? 1 : len < 10 ? 0.3 : 0.7;
+
+  const score =
+    weights.intent * intentScore +
+    weights.tool * toolScore +
+    weights.latency * latencyScore +
+    weights.length * lengthScore;
+
+  return Math.round(score * 100) / 100;
 }
 
 /**
@@ -76,7 +100,7 @@ export function calculateQualityScore(data: ConversationMetricsData): number {
  */
 export async function recordConversationMetrics(data: ConversationMetricsData): Promise<void> {
   try {
-    const qualityScore = calculateQualityScore(data);
+    const qualityScore = await calculateQualityScore(data);
     
     await db.insert(aiConversationMetrics).values({
       conversationId: data.conversationId || null,

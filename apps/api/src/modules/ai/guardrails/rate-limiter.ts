@@ -6,6 +6,7 @@
 
 import type { RateLimitConfig, RateLimitResult } from './types';
 import { DEFAULT_RATE_LIMIT_CONFIG } from './types';
+import { getConfigValue } from '../config/config.service';
 
 /**
  * 请求记录
@@ -66,12 +67,13 @@ function getRateLimitKey(userId: string | null, endpoint?: string): string {
 /**
  * 检查频率限制
  */
-export function checkRateLimit(
+export async function checkRateLimit(
   userId: string | null,
   config: Partial<RateLimitConfig> = {},
   endpoint?: string
-): RateLimitResult {
-  const cfg = { ...DEFAULT_RATE_LIMIT_CONFIG, ...config };
+): Promise<RateLimitResult> {
+  const dynamicConfig = await getConfigValue<Partial<RateLimitConfig>>('guardrails.rate_limit', {});
+  const cfg = { ...DEFAULT_RATE_LIMIT_CONFIG, ...dynamicConfig, ...config };
   const now = Date.now();
   const windowMs = cfg.windowSeconds * 1000;
   const cutoff = now - windowMs;
@@ -118,12 +120,13 @@ export function checkRateLimit(
 /**
  * 消费配额（不检查，直接记录）
  */
-export function consumeQuota(
+export async function consumeQuota(
   userId: string | null,
   config: Partial<RateLimitConfig> = {},
   endpoint?: string
-): void {
-  const cfg = { ...DEFAULT_RATE_LIMIT_CONFIG, ...config };
+): Promise<void> {
+  const dynamicConfig = await getConfigValue<Partial<RateLimitConfig>>('guardrails.rate_limit', {});
+  const cfg = { ...DEFAULT_RATE_LIMIT_CONFIG, ...dynamicConfig, ...config };
   const key = cfg.perUser && userId 
     ? getRateLimitKey(userId, endpoint)
     : getRateLimitKey(null, endpoint);
@@ -148,12 +151,13 @@ export function resetQuota(userId: string, endpoint?: string): void {
 /**
  * 获取用户当前使用量
  */
-export function getUsage(
+export async function getUsage(
   userId: string | null,
   config: Partial<RateLimitConfig> = {},
   endpoint?: string
-): { used: number; limit: number } {
-  const cfg = { ...DEFAULT_RATE_LIMIT_CONFIG, ...config };
+): Promise<{ used: number; limit: number }> {
+  const dynamicConfig = await getConfigValue<Partial<RateLimitConfig>>('guardrails.rate_limit', {});
+  const cfg = { ...DEFAULT_RATE_LIMIT_CONFIG, ...dynamicConfig, ...config };
   const key = cfg.perUser && userId 
     ? getRateLimitKey(userId, endpoint)
     : getRateLimitKey(null, endpoint);

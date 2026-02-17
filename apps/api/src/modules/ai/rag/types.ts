@@ -85,6 +85,8 @@ export interface RagConfig {
   batchSize: number;
   /** 批次间延迟 (ms)，默认 100 */
   batchDelayMs: number;
+  /** MaxSim 个性化提升比例，默认 0.2 */
+  maxSimBoostRatio: number;
 }
 
 /**
@@ -97,6 +99,7 @@ export const DEFAULT_RAG_CONFIG: RagConfig = {
   defaultThreshold: 0.5,
   batchSize: 100,
   batchDelayMs: 100,
+  maxSimBoostRatio: 0.2,
 };
 
 /**

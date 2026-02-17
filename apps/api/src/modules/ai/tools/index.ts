@@ -39,9 +39,10 @@ export type {
 } from './widgets';
 
 // ============ Registry ============
-export { resolveToolsForIntent, getToolNamesByIntent, getAllTools, getTool } from './registry';
-// 向后兼容（已废弃）
-export { getToolNamesForIntent, getToolsForIntent } from './registry';
+export { resolveToolsForIntent, getToolNamesByIntent, getTool } from './registry';
+
+// ============ Executor ============
+export { withTimeout, executeToolWithMetrics, executeTool, executeTools } from './executor';
 
 // ============ Activity Tools ============
 export {
@@ -136,11 +137,11 @@ export function getAIToolsV34(userId: string | null) {
  * @deprecated 使用 resolveToolsForIntent 替代
  * 根据意图动态获取 Tools（精简版）
  */
-export function getToolsByIntent(
+export async function getToolsByIntent(
   userId: string | null,
   intent: IntentType,
   hasDraftContext: boolean,
-  userLocation?: { lat: number; lng: number } | null
+  userLocation?: { lat: number; lng: number } | null,
 ) {
   return resolveToolsForIntent(userId, intent, {
     hasDraftContext,

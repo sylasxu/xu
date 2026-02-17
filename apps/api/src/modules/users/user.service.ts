@@ -214,3 +214,11 @@ export async function setUserQuotaBatch(userIds: string[], quota: number): Promi
 
   return { updatedCount: result.length };
 }
+/**
+ * 根据用户 ID 获取昵称
+ */
+export async function getUserNickname(userId: string): Promise<string | undefined> {
+  const [user] = await db.select({ nickname: users.nickname }).from(users).where(eq(users.id, userId)).limit(1);
+  return user?.nickname || undefined;
+}
+

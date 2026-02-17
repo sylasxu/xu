@@ -12,7 +12,7 @@
 
 import type { LanguageModel } from 'ai';
 import { deepseekProvider } from './adapters/deepseek';
-import { qwenProvider, getQwenEmbeddings, qwenRerank, getQwenModelByIntent } from './adapters/qwen';
+import { qwenProvider, getQwenEmbeddings, qwenRerank } from './adapters/qwen';
 import type { ModelProvider, ModelProviderName, FallbackConfig, RerankResponse } from './types';
 import { DEFAULT_FALLBACK_CONFIG, ACTIVE_MODELS } from './types';
 import { getConfigValue } from '../config/config.service';
@@ -102,16 +102,28 @@ export function getDefaultChatModel(): LanguageModel {
 }
 
 /**
- * 按意图获取模型 (v4.6 新增)
+ * 默认意图→模型映射
+ */
+const DEFAULT_INTENT_MAP: Record<string, string> = {
+  chat: ACTIVE_MODELS.CHAT_PRIMARY,       // qwen-flash
+  reasoning: ACTIVE_MODELS.REASONING,     // qwen-plus
+  agent: ACTIVE_MODELS.AGENT,             // qwen-max
+  vision: ACTIVE_MODELS.VISION,           // qwen-vl-max
+};
+
+/**
+ * 按意图获取模型 (v4.6)
  * 
- * 根据业务意图选择最合适的模型：
+ * 通过 getConfigValue 动态读取意图→模型映射，支持后台切换：
  * - chat: qwen-flash (极速闲聊)
  * - reasoning: qwen-plus (深度思考，找搭子/复杂匹配)
- * - agent: qwen3-max (精准 Tool Calling)
- * - vision: qwen3-vl-plus (视觉理解)
+ * - agent: qwen-max (精准 Tool Calling)
+ * - vision: qwen-vl-max (视觉理解)
  */
-export function getModelByIntent(intent: 'chat' | 'reasoning' | 'agent' | 'vision'): LanguageModel {
-  return getQwenModelByIntent(intent);
+export async function getModelByIntent(intent: 'chat' | 'reasoning' | 'agent' | 'vision'): Promise<LanguageModel> {
+  const intentMap = await getConfigValue<Record<string, string>>('model.intent_map', DEFAULT_INTENT_MAP);
+  const modelId = intentMap[intent] || DEFAULT_INTENT_MAP[intent] || ACTIVE_MODELS.CHAT_PRIMARY;
+  return getChatModel(modelId);
 }
 
 /**
@@ -128,7 +140,14 @@ export async function rerank(
 }
 
 /**
+ * 默认最大重试延迟（30 秒）
+ */
+const DEFAULT_MAX_RETRY_DELAY = 30_000;
+
+/**
  * 执行带重试的操作
+ * 
+ * v4.6: 指数退避增加 MAX_RETRY_DELAY 上限，通过 getConfigValue 动态配置
  */
 export async function withRetry<T>(
   operation: () => Promise<T>,
@@ -140,6 +159,7 @@ export async function withRetry<T>(
 ): Promise<T> {
   const maxRetries = options?.maxRetries ?? fallbackConfig.maxRetries;
   const retryDelay = options?.retryDelay ?? fallbackConfig.retryDelay;
+  const maxRetryDelay = await getConfigValue('model.max_retry_delay', DEFAULT_MAX_RETRY_DELAY);
 
   let lastError: unknown;
 
@@ -151,8 +171,11 @@ export async function withRetry<T>(
 
       if (attempt < maxRetries) {
         options?.onRetry?.(attempt + 1, error);
-        // 指数退避 + 随机抖动
-        const delay = retryDelay * Math.pow(2, attempt) * (0.5 + Math.random() * 0.5);
+        // 指数退避 + 随机抖动，受 maxRetryDelay 上限约束
+        const delay = Math.min(
+          retryDelay * Math.pow(2, attempt) * (0.5 + Math.random() * 0.5),
+          maxRetryDelay,
+        );
         await sleep(delay);
       }
     }
@@ -199,16 +222,18 @@ export async function checkProviderHealth(
 
 /**
  * 检查所有提供商健康状态
+ * 
+ * v4.6: 检查实际使用的 qwen + deepseek（替换已弃用的 zhipu）
  */
 export async function checkAllProvidersHealth(): Promise<Partial<Record<ModelProviderName, boolean>>> {
   const results = await Promise.all([
+    checkProviderHealth('qwen'),
     checkProviderHealth('deepseek'),
-    checkProviderHealth('zhipu'),
   ]);
 
   return {
-    deepseek: results[0],
-    zhipu: results[1],
+    qwen: results[0],
+    deepseek: results[1],
   };
 }
 

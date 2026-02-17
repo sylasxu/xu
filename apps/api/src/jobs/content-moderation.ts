@@ -37,7 +37,7 @@ export async function runContentModeration(): Promise<void> {
     let mediumRiskCount = 0;
 
     for (const activity of recentActivities) {
-      const result = analyzeContent(activity.title, activity.description);
+      const result = await analyzeContent(activity.title, activity.description);
       
       if (result.riskLevel === 'high') {
         highRiskCount++;

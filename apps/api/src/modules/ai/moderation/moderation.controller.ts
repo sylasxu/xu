@@ -52,7 +52,7 @@ export const moderationController = new Elysia({ prefix: '/ai/moderation' })
   .post(
     '/check',
     async ({ body }) => {
-      const result = analyzeContent(body.title, body.description);
+      const result = await analyzeContent(body.title, body.description);
       return {
         ...result,
         activityId: 'preview',

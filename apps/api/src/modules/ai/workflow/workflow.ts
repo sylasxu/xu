@@ -13,6 +13,7 @@ import type {
   WorkflowStepResult,
   WorkflowEvent,
 } from './types';
+import { getConfigValue } from '../config/config.service';
 
 /**
  * 内存工作流存储（后续可替换为 Redis）
@@ -22,10 +23,16 @@ const workflowStore = new Map<string, WorkflowState>();
 /**
  * 创建工作流
  */
-export function createWorkflow<TData>(
+export async function createWorkflow<TData>(
   definition: WorkflowDefinition<TData>,
   userId: string
-): WorkflowState<TData> {
+): Promise<WorkflowState<TData>> {
+  // 超限淘汰
+  const maxSize = await getConfigValue('workflow.max_store_size', 1000);
+  if (workflowStore.size >= maxSize) {
+    evictOldestEntries(maxSize);
+  }
+
   const now = new Date();
   const state: WorkflowState<TData> = {
     id: randomUUID(),
@@ -220,3 +227,43 @@ export function canContinue(workflowId: string): boolean {
   const state = getWorkflow(workflowId);
   return state !== null && state.status === 'pending';
 }
+
+/**
+ * 淘汰最早的条目，优先淘汰过期条目，再按 createdAt 淘汰
+ */
+function evictOldestEntries(maxSize: number): void {
+  const now = new Date();
+
+  // 先淘汰所有过期条目
+  for (const [id, state] of workflowStore.entries()) {
+    if (workflowStore.size < maxSize) return;
+    if (state.expiresAt && now > state.expiresAt) {
+      workflowStore.delete(id);
+    }
+  }
+
+  // 仍然超限，按 createdAt 淘汰最早的
+  if (workflowStore.size >= maxSize) {
+    const sorted = [...workflowStore.entries()].sort(
+      (a, b) => a[1].createdAt.getTime() - b[1].createdAt.getTime()
+    );
+    const toRemove = workflowStore.size - maxSize + 1; // 腾出至少 1 个位置
+    for (let i = 0; i < toRemove && i < sorted.length; i++) {
+      workflowStore.delete(sorted[i][0]);
+    }
+  }
+}
+
+/**
+ * 定时清理任务（5 分钟间隔）
+ * 模块初始化时自动启动
+ */
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+
+setInterval(() => {
+  const cleaned = cleanupExpiredWorkflows();
+  if (cleaned > 0) {
+    console.log(`[Workflow] 定时清理：已清理 ${cleaned} 个过期工作流，剩余 ${workflowStore.size} 个`);
+  }
+}, CLEANUP_INTERVAL_MS);
+

@@ -204,6 +204,51 @@ export const lengthScorer: Scorer = {
 };
 
 /**
+ * 中文输出质量评分器
+ * 
+ * 检测中文输出质量：非空、长度合理、无乱码/截断
+ */
+export const chineseQualityScorer: Scorer = {
+  name: 'chineseQuality',
+  description: '中文输出质量评分',
+  weight: 1.0,
+  score: async (_sample: EvalSample, result: EvalResult): Promise<number> => {
+    const output = result.actualOutput;
+
+    // 1. 非空检查
+    if (!output || output.trim().length === 0) return 0;
+
+    let score = 1.0;
+
+    // 2. 长度合理性：10-2000 字符为理想范围
+    const len = output.length;
+    if (len < 10) score -= 0.4;
+    else if (len > 2000) score -= 0.2;
+
+    // 3. 乱码检测：连续不可读字符（非中日韩、非ASCII可打印、非常见标点/emoji）
+    const garbledPattern = /[\uFFFD]{2,}|[\x00-\x08\x0E-\x1F]{2,}/;
+    if (garbledPattern.test(output)) score -= 0.3;
+
+    // 4. 截断检测：以不完整的句子结尾（无标点且非自然结尾）
+    const lastChar = output.trim().slice(-1);
+    const naturalEndings = /[。！？~～…）》」』\]\)!?.]/;
+    const endsWithChinese = /[\u4e00-\u9fff]/;
+    // 如果最后一个字符既不是标点也不是中文字符，可能被截断
+    if (!naturalEndings.test(lastChar) && !endsWithChinese.test(lastChar) && len > 50) {
+      score -= 0.2;
+    }
+
+    // 5. 高比例替换字符（U+FFFD）检测
+    const replacementCount = (output.match(/\uFFFD/g) || []).length;
+    if (replacementCount > 0 && replacementCount / len > 0.05) {
+      score -= 0.3;
+    }
+
+    return Math.max(0, Math.min(1, score));
+  },
+};
+
+/**
  * 默认评分器集合
  */
 export const defaultScorers: Scorer[] = [
@@ -212,6 +257,7 @@ export const defaultScorers: Scorer[] = [
   relevanceScorer,
   toneScorer,
   lengthScorer,
+  chineseQualityScorer,
 ];
 
 /**

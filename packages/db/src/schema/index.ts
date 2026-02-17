@@ -41,6 +41,9 @@ export * from "./global_keywords";
 // 9. AI Config System (v4.8 AI 参数配置)
 export * from "./ai-configs";
 
+// 10. AI Eval Samples (v4.6 评估结果持久化)
+export * from "./ai-eval-samples";
+
 // 10. Relations (must be last to avoid circular imports)
 export * from "./relations";
 

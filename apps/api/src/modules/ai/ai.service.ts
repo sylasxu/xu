@@ -17,17 +17,11 @@
  */
 
 // ==========================================
-// v4.5 Agent 模块 Re-export
+// v4.5 Agent 模块已废弃，功能由 Processor 架构替代
+// 保留类型别名用于向后兼容
 // ==========================================
-export {
-  streamChat as agentStreamChat,
-  generateChat as agentGenerateChat,
-  toDataStreamResponse,
-  type StreamChatResult,
-  type GenerateChatResult,
-} from './agent';
 
-import { db, users, conversations, conversationMessages, aiRequests, eq, desc, sql, inArray, and } from '@juchang/db';
+import { db, users, conversations, conversationMessages, eq, desc, sql, inArray, and } from '@juchang/db';
 import {
   streamText,
   createUIMessageStream,
@@ -44,22 +38,16 @@ import type { ProcessorLogEntry } from '@juchang/db';
 import { type ClassifyResult } from './intent';
 import { getOrCreateThread, saveMessage, clearUserThreads, deleteThread } from './memory';
 import { resolveToolsForIntent, getToolWidgetType, getToolDisplayName } from './tools';
-import { buildXmlSystemPrompt, type PromptContext, type ActivityDraftForPrompt } from './prompts/xiaoju-v39';
+import { getSystemPrompt, type PromptContext, type ActivityDraftForPrompt } from './prompts';
 import { getModelByIntent } from './models/router';
 // Guardrails
 import { checkRateLimit } from './guardrails/rate-limiter';
+// 辅助函数（从独立模块导入）
+import { getUserNickname } from '../users/user.service';
+import { reverseGeocode } from './utils/geo';
 // Observability
 import { createLogger } from './observability/logger';
-import {
-  countAIRequest,
-  recordAILatency,
-  recordTokenUsage as recordMetricsTokenUsage,
-  recordTokenUsageWithLog,
-} from './observability/metrics';
-import {
-  recordConversationMetrics,
-  extractConversionInfo,
-} from './observability/quality-metrics';
+import { runWithTrace } from './observability/tracer';
 // WorkingMemory (Enhanced)
 import {
   getEnhancedUserProfile,
@@ -71,6 +59,10 @@ import {
   keywordMatchProcessor,
   saveHistoryProcessor,
   extractPreferencesProcessor,
+  outputGuardProcessor,
+  recordMetricsProcessor,
+  persistRequestProcessor,
+  evaluateQualityProcessor,
   runProcessors,
   runPostLLMProcessors,
   runAsyncProcessors,
@@ -88,8 +80,6 @@ import {
   persistPartnerMatchingState,
   type PartnerMatchingState,
 } from './workflow/partner-matching';
-// Evals
-import { evaluateResponseQuality } from './evals/runner';
 // User Action — A2UI (Action-to-UI: 结构化用户操作直接映射为 UI 响应)
 import { handleUserAction, type UserAction } from './user-action';
 
@@ -153,6 +143,7 @@ export async function consumeAIQuota(userId: string): Promise<boolean> {
 // ==========================================
 
 export async function handleChatStream(request: ChatRequest): Promise<Response> {
+  return runWithTrace(async () => {
   const { messages, userId, location, source, draftContext, trace, modelParams, userAction } = request;
   const startTime = Date.now();
 
@@ -207,7 +198,7 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
   const rawUserInput = conversationHistory.filter(m => m.role === 'user').pop()?.content || '';
 
   // 1. 频率限制检查
-  const rateLimitResult = checkRateLimit(userId, { maxRequests: 30, windowSeconds: 60 });
+  const rateLimitResult = await checkRateLimit(userId, { maxRequests: 30, windowSeconds: 60 });
   if (!rateLimitResult.allowed) {
     logger.warn('Rate limit exceeded', { userId, retryAfter: rateLimitResult.retryAfter });
     return createDirectResponse('请求太频繁了，休息一下再来吧～', trace);
@@ -259,7 +250,7 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
     messages: conversationHistory.map(m => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content })),
     rawUserInput,
     userInput: sanitizedInput,
-    systemPrompt: buildXmlSystemPrompt(promptContext),
+    systemPrompt: await getSystemPrompt(promptContext),
     metadata: {},
   };
 
@@ -341,7 +332,7 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
 
   // 7. 获取工具集
   const userLocation = location ? { lat: location[1], lng: location[0] } : null;
-  const tools = resolveToolsForIntent(userId, intentResult.intent, {
+  const tools = await resolveToolsForIntent(userId, intentResult.intent, {
     hasDraftContext: !!draftContext,
     location: userLocation,
   });
@@ -364,7 +355,7 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
   let aiResponseText = '';
   
   // 根据意图选择模型
-  const selectedModel = getModelByIntent(intentResult.intent === 'partner' ? 'reasoning' : 'chat');
+  const selectedModel = await getModelByIntent(intentResult.intent === 'partner' ? 'reasoning' : 'chat');
   
   // 确定 modelId 用于日志记录
   const modelId = intentResult.intent === 'partner' ? 'qwen-plus' : 
@@ -452,43 +443,65 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
         intent: intentResult.intent,
       });
 
-      // 记录指标
-      countAIRequest(modelId, 'success');
-      recordAILatency(modelId, duration);
-      recordMetricsTokenUsage(modelId, totalUsage.promptTokens, totalUsage.completionTokens);
-
-      // 记录 Token 使用量（日志）
-      recordTokenUsageWithLog(userId, {
-        inputTokens: totalUsage.promptTokens,
-        outputTokens: totalUsage.completionTokens,
-        totalTokens: totalUsage.totalTokens,
-        cacheHitTokens: rawUsage.promptCacheHitTokens,
-        cacheMissTokens: rawUsage.promptCacheMissTokens,
-      }, toolCallRecords.map(s => ({ toolName: s.toolName })), {
-        model: modelId,
-        source,
-        intent: intentResult.intent,
-      });
-
-      // ── Post-LLM 阶段：通过管线编排保存对话历史 ──
-      if (userId) {
-        // 构建 Post-LLM context，包含 AI 响应数据
-        const postLLMContext: ProcessorContext = {
-          ...preLLMContext,
-          messages: [
-            ...preLLMContext.messages,
-            { role: 'assistant' as const, content: text || '' },
-          ],
-          metadata: {
-            ...preLLMContext.metadata,
-            conversationId: undefined,
-            activityId: (toolCallRecords.find(tc => (tc.result as any)?.activityId)?.result as any)?.activityId,
+      // ── Post-LLM 阶段：通过管线编排 ──
+      // 构建 Post-LLM context，包含 AI 响应数据和各 Processor 所需的 metadata
+      const postLLMContext: ProcessorContext = {
+        ...preLLMContext,
+        messages: [
+          ...preLLMContext.messages,
+          { role: 'assistant' as const, content: text || '' },
+        ],
+        metadata: {
+          ...preLLMContext.metadata,
+          conversationId: undefined,
+          activityId: (toolCallRecords.find(tc => (tc.result as any)?.activityId)?.result as any)?.activityId,
+          // record-metrics-processor 数据
+          metricsData: {
+            modelId,
+            duration,
+            inputTokens: totalUsage.promptTokens,
+            outputTokens: totalUsage.completionTokens,
+            totalTokens: totalUsage.totalTokens,
+            cacheHitTokens: rawUsage.promptCacheHitTokens,
+            cacheMissTokens: rawUsage.promptCacheMissTokens,
+            toolCalls: toolCallRecords.map(s => ({ toolName: s.toolName })),
+            source,
+            intent: intentResult.intent,
+            userId,
           },
-        };
+          // persist-request-processor 数据
+          persistData: {
+            userId: userId || null,
+            modelId,
+            inputTokens: totalUsage.promptTokens,
+            outputTokens: totalUsage.completionTokens,
+            latencyMs: duration,
+            processorLog: processorLogs,
+            p0MatchKeyword: matchedKeywordId,
+            input: rawUserInput,
+            output: text || '',
+          },
+          // evaluate-quality-processor 数据
+          qualityData: {
+            rawUserInput,
+            aiResponseText: text || '',
+            intent: intentResult.intent,
+            intentConfidence: intentResult.confidence,
+            toolCallRecords: toolCallRecords.map(s => ({ toolName: s.toolName, result: s.result })),
+            userId,
+            inputTokens: totalUsage.promptTokens,
+            outputTokens: totalUsage.completionTokens,
+            totalTokens: totalUsage.totalTokens,
+            latencyMs: duration,
+            source,
+          },
+        },
+      };
 
-        // Post-LLM: save-history（失败时记录日志，不影响响应）
+      if (userId) {
+        // Post-LLM: output-guard → save-history（失败时记录日志，不影响响应）
         const { logs: postLLMLogs } = await runPostLLMProcessors(
-          [{ processor: saveHistoryProcessor }],
+          [{ processor: outputGuardProcessor }, { processor: saveHistoryProcessor }],
           postLLMContext
         );
         processorLogs.push(...postLLMLogs);
@@ -503,62 +516,18 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
           logger.warn('Async processors failed', { error: err.message });
         });
       }
-      
-      // 保存 AI 请求到数据库（包含 Processor 日志）
-      try {
-        await db.insert(aiRequests).values({
-          userId: userId || null,
-          modelId,
-          inputTokens: totalUsage.promptTokens,
-          outputTokens: totalUsage.completionTokens,
-          latencyMs: duration,
-          processorLog: processorLogs,
-          p0MatchKeyword: matchedKeywordId,
-          input: rawUserInput.slice(0, 1000), // 限制长度
-          output: (text || '').slice(0, 1000),
-        });
-      } catch (err) {
-        logger.error('Failed to save AI request to database', { error: err });
-      }
 
-      // 异步评估响应质量（不阻塞响应）
-      evaluateResponseQuality({
-        input: rawUserInput,
-        output: text || '',
-        expectedIntent: intentResult.intent,
-        actualToolCalls: toolCallRecords.map(s => s.toolName),
-      }).then(evalResult => {
-        if (evalResult.score < 0.6) {
-          logger.warn('Low quality response detected', {
-            score: evalResult.score,
-            details: evalResult.details,
-            input: rawUserInput.slice(0, 50),
-          });
-        }
-      }).catch(() => { });
-
-      // 记录对话质量指标到数据库（异步，不阻塞响应）
-      const conversionInfo = extractConversionInfo(toolCallRecords.map(s => ({ toolName: s.toolName, result: s.result })));
-      const toolsSucceeded = toolCallRecords.filter(s => s.result && !(s.result as any)?.error).length;
-      const toolsFailed = toolCallRecords.length - toolsSucceeded;
-
-      recordConversationMetrics({
-        userId: userId || undefined,
-        intent: intentResult.intent,
-        intentConfidence: intentResult.confidence,
-        intentRecognized: intentResult.intent !== 'unknown',
-        toolsCalled: toolCallRecords.map(s => s.toolName),
-        toolsSucceeded,
-        toolsFailed,
-        inputTokens: totalUsage.promptTokens,
-        outputTokens: totalUsage.completionTokens,
-        totalTokens: totalUsage.totalTokens,
-        latencyMs: duration,
-        activityCreated: conversionInfo.activityCreated,
-        activityJoined: conversionInfo.activityJoined,
-        activityId: conversionInfo.activityId,
-        source,
-      }).catch(() => { });
+      // Post-LLM: record-metrics → persist-request → evaluate-quality
+      // 使用 runPostLLMProcessors 确保单个 Processor 失败不影响其他 Processor
+      const { logs: postFinishLogs } = await runPostLLMProcessors(
+        [
+          { processor: recordMetricsProcessor },
+          { processor: persistRequestProcessor },
+          { processor: evaluateQualityProcessor },
+        ],
+        postLLMContext
+      );
+      processorLogs.push(...postFinishLogs);
     },
   });
 
@@ -580,7 +549,8 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
     source,
     userId: userId || null,
     modelId,
-    // Processor 数据（从 processorLogs 提取）
+    // Processor 数据（从 ProcessorContext.metadata 读取）
+    preLLMContext,
     inputGuard: {
       duration: guardResult.executionTime,
       blocked: false,
@@ -595,44 +565,14 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
       responseType: keywordMeta?.responseType,
       duration: keywordResult.executionTime,
     },
-    intentClassify: {
-      intent: intentResult.intent,
-      method: intentResult.method,
-      confidence: intentResult.confidence,
-      duration: findLogDuration(processorLogs, 'intent-classify-processor'),
-    },
-    userProfile: {
-      duration: findLogDuration(processorLogs, 'user-profile-processor'),
-      profile: userProfile,
-    },
-    semanticRecall: {
-      duration: findLogDuration(processorLogs, 'semantic-recall-processor'),
-      query: sanitizedInput,
-      resultCount: (findLogData(processorLogs, 'semantic-recall-processor') as any)?.resultsCount ?? 0,
-      topScore: (findLogData(processorLogs, 'semantic-recall-processor') as any)?.avgSimilarity ?? 0,
-    },
-    tokenLimit: {
-      duration: findLogDuration(processorLogs, 'token-limit-processor'),
-      truncated: (findLogData(processorLogs, 'token-limit-processor') as any)?.truncated ?? false,
-      originalLength: (findLogData(processorLogs, 'token-limit-processor') as any)?.originalLength ?? 0,
-      finalLength: (findLogData(processorLogs, 'token-limit-processor') as any)?.finalLength ?? 0,
-    },
+    processorLogs,
   });
+  }) as Promise<Response>;
 }
 
 // ==========================================
 // 辅助函数
 // ==========================================
-
-/** 从 processorLogs 中查找指定处理器的执行时间 */
-function findLogDuration(logs: ProcessorLogEntry[], processorName: string): number {
-  return logs.find(l => l.processorName === processorName)?.executionTime ?? 0;
-}
-
-/** 从 processorLogs 中查找指定处理器的输出数据 */
-function findLogData(logs: ProcessorLogEntry[], processorName: string): Record<string, unknown> | undefined {
-  return logs.find(l => l.processorName === processorName)?.data;
-}
 
 function createDirectResponse(text: string, trace?: boolean): Response {
   const stream = createUIMessageStream({
@@ -972,7 +912,9 @@ function createTracedStreamResponse(result: ReturnType<typeof streamText>, ctx: 
   source: string;
   userId: string | null;
   modelId: string;
-  // Processor 数据
+  // Pre-LLM 管线上下文（从 metadata 读取各处理器数据）
+  preLLMContext: ProcessorContext;
+  // 独立于管线的 Processor 数据（管线外执行，无法从 metadata 获取）
   inputGuard?: {
     duration: number;
     blocked: boolean;
@@ -987,31 +929,21 @@ function createTracedStreamResponse(result: ReturnType<typeof streamText>, ctx: 
     responseType?: string;
     duration: number;
   };
-  intentClassify?: {
-    intent: string;
-    method: string;
-    confidence?: number;
-    duration: number;
-  };
-  userProfile?: {
-    duration: number;
-    profile: any;
-  };
-  semanticRecall?: {
-    duration: number;
-    query?: string;
-    resultCount?: number;
-    topScore?: number;
-  };
-  tokenLimit?: {
-    duration: number;
-    truncated: boolean;
-    originalLength: number;
-    finalLength: number;
-  };
+  // processorLogs 仅用于获取执行时间（metadata 不存储 duration）
+  processorLogs: import('./processors/types').ProcessorLogEntry[];
 }): Response {
   const llmStartedAt = new Date().toISOString();
   const llmStepId = `step-llm`;
+
+  // 从 ProcessorContext.metadata 读取各处理器数据
+  const { metadata } = ctx.preLLMContext;
+  const intentClassifyMeta = metadata.intentClassify;
+  const userProfileMeta = metadata.userProfile;
+  const semanticRecallMeta = metadata.semanticRecall;
+
+  // 辅助函数：从 processorLogs 获取执行时间
+  const getLogDuration = (name: string) => ctx.processorLogs.find(l => l.processorName === name)?.executionTime ?? 0;
+  const getLogData = (name: string) => ctx.processorLogs.find(l => l.processorName === name)?.data;
 
   const toolsInfo = Object.keys(ctx.tools).map(name => {
     const t = (ctx.tools as any)[name];
@@ -1056,10 +988,7 @@ function createTracedStreamResponse(result: ReturnType<typeof streamText>, ctx: 
                 sanitized: ctx.inputGuard.sanitized,
                 triggeredRules: ctx.inputGuard.triggeredRules || [],
               },
-              config: {
-                maxLength: 500,
-                enabled: true,
-              },
+              config: { maxLength: 500, enabled: true },
             },
           },
           transient: true,
@@ -1091,10 +1020,11 @@ function createTracedStreamResponse(result: ReturnType<typeof streamText>, ctx: 
         });
       }
 
-      // 意图分类 (Intent Classify) trace
-      if (ctx.intentClassify) {
+      // 意图分类 (Intent Classify) trace - 从 metadata 读取
+      if (intentClassifyMeta) {
+        const intentDuration = getLogDuration('intent-classify-processor');
         const intentClassifyStartTime = new Date(ctx.startedAt).getTime() + (ctx.inputGuard?.duration || 0) + (ctx.keywordMatch?.duration || 0);
-        const intentClassifyCompletedAt = new Date(intentClassifyStartTime + ctx.intentClassify.duration).toISOString();
+        const intentClassifyCompletedAt = new Date(intentClassifyStartTime + intentDuration).toISOString();
         writer.write({
           type: 'data-trace-step',
           data: {
@@ -1104,21 +1034,23 @@ function createTracedStreamResponse(result: ReturnType<typeof streamText>, ctx: 
             startedAt: new Date(intentClassifyStartTime).toISOString(),
             completedAt: intentClassifyCompletedAt,
             status: 'success',
-            duration: ctx.intentClassify.duration,
+            duration: intentDuration,
             data: {
-              intent: ctx.intentClassify.intent,
-              method: ctx.intentClassify.method,
-              confidence: ctx.intentClassify.confidence,
+              intent: intentClassifyMeta.intent,
+              method: intentClassifyMeta.method,
+              confidence: intentClassifyMeta.confidence,
             },
           },
           transient: true,
         });
       }
 
-      // User Profile Processor trace
-      if (ctx.userProfile) {
-        const profileStartTime = new Date(ctx.startedAt).getTime() + (ctx.inputGuard?.duration || 0) + (ctx.keywordMatch?.duration || 0) + (ctx.intentClassify?.duration || 0);
-        const profileCompletedAt = new Date(profileStartTime + ctx.userProfile.duration).toISOString();
+      // User Profile Processor trace - 从 metadata 读取
+      if (userProfileMeta) {
+        const profileDuration = getLogDuration('user-profile-processor');
+        const intentDuration = getLogDuration('intent-classify-processor');
+        const profileStartTime = new Date(ctx.startedAt).getTime() + (ctx.inputGuard?.duration || 0) + (ctx.keywordMatch?.duration || 0) + intentDuration;
+        const profileCompletedAt = new Date(profileStartTime + profileDuration).toISOString();
         writer.write({
           type: 'data-trace-step',
           data: {
@@ -1128,26 +1060,27 @@ function createTracedStreamResponse(result: ReturnType<typeof streamText>, ctx: 
             startedAt: new Date(profileStartTime).toISOString(),
             completedAt: profileCompletedAt,
             status: 'success',
-            duration: ctx.userProfile.duration,
+            duration: profileDuration,
             data: {
               processorType: 'user-profile',
-              output: ctx.userProfile.profile ? {
-                preferencesCount: ctx.userProfile.profile.preferences?.length || 0,
-                locationsCount: ctx.userProfile.profile.frequentLocations?.length || 0,
+              output: userProfileMeta.hasProfile ? {
+                preferencesCount: userProfileMeta.preferencesCount || 0,
+                topPreferences: userProfileMeta.topPreferences || [],
               } : {},
-              config: {
-                enabled: true,
-              },
+              config: { enabled: true },
             },
           },
           transient: true,
         });
       }
 
-      // Semantic Recall Processor trace
-      if (ctx.semanticRecall) {
-        const recallStartTime = new Date(ctx.startedAt).getTime() + (ctx.inputGuard?.duration || 0) + (ctx.keywordMatch?.duration || 0) + (ctx.intentClassify?.duration || 0) + (ctx.userProfile?.duration || 0);
-        const recallCompletedAt = new Date(recallStartTime + ctx.semanticRecall.duration).toISOString();
+      // Semantic Recall Processor trace - 从 metadata 读取
+      if (semanticRecallMeta) {
+        const recallDuration = getLogDuration('semantic-recall-processor');
+        const intentDuration = getLogDuration('intent-classify-processor');
+        const profileDuration = getLogDuration('user-profile-processor');
+        const recallStartTime = new Date(ctx.startedAt).getTime() + (ctx.inputGuard?.duration || 0) + (ctx.keywordMatch?.duration || 0) + intentDuration + profileDuration;
+        const recallCompletedAt = new Date(recallStartTime + recallDuration).toISOString();
         writer.write({
           type: 'data-trace-step',
           data: {
@@ -1157,27 +1090,30 @@ function createTracedStreamResponse(result: ReturnType<typeof streamText>, ctx: 
             startedAt: new Date(recallStartTime).toISOString(),
             completedAt: recallCompletedAt,
             status: 'success',
-            duration: ctx.semanticRecall.duration,
+            duration: recallDuration,
             data: {
               processorType: 'semantic-recall',
               output: {
-                query: ctx.semanticRecall.query || '',
-                resultCount: ctx.semanticRecall.resultCount || 0,
-                topScore: ctx.semanticRecall.topScore || 0,
+                query: ctx.preLLMContext.userInput || '',
+                resultCount: semanticRecallMeta.resultsCount || 0,
+                topScore: semanticRecallMeta.avgSimilarity || 0,
               },
-              config: {
-                enabled: true,
-              },
+              config: { enabled: true },
             },
           },
           transient: true,
         });
       }
 
-      // Token Limit Processor trace
-      if (ctx.tokenLimit) {
-        const tokenStartTime = new Date(ctx.startedAt).getTime() + (ctx.inputGuard?.duration || 0) + (ctx.keywordMatch?.duration || 0) + (ctx.intentClassify?.duration || 0) + (ctx.userProfile?.duration || 0) + (ctx.semanticRecall?.duration || 0);
-        const tokenCompletedAt = new Date(tokenStartTime + ctx.tokenLimit.duration).toISOString();
+      // Token Limit Processor trace - 从 processorLogs.data 读取（token-limit 不写 metadata）
+      const tokenLimitData = getLogData('token-limit-processor');
+      if (tokenLimitData) {
+        const tokenDuration = getLogDuration('token-limit-processor');
+        const intentDuration = getLogDuration('intent-classify-processor');
+        const profileDuration = getLogDuration('user-profile-processor');
+        const recallDuration = getLogDuration('semantic-recall-processor');
+        const tokenStartTime = new Date(ctx.startedAt).getTime() + (ctx.inputGuard?.duration || 0) + (ctx.keywordMatch?.duration || 0) + intentDuration + profileDuration + recallDuration;
+        const tokenCompletedAt = new Date(tokenStartTime + tokenDuration).toISOString();
         writer.write({
           type: 'data-trace-step',
           data: {
@@ -1187,18 +1123,15 @@ function createTracedStreamResponse(result: ReturnType<typeof streamText>, ctx: 
             startedAt: new Date(tokenStartTime).toISOString(),
             completedAt: tokenCompletedAt,
             status: 'success',
-            duration: ctx.tokenLimit.duration,
+            duration: tokenDuration,
             data: {
               processorType: 'token-limit',
               output: {
-                truncated: ctx.tokenLimit.truncated,
-                originalLength: ctx.tokenLimit.originalLength,
-                finalLength: ctx.tokenLimit.finalLength,
+                truncated: (tokenLimitData as any)?.truncated ?? false,
+                originalLength: (tokenLimitData as any)?.originalTokens ?? (tokenLimitData as any)?.totalTokens ?? 0,
+                finalLength: (tokenLimitData as any)?.truncatedTokens ?? (tokenLimitData as any)?.totalTokens ?? 0,
               },
-              config: {
-                maxTokens: 12000,
-                enabled: true,
-              },
+              config: { maxTokens: 12000, enabled: true },
             },
           },
           transient: true,
@@ -1251,24 +1184,6 @@ function createTracedStreamResponse(result: ReturnType<typeof streamText>, ctx: 
   });
 
   return createUIMessageStreamResponse({ stream });
-}
-
-async function getUserNickname(userId: string): Promise<string | undefined> {
-  const [user] = await db.select({ nickname: users.nickname }).from(users).where(eq(users.id, userId)).limit(1);
-  return user?.nickname || undefined;
-}
-
-async function reverseGeocode(lat: number, lng: number): Promise<string> {
-  const locations = [
-    { name: '观音桥', lat: 29.5630, lng: 106.5516, radius: 0.02 },
-    { name: '解放碑', lat: 29.5647, lng: 106.5770, radius: 0.02 },
-    { name: '南坪', lat: 29.5230, lng: 106.5516, radius: 0.02 },
-    { name: '沙坪坝', lat: 29.5410, lng: 106.4550, radius: 0.02 },
-  ];
-  for (const loc of locations) {
-    if (Math.sqrt(Math.pow(lat - loc.lat, 2) + Math.pow(lng - loc.lng, 2)) <= loc.radius) return loc.name;
-  }
-  return '附近';
 }
 
 // ==========================================

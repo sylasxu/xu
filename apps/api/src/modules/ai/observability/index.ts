@@ -47,6 +47,7 @@ export { DEFAULT_OBSERVABILITY_CONFIG } from './types';
 
 // Tracer
 export {
+  runWithTrace,
   createTrace,
   getCurrentTraceId,
   getCurrentSpanId,

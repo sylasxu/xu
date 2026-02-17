@@ -6,6 +6,7 @@
 
 import type { GuardResult, OutputGuardConfig, RiskLevel } from './types';
 import { DEFAULT_OUTPUT_GUARD_CONFIG } from './types';
+import { getConfigValue } from '../config/config.service';
 
 /**
  * PII 模式（个人身份信息）
@@ -36,11 +37,12 @@ const HARMFUL_PATTERNS = [
 /**
  * 检查输出
  */
-export function checkOutput(
+export async function checkOutput(
   output: string,
   config: Partial<OutputGuardConfig> = {}
-): GuardResult {
-  const cfg = { ...DEFAULT_OUTPUT_GUARD_CONFIG, ...config };
+): Promise<GuardResult> {
+  const dynamicConfig = await getConfigValue<Partial<OutputGuardConfig>>('guardrails.output_config', {});
+  const cfg = { ...DEFAULT_OUTPUT_GUARD_CONFIG, ...dynamicConfig, ...config };
   const triggeredRules: string[] = [];
   let riskLevel: RiskLevel = 'low';
   
@@ -86,11 +88,12 @@ export function checkOutput(
 /**
  * 清理输出（移除/替换敏感内容）
  */
-export function sanitizeOutput(
+export async function sanitizeOutput(
   output: string,
   config: Partial<OutputGuardConfig> = {}
-): string {
-  const cfg = { ...DEFAULT_OUTPUT_GUARD_CONFIG, ...config };
+): Promise<string> {
+  const dynamicConfig = await getConfigValue<Partial<OutputGuardConfig>>('guardrails.output_config', {});
+  const cfg = { ...DEFAULT_OUTPUT_GUARD_CONFIG, ...dynamicConfig, ...config };
   let sanitized = output;
   
   // 替换 PII
@@ -111,8 +114,8 @@ export function sanitizeOutput(
 /**
  * 快速检查（仅检查是否应该阻止）
  */
-export function shouldBlockOutput(output: string): boolean {
-  const result = checkOutput(output);
+export async function shouldBlockOutput(output: string): Promise<boolean> {
+  const result = await checkOutput(output);
   return result.blocked;
 }
 

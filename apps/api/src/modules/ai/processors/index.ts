@@ -25,6 +25,10 @@ export { semanticRecallProcessor } from './semantic-recall';
 export { tokenLimitProcessor } from './token-limit';
 export { saveHistoryProcessor } from './save-history';
 export { extractPreferencesProcessor } from './extract-preferences';
+export { outputGuardProcessor } from './output-guard';
+export { recordMetricsProcessor } from './record-metrics';
+export { persistRequestProcessor } from './persist-request';
+export { evaluateQualityProcessor } from './evaluate-quality';
 
 // Pipeline 注册表和工厂函数
 export { registerProcessor, buildPreLLMPipeline, clearRegistry } from './pipeline';

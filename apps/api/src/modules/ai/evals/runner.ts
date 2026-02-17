@@ -14,6 +14,8 @@ import type {
 } from './types';
 import { DEFAULT_EVAL_CONFIG } from './types';
 import { defaultScorers } from './scorers';
+import { db, aiEvalSamples } from '@juchang/db';
+import { getConfigValue } from '../config/config.service';
 
 /**
  * 生成运行 ID
@@ -33,7 +35,8 @@ async function evaluateSample(
     toolCalls?: string[];
   }>,
   scorers: Scorer[],
-  timeout: number
+  timeout: number,
+  passThreshold: number
 ): Promise<EvalResult> {
   const startTime = Date.now();
   
@@ -67,8 +70,8 @@ async function evaluateSample(
       }
     }
     
-    // 计算是否通过（所有分数 >= 0.6）
-    result.passed = Object.values(result.scores).every(s => s >= 0.6);
+    // 计算是否通过（所有分数 >= passThreshold）
+    result.passed = Object.values(result.scores).every(s => s >= passThreshold);
     
     return result;
   } catch (error) {
@@ -84,6 +87,45 @@ async function evaluateSample(
 }
 
 /**
+ * 持久化评估结果到 ai_eval_samples 表
+ */
+async function persistEvalResults(
+  runResult: EvalRunResult,
+  dataset: Dataset,
+): Promise<void> {
+  try {
+    const rows = runResult.results.map((result) => {
+      const sample = dataset.samples.find(s => s.id === result.sampleId);
+      const scoreValues = Object.values(result.scores);
+      const totalScore = scoreValues.length > 0
+        ? scoreValues.reduce((a, b) => a + b, 0) / scoreValues.length
+        : 0;
+
+      return {
+        runId: runResult.runId,
+        datasetName: runResult.datasetName,
+        sampleId: result.sampleId,
+        input: sample?.input ?? '',
+        expectedIntent: sample?.expectedIntent ?? null,
+        actualIntent: result.actualIntent ?? null,
+        actualOutput: result.actualOutput || null,
+        scores: result.scores,
+        totalScore: Math.round(totalScore * 1000) / 1000,
+        passed: result.passed,
+        durationMs: result.duration,
+        error: result.error ?? null,
+      };
+    });
+
+    if (rows.length > 0) {
+      await db.insert(aiEvalSamples).values(rows);
+    }
+  } catch (error) {
+    console.error('[Evals] 持久化评估结果失败:', error);
+  }
+}
+
+/**
  * 运行评估
  */
 export async function runEval(
@@ -94,13 +136,17 @@ export async function runEval(
     toolCalls?: string[];
   }>
 ): Promise<EvalRunResult> {
+  // 从动态配置读取默认值
+  const dynamicConfig = await getConfigValue('evals.run_config', DEFAULT_EVAL_CONFIG);
+
   const { 
     dataset, 
     scorers = defaultScorers,
-    concurrency = DEFAULT_EVAL_CONFIG.concurrency,
-    timeout = DEFAULT_EVAL_CONFIG.timeout,
+    concurrency = dynamicConfig.concurrency,
+    timeout = dynamicConfig.timeout,
   } = config;
   
+  const passThreshold = dynamicConfig.passThreshold;
   const runId = generateRunId();
   const startTime = new Date();
   const results: EvalResult[] = [];
@@ -111,7 +157,7 @@ export async function runEval(
   for (let i = 0; i < samples.length; i += concurrency) {
     const batch = samples.slice(i, i + concurrency);
     const batchResults = await Promise.all(
-      batch.map(sample => evaluateSample(sample, executor, scorers, timeout))
+      batch.map(sample => evaluateSample(sample, executor, scorers, timeout, passThreshold))
     );
     results.push(...batchResults);
   }
@@ -135,7 +181,7 @@ export async function runEval(
     }
   }
   
-  return {
+  const runResult: EvalRunResult = {
     runId,
     datasetName: dataset.name,
     startTime,
@@ -147,6 +193,11 @@ export async function runEval(
     averageScores,
     results,
   };
+
+  // 持久化评估结果
+  await persistEvalResults(runResult, dataset);
+
+  return runResult;
 }
 
 /**
@@ -167,9 +218,10 @@ export function createDataset(
 }
 
 /**
- * 小聚评估数据集（示例）
+ * 小聚评估数据集（覆盖所有主要意图类型）
  */
 export const xiaojuEvalDataset: Dataset = createDataset('xiaoju_basic', [
+  // === create 意图（4 个样本） ===
   {
     input: '帮我组个火锅局',
     expectedIntent: 'create',
@@ -177,11 +229,51 @@ export const xiaojuEvalDataset: Dataset = createDataset('xiaoju_basic', [
     tags: ['create', 'food'],
   },
   {
+    input: '周六下午想约人去爬山，帮我发个活动',
+    expectedIntent: 'create',
+    expectedToolCalls: ['createActivityDraft'],
+    tags: ['create', 'outdoor'],
+  },
+  {
+    input: '我想组个剧本杀局，4-6人，今晚7点',
+    expectedIntent: 'create',
+    expectedToolCalls: ['createActivityDraft'],
+    tags: ['create', 'game'],
+  },
+  {
+    input: '发个周末骑行活动，从奥森出发',
+    expectedIntent: 'create',
+    expectedToolCalls: ['createActivityDraft'],
+    tags: ['create', 'sports'],
+  },
+
+  // === explore 意图（4 个样本） ===
+  {
     input: '附近有什么活动',
     expectedIntent: 'explore',
     expectedToolCalls: ['exploreNearby'],
     tags: ['explore'],
   },
+  {
+    input: '看看周围有没有人组饭局',
+    expectedIntent: 'explore',
+    expectedToolCalls: ['exploreNearby'],
+    tags: ['explore', 'food'],
+  },
+  {
+    input: '今天晚上有什么好玩的',
+    expectedIntent: 'explore',
+    expectedToolCalls: ['exploreNearby'],
+    tags: ['explore', 'time'],
+  },
+  {
+    input: '三里屯附近有啥活动可以参加',
+    expectedIntent: 'explore',
+    expectedToolCalls: ['exploreNearby'],
+    tags: ['explore', 'location'],
+  },
+
+  // === partner 意图（4 个样本） ===
   {
     input: '我想找人一起打羽毛球',
     expectedIntent: 'partner',
@@ -189,16 +281,88 @@ export const xiaojuEvalDataset: Dataset = createDataset('xiaoju_basic', [
     tags: ['partner', 'sports'],
   },
   {
+    input: '有没有人周末一起去看电影',
+    expectedIntent: 'partner',
+    expectedToolCalls: ['createPartnerIntent'],
+    tags: ['partner', 'entertainment'],
+  },
+  {
+    input: '想找个搭子一起学英语',
+    expectedIntent: 'partner',
+    expectedToolCalls: ['createPartnerIntent'],
+    tags: ['partner', 'study'],
+  },
+  {
+    input: '找人拼车去机场',
+    expectedIntent: 'partner',
+    expectedToolCalls: ['createPartnerIntent'],
+    tags: ['partner', 'travel'],
+  },
+
+  // === manage 意图（4 个样本） ===
+  {
     input: '取消我的活动',
     expectedIntent: 'manage',
     expectedToolCalls: ['getMyActivities'],
     tags: ['manage'],
   },
   {
+    input: '我报名了哪些活动',
+    expectedIntent: 'manage',
+    expectedToolCalls: ['getMyActivities'],
+    tags: ['manage', 'query'],
+  },
+  {
+    input: '帮我看看我发起的那个火锅局',
+    expectedIntent: 'manage',
+    expectedToolCalls: ['getMyActivities'],
+    tags: ['manage', 'detail'],
+  },
+  {
+    input: '修改一下我那个活动的时间',
+    expectedIntent: 'manage',
+    expectedToolCalls: ['getMyActivities'],
+    tags: ['manage', 'edit'],
+  },
+
+  // === chitchat 意图（4 个样本） ===
+  {
     input: '你好',
     expectedIntent: 'chitchat',
     expectedToolCalls: [],
     tags: ['chitchat'],
+  },
+  {
+    input: '你是谁呀',
+    expectedIntent: 'chitchat',
+    expectedToolCalls: [],
+    tags: ['chitchat', 'identity'],
+  },
+  {
+    input: '今天天气不错',
+    expectedIntent: 'chitchat',
+    expectedToolCalls: [],
+    tags: ['chitchat', 'weather'],
+  },
+  {
+    input: '哈哈哈你好搞笑',
+    expectedIntent: 'chitchat',
+    expectedToolCalls: [],
+    tags: ['chitchat', 'emotion'],
+  },
+
+  // === query 意图（2 个样本） ===
+  {
+    input: '这个活动在哪里集合',
+    expectedIntent: 'query',
+    expectedToolCalls: ['getActivityDetail'],
+    tags: ['query', 'detail'],
+  },
+  {
+    input: '活动还有几个名额',
+    expectedIntent: 'query',
+    expectedToolCalls: ['getActivityDetail'],
+    tags: ['query', 'capacity'],
   },
 ]);
 

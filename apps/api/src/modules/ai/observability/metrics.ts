@@ -5,6 +5,7 @@
  */
 
 import type { MetricPoint, MetricType } from './types';
+import { db, sql, toTimestamp } from '@juchang/db';
 
 /**
  * 指标存储
@@ -312,28 +313,83 @@ export interface ToolStats {
 }
 
 /**
- * 获取每日 Token 使用统计（返回空数组，未来可接入持久化存储）
+ * 获取每日 Token 使用统计（从 ai_requests 表聚合查询）
  */
 export async function getTokenUsageStats(
-  _startDate: Date,
-  _endDate: Date
+  startDate: Date,
+  endDate: Date
 ): Promise<DailyTokenUsage[]> {
-  return [];
+  const result = await db.execute(sql`
+    SELECT
+      DATE(created_at) as date,
+      COUNT(*)::int as total_requests,
+      COALESCE(SUM(input_tokens), 0)::bigint as input_tokens,
+      COALESCE(SUM(output_tokens), 0)::bigint as output_tokens
+    FROM ai_requests
+    WHERE created_at >= ${toTimestamp(startDate)}
+      AND created_at <= ${toTimestamp(endDate)}
+    GROUP BY DATE(created_at)
+    ORDER BY date DESC
+  `);
+
+  return (result as unknown as any[]).map((row) => {
+    const inputTokens = Number(row.input_tokens);
+    const outputTokens = Number(row.output_tokens);
+    return {
+      date: String(row.date),
+      totalRequests: Number(row.total_requests),
+      inputTokens,
+      outputTokens,
+      totalTokens: inputTokens + outputTokens,
+      cacheHitTokens: 0,
+      cacheMissTokens: 0,
+      cacheHitRate: 0,
+    };
+  });
 }
 
 /**
- * 获取 Token 使用汇总（返回空数据，未来可接入持久化存储）
+ * 获取 Token 使用汇总（从 ai_requests 表聚合查询）
  */
 export async function getTokenUsageSummary(
-  _startDate: Date,
-  _endDate: Date
+  startDate: Date,
+  endDate: Date
 ): Promise<TokenUsageSummary> {
+  const result = await db.execute(sql`
+    SELECT
+      COUNT(*)::int as total_requests,
+      COALESCE(SUM(input_tokens), 0)::bigint as total_input_tokens,
+      COALESCE(SUM(output_tokens), 0)::bigint as total_output_tokens
+    FROM ai_requests
+    WHERE created_at >= ${toTimestamp(startDate)}
+      AND created_at <= ${toTimestamp(endDate)}
+  `);
+
+  const row = (result as unknown as any[])[0];
+  if (!row) {
+    return {
+      totalRequests: 0,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalTokens: 0,
+      avgTokensPerRequest: 0,
+      totalCacheHitTokens: 0,
+      totalCacheMissTokens: 0,
+      overallCacheHitRate: 0,
+    };
+  }
+
+  const totalRequests = Number(row.total_requests);
+  const totalInputTokens = Number(row.total_input_tokens);
+  const totalOutputTokens = Number(row.total_output_tokens);
+  const totalTokens = totalInputTokens + totalOutputTokens;
+
   return {
-    totalRequests: 0,
-    totalInputTokens: 0,
-    totalOutputTokens: 0,
-    totalTokens: 0,
-    avgTokensPerRequest: 0,
+    totalRequests,
+    totalInputTokens,
+    totalOutputTokens,
+    totalTokens,
+    avgTokensPerRequest: totalRequests > 0 ? Math.round(totalTokens / totalRequests) : 0,
     totalCacheHitTokens: 0,
     totalCacheMissTokens: 0,
     overallCacheHitRate: 0,
@@ -341,11 +397,36 @@ export async function getTokenUsageSummary(
 }
 
 /**
- * 获取 Tool 调用统计（返回空数组，未来可接入持久化存储）
+ * 获取 Tool 调用统计（从 ai_tool_calls 表聚合查询）
  */
 export async function getToolCallStats(
-  _startDate: Date,
-  _endDate: Date
+  startDate: Date,
+  endDate: Date
 ): Promise<ToolStats[]> {
-  return [];
+  const result = await db.execute(sql`
+    SELECT
+      tool_name,
+      COUNT(*)::int as total_count,
+      COUNT(*) FILTER (WHERE success = true)::int as success_count,
+      COUNT(*) FILTER (WHERE success = false)::int as failure_count,
+      AVG(duration_ms)::int as avg_duration_ms
+    FROM ai_tool_calls
+    WHERE created_at >= ${toTimestamp(startDate)}
+      AND created_at <= ${toTimestamp(endDate)}
+    GROUP BY tool_name
+    ORDER BY total_count DESC
+  `);
+
+  return (result as unknown as any[]).map((row) => {
+    const totalCount = Number(row.total_count);
+    const successCount = Number(row.success_count);
+    return {
+      toolName: String(row.tool_name),
+      totalCount,
+      successCount,
+      failureCount: Number(row.failure_count),
+      successRate: totalCount > 0 ? Math.round((successCount / totalCount) * 10000) / 100 : 0,
+      avgDurationMs: row.avg_duration_ms != null ? Number(row.avg_duration_ms) : null,
+    };
+  });
 }

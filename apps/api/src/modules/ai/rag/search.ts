@@ -3,13 +3,14 @@
  * 
  * 纯函数式模块：
  * - indexActivity() - 索引单个活动
- * - indexActivities() - 批量索引
+ * - indexActivities() - 批量索引（v4.6: 批量 Embedding API）
  * - deleteIndex() - 删除索引
+ * - onActivityStatusChange() - 活动状态变更时清理索引
  * - search() - 混合检索 (Hard Filter + Vector Rank + Rerank + MaxSim)
- * - generateMatchReason() - 推荐理由生成
+ * - generateMatchReason() - 推荐理由生成（v4.6: 模板增强）
  * 
  * v4.5: 支持 MaxSim 个性化推荐
- * v4.6: 新增 qwen3-rerank 重排序步骤
+ * v4.6: 批量 Embedding、索引清理、动态配置、推荐理由模板
  */
 
 import { db, eq, sql, isNotNull } from '@juchang/db';
@@ -24,17 +25,15 @@ import { DEFAULT_RAG_CONFIG } from './types';
 import {
   generateEmbeddingWithRetry,
   generateActivityEmbedding,
+  enrichActivityText,
 } from './utils';
+import { getEmbeddings } from '../models/router';
 import { createLogger } from '../observability/logger';
 import { getInterestVectors, calculateMaxSim } from '../memory';
 import { rerank } from '../models/router';
+import { getConfigValue } from '../config/config.service';
 
 const logger = createLogger('rag');
-
-/**
- * MaxSim 个性化提升比例
- */
-const MAXSIM_BOOST_RATIO = 0.2;
 
 // ============ 索引操作 ============
 
@@ -61,8 +60,10 @@ export async function indexActivity(activity: Activity): Promise<void> {
 }
 
 /**
- * 批量索引活动
- * 用于数据回填
+ * 批量索引活动（v4.6 优化：批量 Embedding API）
+ * 
+ * 将同一批次内的 Embedding 生成请求合并为一次批量 API 调用，
+ * 替代之前逐条调用 indexActivity 的方式。
  */
 export async function indexActivities(
   activityList: Activity[],
@@ -85,16 +86,47 @@ export async function indexActivities(
   for (let i = 0; i < activityList.length; i += batchSize) {
     const batch = activityList.slice(i, i + batchSize);
 
-    for (const activity of batch) {
-      try {
-        await indexActivity(activity);
-        success++;
-      } catch (error) {
-        failed++;
-        errors.push({
-          id: activity.id,
-          error: error instanceof Error ? error.message : String(error),
-        });
+    try {
+      // 批量生成富集文本
+      const texts = batch.map(a => enrichActivityText(a));
+
+      // 一次 API 调用生成整批 Embedding
+      const embeddings = await getEmbeddings(texts);
+
+      // 批量更新数据库
+      for (let j = 0; j < batch.length; j++) {
+        try {
+          await db.update(activities)
+            .set({ embedding: embeddings[j] })
+            .where(eq(activities.id, batch[j].id));
+          success++;
+        } catch (dbError) {
+          failed++;
+          errors.push({
+            id: batch[j].id,
+            error: dbError instanceof Error ? dbError.message : String(dbError),
+          });
+        }
+      }
+    } catch (embeddingError) {
+      // 整批 Embedding 失败，逐条降级
+      logger.warn('Batch embedding failed, falling back to individual indexing', {
+        batchStart: i,
+        batchSize: batch.length,
+        error: embeddingError instanceof Error ? embeddingError.message : String(embeddingError),
+      });
+
+      for (const activity of batch) {
+        try {
+          await indexActivity(activity);
+          success++;
+        } catch (error) {
+          failed++;
+          errors.push({
+            id: activity.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
       }
     }
 
@@ -129,25 +161,55 @@ export async function deleteIndex(activityId: string): Promise<void> {
   logger.debug('Activity index deleted', { activityId });
 }
 
+/**
+ * 活动状态变更时清理索引（v4.6 新增）
+ * 
+ * 当活动状态变为 completed 或 cancelled 时，将 embedding 字段设为 NULL。
+ * 搜索查询已有 `isNotNull(activities.embedding)` 过滤条件，
+ * 设为 NULL 即可将其从搜索结果中排除。
+ */
+export async function onActivityStatusChange(
+  activityId: string,
+  newStatus: string
+): Promise<void> {
+  if (newStatus === 'completed' || newStatus === 'cancelled') {
+    await db.update(activities)
+      .set({ embedding: null })
+      .where(eq(activities.id, activityId));
+
+    logger.info('Activity embedding cleared on status change', {
+      activityId,
+      newStatus,
+    });
+  }
+}
+
 // ============ 检索操作 ============
 
 /**
  * 混合检索
  * 核心搜索方法：Hard Filter (SQL) → Soft Rank (Vector) → MaxSim Boost
  * 
+ * v4.6: defaultLimit、defaultThreshold、maxSimBoostRatio 通过 getConfigValue 动态配置
+ * 
  * 降级策略：
  * - 如果向量生成失败，降级到 location-only 搜索
  * - 如果用户无兴趣向量，跳过 MaxSim boost
  */
 export async function search(params: HybridSearchParams): Promise<ScoredActivity[]> {
+  // 动态加载 RAG 配置
+  const ragConfig = await getConfigValue('rag.search_options', DEFAULT_RAG_CONFIG);
+
   const {
     semanticQuery,
     filters,
-    limit = DEFAULT_RAG_CONFIG.defaultLimit,
-    threshold = DEFAULT_RAG_CONFIG.defaultThreshold,
+    limit = ragConfig.defaultLimit,
+    threshold = ragConfig.defaultThreshold,
     includeMatchReason = false,
     userId = null,
   } = params;
+
+  const maxSimBoostRatio = ragConfig.maxSimBoostRatio;
 
   logger.debug('Starting hybrid search', {
     query: semanticQuery.slice(0, 50),
@@ -290,8 +352,8 @@ export async function search(params: HybridSearchParams): Promise<ScoredActivity
     if (interestVectors.length > 0 && r.embedding) {
       const maxSim = calculateMaxSim(queryVector, interestVectors);
       if (maxSim > 0.5) {
-        // 提升20% 排名分数
-        finalScore = finalScore * (1 + MAXSIM_BOOST_RATIO * maxSim);
+        // 使用动态配置的 maxSimBoostRatio
+        finalScore = finalScore * (1 + maxSimBoostRatio * maxSim);
         logger.debug('MaxSim boost applied', {
           activityId: r.id,
           originalScore: r.similarity,
@@ -337,7 +399,7 @@ export async function search(params: HybridSearchParams): Promise<ScoredActivity
     const scoredResultsWithReason = await Promise.all(
       filtered.map(async r => {
         const activity = mapRowToActivity(r);
-        const matchReason = await generateMatchReason(semanticQuery, activity, r.finalScore);
+        const matchReason = await generateMatchReason(semanticQuery, activity, r.finalScore, r.distance);
         return {
           activity,
           score: r.finalScore,
@@ -477,26 +539,60 @@ function mapRowToActivity(row: any): Activity {
 // ============ 推荐理由生成 ============
 
 /**
- * 生成推荐理由
- * 使用 LLM 解释匹配原因
+ * 生成推荐理由（v4.6 增强：模板化）
+ * 
+ * 使用包含距离、时间、类型匹配等具体信息的模板，
+ * 替代之前仅基于 score 阈值的笼统文案。
  */
 export async function generateMatchReason(
   query: string,
   activity: Activity,
-  score: number
+  score: number,
+  distance?: number
 ): Promise<string> {
   try {
-    // 简化实现：基于相似度和活动信息生成理由
-    // 后续可以接入 LLM 生成更自然的理由
-    const scorePercent = Math.round(score * 100);
+    const parts: string[] = [];
 
-    if (score >= 0.8) {
-      return `非常匹配你的需求「${query.slice(0, 20)}」，这个「${activity.title}」活动和你想要的高度吻合`;
-    } else if (score >= 0.6) {
-      return `推荐这个「${activity.title}」，因为它和你说的「${query.slice(0, 15)}」比较相关`;
-    } else {
-      return `这个「${activity.title}」可能符合你的需求，匹配度 ${scorePercent}%`;
+    // 距离信息
+    if (distance != null) {
+      if (distance < 1000) {
+        parts.push(`距你仅 ${Math.round(distance)}m`);
+      } else {
+        parts.push(`距你 ${(distance / 1000).toFixed(1)}km`);
+      }
     }
+
+    // 类型信息
+    if (activity.type) {
+      parts.push(`${activity.type}类活动`);
+    }
+
+    // 时间信息
+    if (activity.startAt) {
+      const startAt = new Date(activity.startAt);
+      const now = new Date();
+      const diffHours = (startAt.getTime() - now.getTime()) / (1000 * 60 * 60);
+      if (diffHours > 0 && diffHours <= 24) {
+        parts.push('即将开始');
+      } else if (diffHours > 24 && diffHours <= 72) {
+        const days = Math.ceil(diffHours / 24);
+        parts.push(`${days}天后开始`);
+      }
+    }
+
+    // 匹配度信息
+    if (score >= 0.8) {
+      parts.push('和你的需求高度匹配');
+    } else if (score >= 0.6) {
+      parts.push('比较符合你的需求');
+    }
+
+    // 组装理由
+    if (parts.length > 0) {
+      return `推荐「${activity.title}」：${parts.join('，')}`;
+    }
+
+    return `推荐「${activity.title}」`;
   } catch (error) {
     logger.warn('Failed to generate match reason', { error });
     // 降级到默认理由

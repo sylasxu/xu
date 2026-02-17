@@ -14,6 +14,7 @@ export {
   indexActivity, 
   indexActivities, 
   deleteIndex, 
+  onActivityStatusChange,
   search,
   generateMatchReason,
 } from './search';

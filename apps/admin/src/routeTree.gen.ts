@@ -36,6 +36,9 @@ import { Route as AuthenticatedHotKeywordsCreateRouteImport } from './routes/_au
 import { Route as AuthenticatedHotKeywordsAnalyticsRouteImport } from './routes/_authenticated/hot-keywords/analytics'
 import { Route as AuthenticatedGrowthTrendsRouteImport } from './routes/_authenticated/growth/trends'
 import { Route as AuthenticatedGrowthPosterRouteImport } from './routes/_authenticated/growth/poster'
+import { Route as AuthenticatedGrowthLibraryRouteImport } from './routes/_authenticated/growth/library'
+import { Route as AuthenticatedGrowthContentRouteImport } from './routes/_authenticated/growth/content'
+import { Route as AuthenticatedGrowthAnalyticsRouteImport } from './routes/_authenticated/growth/analytics'
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
 import { Route as AuthenticatedAiOpsUsageRouteImport } from './routes/_authenticated/ai-ops/usage'
 import { Route as AuthenticatedAiOpsPlaygroundRouteImport } from './routes/_authenticated/ai-ops/playground'
@@ -192,6 +195,24 @@ const AuthenticatedGrowthPosterRoute =
     path: '/growth/poster',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedGrowthLibraryRoute =
+  AuthenticatedGrowthLibraryRouteImport.update({
+    id: '/growth/library',
+    path: '/growth/library',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedGrowthContentRoute =
+  AuthenticatedGrowthContentRouteImport.update({
+    id: '/growth/content',
+    path: '/growth/content',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedGrowthAnalyticsRoute =
+  AuthenticatedGrowthAnalyticsRouteImport.update({
+    id: '/growth/analytics',
+    path: '/growth/analytics',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedErrorsErrorRoute =
   AuthenticatedErrorsErrorRouteImport.update({
     id: '/errors/$error',
@@ -265,6 +286,9 @@ export interface FileRoutesByFullPath {
   '/ai-ops/playground': typeof AuthenticatedAiOpsPlaygroundRoute
   '/ai-ops/usage': typeof AuthenticatedAiOpsUsageRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
+  '/growth/analytics': typeof AuthenticatedGrowthAnalyticsRoute
+  '/growth/content': typeof AuthenticatedGrowthContentRoute
+  '/growth/library': typeof AuthenticatedGrowthLibraryRoute
   '/growth/poster': typeof AuthenticatedGrowthPosterRoute
   '/growth/trends': typeof AuthenticatedGrowthTrendsRoute
   '/hot-keywords/analytics': typeof AuthenticatedHotKeywordsAnalyticsRoute
@@ -301,6 +325,9 @@ export interface FileRoutesByTo {
   '/ai-ops/playground': typeof AuthenticatedAiOpsPlaygroundRoute
   '/ai-ops/usage': typeof AuthenticatedAiOpsUsageRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
+  '/growth/analytics': typeof AuthenticatedGrowthAnalyticsRoute
+  '/growth/content': typeof AuthenticatedGrowthContentRoute
+  '/growth/library': typeof AuthenticatedGrowthLibraryRoute
   '/growth/poster': typeof AuthenticatedGrowthPosterRoute
   '/growth/trends': typeof AuthenticatedGrowthTrendsRoute
   '/hot-keywords/analytics': typeof AuthenticatedHotKeywordsAnalyticsRoute
@@ -340,6 +367,9 @@ export interface FileRoutesById {
   '/_authenticated/ai-ops/playground': typeof AuthenticatedAiOpsPlaygroundRoute
   '/_authenticated/ai-ops/usage': typeof AuthenticatedAiOpsUsageRoute
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
+  '/_authenticated/growth/analytics': typeof AuthenticatedGrowthAnalyticsRoute
+  '/_authenticated/growth/content': typeof AuthenticatedGrowthContentRoute
+  '/_authenticated/growth/library': typeof AuthenticatedGrowthLibraryRoute
   '/_authenticated/growth/poster': typeof AuthenticatedGrowthPosterRoute
   '/_authenticated/growth/trends': typeof AuthenticatedGrowthTrendsRoute
   '/_authenticated/hot-keywords/analytics': typeof AuthenticatedHotKeywordsAnalyticsRoute
@@ -379,6 +409,9 @@ export interface FileRouteTypes {
     | '/ai-ops/playground'
     | '/ai-ops/usage'
     | '/errors/$error'
+    | '/growth/analytics'
+    | '/growth/content'
+    | '/growth/library'
     | '/growth/poster'
     | '/growth/trends'
     | '/hot-keywords/analytics'
@@ -415,6 +448,9 @@ export interface FileRouteTypes {
     | '/ai-ops/playground'
     | '/ai-ops/usage'
     | '/errors/$error'
+    | '/growth/analytics'
+    | '/growth/content'
+    | '/growth/library'
     | '/growth/poster'
     | '/growth/trends'
     | '/hot-keywords/analytics'
@@ -453,6 +489,9 @@ export interface FileRouteTypes {
     | '/_authenticated/ai-ops/playground'
     | '/_authenticated/ai-ops/usage'
     | '/_authenticated/errors/$error'
+    | '/_authenticated/growth/analytics'
+    | '/_authenticated/growth/content'
+    | '/_authenticated/growth/library'
     | '/_authenticated/growth/poster'
     | '/_authenticated/growth/trends'
     | '/_authenticated/hot-keywords/analytics'
@@ -677,6 +716,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedGrowthPosterRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/growth/library': {
+      id: '/_authenticated/growth/library'
+      path: '/growth/library'
+      fullPath: '/growth/library'
+      preLoaderRoute: typeof AuthenticatedGrowthLibraryRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/growth/content': {
+      id: '/_authenticated/growth/content'
+      path: '/growth/content'
+      fullPath: '/growth/content'
+      preLoaderRoute: typeof AuthenticatedGrowthContentRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/growth/analytics': {
+      id: '/_authenticated/growth/analytics'
+      path: '/growth/analytics'
+      fullPath: '/growth/analytics'
+      preLoaderRoute: typeof AuthenticatedGrowthAnalyticsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/errors/$error': {
       id: '/_authenticated/errors/$error'
       path: '/errors/$error'
@@ -785,6 +845,9 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedAiOpsPlaygroundRoute: typeof AuthenticatedAiOpsPlaygroundRoute
   AuthenticatedAiOpsUsageRoute: typeof AuthenticatedAiOpsUsageRoute
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
+  AuthenticatedGrowthAnalyticsRoute: typeof AuthenticatedGrowthAnalyticsRoute
+  AuthenticatedGrowthContentRoute: typeof AuthenticatedGrowthContentRoute
+  AuthenticatedGrowthLibraryRoute: typeof AuthenticatedGrowthLibraryRoute
   AuthenticatedGrowthPosterRoute: typeof AuthenticatedGrowthPosterRoute
   AuthenticatedGrowthTrendsRoute: typeof AuthenticatedGrowthTrendsRoute
   AuthenticatedHotKeywordsAnalyticsRoute: typeof AuthenticatedHotKeywordsAnalyticsRoute
@@ -810,6 +873,9 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAiOpsPlaygroundRoute: AuthenticatedAiOpsPlaygroundRoute,
   AuthenticatedAiOpsUsageRoute: AuthenticatedAiOpsUsageRoute,
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
+  AuthenticatedGrowthAnalyticsRoute: AuthenticatedGrowthAnalyticsRoute,
+  AuthenticatedGrowthContentRoute: AuthenticatedGrowthContentRoute,
+  AuthenticatedGrowthLibraryRoute: AuthenticatedGrowthLibraryRoute,
   AuthenticatedGrowthPosterRoute: AuthenticatedGrowthPosterRoute,
   AuthenticatedGrowthTrendsRoute: AuthenticatedGrowthTrendsRoute,
   AuthenticatedHotKeywordsAnalyticsRoute:

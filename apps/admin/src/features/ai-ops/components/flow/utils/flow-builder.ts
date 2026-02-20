@@ -193,8 +193,11 @@ export function applyTraceToGraph(
     })
 
     if (matchedNode) {
+      // step.data 就是 TraceStepData（如 { intent, method, confidence } 或 { model, inputTokens, ... }）
+      // 需要把这些字段展开到节点 data 上，detail 组件才能读到
       matchedNode.data = {
         ...matchedNode.data,
+        ...stepData,
         status: mapStepStatus(step.status),
         subtitle: extractSubtitle(step),
         stepData: step.data,
@@ -253,16 +256,12 @@ export function applyTraceToGraph(
           label: (toolData.toolDisplayName as string) || (toolData.toolName as string) || 'Tool',
           subtitle: extractSubtitle(step),
           stepData: step.data,
-          toolName: toolData.toolName,
-          toolDisplayName: toolData.toolDisplayName,
-          input: toolData.input,
-          output: toolData.output,
-          widgetType: toolData.widgetType,
+          ...toolData,
           duration: step.duration,
           startedAt: step.startedAt,
           completedAt: step.completedAt,
         },
-      } as FlowNode)
+      } as unknown as FlowNode)
 
       // LLM → Tool 边
       edges.push(createStyledEdge('llm', toolId, mapStepStatus(step.status)))

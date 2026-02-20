@@ -10,6 +10,9 @@ import {
   TrendingUp,
   Image,
   Sparkles,
+  FileText,
+  Library,
+  BarChart3,
 } from 'lucide-react'
 import { type SidebarData } from '../types'
 
@@ -89,6 +92,21 @@ export const sidebarData: SidebarData = {
           title: '热门洞察',
           url: '/growth/trends',
           icon: Sparkles,
+        },
+        {
+          title: '内容生成',
+          url: '/growth/content',
+          icon: FileText,
+        },
+        {
+          title: '内容库',
+          url: '/growth/library',
+          icon: Library,
+        },
+        {
+          title: '效果分析',
+          url: '/growth/analytics',
+          icon: BarChart3,
         },
       ],
     },

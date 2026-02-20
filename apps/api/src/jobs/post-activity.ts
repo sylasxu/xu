@@ -5,7 +5,7 @@
  * 执行频率：每 5 分钟
  */
 
-import { db, activities, eq, and, sql } from '@juchang/db';
+import { db, activities, eq, and, sql, toTimestamp } from '@juchang/db';
 import { notifyPostActivity } from '../modules/notifications/notification.service';
 import { jobLogger } from '../lib/logger';
 
@@ -18,7 +18,7 @@ export async function processPostActivity(): Promise<void> {
     .from(activities)
     .where(and(
       eq(activities.status, 'active'),
-      sql`${activities.startAt} + interval '2 hours' < ${now}`,
+      sql`${activities.startAt} + interval '2 hours' < ${toTimestamp(now)}`,
     ));
 
   let completed = 0;

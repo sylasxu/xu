@@ -76,7 +76,7 @@ export function PlaygroundLayout() {
   }, [modelParams, traceEnabled])
 
   // useChat hook
-  const { messages, sendMessage, stop, setMessages, status } = useChat({
+  const { messages, sendMessage, stop, setMessages, status, error } = useChat({
     transport,
     onData: (dataPart) => {
       if (dataPart && typeof dataPart === 'object' && 'type' in dataPart) {
@@ -192,6 +192,7 @@ export function PlaygroundLayout() {
         onClear={handleClear}
         onStop={handleStop}
         isLoading={isLoading}
+        error={error}
         mockSettings={mockSettings}
         onMockSettingsChange={setMockSettings}
         modelParams={modelParams}

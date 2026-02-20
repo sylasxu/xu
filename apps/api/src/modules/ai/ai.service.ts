@@ -355,11 +355,19 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
   let aiResponseText = '';
   
   // 根据意图选择模型
-  const selectedModel = await getModelByIntent(intentResult.intent === 'partner' ? 'reasoning' : 'chat');
+  const intentToModelType = (intent: string): 'chat' | 'reasoning' | 'agent' => {
+    switch (intent) {
+      case 'partner': return 'reasoning';
+      case 'create': return 'agent';
+      default: return 'chat';
+    }
+  };
+  const modelType = intentToModelType(intentResult.intent);
+  const selectedModel = await getModelByIntent(modelType);
   
   // 确定 modelId 用于日志记录
-  const modelId = intentResult.intent === 'partner' ? 'qwen-plus' : 
-                  intentResult.intent === 'create' ? 'qwen-max' : 
+  const modelId = modelType === 'reasoning' ? 'qwen-plus' : 
+                  modelType === 'agent' ? 'qwen3-max' : 
                   'qwen-flash';
 
   const result = streamText({
@@ -390,7 +398,7 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
           toolCallRecords.push({
             toolName: tc.toolName,
             toolCallId: tc.toolCallId,
-            args: (tc as any).args,
+            args: (tc as any).input ?? (tc as any).args,
           });
 
           // 记录 Tool 调用日志
@@ -406,14 +414,14 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
       for (const tr of step.toolResults || []) {
         const existing = toolCallRecords.find(s => s.toolCallId === tr.toolCallId);
         if (existing) {
-          existing.result = (tr as any).result;
+          existing.result = (tr as any).output ?? (tr as any).result;
 
           // 记录 Tool 结果日志
           logger.info('Tool result received', {
             stepNumber,
             toolName: existing.toolName,
             toolCallId: tr.toolCallId,
-            hasResult: !!(tr as any).result,
+            hasResult: !!((tr as any).output ?? (tr as any).result),
           });
         }
       }
@@ -429,11 +437,10 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
     onFinish: async ({ usage, text }) => {
       aiResponseText = text || '';
       const rawUsage = usage as any;
-      totalUsage = {
-        promptTokens: rawUsage.inputTokens ?? 0,
-        completionTokens: rawUsage.outputTokens ?? 0,
-        totalTokens: rawUsage.totalTokens ?? 0,
-      };
+      // 必须 mutate 而非 reassign，因为 createTracedStreamResponse 持有同一对象引用
+      totalUsage.promptTokens = rawUsage.inputTokens ?? 0;
+      totalUsage.completionTokens = rawUsage.outputTokens ?? 0;
+      totalUsage.totalTokens = rawUsage.totalTokens ?? 0;
 
       const duration = Date.now() - startTime;
       logger.info('AI request completed', {
@@ -1149,9 +1156,15 @@ function createTracedStreamResponse(result: ReturnType<typeof streamText>, ctx: 
           const llmCompletedAt = new Date().toISOString();
           const llmDuration = new Date(llmCompletedAt).getTime() - new Date(llmStartedAt).getTime();
 
+          // 直接从 streamText result 获取 usage，避免依赖 onFinish 回调的执行顺序
+          const usage = await result.usage;
+          const inputTokens = usage?.inputTokens ?? ctx.totalUsage.promptTokens;
+          const outputTokens = usage?.outputTokens ?? ctx.totalUsage.completionTokens;
+          const totalTokens = (inputTokens + outputTokens) || ctx.totalUsage.totalTokens;
+
           writer.write({
             type: 'data-trace-step-update',
-            data: { stepId: llmStepId, completedAt: llmCompletedAt, status: 'success', duration: llmDuration, data: { model: ctx.modelId, inputTokens: ctx.totalUsage.promptTokens, outputTokens: ctx.totalUsage.completionTokens, totalTokens: ctx.totalUsage.totalTokens } },
+            data: { stepId: llmStepId, completedAt: llmCompletedAt, status: 'success', duration: llmDuration, data: { model: ctx.modelId, inputTokens, outputTokens, totalTokens } },
             transient: true,
           });
 
@@ -1169,7 +1182,7 @@ function createTracedStreamResponse(result: ReturnType<typeof streamText>, ctx: 
           // Output step
           writer.write({
             type: 'data-trace-step',
-            data: { id: `${ctx.requestId}-output`, type: 'output', name: '输出', startedAt: llmCompletedAt, completedAt, status: 'success', duration: totalDuration, data: { text: ctx.aiResponseText || '', toolCallCount: ctx.toolCallRecords.length } },
+            data: { id: `${ctx.requestId}-output`, type: 'output', name: '输出', startedAt: llmCompletedAt, completedAt, status: 'success', duration: totalDuration, data: { text: ctx.aiResponseText || '', toolCallCount: ctx.toolCallRecords.length, totalDuration, totalTokens } },
             transient: true,
           });
 

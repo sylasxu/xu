@@ -8,6 +8,7 @@ import { Elysia, t } from 'elysia'
 import { generatePoster, getTrendInsights } from './growth.service'
 import { basePlugins, verifyAuth } from '../../setup'
 import { growthModel, type ErrorResponse } from './growth.model'
+import { contentController } from './content.controller'
 
 export const growthController = new Elysia({ prefix: '/growth' })
   .use(basePlugins)
@@ -84,3 +85,6 @@ export const growthController = new Elysia({ prefix: '/growth' })
       },
     }
   )
+
+  // 挂载内容运营子路由 → /growth/content/*
+  .use(contentController)

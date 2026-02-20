@@ -44,7 +44,10 @@ export * from "./ai-configs";
 // 10. AI Eval Samples (v4.6 评估结果持久化)
 export * from "./ai-eval-samples";
 
-// 10. Relations (must be last to avoid circular imports)
+// 11. Content Operations (自媒体内容运营)
+export * from "./content-notes";
+
+// 12. Relations (must be last to avoid circular imports)
 export * from "./relations";
 
 // ==========================================

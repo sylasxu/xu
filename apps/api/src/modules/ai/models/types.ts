@@ -222,9 +222,9 @@ export const MODEL_IDS = {
 
   // Qwen3 - 分层 Chat (v4.6 新增，使用 OpenAI 兼容接口)
   // 官方文档: https://help.aliyun.com/zh/model-studio/getting-started/models
-  QWEN_FLASH: 'qwen-flash',                   // 极速闲聊 (最便宜)
-  QWEN_PLUS: 'qwen-plus',                     // 深度思考 (推荐)
-  QWEN_MAX: 'qwen-max',                       // 精准 Tool Calling (最强)
+  QWEN_FLASH: 'qwen-flash',                   // 极速闲聊 (最便宜，已升级至 Qwen3)
+  QWEN_PLUS: 'qwen-plus',                     // 深度思考 (推荐，已升级至 Qwen3)
+  QWEN_MAX: 'qwen3-max',                      // 精准 Tool Calling (最强，Qwen3 旗舰)
   QWEN_VL_MAX: 'qwen-vl-max',                 // 视觉理解
 
   // ==========================================

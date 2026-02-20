@@ -29,6 +29,7 @@ export interface PlaygroundDrawerProps {
   onClear: () => void
   onStop: () => void
   isLoading: boolean
+  error?: Error | null
   // Settings view
   mockSettings: MockSettings
   onMockSettingsChange: (settings: MockSettings) => void
@@ -58,6 +59,7 @@ export function PlaygroundDrawer({
   onClear,
   onStop,
   isLoading,
+  error,
   mockSettings,
   onMockSettingsChange,
   modelParams,
@@ -105,6 +107,7 @@ export function PlaygroundDrawer({
               onClear={onClear}
               onStop={onStop}
               isLoading={isLoading}
+              error={error}
             />
           )}
           {view === 'settings' && (

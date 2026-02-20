@@ -9,7 +9,7 @@ const AnomalyUserSchema = t.Object({
   anomalyId: t.String(),
   userId: t.String(),
   userNickname: t.Union([t.String(), t.Null()]),
-  anomalyType: t.Union([t.Literal('bulk_create'), t.Literal('frequent_cancel')]),
+  anomalyType: t.Union([t.Literal('bulk_create'), t.Literal('frequent_cancel'), t.Literal('high_token_usage'), t.Literal('duplicate_requests')]),
   severity: t.Union([t.Literal('low'), t.Literal('medium'), t.Literal('high')]),
   count: t.Number(),
   detectedAt: t.String(),
@@ -25,6 +25,8 @@ const AnomalyStatsSchema = t.Object({
   byType: t.Object({
     bulk_create: t.Number(),
     frequent_cancel: t.Number(),
+    high_token_usage: t.Number(),
+    duplicate_requests: t.Number(),
   }),
   bySeverity: t.Object({
     high: t.Number(),

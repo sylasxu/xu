@@ -31,9 +31,14 @@ function getProvider() {
 /**
  * 获取 DeepSeek Chat 模型
  */
+/**
+ * 获取 DeepSeek Chat 模型
+ * 注意：必须用 .chat() 而非直接调用 provider()
+ * @ai-sdk/openai v3 默认走 Responses API，DeepSeek 不支持
+ */
 function getChatModel(modelId?: string): LanguageModel {
   const id = modelId || MODEL_IDS.DEEPSEEK_CHAT;
-  return getProvider()(id);
+  return getProvider().chat(id);
 }
 
 /**

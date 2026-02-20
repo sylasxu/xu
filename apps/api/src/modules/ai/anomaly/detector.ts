@@ -159,14 +159,14 @@ export async function detectDuplicateRequests(): Promise<AnomalyUser[]> {
     SELECT 
       r.user_id,
       u.nickname as user_nickname,
-      r.input_text,
+      r.input,
       COUNT(*) as count
     FROM ai_requests r
     LEFT JOIN users u ON r.user_id = u.id
     WHERE r.created_at >= ${toTimestamp(since)}
       AND r.user_id IS NOT NULL
-      AND r.input_text IS NOT NULL
-    GROUP BY r.user_id, u.nickname, r.input_text
+      AND r.input IS NOT NULL
+    GROUP BY r.user_id, u.nickname, r.input
     HAVING COUNT(*) > ${threshold.count}
     ORDER BY count DESC
   `);

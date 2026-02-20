@@ -545,7 +545,7 @@ function mapRowToActivity(row: any): Activity {
  * 替代之前仅基于 score 阈值的笼统文案。
  */
 export async function generateMatchReason(
-  query: string,
+  _query: string,
   activity: Activity,
   score: number,
   distance?: number

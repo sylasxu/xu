@@ -24,9 +24,10 @@ interface ChatViewProps {
   onClear: () => void
   onStop: () => void
   isLoading: boolean
+  error?: Error | null
 }
 
-export function ChatView({ messages, onSendMessage, onClear, onStop, isLoading }: ChatViewProps) {
+export function ChatView({ messages, onSendMessage, onClear, onStop, isLoading, error }: ChatViewProps) {
   const [input, setInput] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -99,6 +100,13 @@ export function ChatView({ messages, onSendMessage, onClear, onStop, isLoading }
           {messages.map((msg) => (
             <MessageBubble key={msg.id} message={msg} isStreaming={isLoading} />
           ))}
+          {error && (
+            <div className="flex justify-start">
+              <div className="max-w-[85%] rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                AI 请求失败: {error.message || '未知错误'}
+              </div>
+            </div>
+          )}
         </div>
       </ScrollArea>
 

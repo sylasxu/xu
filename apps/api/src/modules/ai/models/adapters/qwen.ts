@@ -60,14 +60,18 @@ function createQwenClient() {
  * Qwen Chat 模型
  * 
  * 支持：
- * - qwen-flash-2025-07-28: 极速响应，日常闲聊
- * - qwen-plus-2025-07-28: 深度思考，复杂推理（找搭子）
+ * - qwen-flash: 极速响应，日常闲聊
+ * - qwen-plus: 深度思考，复杂推理（找搭子）
  * - qwen3-max: 精准 Tool Calling，Generative UI
+ * 
+ * 注意：必须使用 .chat() 而非直接调用 provider()
+ * @ai-sdk/openai v3 默认走 Responses API (/responses)，DashScope 不支持
+ * .chat() 显式走 Chat Completions API (/chat/completions)
  */
 function getChatModel(modelId?: string): LanguageModel {
   const qwen = createQwenClient();
   const id = modelId || ACTIVE_MODELS.CHAT_PRIMARY;
-  return qwen(id);
+  return qwen.chat(id);
 }
 
 /**
@@ -241,15 +245,15 @@ export function getQwenModelByIntent(intent: 'chat' | 'reasoning' | 'agent' | 'v
 
   switch (intent) {
     case 'chat':
-      return qwen(ACTIVE_MODELS.CHAT_PRIMARY);  // qwen-flash
+      return qwen.chat(ACTIVE_MODELS.CHAT_PRIMARY);  // qwen-flash
     case 'reasoning':
-      return qwen(ACTIVE_MODELS.REASONING);     // qwen-plus (深度思考)
+      return qwen.chat(ACTIVE_MODELS.REASONING);     // qwen-plus (深度思考)
     case 'agent':
-      return qwen(ACTIVE_MODELS.AGENT);         // qwen3-max (Tool Calling)
+      return qwen.chat(ACTIVE_MODELS.AGENT);         // qwen3-max (Tool Calling)
     case 'vision':
-      return qwen(ACTIVE_MODELS.VISION);        // qwen3-vl-plus
+      return qwen.chat(ACTIVE_MODELS.VISION);        // qwen3-vl-plus
     default:
-      return qwen(ACTIVE_MODELS.CHAT_PRIMARY);
+      return qwen.chat(ACTIVE_MODELS.CHAT_PRIMARY);
   }
 }
 

@@ -17,6 +17,7 @@ import { t } from 'elysia';
 import { createToolFactory } from './create-tool';
 import { search } from '../rag';
 import type { ScoredActivity } from '../rag';
+import type { WidgetFetchConfig, WidgetInteraction } from './widget-protocol';
 
 /**
  * Tool Schema - 使用 TypeBox 语法
@@ -100,6 +101,11 @@ function toExploreResultItem(scored: ScoredActivity): ExploreResultItem {
 }
 
 /**
+ * 引用模式阈值：结果超过此数量时切换到引用模式
+ */
+const REFERENCE_MODE_THRESHOLD = 5;
+
+/**
  * exploreNearby Tool 工厂
  */
 export const exploreNearbyTool = createToolFactory<ExploreNearbyParams, ExploreData>({
@@ -132,19 +138,59 @@ export const exploreNearbyTool = createToolFactory<ExploreNearbyParams, ExploreD
       // 转换结果格式
       const results = scoredResults.map(toExploreResultItem);
       
-      // 构建响应
-      const exploreData: ExploreData = {
-        center,
-        results,
-        title: results.length > 0 
-          ? `为你找到${center.name}附近的 ${results.length} 个活动`
-          : `${center.name}附近暂时没有活动`,
-        semanticQuery: semanticQuery || undefined,
-      };
-      
+      const title = results.length > 0 
+        ? `为你找到${center.name}附近的 ${results.length} 个活动`
+        : `${center.name}附近暂时没有活动`;
+
+      if (results.length > REFERENCE_MODE_THRESHOLD) {
+        // ── 引用模式：结果多时返回 fetchConfig，前端自主拉取 ──
+        return {
+          success: true as const,
+          explore: {
+            center,
+            results: [],
+            title,
+            semanticQuery: semanticQuery || undefined,
+          },
+          fetchConfig: {
+            source: 'nearby_activities',
+            params: {
+              lat: center.lat,
+              lng: center.lng,
+              radius: radius * 1000,
+              ...(type ? { type } : {}),
+            },
+          } satisfies WidgetFetchConfig,
+          preview: {
+            total: results.length,
+            firstItem: {
+              id: results[0].id,
+              title: results[0].title,
+              type: results[0].type,
+              locationName: results[0].locationName,
+              distance: results[0].distance,
+            },
+          },
+          interaction: {
+            swipeable: true,
+            halfScreenDetail: true,
+            actions: [
+              { type: 'join', label: '报名', params: {} },
+              { type: 'share', label: '分享', params: {} },
+            ],
+          } satisfies WidgetInteraction,
+        };
+      }
+
+      // ── 自包含模式：结果少时直接返回完整数据 ──
       return {
         success: true as const,
-        explore: exploreData,
+        explore: {
+          center,
+          results,
+          title,
+          semanticQuery: semanticQuery || undefined,
+        },
       };
     } catch (error) {
       console.error('[exploreNearby] Error:', error);

@@ -1,12 +1,10 @@
 <!--
   Widget Explore 组件 (Generative UI)
-  Requirements: 17.1, 17.2, 17.3, 17.4, 17.5, 17.6
+  Requirements: 17.1-17.6, 4.1-4.6, 5.1, 5.4, 5.5, 7.2, 7.5
   
-  探索卡片 (v3.5 零成本地图方案)
-  - 显示标题（"为你找到观音桥附近的 5 个热门活动"）
-  - 使用位置文字卡片替代静态地图（零成本）
-  - 显示活动列表（最多 3 个）
-  - 实现 [🗺️ 展开地图查看更多] 按钮
+  支持两种模式：
+  - 自包含模式（无 fetchConfig）：现有行为不变
+  - 引用模式（有 fetchConfig）：Swiper + 半屏详情 + 卡内操作
 -->
 <view class="widget-explore halo-card">
   <!-- 头部 -->
@@ -16,42 +14,161 @@
     </view>
     <text class="header-title">{{headerTitle}}</text>
   </view>
-  
-  <!-- 位置卡片（替代静态地图，零成本方案） -->
-  <view class="location-card" bindtap="onLocationTap">
-    <view class="location-card__icon">
-      <t-icon name="map" size="48rpx" color="#5B75FB" />
+
+  <!-- ========== 引用模式：加载中 ========== -->
+  <block wx:if="{{fetchConfig && fetchState === 'loading'}}">
+    <!-- preview 预览 -->
+    <view wx:if="{{preview}}" class="explore-preview">
+      <view class="preview-item">
+        <text class="preview-title">{{preview.firstItem.title}}</text>
+        <text class="preview-meta">{{preview.firstItem.locationName}} · {{preview.firstItem.type}}</text>
+      </view>
+      <view class="preview-hint">
+        <text>共 {{preview.total}} 个活动，加载中...</text>
+      </view>
     </view>
-    <view class="location-card__content">
-      <text class="location-card__name">{{center.name || '附近'}}周边</text>
-      <text class="location-card__hint">点击展开完整地图</text>
+    <!-- 骨架屏 -->
+    <view wx:else class="explore-skeleton">
+      <view class="skeleton-card"></view>
+      <view class="skeleton-card skeleton-card--short"></view>
     </view>
-    <view class="location-card__arrow">
-      <t-icon name="chevron-right" size="32rpx" color="#9CA3AF" />
+  </block>
+
+  <!-- ========== 引用模式：加载失败 ========== -->
+  <block wx:elif="{{fetchConfig && fetchState === 'error'}}">
+    <view class="explore-error">
+      <text class="error-text">加载失败</text>
+      <view class="error-retry btn-pressable" bindtap="onRetryFetch">
+        <text>点击重试</text>
+      </view>
     </view>
-  </view>
-  
-  <!-- 活动列表 -->
-  <view wx:if="{{displayResults.length > 0}}" class="explore-list">
-    <view 
-      wx:for="{{displayResults}}" 
-      wx:key="id"
-      class="explore-item"
-      data-id="{{item.id}}"
-      bindtap="onActivityTap"
+  </block>
+
+  <!-- ========== Swiper 模式（引用模式 + swipeable） ========== -->
+  <block wx:elif="{{swiperMode && displayResults.length > 0}}">
+    <swiper
+      class="explore-swiper"
+      indicator-dots="{{true}}"
+      indicator-color="rgba(0,0,0,0.2)"
+      indicator-active-color="#5B75FB"
+      circular="{{false}}"
+      current="{{activeIndex}}"
+      bindchange="onSwiperChange"
     >
-      <activity-list-item 
-        activity="{{item}}"
-        showDistance="{{true}}"
-      />
+      <swiper-item
+        wx:for="{{displayResults}}"
+        wx:key="id"
+        class="swiper-slide"
+      >
+        <view class="swiper-card" data-id="{{item.id}}" bindtap="onActivityTap">
+          <view class="swiper-card__body">
+            <text class="swiper-card__title">{{item.title}}</text>
+            <view class="swiper-card__meta">
+              <text class="meta-tag">{{item.type}}</text>
+              <text class="meta-dot">·</text>
+              <text>{{item.locationName}}</text>
+            </view>
+            <view class="swiper-card__info">
+              <view class="info-item">
+                <t-icon name="time" size="28rpx" color="#9CA3AF" />
+                <text>{{item.startAt}}</text>
+              </view>
+              <view class="info-item">
+                <t-icon name="location" size="28rpx" color="#9CA3AF" />
+                <text>{{item.distance >= 1000 ? (item.distance / 1000).toFixed(1) + 'km' : item.distance + 'm'}}</text>
+              </view>
+            </view>
+          </view>
+
+          <!-- 卡内操作按钮 -->
+          <view wx:if="{{interaction.actions}}" class="swiper-card__actions">
+            <view
+              wx:for="{{interaction.actions}}"
+              wx:for-item="action"
+              wx:key="type"
+              class="card-action-btn btn-pressable {{actionStates[item.id + '_' + action.type] === 'loading' ? 'is-loading' : ''}} {{actionStates[item.id + '_' + action.type] === 'success' ? 'is-success' : ''}}"
+              data-actiontype="{{action.type}}"
+              data-activityid="{{item.id}}"
+              data-activitytitle="{{item.title}}"
+              data-startat="{{item.startAt}}"
+              data-locationname="{{item.locationName}}"
+              catchtap="onActionTap"
+            >
+              <text wx:if="{{actionStates[item.id + '_' + action.type] === 'loading'}}">...</text>
+              <text wx:elif="{{actionStates[item.id + '_' + action.type] === 'success'}}">{{action.type === 'join' ? '已报名' : action.label}}</text>
+              <text wx:else>{{action.label}}</text>
+            </view>
+          </view>
+
+          <!-- 操作结果卡片 -->
+          <view wx:if="{{actionResults[item.id]}}" class="action-result-card">
+            <text class="result-title">{{actionResults[item.id].title}}</text>
+            <text class="result-summary">{{actionResults[item.id].summary}}</text>
+            <view wx:if="{{actionResults[item.id].details.length > 0}}" class="result-details">
+              <view wx:for="{{actionResults[item.id].details}}" wx:for-item="detail" wx:key="label" class="result-detail-row">
+                <text class="detail-label">{{detail.label}}</text>
+                <text class="detail-value">{{detail.value}}</text>
+              </view>
+            </view>
+            <view
+              wx:if="{{actionResults[item.id].nextAction}}"
+              class="result-next-action btn-pressable"
+              data-actiontype="{{actionResults[item.id].nextAction.type}}"
+              data-activityid="{{item.id}}"
+              bindtap="onNextActionTap"
+            >
+              <text>{{actionResults[item.id].nextAction.label}}</text>
+              <t-icon name="chevron-right" size="28rpx" />
+            </view>
+          </view>
+        </view>
+      </swiper-item>
+    </swiper>
+
+    <!-- Swiper 计数器 -->
+    <view class="swiper-counter">
+      <text>{{activeIndex + 1}} / {{displayResults.length}}</text>
     </view>
-  </view>
-  
-  <!-- 空状态 -->
-  <view wx:else class="explore-empty">
-    <text class="empty-text">附近暂无活动，要不你来发起第一个？</text>
-  </view>
-  
+  </block>
+
+  <!-- ========== 自包含模式（现有行为不变） ========== -->
+  <block wx:elif="{{!fetchConfig || fetchState === 'idle'}}">
+    <!-- 位置卡片 -->
+    <view class="location-card" bindtap="onLocationTap">
+      <view class="location-card__icon">
+        <t-icon name="map" size="48rpx" color="#5B75FB" />
+      </view>
+      <view class="location-card__content">
+        <text class="location-card__name">{{center.name || '附近'}}周边</text>
+        <text class="location-card__hint">点击展开完整地图</text>
+      </view>
+      <view class="location-card__arrow">
+        <t-icon name="chevron-right" size="32rpx" color="#9CA3AF" />
+      </view>
+    </view>
+
+    <!-- 活动列表 -->
+    <view wx:if="{{displayResults.length > 0}}" class="explore-list">
+      <view
+        wx:for="{{displayResults}}"
+        wx:key="id"
+        class="explore-item"
+        data-id="{{item.id}}"
+        bindtap="onActivityTap"
+      >
+        <activity-list-item
+          activity="{{item}}"
+          showDistance="{{true}}"
+        />
+      </view>
+    </view>
+
+    <!-- 空状态 -->
+    <view wx:else class="explore-empty">
+      <text class="empty-text">附近暂无活动，要不你来发起第一个？</text>
+    </view>
+  </block>
+
   <!-- 展开地图按钮 -->
   <view class="explore-action">
     <view class="action-btn action-btn--secondary btn-pressable" bindtap="onExpandMap">
@@ -59,4 +176,11 @@
       <text>展开地图查看更多</text>
     </view>
   </view>
+
+  <!-- 半屏详情 -->
+  <half-screen-detail
+    visible="{{halfScreenVisible}}"
+    activityId="{{halfScreenActivityId}}"
+    bind:close="onHalfScreenClose"
+  />
 </view>

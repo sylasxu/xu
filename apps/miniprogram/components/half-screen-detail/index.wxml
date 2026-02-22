@@ -1,0 +1,73 @@
+<!--
+  半屏详情组件
+  Requirements: 4.3, 5.1, 5.2, 5.3
+  从底部滑入，覆盖 ~70% 屏幕
+-->
+<view wx:if="{{visible}}" class="half-screen-mask" bindtap="onMaskTap">
+  <view class="half-screen-panel slide-up" catchtap="onContentTap">
+    <!-- 拖拽指示条 -->
+    <view class="half-screen-handle">
+      <view class="handle-bar"></view>
+    </view>
+
+    <!-- 加载态 -->
+    <view wx:if="{{loading}}" class="half-screen-loading">
+      <view class="skeleton-title"></view>
+      <view class="skeleton-line"></view>
+      <view class="skeleton-line skeleton-line--short"></view>
+    </view>
+
+    <!-- 详情内容 -->
+    <scroll-view wx:else scroll-y class="half-screen-body">
+      <view class="detail-header">
+        <text class="detail-title">{{activity.title}}</text>
+        <view wx:if="{{activity.type}}" class="detail-tag">{{activity.type}}</view>
+      </view>
+
+      <view class="detail-info">
+        <view class="info-row">
+          <t-icon name="time" size="32rpx" color="#9CA3AF" />
+          <text class="info-text">{{activity.startAt}}</text>
+        </view>
+        <view class="info-row">
+          <t-icon name="location" size="32rpx" color="#9CA3AF" />
+          <text class="info-text">{{activity.locationName}}</text>
+          <text wx:if="{{activity.locationHint}}" class="info-hint">{{activity.locationHint}}</text>
+        </view>
+        <view class="info-row">
+          <t-icon name="usergroup" size="32rpx" color="#9CA3AF" />
+          <text class="info-text">{{activity.currentParticipants || 0}}{{activity.maxParticipants ? '/' + activity.maxParticipants : ''}} 人参与</text>
+        </view>
+      </view>
+
+      <view wx:if="{{activity.description}}" class="detail-desc">
+        <text>{{activity.description}}</text>
+      </view>
+
+      <!-- 查看完整详情 -->
+      <view class="detail-more" bindtap="onViewFullDetail">
+        <text>查看完整详情</text>
+        <t-icon name="chevron-right" size="28rpx" color="#9CA3AF" />
+      </view>
+    </scroll-view>
+
+    <!-- 底部操作栏 -->
+    <view wx:if="{{!loading && activity}}" class="half-screen-footer">
+      <view
+        class="footer-btn footer-btn--secondary btn-pressable"
+        bindtap="onShareTap"
+      >
+        <t-icon name="share" size="32rpx" />
+        <text>分享</text>
+      </view>
+      <view
+        class="footer-btn footer-btn--primary btn-pressable {{joinState === 'loading' ? 'is-loading' : ''}} {{joinState === 'success' ? 'is-success' : ''}}"
+        bindtap="onJoinTap"
+      >
+        <text wx:if="{{joinState === 'loading'}}">报名中...</text>
+        <text wx:elif="{{joinState === 'success'}}">已报名</text>
+        <text wx:else>报名</text>
+      </view>
+    </view>
+  </view>
+</view>

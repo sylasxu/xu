@@ -112,6 +112,9 @@
                     results="{{part.data.results}}"
                     center="{{part.data.center}}"
                     title="{{part.data.title}}"
+                    fetchConfig="{{part.data.fetchConfig}}"
+                    interaction="{{part.data.interaction}}"
+                    preview="{{part.data.preview}}"
                     bind:expandmap="onExploreExpandMap"
                   />
                 </block>

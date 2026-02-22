@@ -5,6 +5,7 @@
  */
 
 import type { TSchema } from 'elysia';
+import type { WidgetFetchConfig, WidgetInteraction } from './widget-protocol';
 
 /**
  * Tool 上下文 - 传递给 Tool 执行函数的上下文信息
@@ -42,6 +43,10 @@ export interface WidgetChunk {
   messageType: string;
   /** Widget 数据 */
   payload: Record<string, unknown>;
+  /** 引用模式：告诉前端从哪个 API 获取完整数据 */
+  fetchConfig?: WidgetFetchConfig;
+  /** 交互能力：告诉前端该 Widget 支持哪些交互 */
+  interaction?: WidgetInteraction;
 }
 
 /**

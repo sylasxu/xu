@@ -3,6 +3,7 @@
   "styleIsolation": "apply-shared",
   "usingComponents": {
     "t-icon": "tdesign-miniprogram/icon/icon",
-    "activity-list-item": "../activity-list-item/index"
+    "activity-list-item": "../activity-list-item/index",
+    "half-screen-detail": "../half-screen-detail/index"
   }
 }

@@ -1298,6 +1298,299 @@ export const exploreNearbyTool = createToolFactory<ExploreNearbyParams, ExploreD
 });
 ```
 
+#### 6.5.1 Widget 协议层 (Gen UI Protocol)
+
+Widget 协议层定义了 Gen UI 系统的数据获取和交互能力，是 API 层与小程序层的共享契约。
+
+**文件**：`apps/api/src/modules/ai/tools/widget-protocol.ts`
+
+**核心类型定义**：
+
+```typescript
+/**
+ * Widget Protocol — 聚场 Gen UI 协议层
+ *
+ * 三个正交维度：
+ * - payload（必选）：Widget 数据
+ * - fetchConfig（可选）：数据源声明
+ * - interaction（可选）：交互能力声明
+ */
+
+// ── 数据源枚举 ──
+
+export type WidgetDataSource =
+  | 'nearby_activities'        // GET /activities/nearby
+  | 'activity_detail'          // GET /activities/:id
+  | 'my_activities'            // GET /activities/mine
+  | 'partner_intents_nearby'   // GET /partner-intents/nearby
+  | 'activity_participants';   // GET /activities/:id/participants
+
+// ── 数据获取配置 ──
+
+export interface WidgetFetchConfig {
+  /** 数据源标识，映射到具体 API 端点 */
+  source: WidgetDataSource;
+  /** 传递给 API 的查询参数 */
+  params: Record<string, unknown>;
+}
+
+// ── 操作类型枚举 ──
+
+export type WidgetActionType =
+  | 'join'           // 报名活动
+  | 'cancel'         // 取消报名
+  | 'share'          // 分享
+  | 'detail'         // 查看详情（触发半屏）
+  | 'publish'        // 发布活动
+  | 'confirm_match'; // 确认搭子匹配
+
+// ── 操作定义 ──
+
+export interface WidgetAction {
+  type: WidgetActionType;
+  label: string;
+  params: Record<string, unknown>;
+}
+
+// ── 交互能力配置 ──
+
+export interface WidgetInteraction {
+  /** 是否支持水平滑动浏览 */
+  swipeable?: boolean;
+  /** 是否支持半屏详情弹出 */
+  halfScreenDetail?: boolean;
+  /** 卡内操作按钮 */
+  actions?: WidgetAction[];
+}
+```
+
+**WidgetChunk 扩展接口**：
+
+```typescript
+// 文件：apps/api/src/modules/ai/tools/types.ts
+
+import type { WidgetFetchConfig, WidgetInteraction } from './widget-protocol';
+
+export interface WidgetChunk {
+  /** Widget 类型，对应 conversationMessageTypeEnum */
+  messageType: string;
+  /** Widget 数据 */
+  payload: Record<string, unknown>;
+  /** 引用模式：告诉前端从哪个 API 获取完整数据 */
+  fetchConfig?: WidgetFetchConfig;
+  /** 交互能力：告诉前端该 Widget 支持哪些交互 */
+  interaction?: WidgetInteraction;
+}
+```
+
+**TypeBox Schema（辅助类型，无对应 DB 表，允许手动定义）**：
+
+```typescript
+import { t } from 'elysia';
+
+export const WidgetFetchConfigSchema = t.Object({
+  source: t.Union([
+    t.Literal('nearby_activities'),
+    t.Literal('activity_detail'),
+    t.Literal('my_activities'),
+    t.Literal('partner_intents_nearby'),
+    t.Literal('activity_participants'),
+  ]),
+  params: t.Record(t.String(), t.Unknown()),
+});
+
+export const WidgetActionSchema = t.Object({
+  type: t.Union([
+    t.Literal('join'),
+    t.Literal('cancel'),
+    t.Literal('share'),
+    t.Literal('detail'),
+    t.Literal('publish'),
+    t.Literal('confirm_match'),
+  ]),
+  label: t.String(),
+  params: t.Record(t.String(), t.Unknown()),
+});
+
+export const WidgetInteractionSchema = t.Object({
+  swipeable: t.Optional(t.Boolean()),
+  halfScreenDetail: t.Optional(t.Boolean()),
+  actions: t.Optional(t.Array(WidgetActionSchema)),
+});
+```
+
+**操作结果类型 (ActionResult)**：
+
+```typescript
+// 文件：apps/miniprogram/src/utils/widget-actions.ts
+
+/** 操作结果详情项 */
+export interface ActionResultDetail {
+  label: string;
+  value: string;
+}
+
+/** 操作结果载荷 — 用于渲染结构化结果卡片 */
+export interface ActionResultPayload {
+  /** 结果标题，如"报名成功" */
+  title: string;
+  /** 结果摘要，如"你已成功报名观音桥火锅局" */
+  summary: string;
+  /** 关键信息列表 */
+  details: ActionResultDetail[];
+  /** 下一步操作建议（可选），复用 WidgetAction 类型 */
+  nextAction?: WidgetAction;
+}
+
+export type ActionState = 'idle' | 'loading' | 'success' | 'error';
+
+export interface ActionResult {
+  state: ActionState;
+  error: string | null;
+  /** 操作成功时的结构化结果（可选，不存在时仅更新按钮状态） */
+  resultPayload?: ActionResultPayload;
+}
+```
+
+#### 6.5.2 Widget Data Fetcher 技术设计
+
+小程序端的数据获取工具，根据 `WidgetDataSource` 映射到对应的 Orval SDK API 调用。
+
+**文件**：`apps/miniprogram/src/utils/widget-fetcher.ts`
+
+**数据源 → API 映射**：
+
+| WidgetDataSource | Orval SDK 调用 | 参数 |
+|-----------------|---------------|------|
+| `nearby_activities` | `getActivitiesNearby(params)` | lat, lng, radius, type? |
+| `activity_detail` | `getActivitiesId(id)` | id |
+| `my_activities` | `getActivitiesMine()` | - |
+| `partner_intents_nearby` | `getPartnerIntentsNearby(params)` | lat, lng |
+| `activity_participants` | `getActivitiesIdParticipants(id)` | id |
+
+**FetchState 状态机**：
+
+```
+idle → loading → success
+                → error (显示 preview + 重试按钮)
+```
+
+**核心接口**：
+
+```typescript
+export type FetchState = 'idle' | 'loading' | 'success' | 'error';
+
+export interface FetchResult<T = unknown> {
+  state: FetchState;
+  data: T | null;
+  error: string | null;
+}
+
+/**
+ * 根据数据源和参数获取 Widget 数据
+ * @param source - WidgetDataSource 枚举值
+ * @param params - 传递给 API 的查询参数
+ */
+export async function fetchWidgetData(
+  source: string,
+  params: Record<string, unknown>,
+): Promise<FetchResult>;
+```
+
+#### 6.5.3 Action Handler 技术设计
+
+小程序端的集中式操作处理器，处理 Widget 内的用户操作。
+
+**文件**：`apps/miniprogram/src/utils/widget-actions.ts`
+
+**操作类型 → 处理逻辑**：
+
+| WidgetActionType | 处理方式 | 成功后行为 |
+|-----------------|---------|-----------|
+| `join` | 调用 `postParticipants` API | 返回 resultPayload（活动名、时间、地点 + "查看详情" nextAction） |
+| `cancel` | 调用取消报名 API | 更新按钮状态 |
+| `share` | 组件层调用 `wx.shareAppMessage` | 无需 API |
+| `detail` | 组件层触发半屏详情 | 无需 API |
+| `publish` | 调用发布 API | 返回 resultPayload |
+| `confirm_match` | 调用确认匹配 API | 返回 resultPayload |
+
+**按钮状态机**：
+
+```
+idle → loading → success (按钮禁用，显示"已报名"等)
+                → error   (Toast 提示，恢复 idle 可重试)
+
+loading 期间：按钮不可点击，防止重复提交
+```
+
+**核心接口**：
+
+```typescript
+/**
+ * 执行 Widget 操作
+ * @param actionType - WidgetActionType 枚举值
+ * @param params - 操作参数（如 activityId）
+ */
+export async function executeWidgetAction(
+  actionType: string,
+  params: Record<string, unknown>,
+): Promise<ActionResult>;
+```
+
+#### 6.5.4 引用模式阈值切换逻辑
+
+以 `exploreNearby` Tool 为例，阈值切换逻辑如下：
+
+```typescript
+const REFERENCE_MODE_THRESHOLD = 5;
+
+// execute 函数内部
+const results = scoredResults.map(toExploreResultItem);
+
+if (results.length > REFERENCE_MODE_THRESHOLD) {
+  // ── 引用模式 ──
+  return {
+    success: true,
+    explore: {
+      center,
+      results: [],  // 空数组，前端通过 fetchConfig 获取
+      title: `为你找到${center.name}附近的 ${results.length} 个活动`,
+    },
+    fetchConfig: {
+      source: 'nearby_activities',
+      params: { lat: center.lat, lng: center.lng, radius: radius * 1000, ...(type ? { type } : {}) },
+    } satisfies WidgetFetchConfig,
+    preview: {
+      total: results.length,
+      firstItem: {
+        id: results[0].id,
+        title: results[0].title,
+        type: results[0].type,
+        locationName: results[0].locationName,
+        distance: results[0].distance,
+      },
+    },
+    interaction: {
+      swipeable: true,
+      halfScreenDetail: true,
+      actions: [
+        { type: 'join', label: '报名', params: {} },
+        { type: 'share', label: '分享', params: {} },
+      ],
+    } satisfies WidgetInteraction,
+  };
+} else {
+  // ── 自包含模式（现有行为不变） ──
+  return { success: true, explore: exploreData };
+}
+```
+
+**设计决策**：
+- 阈值 5 基于 SSE payload 大小和用户体验平衡
+- 引用模式下 `explore.results` 为空数组（非 undefined），保持类型一致
+- `preview` 提供即时反馈，避免加载期间空白
+- `interaction.actions` 中的 `params` 为空对象，实际 activityId 由前端在渲染时注入
+
 ### 6.6 RAG 语义检索系统 (v4.5)
 
 基于 pgvector 的活动语义搜索，支持自然语言查询匹配活动。

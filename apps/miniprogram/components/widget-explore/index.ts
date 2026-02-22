@@ -1,19 +1,18 @@
 /**
  * Widget Explore 组件 (Generative UI)
  * Requirements: 17.1, 17.2, 17.3, 17.4, 17.5, 17.6
- * 
- * 探索卡片 (v3.5 零成本地图方案)
- * - 显示标题（"为你找到观音桥附近的 5 个热门活动"）
- * - 使用位置文字卡片替代静态地图（零成本）
- * - 显示活动列表（最多 3 个）
- * - 实现 [🗺️ 展开地图查看更多] 按钮
- * 
- * v4.7: A2UI 结构化 Action
- * - 点击报名按钮发送 join_activity action
- * - 跳过 LLM 意图识别，直接执行
+ * Enhanced: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 5.1, 5.4, 5.5, 7.2, 7.3, 7.5
+ *
+ * 探索卡片 — 支持自包含模式和引用模式
+ * - 自包含模式：直接渲染 results（现有行为不变）
+ * - 引用模式：通过 fetchConfig 拉取数据，支持 Swiper、半屏详情、卡内操作
  */
 
 import { useChatStore } from '../../src/stores/chat';
+import { fetchWidgetData } from '../../src/utils/widget-fetcher';
+import { executeWidgetAction } from '../../src/utils/widget-actions';
+import type { FetchState } from '../../src/utils/widget-fetcher';
+import type { ActionState, ActionResultPayload, WidgetAction } from '../../src/utils/widget-actions';
 
 // 探索结果类型
 interface ExploreResult {
@@ -24,7 +23,7 @@ interface ExploreResult {
   lng: number;
   locationName: string;
   locationHint?: string;
-  distance: number; // 米
+  distance: number;
   startAt: string;
   currentParticipants?: number;
   maxParticipants?: number;
@@ -37,15 +36,29 @@ interface CenterPoint {
   name: string;
 }
 
-interface ComponentData {
-  displayResults: ExploreResult[];
-  headerTitle: string;
+// 预览数据
+interface PreviewData {
+  total: number;
+  firstItem: {
+    id: string;
+    title: string;
+    type: string;
+    locationName: string;
+    distance: number;
+  };
 }
 
-interface ComponentProperties {
-  results: WechatMiniprogram.Component.PropertyOption;
-  center: WechatMiniprogram.Component.PropertyOption;
-  title: WechatMiniprogram.Component.PropertyOption;
+// FetchConfig
+interface FetchConfig {
+  source: string;
+  params: Record<string, unknown>;
+}
+
+// Interaction
+interface Interaction {
+  swipeable?: boolean;
+  halfScreenDetail?: boolean;
+  actions?: WidgetAction[];
 }
 
 Component({
@@ -54,48 +67,73 @@ Component({
   },
 
   properties: {
-    // 搜索结果
-    results: {
-      type: Array,
-      value: [] as ExploreResult[],
-    },
-    // 搜索中心点
+    // 现有（不变）
+    results: { type: Array, value: [] as ExploreResult[] },
     center: {
       type: Object,
       value: { lat: 29.5647, lng: 106.5507, name: '观音桥' } as CenterPoint,
     },
-    // 自定义标题
-    title: {
-      type: String,
-      value: '',
-    },
+    title: { type: String, value: '' },
+    // 引用模式新增
+    fetchConfig: { type: Object, value: null },
+    interaction: { type: Object, value: null },
+    preview: { type: Object, value: null },
   },
 
   data: {
     displayResults: [] as ExploreResult[],
     headerTitle: '',
+    // 引用模式
+    fetchState: 'idle' as FetchState,
+    fetchedResults: [] as ExploreResult[],
+    swiperMode: false,
+    activeIndex: 0,
+    // 操作状态 { [activityId_actionType]: ActionState }
+    actionStates: {} as Record<string, ActionState>,
+    // 操作结果 { [activityId]: ActionResultPayload }
+    actionResults: {} as Record<string, ActionResultPayload>,
+    // 半屏详情
+    halfScreenVisible: false,
+    halfScreenActivityId: '',
   },
 
   observers: {
-    'results, center, title': function(results: ExploreResult[], center: CenterPoint, title: string) {
-      // 最多显示 3 个活动
+    'results, center, title': function (
+      results: ExploreResult[],
+      center: CenterPoint,
+      title: string,
+    ) {
+      // 自包含模式：直接用 results 渲染
+      const fetchConfig = this.properties.fetchConfig as FetchConfig | null;
+      if (fetchConfig) return; // 引用模式由 fetchConfig observer 处理
+
       const displayResults = (results || []).slice(0, 3);
-      
-      // 生成标题
       const headerTitle = title || this.generateTitle(center, results?.length || 0);
-      
-      this.setData({
-        displayResults,
-        headerTitle,
-      });
+      this.setData({ displayResults, headerTitle });
+    },
+
+    'fetchConfig, interaction, preview': function (
+      fetchConfig: FetchConfig | null,
+      interaction: Interaction | null,
+      preview: PreviewData | null,
+    ) {
+      if (!fetchConfig) return;
+
+      // 引用模式初始化
+      const swiperMode = !!interaction?.swipeable;
+      const headerTitle =
+        this.properties.title ||
+        (preview
+          ? `为你找到附近的 ${preview.total} 个热门活动`
+          : '正在加载附近活动...');
+
+      this.setData({ swiperMode, headerTitle });
+      this.loadReferenceData(fetchConfig);
     },
   },
 
   methods: {
-    /**
-     * 生成标题
-     * Requirements: 17.2
-     */
+    /** 生成标题 */
     generateTitle(center: CenterPoint, count: number): string {
       if (!center?.name) {
         return `为你找到附近的 ${count} 个热门活动`;
@@ -103,54 +141,142 @@ Component({
       return `为你找到${center.name}附近的 ${count} 个热门活动`;
     },
 
-    /**
-     * 点击展开地图
-     * Requirements: 17.4, 18.8
-     */
+    /** 引用模式：加载数据 */
+    async loadReferenceData(fetchConfig: FetchConfig) {
+      this.setData({ fetchState: 'loading' });
+
+      const result = await fetchWidgetData(fetchConfig.source, fetchConfig.params);
+
+      if (result.state === 'success' && result.data) {
+        const items = (Array.isArray(result.data) ? result.data : []) as ExploreResult[];
+        this.setData({
+          fetchState: 'success',
+          fetchedResults: items,
+          displayResults: this.data.swiperMode ? items : items.slice(0, 3),
+        });
+      } else {
+        this.setData({ fetchState: 'error' });
+      }
+    },
+
+    /** 重试加载 */
+    onRetryFetch() {
+      const fetchConfig = this.properties.fetchConfig as FetchConfig | null;
+      if (fetchConfig) {
+        this.loadReferenceData(fetchConfig);
+      }
+    },
+
+    /** 点击展开地图 */
     onExpandMap() {
-      const results = this.properties.results as ExploreResult[];
+      const results = this.data.fetchedResults.length
+        ? this.data.fetchedResults
+        : (this.properties.results as ExploreResult[]);
       const center = this.properties.center as CenterPoint;
-      
-      // 触发事件
+
       this.triggerEvent('expandmap', { results, center });
-      
-      // 跳转到沉浸式地图页，使用放大动画效果
+
       wx.navigateTo({
         url: `/subpackages/activity/explore/index?lat=${center.lat}&lng=${center.lng}&results=${encodeURIComponent(JSON.stringify(results))}&animate=expand`,
-        // 使用自定义动画类型（微信小程序扩展属性）
         routeType: 'none',
       } as WechatMiniprogram.NavigateToOption & { routeType?: string });
     },
 
-    /**
-     * 点击活动项
-     * Requirements: 17.5
-     */
+    /** 点击活动项 */
     onActivityTap(e: WechatMiniprogram.TouchEvent) {
       const { id } = e.currentTarget.dataset;
       if (!id) return;
-      
-      // 触发事件
-      this.triggerEvent('activitytap', { id });
-      
-      // 跳转到活动详情页
-      wx.navigateTo({
-        url: `/subpackages/activity/detail/index?id=${id}`,
-      });
+
+      const interaction = this.properties.interaction as Interaction | null;
+
+      if (interaction?.halfScreenDetail) {
+        // 引用模式：弹出半屏详情
+        this.setData({ halfScreenVisible: true, halfScreenActivityId: id });
+      } else {
+        // 自包含模式：跳转详情页
+        this.triggerEvent('activitytap', { id });
+        wx.navigateTo({ url: `/subpackages/activity/detail/index?id=${id}` });
+      }
     },
 
-    /**
-     * 点击报名按钮 (A2UI)
-     * v4.7: 发送结构化 action，跳过 LLM
-     */
+    /** Swiper 切换 */
+    onSwiperChange(e: WechatMiniprogram.SwiperChange) {
+      this.setData({ activeIndex: e.detail.current });
+    },
+
+    /** 关闭半屏详情 */
+    onHalfScreenClose() {
+      this.setData({ halfScreenVisible: false, halfScreenActivityId: '' });
+    },
+
+    /** 卡内操作按钮点击 */
+    async onActionTap(e: WechatMiniprogram.TouchEvent) {
+      const { actiontype, activityid, activitytitle, startat, locationname } =
+        e.currentTarget.dataset;
+      if (!actiontype || !activityid) return;
+
+      const stateKey = `${activityid}_${actiontype}`;
+      const currentState = this.data.actionStates[stateKey];
+      if (currentState === 'loading' || currentState === 'success') return;
+
+      wx.vibrateShort({ type: 'light' });
+
+      // 特殊处理：share 由组件层处理
+      if (actiontype === 'share') {
+        this.triggerEvent('share', { activityId: activityid, title: activitytitle });
+        return;
+      }
+
+      // 特殊处理：detail 触发半屏
+      if (actiontype === 'detail') {
+        this.setData({ halfScreenVisible: true, halfScreenActivityId: activityid });
+        return;
+      }
+
+      // 通用操作：走 Action Handler
+      this.setData({ [`actionStates.${stateKey}`]: 'loading' });
+
+      const result = await executeWidgetAction(actiontype, {
+        activityId: activityid,
+        title: activitytitle,
+        startAt: startat,
+        locationName: locationname,
+      });
+
+      if (result.state === 'success') {
+        this.setData({ [`actionStates.${stateKey}`]: 'success' });
+        if (result.resultPayload) {
+          this.setData({ [`actionResults.${activityid}`]: result.resultPayload });
+        }
+        // 注入操作结果到对话历史，让 AI 下次对话时感知
+        const chatStore = useChatStore.getState();
+        chatStore.appendActionResult(
+          actiontype,
+          { activityId: activityid, title: activitytitle },
+          true,
+          result.resultPayload?.summary || `${actiontype} 操作成功`,
+        );
+      } else {
+        this.setData({ [`actionStates.${stateKey}`]: 'idle' });
+        wx.showToast({ title: result.error || '操作失败', icon: 'none' });
+      }
+    },
+
+    /** 操作结果卡片的 nextAction 点击 */
+    onNextActionTap(e: WechatMiniprogram.TouchEvent) {
+      const { actiontype, activityid } = e.currentTarget.dataset;
+      if (actiontype === 'detail' && activityid) {
+        this.setData({ halfScreenVisible: true, halfScreenActivityId: activityid });
+      }
+    },
+
+    /** 点击报名按钮 (A2UI — 自包含模式保留) */
     onJoinTap(e: WechatMiniprogram.TouchEvent) {
       const { id, title } = e.currentTarget.dataset;
       if (!id) return;
-      
-      // 触感反馈
+
       wx.vibrateShort({ type: 'light' });
-      
-      // 发送结构化 action
+
       const chatStore = useChatStore.getState();
       chatStore.sendAction({
         action: 'join_activity',
@@ -160,9 +286,7 @@ Component({
       });
     },
 
-    /**
-     * 点击位置卡片 - 展开地图
-     */
+    /** 点击位置卡片 */
     onLocationTap() {
       this.onExpandMap();
     },

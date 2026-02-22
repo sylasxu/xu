@@ -1,0 +1,238 @@
+/**
+ * 半屏详情组件样式
+ * Requirements: 4.3, 5.1, 5.2, 5.3
+ * 从底部滑入，覆盖 ~70% 屏幕
+ */
+@import '/styles/tokens.less';
+
+.half-screen-mask {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.half-screen-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 70vh;
+  background: var(--bg-card, @bg-card);
+  border-radius: var(--radius-xl, @rounded-xl) var(--radius-xl, @rounded-xl) 0 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+// ==================== 滑入动画 ====================
+
+.slide-up {
+  animation: slideUp var(--duration-normal, @duration-normal) var(--ease-out-back, @ease-out-back);
+}
+
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+// ==================== 拖拽指示条 ====================
+
+.half-screen-handle {
+  display: flex;
+  justify-content: center;
+  padding: @spacing-3 0 @spacing-2;
+  flex-shrink: 0;
+}
+
+.handle-bar {
+  width: 64rpx;
+  height: 8rpx;
+  border-radius: 4rpx;
+  background: var(--border-default, @border-default);
+}
+
+// ==================== 加载骨架屏 ====================
+
+.half-screen-loading {
+  padding: @spacing-4 @spacing-6;
+}
+
+.skeleton-title {
+  width: 60%;
+  height: 40rpx;
+  border-radius: var(--radius-sm, @rounded-sm);
+  background: var(--bg-input, @bg-input);
+  margin-bottom: @spacing-4;
+}
+
+.skeleton-line {
+  width: 100%;
+  height: 28rpx;
+  border-radius: var(--radius-sm, @rounded-sm);
+  background: var(--bg-input, @bg-input);
+  margin-bottom: @spacing-3;
+
+  &--short {
+    width: 40%;
+  }
+}
+
+// ==================== 内容区域 ====================
+
+.half-screen-body {
+  flex: 1;
+  padding: 0 @spacing-6;
+  overflow-y: auto;
+}
+
+.detail-header {
+  display: flex;
+  align-items: center;
+  gap: @spacing-2;
+  margin-bottom: @spacing-4;
+}
+
+.detail-title {
+  font-size: @text-xl;
+  font-weight: 600;
+  color: var(--text-main, @text-main);
+  flex: 1;
+  line-height: 1.4;
+}
+
+.detail-tag {
+  flex-shrink: 0;
+  padding: @spacing-1 @spacing-2;
+  font-size: @text-xs;
+  color: var(--color-brand, @color-brand);
+  background: var(--icon-bg-blue, rgba(91, 117, 251, 0.1));
+  border-radius: var(--radius-sm, @rounded-sm);
+}
+
+// ==================== 信息行 ====================
+
+.detail-info {
+  display: flex;
+  flex-direction: column;
+  gap: @spacing-3;
+  margin-bottom: @spacing-4;
+}
+
+.info-row {
+  display: flex;
+  align-items: center;
+  gap: @spacing-2;
+}
+
+.info-text {
+  font-size: @text-sm;
+  color: var(--text-secondary, @text-secondary);
+  line-height: 1.4;
+}
+
+.info-hint {
+  font-size: @text-xs;
+  color: var(--text-tertiary, @text-tertiary);
+  margin-left: @spacing-1;
+}
+
+// ==================== 描述 ====================
+
+.detail-desc {
+  padding: @spacing-4;
+  background: var(--bg-input, @bg-input);
+  border-radius: var(--radius-md, @rounded-md);
+  margin-bottom: @spacing-4;
+  font-size: @text-sm;
+  color: var(--text-main, @text-main);
+  line-height: 1.6;
+}
+
+// ==================== 查看更多 ====================
+
+.detail-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: @spacing-1;
+  padding: @spacing-3 0;
+  font-size: @text-sm;
+  color: var(--text-secondary, @text-secondary);
+}
+
+// ==================== 底部操作栏 ====================
+
+.half-screen-footer {
+  display: flex;
+  gap: @spacing-3;
+  padding: @spacing-4 @spacing-6;
+  padding-bottom: calc(@spacing-4 + env(safe-area-inset-bottom));
+  border-top: 1rpx solid var(--border-default, @border-default);
+  flex-shrink: 0;
+}
+
+.footer-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: @spacing-2;
+  height: 88rpx;
+  border-radius: 44rpx;
+  font-size: @text-base;
+  font-weight: 500;
+
+  &--secondary {
+    background: var(--bg-input, @bg-input);
+    color: var(--text-main, @text-main);
+  }
+
+  &--primary {
+    background: var(--color-brand, @color-brand);
+    color: #fff;
+
+    &.is-loading {
+      opacity: 0.7;
+      pointer-events: none;
+    }
+
+    &.is-success {
+      background: var(--color-success, @color-success);
+      pointer-events: none;
+    }
+  }
+}
+
+// ==================== 深色模式 ====================
+
+@media (prefers-color-scheme: dark) {
+  .half-screen-panel {
+    background: var(--bg-card, @bg-card-dark);
+  }
+
+  .detail-title {
+    color: var(--text-main, @text-main-dark);
+  }
+
+  .info-text {
+    color: var(--text-secondary, @text-secondary-dark);
+  }
+
+  .detail-desc {
+    background: var(--bg-input, @bg-input-dark);
+    color: var(--text-main, @text-main-dark);
+  }
+
+  .half-screen-footer {
+    border-top-color: var(--border-default, @border-default-dark);
+  }
+
+  .footer-btn--secondary {
+    background: var(--bg-input, @bg-input-dark);
+    color: var(--text-main, @text-main-dark);
+  }
+}

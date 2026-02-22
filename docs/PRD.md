@@ -1218,7 +1218,192 @@ AI 创建活动时，根据活动类型自动分配预设主题：
 | Widget_Draft | 意图解析卡片 | AI 识别为"创建意图" |
 | Widget_Share | 创建成功卡片 | 活动发布成功 |
 | **Widget_Explore** | **探索卡片** | **AI 识别为"探索意图"** |
+| Widget_AskPreference | 偏好追问卡片 | 信息不足需追问 |
+| Widget_Launcher | 组局发射台 | 查询我的活动 |
+| Widget_Action | 快捷操作卡片 | 快捷入口点击 |
 | Widget_Error | 错误提示卡片 | AI 解析失败 |
+
+#### 3.3.1 Gen UI 数据架构
+
+聚场的 Generative UI 系统采用 **A2UI（AI-to-UI）架构**：AI Tool 返回结构化数据（`WidgetChunk`），前端根据 `messageType` 渲染对应的 Widget 组件。系统支持两种数据模式，根据场景自动切换。
+
+**WidgetChunk 数据结构**：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    WidgetChunk 数据结构                       │
+├─────────────────────────────────────────────────────────────┤
+│  messageType: string          ← Widget 类型标识              │
+│  payload: Record<string, any> ← Widget 数据                  │
+│  fetchConfig?: WidgetFetchConfig   ← 引用模式数据源声明       │
+│  interaction?: WidgetInteraction   ← 交互能力声明             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**两种数据模式**：
+
+| 模式 | 名称 | fetchConfig | payload 内容 | 网络请求 | 适用场景 |
+|------|------|-------------|-------------|---------|---------|
+| A | 自包含模式 (Self-Contained) | 不存在 | 完整数据 | 零请求，直接渲染 | 数据量小（≤5 条）、静态数据 |
+| B | 引用模式 (Reference) | 存在，声明数据源 | 仅 preview 预览 | Widget 自主调用 REST API | 数据量大（>5 条）、需实时性、需深度交互 |
+
+**模式切换规则**：以 `exploreNearby` 为例，当搜索结果 > 5 条时自动切换到引用模式，≤ 5 条时保持自包含模式。阈值由 Tool 内部决定，前端无感知。
+
+**引用模式扩展字段**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `fetchConfig.source` | WidgetDataSource | 数据源标识，映射到具体 API 端点 |
+| `fetchConfig.params` | Record | 传递给 API 的查询参数（经纬度、半径、筛选条件等） |
+| `interaction.swipeable` | boolean | 是否支持水平 Swiper 滑动浏览 |
+| `interaction.halfScreenDetail` | boolean | 是否支持点击弹出半屏详情 |
+| `interaction.actions` | WidgetAction[] | 卡内操作按钮（报名、分享等） |
+| `preview.total` | number | 结果总数（加载前即时展示） |
+| `preview.firstItem` | object | 第一条结果摘要（加载前即时展示） |
+
+**数据源枚举 (WidgetDataSource)**：
+
+| 数据源 | 对应 API | 说明 |
+|--------|---------|------|
+| `nearby_activities` | GET /activities/nearby | 附近活动列表 |
+| `activity_detail` | GET /activities/:id | 活动详情 |
+| `my_activities` | GET /activities/mine | 我的活动 |
+| `partner_intents_nearby` | GET /partner-intents/nearby | 附近搭子意向 |
+| `activity_participants` | GET /activities/:id/participants | 活动参与者 |
+
+**操作类型枚举 (WidgetActionType)**：
+
+| 操作类型 | 说明 | 触发行为 |
+|---------|------|---------|
+| `join` | 报名活动 | 调用报名 API，成功后渲染结果卡片 |
+| `cancel` | 取消报名 | 调用取消 API |
+| `share` | 分享 | 触发微信分享 |
+| `detail` | 查看详情 | 弹出半屏详情面板 |
+| `publish` | 发布活动 | 调用发布 API |
+| `confirm_match` | 确认搭子匹配 | 调用确认 API |
+
+#### 3.3.2 操作结果卡片 (ActionResult)
+
+当用户在 Widget 内执行操作（如报名）成功后，系统返回结构化的操作结果卡片，提供清晰的反馈和下一步引导。
+
+**结果卡片结构**：
+
+```
+┌─────────────────────────────────────────┐
+│  ✅ 报名成功                             │  ← title
+│  你已成功报名「观音桥火锅局」             │  ← summary
+│                                         │
+│  活动：观音桥火锅局                      │  ← details[0]
+│  时间：2026-02-22 19:00                  │  ← details[1]
+│  地点：观音桥步行街                      │  ← details[2]
+│                                         │
+│  [ 查看活动详情 → ]                      │  ← nextAction
+└─────────────────────────────────────────┘
+```
+
+**resultPayload 字段说明**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `title` | string | 结果标题，如"报名成功" |
+| `summary` | string | 结果摘要，如"你已成功报名「观音桥火锅局」" |
+| `details` | `{ label, value }[]` | 关键信息列表（活动名、时间、地点等） |
+| `nextAction` | WidgetAction (可选) | 下一步操作建议（如"查看活动详情"） |
+
+**设计原则**：
+- `resultPayload` 为可选字段，不存在时仅更新按钮状态（如"已报名"）
+- 存在时在操作按钮下方渲染结构化卡片，提供更丰富的反馈
+- `nextAction` 复用 `WidgetAction` 类型，点击后触发对应操作（如弹出半屏详情）
+
+#### 3.3.3 端到端数据流
+
+```
+AI Tool execute()
+  │
+  ├─ 返回 ToolResult { success, data, widget? }
+  │
+  ▼
+AI SDK streamText → onToolResult 回调
+  │
+  ├─ 提取 widget.messageType → 确定 Widget 类型
+  ├─ 提取 widget.payload → Widget 数据
+  ├─ 提取 fetchConfig / interaction（如有）
+  │
+  ▼
+SSE 流 → data-tool-result 事件
+  │
+  ▼
+小程序 data-stream-parser 解析
+  │
+  ▼
+Chat Store onToolResult 回调
+  │
+  ├─ 按 messageType 分发到对应 Widget 组件
+  ├─ 传递 payload + fetchConfig + interaction
+  │
+  ▼
+Widget 组件渲染
+  │
+  ├─ 无 fetchConfig → 直接用 payload 渲染（自包含模式）
+  └─ 有 fetchConfig → 先显示 preview → Widget Data Fetcher 拉取数据 → 渲染完整内容
+                       │
+                       └─ 有 interaction → 渲染交互元素（Swiper / 半屏详情 / 操作按钮）
+                                            │
+                                            └─ 操作按钮点击 → Action Handler 执行
+                                                              │
+                                                              ├─ 成功 + resultPayload → 渲染结果卡片
+                                                              └─ 成功 + 无 resultPayload → 仅更新按钮状态
+```
+
+#### 3.3.4 Explore Widget 交互设计
+
+Explore Widget 是首个支持引用模式的 Widget，交互设计如下：
+
+**自包含模式（结果 ≤ 5 条）**：
+- 垂直列表展示活动卡片
+- 点击卡片跳转活动详情页
+- 保持现有行为不变
+
+**引用模式（结果 > 5 条）**：
+
+```
+┌─────────────────────────────────────────┐
+│  为你找到观音桥附近的 12 个活动          │  ← title
+│                                         │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐  │
+│  │ 🍲 火锅局│ │ 🏸 羽毛球│ │ 🎮 桌游局│  │  ← Swiper 水平滑动
+│  │ 观音桥   │ │ 解放碑   │ │ 南坪    │  │
+│  │ 0.5km   │ │ 1.2km   │ │ 2.1km   │  │
+│  │          │ │          │ │          │  │
+│  │ [报名]   │ │ [报名]   │ │ [报名]   │  │  ← 卡内操作按钮
+│  │ [分享]   │ │ [分享]   │ │ [分享]   │  │
+│  └─────────┘ └─────────┘ └─────────┘  │
+│       ●  ○  ○  ○                       │  ← Swiper 指示器
+└─────────────────────────────────────────┘
+```
+
+**半屏详情面板**：
+
+```
+┌─────────────────────────────────────────┐
+│                                         │  ← 遮罩层（点击关闭）
+│                                         │
+├─────────────────────────────────────────┤  ← 从底部滑入，覆盖 ~70%
+│  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  │  ← 拖拽指示条
+│                                         │
+│  🍲 观音桥火锅局                         │  ← 活动标题
+│  周六晚上 19:00 · 观音桥步行街           │  ← 时间 + 地点
+│                                         │
+│  约几个朋友一起吃火锅，地道重庆味...      │  ← 活动描述
+│                                         │
+│  👥 3/6 人已报名                         │  ← 参与人数
+│                                         │
+├─────────────────────────────────────────┤
+│  [ 报名参加 ]          [ 分享给朋友 ]    │  ← 底部固定操作栏
+└─────────────────────────────────────────┘
+```
+
+**降级策略**：半屏详情加载失败时，自动关闭半屏并跳转到活动详情页。
 
 ### 3.4 意图识别引擎：三层优先级系统 (Intent Recognition Engine)
 

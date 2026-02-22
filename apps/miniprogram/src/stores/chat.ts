@@ -154,6 +154,8 @@ interface ChatState {
   addWidgetMessage: (widgetType: WidgetPart['widgetType'], data: unknown) => string
   /** 发送结构化 Action (A2UI 风格) */
   sendAction: (action: UserAction) => void
+  /** 追加 Widget 操作结果到对话历史（让 AI 下次对话时感知用户的卡内操作） */
+  appendActionResult: (actionType: string, params: Record<string, unknown>, success: boolean, summary: string) => void
   
   // ========== Internal ==========
   /** SSE 控制器（内部使用） */
@@ -309,7 +311,8 @@ export const useChatStore = create<ChatState>()(
                   
                   // 处理 explore 数据格式
                   if (widgetType === 'widget_explore') {
-                    const exploreData = result.result as ExploreData
+                    const toolOutput = result.result as Record<string, unknown>
+                    const exploreData = (toolOutput.explore || toolOutput) as ExploreData
                     widgetData = {
                       results: exploreData?.results || exploreData?.activities || [],
                       center: exploreData?.center || {
@@ -318,6 +321,10 @@ export const useChatStore = create<ChatState>()(
                         name: exploreData?.locationName || '附近',
                       },
                       title: exploreData?.title || '',
+                      // 引用模式字段（不存在时为 null，Widget 按自包含模式渲染）
+                      fetchConfig: (toolOutput.fetchConfig as Record<string, unknown>) || null,
+                      interaction: (toolOutput.interaction as Record<string, unknown>) || null,
+                      preview: (toolOutput.preview as Record<string, unknown>) || null,
                     }
                   }
                   
@@ -597,6 +604,27 @@ export const useChatStore = create<ChatState>()(
         
         set((draft) => {
           draft._controller = controller
+        })
+      },
+      
+      /**
+       * 追加 Widget 操作结果到对话历史
+       * 用于引用模式下的卡内操作（executeWidgetAction），让 AI 下次对话时知道用户做了什么
+       */
+      appendActionResult: (actionType, params, success, summary) => {
+        const id = generateId()
+        const message: UIMessage = {
+          id,
+          role: 'assistant',
+          parts: [{
+            type: 'text',
+            text: `[用户操作] ${summary}`,
+          }],
+          createdAt: new Date(),
+        }
+        
+        set((draft) => {
+          draft.messages.push(message)
         })
       },
       

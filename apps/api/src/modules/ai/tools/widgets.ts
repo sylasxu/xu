@@ -6,7 +6,9 @@
  */
 
 import { t } from 'elysia';
-import type { TObject } from '@sinclair/typebox';
+
+/** TypeBox TObject 的轻量类型别名，避免直接依赖 @sinclair/typebox */
+type TObject = ReturnType<typeof t.Object>;
 import type { WidgetChunk } from './types';
 import type { WidgetFetchConfig, WidgetInteraction, WidgetAction } from './widget-protocol';
 

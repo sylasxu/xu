@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import type { UIMessage } from '@ai-sdk/react'
 import { type FlowNode, type FlowNodeData, type InputNodeData, getNodeChineseLabel } from '../../types/flow'
+import { DetailRow } from '../shared/detail-row'
 import { type ModelParams, type TraceOutput, formatDuration } from '../../types/trace'
 import type { MockSettings } from './mock-settings-panel'
 import { ChatView } from './chat-view'
@@ -63,23 +64,17 @@ function StatusBadge({ status }: { status: string }) {
 /** Drawer 头部：中文节点标题 + 状态 Badge + 耗时 */
 function DrawerHeader({ node }: { node: FlowNode }) {
   const data = node.data as FlowNodeData
+  // processor 节点用 processorType 获取具体中文标签（如"用户画像"），其他节点用 type
+  const labelKey = data.type === 'processor' && 'processorType' in data && data.processorType
+    ? (data.processorType as string)
+    : data.type
   return (
     <div className="flex items-center gap-2">
-      <span className="font-medium">{getNodeChineseLabel(data.type)}</span>
+      <span className="font-medium">{getNodeChineseLabel(labelKey)}</span>
       <StatusBadge status={data.status} />
       {data.duration != null && (
         <span className="text-xs text-muted-foreground">{formatDuration(data.duration)}</span>
       )}
-    </div>
-  )
-}
-
-/** 简单的 label-value 行 */
-function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-start justify-between gap-4">
-      <span className="text-sm text-muted-foreground shrink-0">{label}</span>
-      <div className="text-right">{children}</div>
     </div>
   )
 }
@@ -147,7 +142,7 @@ function UserInputNodePanel({
     <div className="flex flex-col">
       {/* 输入详情 */}
       <div className="p-4">
-        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">输入详情</p>
+        <p className="text-xs font-medium text-muted-foreground mb-3">输入详情</p>
         <InputDetailSection node={node} />
       </div>
 
@@ -155,7 +150,7 @@ function UserInputNodePanel({
 
       {/* 对话区 */}
       <div className="p-4">
-        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">对话</p>
+        <p className="text-xs font-medium text-muted-foreground mb-3">对话</p>
         <ChatView
           messages={messages}
           onSendMessage={onSendMessage}
@@ -171,7 +166,7 @@ function UserInputNodePanel({
       {/* 配置区 */}
       <div>
         <div className="px-4 pt-4">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-3">配置</p>
+          <p className="text-xs font-medium text-muted-foreground mb-3">配置</p>
         </div>
         <SettingsView
           mockSettings={mockSettings}
@@ -216,7 +211,13 @@ export function PlaygroundDrawer({
         {/* Header */}
         <SheetHeader className="border-b px-4 py-3 flex-shrink-0">
           <SheetTitle className="sr-only">
-            {selectedNode ? getNodeChineseLabel(nodeData!.type) : '节点详情'}
+            {selectedNode
+              ? getNodeChineseLabel(
+                  nodeData!.type === 'processor' && 'processorType' in nodeData! && nodeData!.processorType
+                    ? (nodeData!.processorType as string)
+                    : nodeData!.type
+                )
+              : '节点详情'}
           </SheetTitle>
           <SheetDescription className="sr-only">AI Playground 节点详情面板</SheetDescription>
           {selectedNode ? (

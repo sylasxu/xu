@@ -173,12 +173,11 @@ function MessageBubble({ message, isStreaming }: { message: UIMessage; isStreami
 function ToolCard({
   toolName,
   state,
-  input,
   output,
 }: {
   toolName: string
   state: string
-  input: Record<string, unknown>
+  input?: Record<string, unknown>
   output?: unknown
 }) {
   const displayName = TOOL_DISPLAY_NAMES[toolName] || toolName

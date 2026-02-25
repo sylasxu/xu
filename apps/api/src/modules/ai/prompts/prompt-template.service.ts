@@ -7,7 +7,7 @@
 
 import { getConfigValue } from '../config/config.service';
 import { formatDateTime, getTomorrowStr, escapeXml } from './builder';
-import { FALLBACK_TEMPLATE, FALLBACK_METADATA } from './fallback-template';
+import { FALLBACK_TEMPLATE } from './fallback-template';
 import { interpolateTemplate } from './interpolator';
 import { generateWidgetCatalog } from './widget-catalog';
 import type { PromptContext } from './types';

@@ -23,6 +23,7 @@ import {
   formatDuration,
   type IntentType,
 } from '../../types/trace'
+import { DetailRow } from '../shared/detail-row'
 import { JsonViewer } from '../shared/json-viewer'
 
 interface NodeDetailViewProps {
@@ -545,16 +546,6 @@ function FinalOutputDetail({
 }
 
 // ============ 通用子组件 ============
-
-/** 详情行 */
-function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-start justify-between gap-4">
-      <span className="text-sm text-muted-foreground shrink-0">{label}</span>
-      <div className="text-right">{children}</div>
-    </div>
-  )
-}
 
 /** 可折叠区块 */
 function CollapsibleSection({

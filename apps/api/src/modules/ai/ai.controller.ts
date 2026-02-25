@@ -577,6 +577,8 @@ Data Stream 格式：
       return {
         version: FALLBACK_METADATA.version,
         description: FALLBACK_METADATA.description,
+        lastModified: FALLBACK_METADATA.lastModified,
+        features: FALLBACK_METADATA.features,
         content,
       };
     },

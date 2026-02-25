@@ -275,4 +275,6 @@ A: call confirmMatch({matchId: "yyy"})
 export const FALLBACK_METADATA = {
   version: 'v3.9.1',
   description: '小聚 v3.9.1 - 找搭子能力 + 结构化追问 (Flova 模式)',
+  lastModified: '2025-12-01',
+  features: ['找搭子', '结构化追问', 'Widget 渲染', '语义记忆召回'],
 };

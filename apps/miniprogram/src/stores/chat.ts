@@ -26,7 +26,8 @@ import {
   type UIMessagePart,
 } from '../utils/sse-request'
 import { getWidgetTypeFromToolCall, type ToolCall } from '../utils/data-stream-parser'
-import type { DraftContext, DraftData, ExploreData } from '../types/global'
+import { transformToolResult } from '../utils/widget-transforms'
+import type { DraftContext } from '../types/global'
 
 // ============================================================================
 // Types - 与 AI SDK v6 UIMessage 保持一致，扩展 Widget 支持
@@ -307,42 +308,7 @@ export const useChatStore = create<ChatState>()(
                 
                 // 添加 Widget Part（用于 UI 渲染）
                 if (widgetType) {
-                  let widgetData: unknown = result.result
-                  
-                  // 处理 explore 数据格式
-                  if (widgetType === 'widget_explore') {
-                    const toolOutput = result.result as Record<string, unknown>
-                    const exploreData = (toolOutput.explore || toolOutput) as ExploreData
-                    widgetData = {
-                      results: exploreData?.results || exploreData?.activities || [],
-                      center: exploreData?.center || {
-                        lat: exploreData?.lat || 29.5647,
-                        lng: exploreData?.lng || 106.5507,
-                        name: exploreData?.locationName || '附近',
-                      },
-                      title: exploreData?.title || '',
-                      // 引用模式字段（不存在时为 null，Widget 按自包含模式渲染）
-                      fetchConfig: (toolOutput.fetchConfig as Record<string, unknown>) || null,
-                      interaction: (toolOutput.interaction as Record<string, unknown>) || null,
-                      preview: (toolOutput.preview as Record<string, unknown>) || null,
-                    }
-                  }
-                  
-                  // 处理 ask_preference 数据格式
-                  if (widgetType === 'widget_ask_preference') {
-                    const askData = result.result as {
-                      questionType: 'location' | 'type'
-                      question: string
-                      options: Array<{ label: string; value: string }>
-                      allowSkip: boolean
-                      collectedInfo?: { location?: string; type?: string }
-                    }
-                    widgetData = {
-                      ...askData,
-                      allowSkip: askData.allowSkip !== false,
-                      disabled: false,
-                    }
-                  }
+                  const widgetData = transformToolResult(widgetType, result.result)
                   
                   const widgetPart: WidgetPart = {
                     type: 'widget',

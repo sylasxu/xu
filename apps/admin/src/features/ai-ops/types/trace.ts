@@ -90,8 +90,8 @@ export interface ToolDefinition {
 export interface TraceStep {
   /** 步骤唯一标识 */
   id: string
-  /** 步骤类型 */
-  type: StepType
+  /** 步骤类型（包含扩展类型：processor, keyword-match, intent-classify） */
+  type: ExtendedStepType
   /** 步骤名称 (显示用) */
   name: string
   /** 开始时间 (ISO timestamp) */

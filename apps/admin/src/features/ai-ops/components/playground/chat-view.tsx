@@ -129,9 +129,9 @@ export function ChatView({ messages, onSendMessage, onClear, onStop, isLoading, 
 /** 消息气泡 */
 function MessageBubble({ message, isStreaming }: { message: UIMessage; isStreaming: boolean }) {
   const isUser = message.role === 'user'
-  // 提取文本内容和 tool 调用
+  // 提取文本内容和 tool 调用（AI SDK v6: typed tool parts 以 'tool-' 开头）
   const textParts = message.parts?.filter((p) => p.type === 'text') ?? []
-  const toolParts = message.parts?.filter((p) => p.type === 'tool-invocation') ?? []
+  const toolParts = message.parts?.filter((p) => p.type.startsWith('tool-')) ?? []
   const textContent = textParts.map((p) => (p as { type: 'text'; text: string }).text).join('')
 
   return (
@@ -159,16 +159,8 @@ function MessageBubble({ message, isStreaming }: { message: UIMessage; isStreami
         {toolParts.length > 0 && (
           <div className="mt-2 space-y-2">
             {toolParts.map((part, i) => {
-              const toolPart = part as unknown as {
-                type: 'tool-invocation'
-                toolInvocation: {
-                  toolName: string
-                  state: string
-                  args: Record<string, unknown>
-                  result?: unknown
-                }
-              }
-              return <ToolCard key={i} invocation={toolPart.toolInvocation} />
+              const toolPart = part as { type: string; toolName: string; state: string; input: Record<string, unknown>; output?: unknown }
+              return <ToolCard key={i} toolName={toolPart.toolName} state={toolPart.state} input={toolPart.input} output={toolPart.output} />
             })}
           </div>
         )}
@@ -179,17 +171,18 @@ function MessageBubble({ message, isStreaming }: { message: UIMessage; isStreami
 
 /** Tool 调用卡片 */
 function ToolCard({
-  invocation,
+  toolName,
+  state,
+  input,
+  output,
 }: {
-  invocation: {
-    toolName: string
-    state: string
-    args: Record<string, unknown>
-    result?: unknown
-  }
+  toolName: string
+  state: string
+  input: Record<string, unknown>
+  output?: unknown
 }) {
-  const displayName = TOOL_DISPLAY_NAMES[invocation.toolName] || invocation.toolName
-  const isComplete = invocation.state === 'result'
+  const displayName = TOOL_DISPLAY_NAMES[toolName] || toolName
+  const isComplete = state === 'output-available'
 
   return (
     <div className="rounded-md border bg-background/50 p-2">
@@ -201,8 +194,8 @@ function ToolCard({
           <span className="text-xs text-muted-foreground animate-pulse">执行中...</span>
         )}
       </div>
-      {isComplete && invocation.result != null && (
-        <ToolResultPreview toolName={invocation.toolName} result={invocation.result} />
+      {isComplete && output != null && (
+        <ToolResultPreview toolName={toolName} result={output} />
       )}
     </div>
   )

@@ -12,6 +12,7 @@
  * @see https://sdk.vercel.ai/docs/ai-sdk-ui/stream-protocol
  */
 
+import { TOOL_WIDGET_MAP, WIDGET_TOOL_NAMES } from './widget-config'
 /** Tool Call 数据结构 */
 export interface ToolCall {
   toolCallId: string
@@ -382,22 +383,14 @@ export function createDataStreamParser(
  * 根据 toolName 判断应该渲染哪种 Widget
  */
 export function getWidgetTypeFromToolCall(toolCall: ToolCall): string | null {
-  const toolNameToWidget: Record<string, string> = {
-    createActivityDraft: 'widget_draft',
-    refineDraft: 'widget_draft',
-    exploreNearby: 'widget_explore',
-    askPreference: 'widget_ask_preference',
-    publishActivity: 'widget_share',
-  }
-  return toolNameToWidget[toolCall.toolName] || null
+  return TOOL_WIDGET_MAP[toolCall.toolName] || null
 }
 
 /**
  * 辅助函数 - 判断是否是 Widget 相关的 Tool
  */
 export function isWidgetTool(toolName: string): boolean {
-  const widgetTools = ['createActivityDraft', 'refineDraft', 'exploreNearby', 'askPreference', 'publishActivity']
-  return widgetTools.includes(toolName)
+  return WIDGET_TOOL_NAMES.includes(toolName)
 }
 
 export default DataStreamParser

@@ -7,7 +7,7 @@
  * - applyTraceToGraph(): 根据 ExecutionTrace 更新节点状态和数据
  */
 
-import type { ExecutionTrace, TraceStep, ExtendedStepType } from '../../../types/trace'
+import type { ExecutionTrace, TraceStep } from '../../../types/trace'
 import type {
   FlowGraphData,
   FlowNode,
@@ -41,46 +41,46 @@ export const PIPELINE_LAYERS: LayerConfig[] = [
   {
     id: 'L1',
     nodes: [
-      { nodeId: 'input', type: 'input', label: '用户输入', traceType: 'input' },
+      { nodeId: 'input', type: 'user-input', label: '用户输入', traceType: 'input' },
     ],
   },
   {
     id: 'L2',
     nodes: [
-      { nodeId: 'input-guard', type: 'processor', label: 'Input Guard', traceType: 'processor', processorType: 'input-guard' },
-      { nodeId: 'keyword-match', type: 'keyword-match', label: 'P0 匹配', traceType: 'keyword-match' },
+      { nodeId: 'input-guard', type: 'processor', label: '输入安全检查', traceType: 'processor', processorType: 'input-guard' },
+      { nodeId: 'keyword-match', type: 'keyword-match', label: '关键词快捷匹配', traceType: 'keyword-match' },
     ],
   },
   {
     id: 'L3',
     nodes: [
-      { nodeId: 'intent-classify', type: 'intent-classify', label: 'P1 意图', traceType: 'intent-classify' },
+      { nodeId: 'intent-classify', type: 'intent-classify', label: '意图识别', traceType: 'intent-classify' },
     ],
   },
   {
     id: 'L4',
     nodes: [
-      { nodeId: 'user-profile', type: 'processor', label: 'User Profile', traceType: 'processor', processorType: 'user-profile' },
-      { nodeId: 'semantic-recall', type: 'processor', label: 'Semantic Recall', traceType: 'processor', processorType: 'semantic-recall' },
-      { nodeId: 'token-limit', type: 'processor', label: 'Token Limit', traceType: 'processor', processorType: 'token-limit' },
+      { nodeId: 'user-profile', type: 'processor', label: '用户画像', traceType: 'processor', processorType: 'user-profile' },
+      { nodeId: 'semantic-recall', type: 'processor', label: '语义记忆召回', traceType: 'processor', processorType: 'semantic-recall' },
+      { nodeId: 'token-limit', type: 'processor', label: '上下文窗口', traceType: 'processor', processorType: 'token-limit' },
     ],
   },
   {
     id: 'L5',
     nodes: [
-      { nodeId: 'llm', type: 'llm', label: 'LLM 推理', traceType: 'llm' },
+      { nodeId: 'llm', type: 'llm', label: '模型推理', traceType: 'llm' },
     ],
   },
   {
     id: 'L6',
     nodes: [
-      { nodeId: 'tool-placeholder', type: 'tool', label: 'Tool 调用', traceType: 'tool' },
+      { nodeId: 'tool-placeholder', type: 'tool', label: '工具调用', traceType: 'tool' },
     ],
   },
   {
     id: 'L7',
     nodes: [
-      { nodeId: 'output', type: 'output', label: '输出', traceType: 'output' },
+      { nodeId: 'output', type: 'final-output', label: '最终响应', traceType: 'output' },
     ],
   },
 ]
@@ -174,8 +174,15 @@ export function applyTraceToGraph(
   let p0Matched = false
 
   // 1. 遍历 trace steps，匹配并更新节点
+  // 后端 trace step type → 前端 flow node type 映射
+  const traceToFlowType: Record<string, string> = {
+    'input': 'user-input',
+    'output': 'final-output',
+  }
+
   for (const step of trace.steps) {
-    const stepType = step.type as ExtendedStepType
+    const stepType = step.type
+    const flowType = traceToFlowType[stepType] ?? stepType
     const stepData = step.data as unknown as Record<string, unknown>
     const processorType = stepData.processorType as string | undefined
 
@@ -189,7 +196,7 @@ export function applyTraceToGraph(
         // tool 节点特殊处理（见下方）
         return false
       }
-      return nd.type === stepType
+      return nd.type === flowType
     })
 
     if (matchedNode) {
@@ -297,7 +304,7 @@ function mapStepStatus(status: string): FlowNodeStatus {
 /** 从 step data 提取关键指标作为 subtitle */
 function extractSubtitle(step: TraceStep): string | undefined {
   const data = step.data as unknown as Record<string, unknown>
-  const type = step.type as ExtendedStepType
+  const type = step.type
 
   if (step.duration !== undefined && step.duration > 0) {
     const durationStr = step.duration < 1000

@@ -1,170 +1,22 @@
 /**
- * 小聚 v3.9 System Prompt
- * 
- * 基于 v3.8 + 找搭子能力 (Partner Matching)
- * 
- * 新增特性：
- * 1. 找搭子能力 - Agent 自然识别找搭子意图，追问澄清需求后才创建意向
- * 2. 扩展 intent_map - 新增找搭子相关意图映射
- * 3. partner_matching_examples - 追问澄清和偏好优先级示例
- * 4. 偏好优先级规则 - 当前对话意图 > 历史记录
+ * Fallback Template — 内置降级模板
+ *
+ * 当数据库不可用时使用此模板生成 System Prompt
+ * 内容等价于 xiaoju-v39.ts 的 buildXmlSystemPrompt 输出
+ * 使用 {{variable}} 占位符格式
+ *
+ * 支持的变量：
+ * - timeStr: 格式化的当前时间
+ * - locationStr: 用户位置或"未提供"
+ * - userNickname: "用户: xxx" 或空字符串（含前缀）
+ * - draftJson: "草稿: {...}" 或空字符串（含前缀）
+ * - tomorrowStr: 明天日期
+ * - enrichmentXml: 消息增强上下文 XML
+ * - widgetCatalog: Widget 类型描述
+ * - workingMemory: 用户画像 Markdown
  */
 
-export const PROMPT_VERSION = 'v3.9.1';
-
-/**
- * 活动引导知识（替代 RAG）
- * 
- * 小聚是"按图索骥"（结构化查询），不是"大海捞针"（语义检索）
- * 知识量小（几十条活动建议），Prompt 内置即可
- */
-export const ACTIVITY_GUIDE: Record<string, string> = {
-  剧本杀: '建议6-8人，提前预约，先问大家喜欢推理/情感/恐怖',
-  火锅: '人均80-120元，提前订位，问清忌口（辣度、牛羊肉）',
-  羽毛球: '建议4-6人，提前订场地，带好球拍和水',
-  KTV: '建议4-8人，提前订包间，问清是否有麦霸',
-  桌游: '建议4-6人，新手建议从简单游戏开始（如阿瓦隆、狼人杀）',
-  烧烤: '人均60-100元，夏天建议晚上去，注意防蚊',
-  电影: '建议2-4人，提前选好片子和场次',
-  爬山: '建议4-8人，带好水和零食，注意防晒',
-  密室逃脱: '建议4-6人，提前预约，问清恐怖程度',
-  轰趴: '建议8-15人，提前订场地，准备好游戏和零食',
-};
-
-/**
- * 获取活动引导建议
- */
-export function getActivityGuide(activityType: string): string | null {
-  // 尝试精确匹配
-  if (ACTIVITY_GUIDE[activityType]) {
-    return ACTIVITY_GUIDE[activityType];
-  }
-  
-  // 尝试模糊匹配
-  for (const [key, value] of Object.entries(ACTIVITY_GUIDE)) {
-    if (activityType.includes(key) || key.includes(activityType)) {
-      return value;
-    }
-  }
-  
-  return null;
-}
-
-/**
- * Prompt 上下文接口
- */
-export interface PromptContext {
-  currentTime: Date;
-  userLocation?: {
-    lat: number;
-    lng: number;
-    name?: string;
-  };
-  userNickname?: string;
-  draftContext?: {
-    activityId: string;
-    currentDraft: ActivityDraftForPrompt;
-  };
-  /** 用户工作记忆（Markdown 格式的用户画像） */
-  workingMemory?: string | null;
-}
-
-/**
- * 活动草稿（用于 Prompt 上下文）
- */
-export interface ActivityDraftForPrompt {
-  title: string;
-  type: string;
-  locationName: string;
-  locationHint: string;
-  startAt: string;
-  maxParticipants: number;
-}
-
-/**
- * Prompt 技术列表
- */
-export const PROMPT_TECHNIQUES = [
-  'XML Structured Prompt',
-  'Few-Shot Prompting (Compressed)',
-  'TypeScript-like Tool Schema',
-  'Implicit Chain-of-Thought',
-  'ReAct Pattern',
-  'Role Prompting',
-  'Default to Action',
-  'Message Enrichment',
-  'Partner Matching (v3.9)',
-] as const;
-
-
-/**
- * 格式化日期时间
- */
-export function formatDateTime(date: Date): string {
-  const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const weekday = weekdays[date.getDay()];
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  
-  return `${year}-${month}-${day} ${weekday} ${hours}:${minutes}`;
-}
-
-/**
- * 获取明天的日期字符串
- */
-function getTomorrowStr(currentTime: Date): string {
-  const tomorrow = new Date(currentTime);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  return `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`;
-}
-
-/**
- * XML 转义
- */
-function escapeXml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
-/**
- * 构建 XML 结构化 System Prompt (v3.9 - Broker Mode)
- */
-export function buildXmlSystemPrompt(
-  context: PromptContext,
-  contextXml?: string
-): string {
-  const { currentTime, userLocation, userNickname, draftContext } = context;
-  
-  const timeStr = formatDateTime(currentTime);
-  const tomorrowStr = getTomorrowStr(currentTime);
-  
-  // 位置信息
-  const locationStr = userLocation
-    ? `${userLocation.lat.toFixed(4)},${userLocation.lng.toFixed(4)} (${escapeXml(userLocation.name || '当前位置')})`
-    : '未提供';
-  
-  // 草稿上下文（JSON 格式更紧凑）
-  const draftJson = draftContext 
-    ? JSON.stringify({
-        id: draftContext.activityId,
-        title: draftContext.currentDraft.title,
-        type: draftContext.currentDraft.type,
-        location: draftContext.currentDraft.locationName,
-        time: draftContext.currentDraft.startAt,
-      })
-    : '';
-
-  // 消息增强上下文
-  const enrichmentXml = contextXml || '';
-
-  return `<role>
+export const FALLBACK_TEMPLATE = `<role>
 你是小聚，重庆本地生活达人，在观音桥、解放碑混了10年，火锅、桌游、KTV门儿清。
 你是"聚场"小程序的 AI 组局主理人，专门帮用户张罗饭局、桌游、运动。
 性格：办事利索不墨迹，像靠谱朋友帮忙约局，不端着。
@@ -172,12 +24,17 @@ export function buildXmlSystemPrompt(
 </role>
 
 <context>
-时间: ${timeStr}
-位置: ${locationStr}
-${userNickname ? `用户: ${escapeXml(userNickname)}` : ''}
-${draftJson ? `草稿: ${draftJson}` : ''}
+时间: {{timeStr}}
+位置: {{locationStr}}
+{{userNickname}}
+{{draftJson}}
 </context>
-${enrichmentXml}
+{{enrichmentXml}}
+
+
+{{widgetCatalog}}
+
+{{workingMemory}}
 
 <rules>
 1. Tool First: 必须用 Tool 响应，不要只用文字
@@ -252,7 +109,7 @@ ${enrichmentXml}
 </intent_map>
 
 <inference>
-时间: enrichment_hints.time_resolved 或默认 "${tomorrowStr} 14:00"
+时间: enrichment_hints.time_resolved 或默认 "{{tomorrowStr}} 14:00"
 位置: 用户提供 > GPS > "待定"
 人数: 默认4人, "一桌"→8人
 类型: 火锅/吃饭→food, KTV/电影→entertainment, 球/跑→sports, 麻将/桌游→boardgame
@@ -411,24 +268,11 @@ CTX: 用户是某个匹配的临时召集人，matchId=yyy
 A: call confirmMatch({matchId: "yyy"})
 // 确认匹配，转为正式活动
 </partner_matching_examples>`;
-}
 
 /**
- * 获取当前 Prompt 信息（Admin 用）
+ * 降级模板元数据
  */
-export function getPromptInfo() {
-  return {
-    version: PROMPT_VERSION,
-    lastModified: '2026-01-12',
-    description: '小聚 v3.9.1 - 找搭子能力 + 结构化追问 (Flova 模式)',
-    features: [
-      '找搭子能力 - Agent 自然识别找搭子意图',
-      '结构化追问 - 列出选项 + 示例回复格式 (参考 Flova)',
-      '支持选项式回复 (1A 2A 3AD) 和自然语言回复',
-      '偏好优先级：当前对话 > 历史记录',
-      '扩展 intent_map 支持找搭子意图',
-      '新增 partner_matching_examples 示例',
-    ],
-    promptTechniques: [...PROMPT_TECHNIQUES],
-  };
-}
+export const FALLBACK_METADATA = {
+  version: 'v3.9.1',
+  description: '小聚 v3.9.1 - 找搭子能力 + 结构化追问 (Flova 模式)',
+};

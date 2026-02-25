@@ -6,7 +6,9 @@
  */
 
 import { t } from 'elysia';
+import type { TObject } from '@sinclair/typebox';
 import type { WidgetChunk } from './types';
+import type { WidgetFetchConfig, WidgetInteraction, WidgetAction } from './widget-protocol';
 
 /**
  * Widget 类型枚举（对应 conversationMessageTypeEnum）
@@ -115,6 +117,250 @@ export const WidgetErrorPayloadSchema = t.Object({
 });
 
 export type WidgetErrorPayload = typeof WidgetErrorPayloadSchema.static;
+
+// ==========================================
+// Widget Catalog 注册表
+// ==========================================
+
+/**
+ * Widget Catalog 条目类型
+ */
+export interface WidgetCatalogEntry {
+  /** Widget 类型名，对应 conversationMessageTypeEnum */
+  widgetType: string;
+  /** 用途说明，供 AI 理解和开发者参考 */
+  description: string;
+  /** TypeBox Payload Schema 引用（可选，部分 Widget 无独立 Schema） */
+  payloadSchema?: TObject;
+  /** 关联的 Tool 名称列表（可为空，如 dashboard/launcher 由前端生成） */
+  toolNames: string[];
+  /** 声明式初始状态（可选，H5 端直接消费，小程序端可忽略） */
+  defaultState?: Record<string, unknown>;
+  /** 交互能力声明（可选，描述该 Widget 支持的用户操作） */
+  interactions?: Array<{
+    /** 操作类型，对应 WidgetActionType */
+    action: string;
+    /** 操作显示文本 */
+    label: string;
+  }>;
+}
+
+/**
+ * Widget Catalog — 集中式注册表
+ * 新增 Widget 类型时只需在此数组中添加一个条目
+ */
+export const WIDGET_CATALOG: WidgetCatalogEntry[] = [
+  {
+    widgetType: WidgetType.DRAFT,
+    description: '活动草稿卡片，展示 AI 创建或修改的活动草稿，用户可预览和发布',
+    payloadSchema: WidgetDraftPayloadSchema,
+    toolNames: ['createActivityDraft', 'getDraft', 'refineDraft'],
+    interactions: [
+      { action: 'publish', label: '发布活动' },
+    ],
+  },
+  {
+    widgetType: WidgetType.EXPLORE,
+    description: '附近活动列表，展示基于位置的活动搜索结果，支持浏览和报名',
+    payloadSchema: WidgetExplorePayloadSchema,
+    toolNames: ['exploreNearby'],
+    defaultState: { selectedActivityId: null },
+    interactions: [
+      { action: 'join', label: '报名' },
+      { action: 'share', label: '分享' },
+      { action: 'detail', label: '查看详情' },
+    ],
+  },
+  {
+    widgetType: WidgetType.DETAIL,
+    description: '活动详情卡片，展示单个活动的完整信息',
+    payloadSchema: undefined,
+    toolNames: ['getActivityDetail'],
+    interactions: [
+      { action: 'join', label: '报名' },
+      { action: 'share', label: '分享' },
+    ],
+  },
+  {
+    widgetType: WidgetType.SHARE,
+    description: '分享活动卡片，展示已发布活动的分享信息和链接',
+    payloadSchema: WidgetSharePayloadSchema,
+    toolNames: ['publishActivity'],
+    interactions: [
+      { action: 'share', label: '分享给朋友' },
+    ],
+  },
+  {
+    widgetType: WidgetType.ACTION,
+    description: '快捷操作卡片，展示可执行的快捷操作按钮',
+    payloadSchema: undefined,
+    toolNames: [],
+  },
+  {
+    widgetType: WidgetType.ASK_PREFERENCE,
+    description: '偏好追问卡片，向用户提问以收集位置、时间、类型等偏好信息',
+    payloadSchema: WidgetAskPreferencePayloadSchema,
+    toolNames: ['askPreference'],
+    defaultState: { disabled: false, selectedValue: null },
+    interactions: [
+      { action: 'select', label: '选择选项' },
+      { action: 'skip', label: '跳过' },
+    ],
+  },
+  {
+    widgetType: WidgetType.DASHBOARD,
+    description: '进场欢迎面板，展示个性化问候、快捷入口和社交信息',
+    payloadSchema: undefined,
+    toolNames: [],
+  },
+  {
+    widgetType: WidgetType.LAUNCHER,
+    description: '组局发射台，展示用户的活动列表和管理入口',
+    payloadSchema: undefined,
+    toolNames: [],
+  },
+  {
+    widgetType: WidgetType.ERROR,
+    description: '错误提示卡片，展示错误信息和重试建议',
+    payloadSchema: WidgetErrorPayloadSchema,
+    toolNames: [],
+  },
+];
+
+// ── 派生常量 ──
+
+/** Tool→Widget 扁平映射（从 Catalog 自动派生） */
+export const TOOL_WIDGET_MAP: Record<string, string> = Object.fromEntries(
+  WIDGET_CATALOG.flatMap(entry =>
+    entry.toolNames.map(toolName => [toolName, entry.widgetType])
+  )
+);
+
+/** 所有关联 Widget 的 Tool 名称列表（从 Catalog 自动派生） */
+export const WIDGET_TOOL_NAMES: string[] = WIDGET_CATALOG.flatMap(
+  entry => entry.toolNames
+);
+
+// ── 派生函数 ──
+
+/**
+ * 根据 Tool 名称查找对应的 Widget 类型
+ * 替代 types.ts 中的 TOOL_WIDGET_TYPES[toolName]
+ */
+export function getWidgetTypeByToolName(toolName: string): string | undefined {
+  return TOOL_WIDGET_MAP[toolName];
+}
+
+/**
+ * 判断 Tool 是否关联 Widget
+ * 替代 data-stream-parser.ts 中的 isWidgetTool
+ */
+export function isWidgetTool(toolName: string): boolean {
+  return WIDGET_TOOL_NAMES.includes(toolName);
+}
+
+/**
+ * 根据 Tool 名称查找 Catalog 条目
+ */
+export function getCatalogEntryByToolName(toolName: string): WidgetCatalogEntry | undefined {
+  return WIDGET_CATALOG.find(entry => entry.toolNames.includes(toolName));
+}
+
+// ── Widget Spec Builder ──
+
+/**
+ * 从 Tool 返回值中提取协议字段（fetchConfig、interaction、preview）
+ * 这些字段由 Tool 在返回值中显式声明，不属于业务 payload
+ */
+const PROTOCOL_FIELDS = ['fetchConfig', 'interaction', 'preview', 'success', 'error'] as const;
+
+/**
+ * 构建标准化 Widget Spec
+ *
+ * 纯函数：Tool 原始返回值 + Catalog 元数据 → WidgetChunk
+ *
+ * @param toolName - Tool 名称
+ * @param toolResult - Tool execute() 的原始返回值
+ * @returns 标准化的 WidgetChunk，或 null（Tool 不关联 Widget）
+ */
+export function buildWidgetSpec(
+  toolName: string,
+  toolResult: Record<string, unknown>
+): WidgetChunk | null {
+  const entry = getCatalogEntryByToolName(toolName);
+  if (!entry) return null;
+
+  // 提取协议字段
+  const fetchConfig = toolResult.fetchConfig as WidgetFetchConfig | undefined;
+  const interaction = toolResult.interaction as WidgetInteraction | undefined;
+
+  // 剩余字段作为 payload（排除协议字段）
+  const payload: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(toolResult)) {
+    if (!PROTOCOL_FIELDS.includes(key as any)) {
+      payload[key] = value;
+    }
+  }
+
+  // 合并 Catalog 默认交互（Tool 返回的 interaction 优先）
+  const finalInteraction = interaction ?? (
+    entry.interactions
+      ? { actions: entry.interactions.map(i => ({ type: i.action as WidgetAction['type'], label: i.label, params: {} })) }
+      : undefined
+  );
+
+  return {
+    messageType: entry.widgetType,
+    payload,
+    state: entry.defaultState ? { ...entry.defaultState } : undefined,
+    fetchConfig,
+    interaction: finalInteraction,
+  };
+}
+
+// ── Widget Catalog Generator ──
+
+/**
+ * 从 TypeBox Schema 提取字段描述
+ */
+function extractSchemaFields(schema: TObject): string {
+  const properties = schema.properties;
+  return Object.entries(properties)
+    .map(([key, prop]) => {
+      const typeName = (prop as any).type || 'unknown';
+      if (typeName === 'object') return `${key}(object)`;
+      if (typeName === 'array') return `${key}(array)`;
+      if (typeName === 'string') return `${key}(string)`;
+      if (typeName === 'number') return `${key}(number)`;
+      if (typeName === 'boolean') return `${key}(boolean)`;
+      if ((prop as any).anyOf || (prop as any).oneOf) return `${key}(union)`;
+      return `${key}(${typeName})`;
+    })
+    .join(', ');
+}
+
+/**
+ * 从 WIDGET_CATALOG 自动生成 Widget 类型描述文本
+ * 供 prompt-db-template 的 {{widgetCatalog}} 变量使用
+ *
+ * 纯函数，无副作用
+ */
+export function generateWidgetCatalog(): string {
+  const lines = WIDGET_CATALOG
+    .filter(entry => entry.toolNames.length > 0)
+    .map(entry => {
+      const fields = entry.payloadSchema
+        ? extractSchemaFields(entry.payloadSchema)
+        : '(无固定 Schema)';
+      const actions = entry.interactions?.length
+        ? `。交互: ${entry.interactions.map(i => i.label).join(', ')}`
+        : '';
+      return `- ${entry.widgetType}: ${entry.description}。字段: ${fields}${actions}`;
+    });
+
+  return `<widget_catalog>\n${lines.join('\n')}\n</widget_catalog>`;
+}
+
 
 // ==========================================
 // Widget 构建函数

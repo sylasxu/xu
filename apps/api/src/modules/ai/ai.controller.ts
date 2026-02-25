@@ -19,7 +19,7 @@ import {
   // v4.6: 会话评估
   evaluateConversation,
 } from './ai.service';
-import { getPromptInfo, buildXmlSystemPrompt } from './prompts/xiaoju-v38';
+import { getSystemPrompt, FALLBACK_METADATA } from './prompts';
 import {
   getTokenUsageStats,
   getTokenUsageSummary,
@@ -568,15 +568,15 @@ Data Stream 格式：
   .get(
     '/prompts/current',
     async () => {
-      const info = getPromptInfo();
-      const content = buildXmlSystemPrompt({
+      const content = await getSystemPrompt({
         currentTime: new Date(),
         userLocation: { lat: 29.5630, lng: 106.5516, name: '观音桥' },
         userNickname: '示例用户',
       });
 
       return {
-        ...info,
+        version: FALLBACK_METADATA.version,
+        description: FALLBACK_METADATA.description,
         content,
       };
     },

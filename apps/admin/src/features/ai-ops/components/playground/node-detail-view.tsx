@@ -3,10 +3,14 @@
  *
  * Drawer 节点详情视图：根据节点 type 渲染对应的详情内容
  * 严格对齐后端 createTracedStreamResponse 发送的 data-trace-step 数据
+ *
+ * NodeHeader 和 StatusBadge 已提升到 playground-drawer.tsx 的 DrawerHeader
+ * user-input 节点由 playground-drawer.tsx 的 UserInputNodePanel 处理
  */
 
 import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
+import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
 import { ChevronDown, ChevronRight, AlertCircle } from 'lucide-react'
 import type { FlowNode, FlowNodeData } from '../../types/flow'
@@ -40,11 +44,6 @@ export function NodeDetailView({ node, systemPrompt, traceOutput }: NodeDetailVi
 
   return (
     <div className="space-y-4 p-4">
-      {/* 节点头部 */}
-      <NodeHeader data={data} />
-
-      <Separator />
-
       {/* 错误信息 */}
       {data.error && <ErrorSection error={data.error} />}
 
@@ -54,41 +53,7 @@ export function NodeDetailView({ node, systemPrompt, traceOutput }: NodeDetailVi
   )
 }
 
-// ============ 节点头部 ============
-
-function NodeHeader({ data }: { data: FlowNodeData }) {
-  return (
-    <div className="flex items-center gap-3">
-      <div className="flex-1 min-w-0">
-        <h3 className="text-sm font-medium truncate">{data.label}</h3>
-        {data.duration !== undefined && (
-          <p className="text-xs text-muted-foreground mt-0.5">
-            耗时 {formatDuration(data.duration)}
-          </p>
-        )}
-      </div>
-      <StatusBadge status={data.status} />
-    </div>
-  )
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const labels: Record<string, string> = {
-    pending: '等待中',
-    running: '执行中',
-    success: '成功',
-    error: '失败',
-    skipped: '已跳过',
-  }
-  const variants: Record<string, 'default' | 'destructive' | 'secondary' | 'outline'> = {
-    success: 'default',
-    error: 'destructive',
-    running: 'secondary',
-    pending: 'outline',
-    skipped: 'outline',
-  }
-  return <Badge variant={variants[status] ?? 'outline'}>{labels[status] ?? status}</Badge>
-}
+// ============ 错误区块 ============
 
 function ErrorSection({ error }: { error: string }) {
   return (
@@ -113,8 +78,6 @@ function NodeContent({
   traceOutput: TraceOutput | null
 }) {
   switch (data.type) {
-    case 'input':
-      return <InputDetail data={data} />
     case 'keyword-match':
       return <P0MatchDetail data={data} />
     case 'intent-classify':
@@ -125,39 +88,14 @@ function NodeContent({
       return <LLMDetail data={data} systemPrompt={systemPrompt} />
     case 'tool':
       return <ToolDetail data={data} />
-    case 'output':
-      return <OutputDetail data={data} traceOutput={traceOutput} />
+    case 'final-output':
+      return <FinalOutputDetail data={data} traceOutput={traceOutput} />
     default:
       return <p className="text-sm text-muted-foreground">暂无详情</p>
   }
 }
 
-
 // ============ 各节点类型详情 ============
-
-/** Input 节点详情 */
-function InputDetail({ data }: { data: FlowNodeData & { type: 'input' } }) {
-  return (
-    <div className="space-y-3">
-      <DetailRow label="输入文本">
-        <p className="text-sm whitespace-pre-wrap">{data.text}</p>
-      </DetailRow>
-      <DetailRow label="字符数">
-        <span className="text-sm font-mono">{data.charCount ?? data.text?.length ?? 0}</span>
-      </DetailRow>
-      {data.source && (
-        <DetailRow label="来源">
-          <Badge variant="outline">{data.source}</Badge>
-        </DetailRow>
-      )}
-      {data.userId && (
-        <DetailRow label="用户 ID">
-          <span className="text-sm font-mono text-muted-foreground">{data.userId}</span>
-        </DetailRow>
-      )}
-    </div>
-  )
-}
 
 /** Input Guard 详情 (processor type=input-guard) */
 function InputGuardDetail({ data }: { data: Record<string, unknown> }) {
@@ -257,15 +195,44 @@ function TokenLimitDetail({ data }: { data: Record<string, unknown> }) {
           {output?.truncated ? '已截断' : '未截断'}
         </Badge>
       </DetailRow>
-      {output?.originalLength !== undefined && (
-        <DetailRow label="原始长度">
-          <span className="text-sm font-mono">{String(output.originalLength)} 字符</span>
-        </DetailRow>
-      )}
-      {output?.finalLength !== undefined && (
-        <DetailRow label="截断后长度">
-          <span className="text-sm font-mono">{String(output.finalLength)} 字符</span>
-        </DetailRow>
+      {output?.originalLength !== undefined && output?.finalLength !== undefined ? (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">长度对比</span>
+            <span className="font-mono">
+              {String(output.finalLength)} / {String(output.originalLength)} 字符
+            </span>
+          </div>
+          <div className="relative h-2 rounded-full bg-muted overflow-hidden">
+            <div
+              className="absolute inset-y-0 left-0 rounded-full bg-primary/60"
+              style={{ width: '100%' }}
+            />
+            <div
+              className="absolute inset-y-0 left-0 rounded-full bg-primary"
+              style={{
+                width: `${Math.min(100, (Number(output.finalLength) / Number(output.originalLength)) * 100)}%`,
+              }}
+            />
+          </div>
+          <div className="flex justify-between text-xs text-muted-foreground">
+            <span>截断后</span>
+            <span>原始</span>
+          </div>
+        </div>
+      ) : (
+        <>
+          {output?.originalLength !== undefined && (
+            <DetailRow label="原始长度">
+              <span className="text-sm font-mono">{String(output.originalLength)} 字符</span>
+            </DetailRow>
+          )}
+          {output?.finalLength !== undefined && (
+            <DetailRow label="截断后长度">
+              <span className="text-sm font-mono">{String(output.finalLength)} 字符</span>
+            </DetailRow>
+          )}
+        </>
       )}
       {config?.maxTokens !== undefined && (
         <DetailRow label="Token 限制">
@@ -349,9 +316,13 @@ function P1IntentDetail({ data }: { data: FlowNodeData & { type: 'intent-classif
         <span className="text-sm">{methodLabel}</span>
       </DetailRow>
       {data.confidence !== undefined && (
-        <DetailRow label="置信度">
-          <span className="text-sm font-mono">{(data.confidence * 100).toFixed(1)}%</span>
-        </DetailRow>
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">置信度</span>
+            <span className="text-sm font-mono">{(data.confidence * 100).toFixed(1)}%</span>
+          </div>
+          <Progress value={data.confidence * 100} className="h-2" />
+        </div>
       )}
     </div>
   )
@@ -442,16 +413,67 @@ function ToolDetail({ data }: { data: FlowNodeData & { type: 'tool' } }) {
           </CollapsibleSection>
         </>
       )}
+
+      {/* 评估结果 */}
+      {data.evaluation && (
+        <>
+          <Separator />
+          <CollapsibleSection title="评估结果" defaultOpen>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">评估状态</span>
+                <Badge variant={data.evaluation.passed ? 'default' : 'destructive'}>
+                  {data.evaluation.passed ? '通过' : '未通过'}
+                </Badge>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">质量评分</span>
+                <span className="text-sm font-mono">{data.evaluation.score}/10</span>
+              </div>
+              {data.evaluation.toneScore !== undefined && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">语气评分</span>
+                  <span className="text-sm font-mono">{data.evaluation.toneScore}/5</span>
+                </div>
+              )}
+              {data.evaluation.relevanceScore !== undefined && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">相关性</span>
+                  <span className="text-sm font-mono">{data.evaluation.relevanceScore}/5</span>
+                </div>
+              )}
+              {data.evaluation.contextScore !== undefined && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">上下文利用</span>
+                  <span className="text-sm font-mono">{data.evaluation.contextScore}/5</span>
+                </div>
+              )}
+              {data.evaluation.issues.length > 0 && (
+                <div className="space-y-1.5">
+                  <span className="text-sm text-muted-foreground">发现问题</span>
+                  <div className="space-y-1">
+                    {data.evaluation.issues.map((issue, i) => (
+                      <div key={i} className="text-sm text-destructive bg-destructive/5 rounded px-2 py-1">
+                        {issue}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </CollapsibleSection>
+        </>
+      )}
     </div>
   )
 }
 
-/** Output 详情 */
-function OutputDetail({
+/** 最终响应详情 */
+function FinalOutputDetail({
   data,
   traceOutput,
 }: {
-  data: FlowNodeData & { type: 'output' }
+  data: FlowNodeData & { type: 'final-output' }
   traceOutput: TraceOutput | null
 }) {
   // 从 traceOutput (data-trace-end) 获取完整输出
@@ -497,6 +519,7 @@ function OutputDetail({
       <Separator />
 
       {/* 统计 */}
+      <p className="text-xs font-medium text-muted-foreground">统计</p>
       {data.totalDuration !== undefined && (
         <DetailRow label="总耗时">
           <span className="text-sm font-mono">{formatDuration(data.totalDuration)}</span>

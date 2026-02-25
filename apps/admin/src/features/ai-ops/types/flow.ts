@@ -8,14 +8,14 @@ import type { Node, Edge } from '@xyflow/react';
 
 /** 节点类型 */
 export type FlowNodeType =
-  | 'input'              // 用户输入
+  | 'user-input'         // 用户输入（避开 ReactFlow 保留的 'input' 类型）
   | 'input-guard'        // Input Guard Processor
   | 'keyword-match'      // P0 关键词匹配
   | 'intent-classify'    // P1 意图识别
   | 'processor'          // 通用 Processor（User Profile, Working Memory, etc.）
   | 'llm'                // LLM 推理
   | 'tool'               // Tool 调用（包含 Evaluation）
-  | 'output';            // 最终输出
+  | 'final-output';      // 最终输出（避开 ReactFlow 保留的 'output' 类型）
 
 /** 节点状态 */
 export type FlowNodeStatus = 'pending' | 'running' | 'success' | 'error' | 'skipped';
@@ -43,7 +43,7 @@ export interface BaseFlowNodeData {
 
 /** Input 节点数据 */
 export interface InputNodeData extends BaseFlowNodeData {
-  type: 'input';
+  type: 'user-input';
   text: string;
   charCount: number;
   userId?: string;
@@ -142,7 +142,7 @@ export interface ToolNodeData extends BaseFlowNodeData {
 
 /** Output 节点数据 */
 export interface OutputNodeData extends BaseFlowNodeData {
-  type: 'output';
+  type: 'final-output';
   responseType: string;
   itemCount?: number;
   totalDuration: number;
@@ -179,16 +179,36 @@ export interface FlowGraphData {
 
 /** Processor 显示名称映射 */
 export const PROCESSOR_DISPLAY_NAMES: Record<ProcessorType, string> = {
-  'input-guard': 'Input Guard',
-  'user-profile': 'User Profile',
-  'working-memory': 'Working Memory',
-  'semantic-recall': 'Semantic Recall',
-  'token-limit': 'Token Limit',
-  'save-history': 'Save History',
-  'extract-preferences': 'Extract Preferences',
+  'input-guard': '输入安全检查',
+  'user-profile': '用户画像',
+  'working-memory': '工作记忆',
+  'semantic-recall': '语义记忆召回',
+  'token-limit': '上下文窗口',
+  'save-history': '保存历史',
+  'extract-preferences': '提取偏好',
 };
 
 /** 获取 Processor 显示名称 */
 export function getProcessorDisplayName(type: ProcessorType): string {
   return PROCESSOR_DISPLAY_NAMES[type] || type;
 }
+
+/** 节点中文标签映射（流程图标签 + Drawer 标题共用） */
+export const NODE_CHINESE_LABELS: Record<string, string> = {
+  'user-input': '用户输入',
+  'input-guard': '输入安全检查',
+  'keyword-match': '关键词快捷匹配',
+  'intent-classify': '意图识别',
+  'user-profile': '用户画像',
+  'semantic-recall': '语义记忆召回',
+  'token-limit': '上下文窗口',
+  'llm': '模型推理',
+  'tool': '工具调用',
+  'final-output': '最终响应',
+}
+
+/** 获取节点中文标签，未匹配时返回原始 type */
+export function getNodeChineseLabel(type: string): string {
+  return NODE_CHINESE_LABELS[type] ?? type
+}
+

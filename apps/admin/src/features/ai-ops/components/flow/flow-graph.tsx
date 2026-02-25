@@ -30,13 +30,13 @@ interface FlowGraphProps {
 }
 
 const nodeTypes: NodeTypes = {
-  input: InputNode,
+  'user-input': InputNode,
   'keyword-match': P0MatchNode,
   'intent-classify': P1IntentNode,
   processor: ProcessorNode,
   llm: LLMNode,
   tool: ToolNode,
-  output: OutputNode,
+  'final-output': OutputNode,
 };
 
 export function FlowGraph({ data, onNodeClick }: FlowGraphProps) {
@@ -57,7 +57,21 @@ export function FlowGraph({ data, onNodeClick }: FlowGraphProps) {
   );
 
   return (
-    <div className="h-full w-full [&_.react-flow__node.selected]:!shadow-none [&_.react-flow__node.selected]:!outline-none [&_.react-flow__node.selected]:!border-transparent [&_.react-flow__node.selected_.react-flow__node-default]:!border-transparent">
+    <div
+      className="h-full w-full [&_.react-flow__node]:!border-0 [&_.react-flow__node]:!shadow-none [&_.react-flow__node]:!rounded-none [&_.react-flow__node]:!p-0 [&_.react-flow__node.selected]:!outline-none [&_.react-flow__handle]:!min-w-0 [&_.react-flow__handle]:!min-h-0"
+      style={{
+        // 覆盖 ReactFlow 内置 dark mode 的黑色背景，统一使用设计系统的 --background
+        '--xy-background-color': 'hsl(var(--background))',
+        '--xy-minimap-background-color': 'hsl(var(--muted))',
+        '--xy-minimap-mask-background-color': 'hsl(var(--background) / 0.7)',
+        '--xy-node-background-color': 'transparent',
+        '--xy-node-border-color': 'transparent',
+        '--xy-controls-button-background-color': 'hsl(var(--card))',
+        '--xy-controls-button-border-color': 'hsl(var(--border))',
+        '--xy-controls-button-color': 'hsl(var(--foreground))',
+        '--xy-edge-stroke': 'hsl(var(--muted-foreground) / 0.3)',
+      } as React.CSSProperties}
+    >
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -81,7 +95,7 @@ export function FlowGraph({ data, onNodeClick }: FlowGraphProps) {
         elementsSelectable={true}
         selectNodesOnDrag={false}
       >
-        <Background />
+        <Background color="hsl(var(--muted-foreground) / 0.15)" />
         <Controls />
         <MiniMap
           nodeColor={(node) => {

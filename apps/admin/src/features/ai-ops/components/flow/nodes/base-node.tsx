@@ -23,6 +23,10 @@ export interface BaseNodeProps {
   }
   selected?: boolean
   children?: ReactNode
+  /** 隐藏顶部 handle（用于第一层节点如 Input） */
+  hideTargetHandle?: boolean
+  /** 隐藏底部 handle（用于最后一层节点如 Output） */
+  hideSourceHandle?: boolean
 }
 
 const statusStyles: Record<FlowNodeStatus, string> = {
@@ -33,7 +37,9 @@ const statusStyles: Record<FlowNodeStatus, string> = {
   skipped: 'border-dashed border-muted text-muted-foreground/50 bg-card/50',
 }
 
-export const BaseNode = memo(({ data, selected, children }: BaseNodeProps) => {
+const handleClassName = '!bg-muted-foreground/40 !w-2 !h-2 !border-0 !min-w-0 !min-h-0'
+
+export const BaseNode = memo(({ data, selected, children, hideTargetHandle, hideSourceHandle }: BaseNodeProps) => {
   const status = data.status as FlowNodeStatus
 
   return (
@@ -45,7 +51,9 @@ export const BaseNode = memo(({ data, selected, children }: BaseNodeProps) => {
       )}
       style={{ width: 200 }}
     >
-      <Handle type="target" position={Position.Top} className="!bg-muted-foreground/40 !w-2 !h-2 !border-0" />
+      {!hideTargetHandle && (
+        <Handle type="target" position={Position.Top} className={handleClassName} />
+      )}
 
       <div className="text-sm font-medium truncate">{data.label}</div>
       {data.subtitle && (
@@ -55,7 +63,9 @@ export const BaseNode = memo(({ data, selected, children }: BaseNodeProps) => {
       )}
       {children}
 
-      <Handle type="source" position={Position.Bottom} className="!bg-muted-foreground/40 !w-2 !h-2 !border-0" />
+      {!hideSourceHandle && (
+        <Handle type="source" position={Position.Bottom} className={handleClassName} />
+      )}
     </div>
   )
 })

@@ -38,6 +38,19 @@ export type {
   WidgetErrorPayload,
 } from './widgets';
 
+// ============ Widget Catalog ============
+export {
+  WIDGET_CATALOG,
+  TOOL_WIDGET_MAP,
+  WIDGET_TOOL_NAMES,
+  isWidgetTool,
+  buildWidgetSpec,
+  generateWidgetCatalog,
+  getCatalogEntryByToolName,
+} from './widgets';
+
+export type { WidgetCatalogEntry } from './widgets';
+
 // ============ Registry ============
 export { resolveToolsForIntent, getToolNamesByIntent, getTool } from './registry';
 

@@ -2,12 +2,13 @@
 import { useState } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
-import { Loader2, RefreshCw, Brain, Route, Workflow, ListTree } from 'lucide-react'
+import { Loader2, RefreshCw, Brain, Route, Workflow, ListTree, FileText } from 'lucide-react'
 import { useAiConfigs } from './hooks/use-ai-config'
 import { FeatureRulesEditor } from './components/config/feature-rules-editor'
 import { FewShotEditor } from './components/config/few-shot-editor'
 import { ModelRouterEditor } from './components/config/model-router-editor'
 import { PipelineEditor } from './components/config/pipeline-editor'
+import { PromptTemplateEditor } from './components/config/prompt-template-editor'
 import { ConfigHistoryPanel } from './components/config/config-history-panel'
 
 export function AiConfig() {
@@ -46,7 +47,7 @@ export function AiConfig() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
           <Tabs defaultValue="intent" className="space-y-4">
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="intent" className="flex items-center gap-1.5">
                 <Brain className="h-3.5 w-3.5" />
                 意图分类
@@ -63,6 +64,10 @@ export function AiConfig() {
                 <Workflow className="h-3.5 w-3.5" />
                 处理器管线
               </TabsTrigger>
+              <TabsTrigger value="prompt" className="flex items-center gap-1.5">
+                <FileText className="h-3.5 w-3.5" />
+                Prompt 模板
+              </TabsTrigger>
             </TabsList>
 
             <TabsContent value="intent">
@@ -76,6 +81,9 @@ export function AiConfig() {
             </TabsContent>
             <TabsContent value="pipeline">
               <PipelineEditor onSelectConfig={setSelectedConfigKey} />
+            </TabsContent>
+            <TabsContent value="prompt">
+              <PromptTemplateEditor onSelectConfig={setSelectedConfigKey} />
             </TabsContent>
           </Tabs>
         </div>

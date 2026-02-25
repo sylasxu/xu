@@ -37,12 +37,21 @@ export interface ToolResult<T = unknown> {
 
 /**
  * Widget 数据块 - Tool 返回的结构化 UI 数据
+ *
+ * 五维协议：
+ * - messageType: Widget 类型标识
+ * - payload: 业务数据（必选）
+ * - state: 声明式初始状态（可选，H5 直接消费，小程序可忽略）
+ * - fetchConfig: 数据源声明（可选，引用模式）
+ * - interaction: 交互能力声明（可选）
  */
 export interface WidgetChunk {
   /** Widget 类型，对应 conversationMessageTypeEnum */
   messageType: string;
   /** Widget 数据 */
   payload: Record<string, unknown>;
+  /** 声明式初始状态（H5 端直接消费，小程序端可忽略） */
+  state?: Record<string, unknown>;
   /** 引用模式：告诉前端从哪个 API 获取完整数据 */
   fetchConfig?: WidgetFetchConfig;
   /** 交互能力：告诉前端该 Widget 支持哪些交互 */
@@ -84,28 +93,12 @@ export const TOOL_DISPLAY_NAMES: Record<string, string> = {
 };
 
 /**
- * Tool 对应的 Widget 类型映射
- */
-export const TOOL_WIDGET_TYPES: Record<string, string> = {
-  createActivityDraft: 'widget_draft',
-  getDraft: 'widget_draft',
-  refineDraft: 'widget_draft',
-  exploreNearby: 'widget_explore',
-  getActivityDetail: 'widget_detail',
-  publishActivity: 'widget_share',
-  askPreference: 'widget_ask_preference',
-};
-
-/**
  * 获取 Tool 显示名称
  */
 export function getToolDisplayName(toolName: string): string {
   return TOOL_DISPLAY_NAMES[toolName] || toolName;
 }
 
-/**
- * 获取 Tool 对应的 Widget 类型
- */
-export function getToolWidgetType(toolName: string): string | undefined {
-  return TOOL_WIDGET_TYPES[toolName];
-}
+// 从 widgets.ts 重导出（向后兼容）
+export { TOOL_WIDGET_MAP as TOOL_WIDGET_TYPES } from './widgets';
+export { getWidgetTypeByToolName as getToolWidgetType } from './widgets';

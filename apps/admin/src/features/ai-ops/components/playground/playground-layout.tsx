@@ -10,7 +10,7 @@ import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport } from 'ai'
 import { useExecutionTrace } from '../../hooks/use-execution-trace'
 import { FlowTracePanel } from '../flow/flow-trace-panel'
-import { PlaygroundDrawer, type DrawerView } from './playground-drawer'
+import { PlaygroundDrawer } from './playground-drawer'
 import { SessionStatsBar } from './session-stats-bar'
 import { RoundSelector } from './round-selector'
 import type { MockSettings } from './mock-settings-panel'
@@ -26,7 +26,6 @@ import { ProfileDropdown } from '@/components/profile-dropdown'
 export function PlaygroundLayout() {
   // Drawer 状态
   const [drawerOpen, setDrawerOpen] = useState(true)
-  const [drawerView, setDrawerView] = useState<DrawerView>('chat')
   const [selectedNode, setSelectedNode] = useState<FlowNode | null>(null)
   const [selectedRound, setSelectedRound] = useState(0)
 
@@ -146,7 +145,6 @@ export function PlaygroundLayout() {
   // 节点点击 → 打开 Drawer node-detail 视图
   const handleNodeClick = useCallback((node: FlowNode) => {
     setSelectedNode(node)
-    setDrawerView('node-detail')
     setDrawerOpen(true)
   }, [])
 
@@ -185,8 +183,6 @@ export function PlaygroundLayout() {
       <PlaygroundDrawer
         open={drawerOpen}
         onOpenChange={setDrawerOpen}
-        view={drawerView}
-        onViewChange={setDrawerView}
         messages={messages}
         onSendMessage={handleSendMessage}
         onClear={handleClear}

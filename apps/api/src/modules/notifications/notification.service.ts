@@ -44,7 +44,7 @@ export async function getNotifications(
   const total = totalResult[0]?.count || 0;
   const totalPages = Math.ceil(total / limit);
 
-  return { data, total, page, totalPages };
+  return { items: data, total, page, totalPages };
 }
 
 /**
@@ -52,7 +52,7 @@ export async function getNotifications(
  */
 export async function getAllNotifications(
   query: NotificationListQuery
-): Promise<NotificationListResponse & { data: Array<any> }> {
+): Promise<NotificationListResponse & { items: Array<any> }> {
   const { page = 1, limit = 20, type } = query;
   const offset = (page - 1) * limit;
 
@@ -94,7 +94,7 @@ export async function getAllNotifications(
   const total = totalResult[0]?.count || 0;
   const totalPages = Math.ceil(total / limit);
 
-  return { data, total, page, totalPages };
+  return { items: data, total, page, totalPages };
 }
 
 /**
@@ -103,7 +103,7 @@ export async function getAllNotifications(
 export async function getNotificationsByUserId(
   targetUserId: string,
   query: NotificationListQuery
-): Promise<NotificationListResponse & { data: Array<any> }> {
+): Promise<NotificationListResponse & { items: Array<any> }> {
   const { page = 1, limit = 20, type } = query;
   const offset = (page - 1) * limit;
 
@@ -143,7 +143,7 @@ export async function getNotificationsByUserId(
   const total = totalResult[0]?.count || 0;
   const totalPages = Math.ceil(total / limit);
 
-  return { data, total, page, totalPages };
+  return { items: data, total, page, totalPages };
 }
 
 /**

@@ -9,7 +9,7 @@ type ReportsResponse = ApiResponse<typeof api.reports>
 
 // 导出推导的类型
 export type ReportListResponse = NonNullable<ReportsResponse>
-export type Report = ReportListResponse['data'] extends (infer T)[] ? T : never
+export type Report = ReportListResponse['items'] extends (infer T)[] ? T : never
 
 // 举报筛选参数类型 (前端特有，允许手动定义)
 export interface ReportFilters {

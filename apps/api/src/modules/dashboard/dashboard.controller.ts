@@ -1,12 +1,22 @@
 // Dashboard Controller - MVP 简化版：只保留 Admin 基础统计
 import { Elysia } from 'elysia';
-import { basePlugins } from '../../setup';
+import { basePlugins, verifyAdmin, AuthError } from '../../setup';
 import { dashboardModel, type ErrorResponse } from './dashboard.model';
 import { getDashboardStats, getRecentActivities, getUserGrowthTrend, getActivityTypeDistribution, getGeographicDistribution, getBusinessMetrics, getIntentMetrics, getGodViewData } from './dashboard.service';
 
 export const dashboardController = new Elysia({ prefix: '/dashboard' })
   .use(basePlugins)
   .use(dashboardModel)
+  .onBeforeHandle(async ({ jwt, headers, set }) => {
+    try {
+      await verifyAdmin(jwt, headers);
+    } catch (error) {
+      if (error instanceof AuthError) {
+        set.status = error.status;
+        return { code: error.status, msg: error.message };
+      }
+    }
+  })
   
   // 获取仪表板统计数据
   .get(
@@ -62,7 +72,7 @@ export const dashboardController = new Elysia({ prefix: '/dashboard' })
 
   // 获取用户增长趋势
   .get(
-    '/userGrowth',
+    '/user-growth',
     async ({ query, set }) => {
       try {
         const days = query.days ? parseInt(query.days) : 30;
@@ -89,7 +99,7 @@ export const dashboardController = new Elysia({ prefix: '/dashboard' })
 
   // 获取活动类型分布
   .get(
-    '/activityTypes',
+    '/activity-types',
     async ({ set }) => {
       try {
         const data = await getActivityTypeDistribution();

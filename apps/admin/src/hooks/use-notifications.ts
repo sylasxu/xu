@@ -8,7 +8,7 @@ type NotificationsResponse = ApiResponse<typeof api.notifications>
 
 // 导出推导的类型
 export type NotificationListResponse = NonNullable<NotificationsResponse>
-export type Notification = NotificationListResponse['data'] extends (infer T)[] ? T : never
+export type Notification = NotificationListResponse['items'] extends (infer T)[] ? T : never
 
 // 通知筛选参数类型 (前端特有，允许手动定义)
 export interface NotificationFilters {

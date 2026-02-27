@@ -147,7 +147,7 @@ export function useUserGrowthTrend(days: number = 30) {
     queryFn: async (): Promise<UserGrowthData[]> => {
       try {
         const response = await unwrap(
-          api.dashboard.userGrowth.get({ query: { days: String(days) } })
+          api.dashboard['user-growth'].get({ query: { days: String(days) } })
         )
         const data = response as Array<{
           date: string
@@ -214,7 +214,7 @@ export function useActivityTypeDistribution() {
     queryKey: queryKeys.dashboard.activityTypes(),
     queryFn: async () => {
       try {
-        const response = await unwrap(api.dashboard.activityTypes.get())
+        const response = await unwrap(api.dashboard['activity-types'].get())
         return response as {
           food: number
           sports: number

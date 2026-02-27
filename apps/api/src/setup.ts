@@ -36,7 +36,31 @@ export async function verifyAuth(jwt: any, headers: Record<string, string | unde
   return profile as { id: string; role: string } | null;
 }
 
+/**
+ * Admin 认证错误类
+ * 包含 HTTP status (401/403) 和错误消息
+ */
+export class AuthError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+  }
+}
 
-
-
+/**
+ * Admin 权限验证中间件
+ * 验证 JWT + admin 角色，失败抛出 AuthError
+ */
+export async function verifyAdmin(
+  jwt: any,
+  headers: Record<string, string | undefined>
+): Promise<{ id: string; role: string }> {
+  const user = await verifyAuth(jwt, headers);
+  if (!user) {
+    throw new AuthError(401, '未授权');
+  }
+  if (user.role !== 'admin') {
+    throw new AuthError(403, '无管理员权限');
+  }
+  return user;
+}
 

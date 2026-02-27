@@ -114,7 +114,7 @@ export const ReportResponseSchema = t.Object({
 
 // 举报列表响应
 export const ReportListResponseSchema = t.Object({
-  data: t.Array(ReportResponseSchema),
+  items: t.Array(ReportResponseSchema),
   total: t.Number({ description: '总数' }),
   page: t.Number({ description: '当前页码' }),
   limit: t.Number({ description: '每页数量' }),
@@ -134,8 +134,9 @@ const SuccessResponseSchema = t.Object({
 
 // 创建举报成功响应
 const CreateReportSuccessSchema = t.Object({
-  id: t.String({ description: '举报 ID' }),
+  success: t.Literal(true),
   msg: t.String(),
+  id: t.String({ description: '举报 ID' }),
 });
 
 // ============ 注册到 Elysia ============

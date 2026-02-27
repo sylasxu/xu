@@ -101,7 +101,7 @@ export function useSetUserQuotaBatch() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: quotaKeys.all })
-      toast.success(`已更新 ${data?.updatedCount || 0} 个用户的额度`)
+      toast.success(`已更新 ${data?.count || 0} 个用户的额度`)
     },
     onError: (error: Error) => {
       toast.error(`批量更新失败: ${error.message}`)

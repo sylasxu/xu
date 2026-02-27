@@ -154,12 +154,12 @@ export function useDeleteSessionsBatch() {
   return useMutation({
     mutationFn: async (ids: string[]) => {
       return await unwrap(
-        api.ai.sessions.batchDelete.post({ ids })
+        api.ai.sessions['batch-delete'].post({ ids })
       )
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['conversations', 'sessions'] })
-      toast.success(`已删除 ${data?.deletedCount || 0} 个会话`)
+      toast.success(`已删除 ${data?.count || 0} 个会话`)
     },
     onError: (error: Error) => {
       toast.error(`批量删除失败: ${error.message}`)

@@ -27,7 +27,7 @@ const NotificationListQuery = t.Object({
 
 // 通知列表响应
 const NotificationListResponse = t.Object({
-  data: t.Array(selectNotificationSchema),
+  items: t.Array(selectNotificationSchema),
   total: t.Number(),
   page: t.Number(),
   totalPages: t.Number(),

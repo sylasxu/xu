@@ -1,5 +1,6 @@
 // Dashboard Model - MVP 简化版：只保留 Admin 基础统计
 import { Elysia, t, type Static } from 'elysia';
+import { selectActivitySchema } from '@juchang/db';
 
 /**
  * Dashboard Model Plugin - MVP 版本
@@ -14,15 +15,15 @@ const DashboardStats = t.Object({
   todayNewUsers: t.Number(),
 });
 
-// 最近活动项
-const RecentActivity = t.Object({
-  id: t.String(),
-  title: t.String(),
-  creatorName: t.String(),
-  participantCount: t.Number(),
-  status: t.String(),
-  createdAt: t.String(),
-});
+// 最近活动项（DB 字段从 @juchang/db 派生 + 聚合字段手动定义）
+const RecentActivity = t.Composite([
+  t.Pick(selectActivitySchema, ['id', 'title', 'status']),
+  t.Object({
+    creatorName: t.String(),           // 聚合字段，非 DB 列
+    participantCount: t.Number(),       // 聚合字段
+    createdAt: t.String(),             // 时间转 ISO 字符串
+  }),
+]);
 
 // 用户增长趋势数据项
 const UserGrowthItem = t.Object({

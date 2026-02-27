@@ -24,7 +24,7 @@ export function useHotKeywordsList(filters: HotKeywordsFilters = {}) {
     queryKey: hotKeywordsKeys.list(filters),
     queryFn: async () => {
       const result = await unwrap(
-        api['hot-keywords'].admin.get({ 
+        api['hot-keywords'].all.get({ 
           query: {
             isActive: filters.isActive,
             matchType: filters.matchType,
@@ -37,7 +37,7 @@ export function useHotKeywordsList(filters: HotKeywordsFilters = {}) {
         return { data: [], total: 0 }
       }
       
-      let keywords = result.data as GlobalKeyword[]
+      let keywords = result.items as GlobalKeyword[]
       
       // 前端过滤（搜索）
       if (filters.filter) {
@@ -89,11 +89,11 @@ export function useHotKeywordDetail(id: string) {
     queryKey: hotKeywordsKeys.detail(id),
     queryFn: async () => {
       // 通过列表接口获取所有数据，然后找到对应的热词
-      const result = await unwrap(api['hot-keywords'].admin.get({ query: {} }))
+      const result = await unwrap(api['hot-keywords'].all.get({ query: {} }))
       if (!result) {
         throw new Error('获取热词列表失败')
       }
-      const keyword = (result.data as GlobalKeyword[]).find(kw => kw.id === id)
+      const keyword = (result.items as GlobalKeyword[]).find(kw => kw.id === id)
       if (!keyword) {
         throw new Error('热词不存在')
       }
@@ -110,7 +110,7 @@ export function useCreateHotKeyword() {
   
   return useMutation({
     mutationFn: async (data: CreateGlobalKeywordRequest) => {
-      return unwrap(api['hot-keywords'].admin.post(data))
+      return unwrap(api['hot-keywords'].post(data))
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: hotKeywordsKeys.all })
@@ -128,7 +128,7 @@ export function useUpdateHotKeyword() {
   
   return useMutation({
     mutationFn: async ({ id, data }: { id: string; data: UpdateGlobalKeywordRequest }) => {
-      return unwrap(api['hot-keywords'].admin({ id }).patch(data))
+      return unwrap(api['hot-keywords']({ id }).patch(data))
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: hotKeywordsKeys.all })
@@ -146,7 +146,7 @@ export function useDeleteHotKeyword() {
   
   return useMutation({
     mutationFn: async (id: string) => {
-      return unwrap(api['hot-keywords'].admin({ id }).delete())
+      return unwrap(api['hot-keywords']({ id }).delete())
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: hotKeywordsKeys.all })
@@ -166,7 +166,7 @@ export function useBatchUpdateStatus() {
     mutationFn: async ({ ids, isActive }: { ids: string[]; isActive: boolean }) => {
       // 批量调用更新接口
       await Promise.all(
-        ids.map(id => unwrap(api['hot-keywords'].admin({ id }).patch({ isActive })))
+        ids.map(id => unwrap(api['hot-keywords']({ id }).patch({ isActive })))
       )
       return { count: ids.length }
     },
@@ -188,7 +188,7 @@ export function useBatchDeleteHotKeywords() {
     mutationFn: async (ids: string[]) => {
       // 批量调用删除接口
       await Promise.all(
-        ids.map(id => unwrap(api['hot-keywords'].admin({ id }).delete()))
+        ids.map(id => unwrap(api['hot-keywords']({ id }).delete()))
       )
       return { count: ids.length }
     },
@@ -208,7 +208,7 @@ export function useHotKeywordsAnalytics(period: '7d' | '30d' = '7d') {
     queryKey: [...hotKeywordsKeys.all, 'analytics', period],
     queryFn: async () => {
       const result = await unwrap(
-        api['hot-keywords'].admin.analytics.get({ 
+        api['hot-keywords'].analytics.get({ 
           query: { period } 
         })
       )

@@ -1,6 +1,6 @@
 // Notification Controller - MVP 简化版 + Admin 扩展
 import { Elysia } from 'elysia';
-import { basePlugins, verifyAuth } from '../../setup';
+import { basePlugins, verifyAuth, verifyAdmin, AuthError } from '../../setup';
 import { notificationModel, type ErrorResponse } from './notification.model';
 import { 
   getNotifications, 
@@ -18,29 +18,39 @@ export const notificationController = new Elysia({ prefix: '/notifications' })
   .get(
     '/',
     async ({ query, set, jwt, headers }) => {
+      const { scope = 'mine', userId } = query;
+
+      // scope=all 或 userId 参数需要 Admin 权限
+      if (scope === 'all' || userId) {
+        try {
+          await verifyAdmin(jwt, headers);
+        } catch (error) {
+          if (error instanceof AuthError) {
+            set.status = error.status;
+            return { code: error.status, msg: error.message } satisfies ErrorResponse;
+          }
+          set.status = 500;
+          return { code: 500, msg: '服务器错误' } satisfies ErrorResponse;
+        }
+
+        // Admin 查指定用户的通知
+        if (userId) {
+          const result = await getNotificationsByUserId(userId, query);
+          return result;
+        }
+
+        // Admin 查所有用户的通知
+        const result = await getAllNotifications(query);
+        return result;
+      }
+
+      // scope=mine（默认）：普通用户查自己的通知
       const user = await verifyAuth(jwt, headers);
       if (!user) {
         set.status = 401;
         return { code: 401, msg: '未授权' } satisfies ErrorResponse;
       }
 
-      const { scope = 'mine', userId } = query;
-
-      // 如果指定了 userId，Admin 查指定用户的通知
-      if (userId) {
-        // TODO: 添加 Admin 角色验证
-        const result = await getNotificationsByUserId(userId, query);
-        return result;
-      }
-
-      // scope=all：Admin 查所有用户的通知
-      if (scope === 'all') {
-        // TODO: 添加 Admin 角色验证
-        const result = await getAllNotifications(query);
-        return result;
-      }
-
-      // scope=mine（默认）：查当前用户的通知
       const result = await getNotifications(user.id, query);
       return result;
     },
@@ -63,7 +73,7 @@ export const notificationController = new Elysia({ prefix: '/notifications' })
 
   // 获取未读通知数量
   .get(
-    '/unreadCount',
+    '/unread-count',
     async ({ set, jwt, headers }) => {
       const user = await verifyAuth(jwt, headers);
       if (!user) {

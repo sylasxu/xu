@@ -139,17 +139,21 @@ const KeywordAnalyticsQuery = t.Object({
 
 // 热词列表响应
 const HotKeywordsResponse = t.Object({
-  data: t.Array(HotKeywordListItem),
+  items: t.Array(HotKeywordListItem),
+  total: t.Number(),
 });
 
 // Admin 热词列表响应
 const AdminHotKeywordsResponse = t.Object({
-  data: t.Array(GlobalKeywordResponse),
+  items: t.Array(GlobalKeywordResponse),
+  total: t.Number(),
 });
 
 // 创建热词响应
 const CreateKeywordResponse = t.Object({
-  data: GlobalKeywordResponse,
+  success: t.Literal(true),
+  msg: t.String(),
+  id: t.String(),
 });
 
 // 更新热词响应
@@ -159,7 +163,8 @@ const UpdateKeywordResponse = t.Object({
 
 // 删除热词响应
 const DeleteKeywordResponse = t.Object({
-  success: t.Boolean(),
+  success: t.Literal(true),
+  msg: t.String(),
 });
 
 // 热词分析项（Admin 特有类型，允许手动定义）
@@ -177,7 +182,8 @@ const KeywordAnalyticsItem = t.Object({
 
 // 热词分析响应
 const KeywordAnalyticsResponse = t.Object({
-  data: t.Array(KeywordAnalyticsItem),
+  items: t.Array(KeywordAnalyticsItem),
+  total: t.Number(),
 });
 
 // ==========================================

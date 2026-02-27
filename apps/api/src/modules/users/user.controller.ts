@@ -1,6 +1,6 @@
 // User Controller - 用户管理接口 (纯 RESTful)
 import { Elysia, t } from 'elysia';
-import { basePlugins } from '../../setup';
+import { basePlugins, verifyAdmin, AuthError } from '../../setup';
 import { 
   userModel, 
   UserResponseSchema,
@@ -21,6 +21,16 @@ import { getEnhancedUserProfile } from '../ai/memory/working';
 export const userController = new Elysia({ prefix: '/users' })
   .use(basePlugins)
   .use(userModel)
+  .onBeforeHandle(async ({ jwt, headers, set }) => {
+    try {
+      await verifyAdmin(jwt, headers);
+    } catch (error) {
+      if (error instanceof AuthError) {
+        set.status = error.status;
+        return { code: error.status, msg: error.message };
+      }
+    }
+  })
 
   // 获取用户列表 (分页、搜索)
   .get(
@@ -174,7 +184,7 @@ export const userController = new Elysia({ prefix: '/users' })
     '/quota/batch',
     async ({ body }) => {
       const result = await setUserQuotaBatch(body.userIds, body.quota);
-      return { success: true, updatedCount: result.updatedCount };
+      return { success: true as const, msg: '批量设置额度成功', count: result.updatedCount };
     },
     {
       detail: {
@@ -188,8 +198,9 @@ export const userController = new Elysia({ prefix: '/users' })
       }),
       response: {
         200: t.Object({
-          success: t.Boolean(),
-          updatedCount: t.Number(),
+          success: t.Literal(true),
+          msg: t.String(),
+          count: t.Number(),
         }),
       },
     }

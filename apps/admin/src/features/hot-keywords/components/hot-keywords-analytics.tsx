@@ -15,7 +15,7 @@ export function HotKeywordsAnalytics() {
   const [period, setPeriod] = useState<'7d' | '30d'>('7d')
   const { data, isLoading, error, refetch } = useHotKeywordsAnalytics(period)
 
-  const analytics = data?.data || []
+  const analytics = data?.items || []
 
   // 计算 Top 10 by hit count
   const topByHits = [...analytics]

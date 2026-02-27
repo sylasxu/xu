@@ -200,7 +200,7 @@ export async function getReports(
   }));
   
   return {
-    data,
+    items: data,
     total: totalResult?.total ?? 0,
     page,
     limit,

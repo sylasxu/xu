@@ -25,7 +25,7 @@ import { ProfileDropdown } from '@/components/profile-dropdown'
 
 export function PlaygroundLayout() {
   // Drawer 状态
-  const [drawerOpen, setDrawerOpen] = useState(true)
+  const [drawerOpen, setDrawerOpen] = useState(false)
   const [selectedNode, setSelectedNode] = useState<FlowNode | null>(null)
   const [selectedRound, setSelectedRound] = useState(0)
 
@@ -149,7 +149,7 @@ export function PlaygroundLayout() {
   }, [])
 
   return (
-    <div className="relative h-screen w-screen overflow-hidden">
+    <div className="relative h-full w-full overflow-hidden">
       {/* 透明 Header */}
       <Header className="pointer-events-none absolute left-0 right-0 top-0 z-40 bg-transparent border-b-0">
         <div className="pointer-events-auto flex items-center gap-3">

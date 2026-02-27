@@ -60,16 +60,16 @@ export function FlowGraph({ data, onNodeClick }: FlowGraphProps) {
     <div
       className="h-full w-full [&_.react-flow__node]:!border-0 [&_.react-flow__node]:!shadow-none [&_.react-flow__node]:!rounded-none [&_.react-flow__node]:!p-0 [&_.react-flow__node.selected]:!outline-none [&_.react-flow__handle]:!min-w-0 [&_.react-flow__handle]:!min-h-0"
       style={{
-        // 覆盖 ReactFlow 内置 dark mode 的黑色背景，统一使用设计系统的 --background
-        '--xy-background-color': 'hsl(var(--background))',
-        '--xy-minimap-background-color': 'hsl(var(--muted))',
-        '--xy-minimap-mask-background-color': 'hsl(var(--background) / 0.7)',
+        // CSS 变量值已是完整的 oklch() 颜色，直接引用即可
+        '--xy-background-color': 'var(--background)',
+        '--xy-minimap-background-color': 'var(--muted)',
+        '--xy-minimap-mask-background-color': 'color-mix(in oklch, var(--background) 70%, transparent)',
         '--xy-node-background-color': 'transparent',
         '--xy-node-border-color': 'transparent',
-        '--xy-controls-button-background-color': 'hsl(var(--card))',
-        '--xy-controls-button-border-color': 'hsl(var(--border))',
-        '--xy-controls-button-color': 'hsl(var(--foreground))',
-        '--xy-edge-stroke': 'hsl(var(--muted-foreground) / 0.3)',
+        '--xy-controls-button-background-color': 'var(--card)',
+        '--xy-controls-button-border-color': 'var(--border)',
+        '--xy-controls-button-color': 'var(--foreground)',
+        '--xy-edge-stroke': 'color-mix(in oklch, var(--muted-foreground) 30%, transparent)',
       } as React.CSSProperties}
     >
       <ReactFlow
@@ -82,10 +82,11 @@ export function FlowGraph({ data, onNodeClick }: FlowGraphProps) {
         fitView
         minZoom={0.5}
         maxZoom={1.5}
+        proOptions={{ hideAttribution: true }}
         defaultEdgeOptions={{
           type: 'smoothstep',
           style: { 
-            stroke: 'hsl(var(--primary))',
+            stroke: 'var(--primary)',
             strokeWidth: 2,
           },
           animated: false,
@@ -95,9 +96,12 @@ export function FlowGraph({ data, onNodeClick }: FlowGraphProps) {
         elementsSelectable={true}
         selectNodesOnDrag={false}
       >
-        <Background color="hsl(var(--muted-foreground) / 0.15)" />
+        <Background variant="dots" gap={16} size={1} color="rgba(140, 140, 160, 0.4)" />
         <Controls />
         <MiniMap
+          maskColor="color-mix(in oklch, var(--background) 70%, transparent)"
+          bgColor="var(--muted)"
+          style={{ width: 160, height: 120, right: 12, bottom: 12 }}
           nodeColor={(node) => {
             const status = (node.data as any)?.status as string | undefined;
             const colorMap: Record<string, string> = {

@@ -30,11 +30,11 @@ export interface BaseNodeProps {
 }
 
 const statusStyles: Record<FlowNodeStatus, string> = {
-  pending: 'border-dashed border-muted text-muted-foreground bg-card',
+  pending: 'border-dashed border-muted-foreground/20 text-muted-foreground bg-muted',
   running: 'border-primary bg-card animate-pulse',
   success: 'border-foreground/30 bg-card',
   error: 'border-destructive bg-card',
-  skipped: 'border-dashed border-muted text-muted-foreground/50 bg-card/50',
+  skipped: 'border-dashed border-muted-foreground/20 text-muted-foreground/50 bg-muted/50',
 }
 
 const handleClassName = '!bg-muted-foreground/40 !w-2 !h-2 !border-0 !min-w-0 !min-h-0'

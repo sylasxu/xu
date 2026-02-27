@@ -335,9 +335,10 @@ function createPendingEdge(source: string, target: string): FlowEdge {
     type: 'smoothstep',
     animated: false,
     style: {
-      stroke: 'hsl(var(--muted-foreground) / 0.3)',
+      stroke: 'var(--muted-foreground)',
       strokeWidth: 1.5,
       strokeDasharray: '6 4',
+      opacity: 0.3,
     },
   }
 }
@@ -359,32 +360,32 @@ function getEdgeStyle(status: FlowNodeStatus): Pick<FlowEdge, 'animated' | 'styl
     case 'pending':
       return {
         animated: false,
-        style: { stroke: 'hsl(var(--muted-foreground) / 0.3)', strokeWidth: 1.5, strokeDasharray: '6 4' },
+        style: { stroke: 'var(--muted-foreground)', strokeWidth: 1.5, strokeDasharray: '6 4', opacity: 0.3 },
       }
     case 'running':
       return {
         animated: true,
-        style: { stroke: 'hsl(var(--primary))', strokeWidth: 2 },
+        style: { stroke: 'var(--primary)', strokeWidth: 2 },
       }
     case 'success':
       return {
         animated: false,
-        style: { stroke: 'hsl(var(--foreground) / 0.4)', strokeWidth: 2 },
+        style: { stroke: 'var(--foreground)', strokeWidth: 2, opacity: 0.4 },
       }
     case 'error':
       return {
         animated: false,
-        style: { stroke: 'hsl(var(--destructive))', strokeWidth: 2 },
+        style: { stroke: 'var(--destructive)', strokeWidth: 2 },
       }
     case 'skipped':
       return {
         animated: false,
-        style: { stroke: 'hsl(var(--muted-foreground) / 0.15)', strokeWidth: 1, strokeDasharray: '4 4' },
+        style: { stroke: 'var(--muted-foreground)', strokeWidth: 1, strokeDasharray: '4 4', opacity: 0.15 },
       }
     default:
       return {
         animated: false,
-        style: { stroke: 'hsl(var(--muted-foreground) / 0.3)', strokeWidth: 1.5, strokeDasharray: '6 4' },
+        style: { stroke: 'var(--muted-foreground)', strokeWidth: 1.5, strokeDasharray: '6 4', opacity: 0.3 },
       }
   }
 }

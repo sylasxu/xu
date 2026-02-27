@@ -57,7 +57,7 @@ export async function generateNotes(params: {
   contentType: string;
   count: number;
   trendKeywords?: string[];
-}): Promise<ContentNote[]> {
+}) {
   const { topic, contentType, count, trendKeywords } = params;
   const batchId = crypto.randomUUID();
 
@@ -84,7 +84,7 @@ ${references}
   }
 
   const generatedTitles: string[] = [];
-  const results: ContentNote[] = [];
+  const results: ReturnType<typeof formatContentNote>[] = [];
 
   for (let i = 0; i < count; i++) {
     let contentPrompt = DEFAULT_CONTENT_PROMPT

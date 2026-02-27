@@ -433,6 +433,48 @@ Data Stream 格式：
   )
 
   // ==========================================
+  // AI 内容生成 (从 Growth 迁移)
+  // ==========================================
+  .post(
+    '/generate/content',
+    async ({ body, set, jwt, headers }) => {
+      const user = await verifyAuth(jwt, headers);
+      if (!user) {
+        set.status = 401;
+        return {
+          code: 401,
+          msg: '未授权',
+        } satisfies ErrorResponse;
+      }
+
+      try {
+        const { generateContent } = await import('./ai.service');
+        const result = await generateContent(body);
+        return result;
+      } catch (error: any) {
+        set.status = 500;
+        return {
+          code: 500,
+          msg: error.message || '生成失败',
+        } satisfies ErrorResponse;
+      }
+    },
+    {
+      detail: {
+        tags: ['AI'],
+        summary: 'AI 生成内容',
+        description: '根据主题生成海报文案、小红书笔记等社交媒体内容。从 Growth 模块迁移。',
+      },
+      body: 'ai.contentGenerationRequest',
+      response: {
+        200: 'ai.contentGenerationResponse',
+        401: 'ai.error',
+        500: 'ai.error',
+      },
+    }
+  )
+
+  // ==========================================
   // Admin 路由（需要 verifyAdmin 权限）
   // ==========================================
   .guard(

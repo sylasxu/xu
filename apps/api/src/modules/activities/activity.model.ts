@@ -333,6 +333,36 @@ const CreateActivityResponse = t.Object({
   msg: t.String(),
 });
 
+// ==========================================
+// 活动统计 (新增)
+// ==========================================
+
+// 活动统计查询参数
+const ActivityStatsQuerySchema = t.Object({
+  type: t.Optional(t.Union([
+    t.Literal('overview'),      // 概览统计
+    t.Literal('distribution'),  // 类型分布
+  ], { default: 'overview', description: '统计类型' })),
+});
+
+// 活动概览统计
+const ActivityOverviewStatsSchema = t.Object({
+  totalActivities: t.Number({ description: '总活动数' }),
+  activeActivities: t.Number({ description: '进行中的活动' }),
+  completedActivities: t.Number({ description: '已成局的活动' }),
+  draftActivities: t.Number({ description: '草稿数' }),
+  todayCompleted: t.Number({ description: '今日成局数' }),
+});
+
+// 活动类型分布
+const ActivityTypeDistributionSchema = t.Object({
+  food: t.Number(),
+  sports: t.Number(),
+  entertainment: t.Number(),
+  boardgame: t.Number(),
+  other: t.Number(),
+});
+
 // 注册到 Elysia
 export const activityModel = new Elysia({ name: 'activityModel' })
   .model({
@@ -361,6 +391,10 @@ export const activityModel = new Elysia({ name: 'activityModel' })
     'activity.idParams': IdParams,
     'activity.error': ErrorResponse,
     'activity.success': SuccessResponse,
+    // 活动统计
+    'activity.statsQuery': ActivityStatsQuerySchema,
+    'activity.overviewStats': ActivityOverviewStatsSchema,
+    'activity.typeDistribution': ActivityTypeDistributionSchema,
   });
 
 // 导出 TS 类型
@@ -386,3 +420,9 @@ export type IdParams = Static<typeof IdParams>;
 export type ErrorResponse = Static<typeof ErrorResponse>;
 export type SuccessResponse = Static<typeof SuccessResponse>;
 export type CreateActivityResponse = Static<typeof CreateActivityResponse>;
+// 活动统计类型
+export type ActivityStatsQuery = Static<typeof ActivityStatsQuerySchema>;
+export type ActivityOverviewStats = Static<typeof ActivityOverviewStatsSchema>;
+export type ActivityTypeDistribution = Static<typeof ActivityTypeDistributionSchema>;
+// 导出 Schema 供 controller 使用
+export { ActivityOverviewStatsSchema, ActivityTypeDistributionSchema };

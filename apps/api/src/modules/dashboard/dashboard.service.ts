@@ -1,4 +1,5 @@
 // Dashboard Service - MVP 简化版：只保留 Admin 基础统计
+// 重构后：Dashboard 作为 BFF 聚合层，调用各领域服务
 import { db, users, activities, participants, eq, gte, desc, count, and, lte, lt, sql, inArray, not, partnerIntents, intentMatches, conversations } from '@juchang/db';
 import type { 
   DashboardStats, 
@@ -14,36 +15,25 @@ import type {
   IntentMetrics,
   GodViewData,
 } from './dashboard.model';
+import { getUserOverviewStats, getUserGrowthTrend as getUserGrowthTrendFromDomain } from '../users/user.service';
+import { getActivityOverviewStats, getActivityTypeDistribution as getActivityTypeDistributionFromDomain } from '../activities/activity.service';
 
 /**
  * 获取仪表板统计数据
+ * 重构后：调用 Users 和 Activities 领域服务
  */
 export async function getDashboardStats(): Promise<DashboardStats> {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
   try {
-    const [
-      totalUsersResult,
-      totalActivitiesResult,
-      activeActivitiesResult,
-      todayNewUsersResult,
-    ] = await Promise.all([
-      db.select({ count: count() }).from(users),
-      db.select({ count: count() }).from(activities),
-      db.select({ count: count() })
-        .from(activities)
-        .where(eq(activities.status, 'active')),
-      db.select({ count: count() })
-        .from(users)
-        .where(gte(users.createdAt, today)),
+    const [userStats, activityStats] = await Promise.all([
+      getUserOverviewStats(),
+      getActivityOverviewStats(),
     ]);
 
     return {
-      totalUsers: totalUsersResult[0]?.count || 0,
-      totalActivities: totalActivitiesResult[0]?.count || 0,
-      activeActivities: activeActivitiesResult[0]?.count || 0,
-      todayNewUsers: todayNewUsersResult[0]?.count || 0,
+      totalUsers: userStats.totalUsers,
+      totalActivities: activityStats.totalActivities,
+      activeActivities: activityStats.activeActivities,
+      todayNewUsers: userStats.todayNewUsers,
     };
   } catch (error) {
     console.error('获取仪表板统计数据失败:', error);
@@ -91,44 +81,11 @@ export async function getRecentActivities(): Promise<RecentActivity[]> {
 
 /**
  * 获取用户增长趋势数据（过去N天）
+ * 重构后：调用 Users 领域服务
  */
 export async function getUserGrowthTrend(days: number = 30): Promise<UserGrowthItem[]> {
   try {
-    const result: UserGrowthItem[] = [];
-    const now = new Date();
-    
-    for (let i = days - 1; i >= 0; i--) {
-      const date = new Date(now);
-      date.setDate(date.getDate() - i);
-      date.setHours(0, 0, 0, 0);
-      
-      const nextDate = new Date(date);
-      nextDate.setDate(nextDate.getDate() + 1);
-      
-      // 获取截止到该日期的总用户数
-      const [totalResult] = await db
-        .select({ count: count() })
-        .from(users)
-        .where(lte(users.createdAt, nextDate));
-      
-      // 获取当天新增用户数
-      const [newResult] = await db
-        .select({ count: count() })
-        .from(users)
-        .where(and(
-          gte(users.createdAt, date),
-          lte(users.createdAt, nextDate)
-        ));
-      
-      result.push({
-        date: date.toISOString().split('T')[0],
-        totalUsers: totalResult?.count || 0,
-        newUsers: newResult?.count || 0,
-        activeUsers: Math.floor((totalResult?.count || 0) * 0.3), // MVP: 估算活跃用户
-      });
-    }
-    
-    return result;
+    return await getUserGrowthTrendFromDomain(days);
   } catch (error) {
     console.error('获取用户增长趋势失败:', error);
     return [];
@@ -137,35 +94,11 @@ export async function getUserGrowthTrend(days: number = 30): Promise<UserGrowthI
 
 /**
  * 获取活动类型分布
+ * 重构后：调用 Activities 领域服务
  */
 export async function getActivityTypeDistribution(): Promise<ActivityTypeDistribution> {
   try {
-    const result = await db
-      .select({
-        type: activities.type,
-        count: count(),
-      })
-      .from(activities)
-      .groupBy(activities.type);
-    
-    const distribution: ActivityTypeDistribution = {
-      food: 0,
-      sports: 0,
-      entertainment: 0,
-      boardgame: 0,
-      other: 0,
-    };
-    
-    for (const row of result) {
-      const type = row.type as keyof ActivityTypeDistribution;
-      if (type in distribution) {
-        distribution[type] = row.count;
-      } else {
-        distribution.other += row.count;
-      }
-    }
-    
-    return distribution;
+    return await getActivityTypeDistributionFromDomain();
   } catch (error) {
     console.error('获取活动类型分布失败:', error);
     return { food: 0, sports: 0, entertainment: 0, boardgame: 0, other: 0 };

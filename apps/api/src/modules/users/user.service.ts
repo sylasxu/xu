@@ -1,11 +1,14 @@
 // User Service - 纯业务逻辑 (纯 RESTful)
-import { db, users, eq, or, ilike, count, desc, sql } from '@juchang/db';
+import { db, users, activities, eq, or, ilike, count, desc, sql, gte, lte, and, not } from '@juchang/db';
 import type { 
   UserResponse,
   QuotaResponse, 
   UserListQuery, 
   UserListResponse, 
-  UpdateUserRequest 
+  UpdateUserRequest,
+  UserOverviewStats,
+  UserGrowthItem,
+  UserStatsQuery,
 } from './user.model';
 
 /**
@@ -220,5 +223,108 @@ export async function setUserQuotaBatch(userIds: string[], quota: number): Promi
 export async function getUserNickname(userId: string): Promise<string | undefined> {
   const [user] = await db.select({ nickname: users.nickname }).from(users).where(eq(users.id, userId)).limit(1);
   return user?.nickname || undefined;
+}
+
+// ==========================================
+// 用户统计 (从 dashboard 迁移)
+// ==========================================
+
+/**
+ * 获取用户概览统计
+ */
+export async function getUserOverviewStats(): Promise<UserOverviewStats> {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  try {
+    const [
+      totalUsersResult,
+      todayNewUsersResult,
+      totalCreatorsResult,
+    ] = await Promise.all([
+      db.select({ count: count() }).from(users),
+      db.select({ count: count() })
+        .from(users)
+        .where(gte(users.createdAt, today)),
+      db.select({ count: count() })
+        .from(activities)
+        .where(not(eq(activities.status, 'draft')))
+        .groupBy(activities.creatorId)
+        .then(results => [{ count: results.length }]),
+    ]);
+
+    const totalUsers = totalUsersResult[0]?.count || 0;
+
+    return {
+      totalUsers,
+      todayNewUsers: todayNewUsersResult[0]?.count || 0,
+      activeUsers: Math.floor(totalUsers * 0.3), // MVP: 估算活跃用户
+      totalCreators: totalCreatorsResult[0]?.count || 0,
+    };
+  } catch (error) {
+    console.error('获取用户概览统计失败:', error);
+    return {
+      totalUsers: 0,
+      todayNewUsers: 0,
+      activeUsers: 0,
+      totalCreators: 0,
+    };
+  }
+}
+
+/**
+ * 获取用户增长趋势数据（过去N天）
+ */
+export async function getUserGrowthTrend(days: number = 30): Promise<UserGrowthItem[]> {
+  try {
+    const result: UserGrowthItem[] = [];
+    const now = new Date();
+    
+    for (let i = days - 1; i >= 0; i--) {
+      const date = new Date(now);
+      date.setDate(date.getDate() - i);
+      date.setHours(0, 0, 0, 0);
+      
+      const nextDate = new Date(date);
+      nextDate.setDate(nextDate.getDate() + 1);
+      
+      // 获取截止到该日期的总用户数
+      const [totalResult] = await db
+        .select({ count: count() })
+        .from(users)
+        .where(lte(users.createdAt, nextDate));
+      
+      // 获取当天新增用户数
+      const [newResult] = await db
+        .select({ count: count() })
+        .from(users)
+        .where(and(
+          gte(users.createdAt, date),
+          lte(users.createdAt, nextDate)
+        ));
+      
+      result.push({
+        date: date.toISOString().split('T')[0],
+        totalUsers: totalResult?.count || 0,
+        newUsers: newResult?.count || 0,
+        activeUsers: Math.floor((totalResult?.count || 0) * 0.3), // MVP: 估算活跃用户
+      });
+    }
+    
+    return result;
+  } catch (error) {
+    console.error('获取用户增长趋势失败:', error);
+    return [];
+  }
+}
+
+/**
+ * 用户统计入口 - 根据类型返回不同统计
+ */
+export async function getUserStats(query: UserStatsQuery): Promise<UserOverviewStats | UserGrowthItem[]> {
+  if (query.type === 'growth') {
+    return getUserGrowthTrend(query.period);
+  }
+  return getUserOverviewStats();
 }
 

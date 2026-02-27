@@ -5,6 +5,8 @@ import {
   userModel, 
   UserResponseSchema,
   UserListResponseSchema,
+  UserOverviewStatsSchema,
+  UserGrowthResponseSchema,
   type ErrorResponse 
 } from './user.model';
 import { 
@@ -15,6 +17,7 @@ import {
   getQuota,
   setUserQuota,
   setUserQuotaBatch,
+  getUserStats,
 } from './user.service';
 import { getEnhancedUserProfile } from '../ai/memory/working';
 
@@ -31,6 +34,25 @@ export const userController = new Elysia({ prefix: '/users' })
       }
     }
   })
+
+  // 获取用户统计
+  .get(
+    '/stats',
+    async ({ query }) => {
+      return await getUserStats(query);
+    },
+    {
+      detail: {
+        tags: ['Users'],
+        summary: '获取用户统计',
+        description: '获取用户统计数据，支持概览统计(type=overview)或增长趋势(type=growth)',
+      },
+      query: 'user.statsQuery',
+      response: {
+        200: t.Union([UserOverviewStatsSchema, UserGrowthResponseSchema]),
+      },
+    }
+  )
 
   // 获取用户列表 (分页、搜索)
   .get(

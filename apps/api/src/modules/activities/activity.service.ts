@@ -1,5 +1,5 @@
 // Activity Service - 纯业务逻辑 (MVP 简化版 + v3.2 附近搜索)
-import { db, activities, users, participants, activityMessages, eq, sql, and, gt, like, inArray, desc } from '@juchang/db';
+import { db, activities, users, participants, activityMessages, eq, sql, and, gt, like, inArray, desc, count, gte } from '@juchang/db';
 import type {
   ActivityDetailResponse,
   ActivityListItem,
@@ -11,6 +11,9 @@ import type {
   ActivitiesListQuery,
   ActivitiesListResponse,
   PublicActivityResponse,
+  ActivityOverviewStats,
+  ActivityTypeDistribution,
+  ActivityStatsQuery,
 } from './activity.model';
 import { deductAiCreateQuota } from '../users/user.service';
 import { indexActivity, deleteIndex } from '../ai/rag';
@@ -1133,4 +1136,107 @@ export async function getNearbyActivities(
     center: { lat, lng },
     radius,
   };
+}
+
+// ==========================================
+// 活动统计 (从 dashboard 迁移)
+// ==========================================
+
+/**
+ * 获取活动概览统计
+ */
+export async function getActivityOverviewStats(): Promise<ActivityOverviewStats> {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  try {
+    const [
+      totalActivitiesResult,
+      activeActivitiesResult,
+      completedActivitiesResult,
+      draftActivitiesResult,
+      todayCompletedResult,
+    ] = await Promise.all([
+      db.select({ count: count() }).from(activities),
+      db.select({ count: count() })
+        .from(activities)
+        .where(eq(activities.status, 'active')),
+      db.select({ count: count() })
+        .from(activities)
+        .where(eq(activities.status, 'completed')),
+      db.select({ count: count() })
+        .from(activities)
+        .where(eq(activities.status, 'draft')),
+      db.select({ count: count() })
+        .from(activities)
+        .where(and(
+          eq(activities.status, 'completed'),
+          gte(activities.updatedAt, today)
+        )),
+    ]);
+
+    return {
+      totalActivities: totalActivitiesResult[0]?.count || 0,
+      activeActivities: activeActivitiesResult[0]?.count || 0,
+      completedActivities: completedActivitiesResult[0]?.count || 0,
+      draftActivities: draftActivitiesResult[0]?.count || 0,
+      todayCompleted: todayCompletedResult[0]?.count || 0,
+    };
+  } catch (error) {
+    console.error('获取活动概览统计失败:', error);
+    return {
+      totalActivities: 0,
+      activeActivities: 0,
+      completedActivities: 0,
+      draftActivities: 0,
+      todayCompleted: 0,
+    };
+  }
+}
+
+/**
+ * 获取活动类型分布
+ */
+export async function getActivityTypeDistribution(): Promise<ActivityTypeDistribution> {
+  try {
+    const result = await db
+      .select({
+        type: activities.type,
+        count: count(),
+      })
+      .from(activities)
+      .groupBy(activities.type);
+    
+    const distribution: ActivityTypeDistribution = {
+      food: 0,
+      sports: 0,
+      entertainment: 0,
+      boardgame: 0,
+      other: 0,
+    };
+    
+    for (const row of result) {
+      const type = row.type as keyof ActivityTypeDistribution;
+      if (type in distribution) {
+        distribution[type] = row.count;
+      } else {
+        distribution.other += row.count;
+      }
+    }
+    
+    return distribution;
+  } catch (error) {
+    console.error('获取活动类型分布失败:', error);
+    return { food: 0, sports: 0, entertainment: 0, boardgame: 0, other: 0 };
+  }
+}
+
+/**
+ * 活动统计入口 - 根据类型返回不同统计
+ */
+export async function getActivityStats(query: ActivityStatsQuery): Promise<ActivityOverviewStats | ActivityTypeDistribution> {
+  if (query.type === 'distribution') {
+    return getActivityTypeDistribution();
+  }
+  return getActivityOverviewStats();
 }

@@ -1,7 +1,7 @@
 // Activity Controller - 活动相关接口 (MVP 简化版 + v3.2 附近搜索)
 import { Elysia, t } from 'elysia';
 import { basePlugins, verifyAuth } from '../../setup';
-import { activityModel, type ErrorResponse } from './activity.model';
+import { activityModel, type ErrorResponse, ActivityOverviewStatsSchema, ActivityTypeDistributionSchema } from './activity.model';
 import { 
   getActivitiesList,
   getMyActivities,
@@ -14,6 +14,7 @@ import {
   quitActivity,
   getNearbyActivities,
   publishDraftActivity,
+  getActivityStats,
 } from './activity.service';
 
 export const activityController = new Elysia({ prefix: '/activities' })
@@ -46,6 +47,37 @@ export const activityController = new Elysia({ prefix: '/activities' })
       query: 'activity.listQuery',
       response: {
         200: 'activity.listResponse',
+        500: 'activity.error',
+      },
+    }
+  )
+
+  // ==========================================
+  // 活动统计
+  // ==========================================
+  .get(
+    '/stats',
+    async ({ query, set }) => {
+      try {
+        const result = await getActivityStats(query);
+        return result;
+      } catch (error: any) {
+        set.status = 500;
+        return {
+          code: 500,
+          msg: error.message || '获取活动统计失败',
+        } satisfies ErrorResponse;
+      }
+    },
+    {
+      detail: {
+        tags: ['Activities'],
+        summary: '获取活动统计',
+        description: '获取活动统计数据，支持概览统计(type=overview)或类型分布(type=distribution)',
+      },
+      query: 'activity.statsQuery',
+      response: {
+        200: t.Union([ActivityOverviewStatsSchema, ActivityTypeDistributionSchema]),
         500: 'activity.error',
       },
     }

@@ -1571,3 +1571,109 @@ export async function getWelcomeCard(
     quickPrompts,
   };
 }
+
+
+// ==========================================
+// AI 内容生成 (从 Growth 迁移)
+// ==========================================
+
+import { generateObject, jsonSchema } from 'ai';
+import { t } from 'elysia';
+import { toJsonSchema } from '@juchang/utils';
+import { getQwenModelByIntent } from './models/adapters/qwen';
+import type { ContentGenerationRequest, ContentGenerationResponse } from './ai.model';
+
+// AI 输出 Schema
+const NoteOutputSchema = t.Object({
+  title: t.String({ description: '标题，不超过20字，含emoji' }),
+  body: t.String({ description: '正文300-800字，分段结构，含emoji排版' }),
+  hashtags: t.Array(t.String(), { description: '5-10个话题标签' }),
+  coverImageHint: t.String({ description: '封面图片描述提示' }),
+});
+type NoteOutput = typeof NoteOutputSchema.static;
+
+// 默认 Prompt 模板
+const DEFAULT_SYSTEM_PROMPT = `你是"搭子观察员"，一个热爱重庆生活、擅长记录搭子故事的小红书博主。
+你的风格：接地气、温暖、真实分享，像朋友聊天一样自然。
+绝对禁止：营销腔、广告感、生硬推销。`;
+
+const DEFAULT_CONTENT_PROMPT = `请为以下主题生成一篇小红书笔记：
+
+主题：{topic}
+内容类型：{contentType}
+
+要求：
+1. 标题：不超过20字，包含吸引点击的emoji和关键词
+2. 正文：300-800字，分段结构（开头hook + 正文内容 + 引导互动结尾），包含适量emoji排版
+3. 话题标签：5-10个，混合热门大标签和精准小标签
+4. 封面图片描述：描述适合这篇笔记的封面图片风格和内容
+5. 在正文末尾自然植入引导语（如"评论区聊聊"、"想加群的扣1"）
+6. 使用"搭子观察员"第三人称叙事视角`;
+
+/**
+ * AI 生成内容（文案/笔记）
+ * 从 Growth 模块迁移，统一归到 AI 领域
+ */
+export async function generateContent(
+  request: ContentGenerationRequest
+): Promise<ContentGenerationResponse> {
+  const { topic, contentType, style, trendKeywords, count = 1 } = request;
+  const batchId = crypto.randomUUID();
+
+  const results = [];
+  const generatedTitles: string[] = [];
+
+  for (let i = 0; i < count; i++) {
+    // 构建 Prompt
+    let contentPrompt = DEFAULT_CONTENT_PROMPT
+      .replace('{topic}', topic)
+      .replace('{contentType}', contentType);
+
+    // 趋势关键词注入
+    if (trendKeywords && trendKeywords.length > 0) {
+      contentPrompt += `\n\n当前热门关键词：${trendKeywords.join('、')}，请适当融入内容中。`;
+    }
+
+    // 风格提示
+    if (style) {
+      const styleHints: Record<string, string> = {
+        'minimal': '风格要求：极简、干净、留白多',
+        'cyberpunk': '风格要求：赛博朋克、未来感、霓虹色调',
+        'handwritten': '风格要求：手写风、温暖、亲切',
+        'xiaohongshu': '风格要求：小红书热门风格、精致生活',
+        'casual': '风格要求： casual、随意、轻松',
+        'professional': '风格要求：专业、简洁、高效',
+      };
+      if (styleHints[style]) {
+        contentPrompt += `\n\n${styleHints[style]}`;
+      }
+    }
+
+    // 避免重复
+    if (generatedTitles.length > 0) {
+      contentPrompt += `\n\n注意：以下标题已被使用，请确保你的标题与它们完全不同：\n${generatedTitles.map(t => `- ${t}`).join('\n')}`;
+    }
+
+    const fullPrompt = `${DEFAULT_SYSTEM_PROMPT}\n\n${contentPrompt}`;
+
+    const result = await generateObject({
+      model: getQwenModelByIntent('chat'),
+      schema: jsonSchema<NoteOutput>(toJsonSchema(NoteOutputSchema) as any),
+      prompt: fullPrompt,
+    });
+
+    generatedTitles.push(result.object.title);
+
+    results.push({
+      title: result.object.title,
+      body: result.object.body,
+      hashtags: result.object.hashtags,
+      coverImageHint: result.object.coverImageHint,
+    });
+  }
+
+  return {
+    items: results,
+    batchId,
+  };
+}

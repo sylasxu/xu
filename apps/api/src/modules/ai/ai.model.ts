@@ -615,6 +615,45 @@ const ViolationStatsResponse = t.Object({
 });
 
 // ==========================================
+// AI 内容生成 Schema (从 Growth 迁移)
+// ==========================================
+
+// 内容生成请求
+const ContentGenerationRequest = t.Object({
+  topic: t.String({ description: '内容主题/描述', minLength: 1, maxLength: 500 }),
+  contentType: t.Union([
+    t.Literal('poster'),        // 海报文案
+    t.Literal('social-note'),   // 小红书笔记
+    t.Literal('social-post'),   // 社交媒体帖子
+  ], { description: '内容类型' }),
+  style: t.Optional(t.Union([
+    t.Literal('minimal'),       // 极简
+    t.Literal('cyberpunk'),     // 赛博朋克
+    t.Literal('handwritten'),   // 手写风
+    t.Literal('xiaohongshu'),   // 小红书风格
+    t.Literal('casual'),        //  casual
+    t.Literal('professional'),  // 专业
+  ], { default: 'minimal', description: '文案风格' })),
+  trendKeywords: t.Optional(t.Array(t.String(), { description: '趋势关键词' })),
+  count: t.Optional(t.Number({ minimum: 1, maximum: 5, default: 1, description: '生成数量' })),
+});
+
+// 内容生成响应项
+const GeneratedContentItem = t.Object({
+  title: t.String({ description: '标题' }),
+  body: t.String({ description: '正文内容' }),
+  hashtags: t.Array(t.String(), { description: '话题标签' }),
+  coverImageHint: t.Optional(t.String({ description: '封面图片描述' })),
+  cta: t.Optional(t.String({ description: '行动号召' })),
+});
+
+// 内容生成响应
+const ContentGenerationResponse = t.Object({
+  items: t.Array(GeneratedContentItem),
+  batchId: t.String({ description: '批次ID' }),
+});
+
+// ==========================================
 // Ops 子 Controller Schema (v4.6)
 // 运营指标 - AI 特有聚合类型
 // ==========================================
@@ -829,6 +868,11 @@ export const aiModel = new Elysia({ name: 'aiModel' })
     'ai.opsDeleteSensitiveWordResponse': OpsDeleteSensitiveWordResponse,
     'ai.securityEventsResponse': SecurityEventsResponse,
     'ai.securityStatsDBResponse': SecurityStatsDBResponse,
+    // ==========================================
+    // AI 内容生成 (从 Growth 迁移)
+    // ==========================================
+    'ai.contentGenerationRequest': ContentGenerationRequest,
+    'ai.contentGenerationResponse': ContentGenerationResponse,
   });
 
 // 导出 TS 类型
@@ -866,3 +910,8 @@ export type MetricsUsageResponse = Static<typeof MetricsUsageResponse>;
 
 // Prompt 类型导出 (v3.4 新增)
 export type PromptInfoResponse = Static<typeof PromptInfoResponse>;
+
+// AI 内容生成类型导出 (从 Growth 迁移)
+export type ContentGenerationRequest = Static<typeof ContentGenerationRequest>;
+export type GeneratedContentItem = Static<typeof GeneratedContentItem>;
+export type ContentGenerationResponse = Static<typeof ContentGenerationResponse>;

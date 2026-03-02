@@ -1,206 +1,967 @@
-"use client"
+"use client";
 
-import { useState, useCallback, useRef, useEffect } from "react"
+import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  ArrowUp,
+  Bot,
+  ChevronRight,
+  MapPin,
+  Menu,
+  Paperclip,
+  Square,
+} from "lucide-react";
+
 import {
   Conversation,
   ConversationContent,
-} from "@/components/ai-elements/conversation"
-import { Message, MessageContent } from "@/components/ai-elements/message"
+  ConversationEmpty,
+} from "@/components/ai-elements/conversation";
 import {
-  Reasoning,
-  ReasoningContent,
-  ReasoningTrigger,
-} from "@/components/ai-elements/reasoning"
+  Message,
+  MessageAvatar,
+  MessageContent,
+  MessageFooter,
+} from "@/components/ai-elements/message";
 import {
   PromptInput,
   PromptInputTextarea,
   PromptInputSubmit,
-} from "@/components/ai-elements/prompt-input"
+} from "@/components/ai-elements/prompt-input";
+import {
+  Reasoning,
+  ReasoningContent,
+  ReasoningTrigger,
+} from "@/components/ai-elements/reasoning";
+import { ToolInvocationCard } from "@/components/ai-elements/tool-invocation";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:1996"
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:1996";
+const HOT_KEYWORD_LIMIT = 6;
 
-interface ChatMessage {
-  role: "user" | "assistant"
-  content: string
-  reasoning?: string
+interface WelcomeQuickItem {
+  type: "draft" | "suggestion" | "explore";
+  label: string;
+  prompt: string;
+  icon?: string;
 }
 
+interface WelcomeSection {
+  id: string;
+  icon: string;
+  title: string;
+  items: WelcomeQuickItem[];
+}
+
+interface SocialProfile {
+  participationCount: number;
+  activitiesCreatedCount: number;
+  preferenceCompleteness: number;
+}
+
+interface QuickPrompt {
+  icon: string;
+  text: string;
+  prompt: string;
+}
+
+interface WelcomeResponse {
+  greeting: string;
+  subGreeting?: string;
+  sections: WelcomeSection[];
+  socialProfile?: SocialProfile;
+  quickPrompts: QuickPrompt[];
+}
+
+interface HotKeywordItem {
+  id: string;
+  keyword: string;
+}
+
+interface PromptChip {
+  id: string;
+  text: string;
+  prompt: string;
+}
+
+const FALLBACK_WELCOME: WelcomeResponse = {
+  greeting: "我是小聚，你的 AI 活动助理",
+  subGreeting: "想约点什么？",
+  sections: [
+    {
+      id: "suggestions",
+      icon: "",
+      title: "快速组局",
+      items: [
+        { type: "suggestion", label: "约饭局", prompt: "帮我组一个吃饭的局" },
+        { type: "suggestion", label: "找运动搭子", prompt: "帮我找个运动搭子" },
+        { type: "suggestion", label: "周末活动", prompt: "周末附近有什么活动" },
+        { type: "suggestion", label: "组周五晚局", prompt: "想组个周五晚的局" },
+      ],
+    },
+  ],
+  quickPrompts: [
+    { icon: "", text: "周末附近有什么活动？", prompt: "周末附近有什么活动" },
+    { icon: "", text: "帮我找个运动搭子", prompt: "帮我找个运动搭子" },
+    { icon: "", text: "想组个周五晚的局", prompt: "想组个周五晚的局" },
+  ],
+};
+
 export default function ChatPage() {
-  const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [input, setInput] = useState("")
-  const [isStreaming, setIsStreaming] = useState(false)
-  const scrollRef = useRef<HTMLDivElement>(null)
+  const router = useRouter();
+  const {
+    messages,
+    sendMessage,
+    status,
+    stop,
+    error,
+    regenerate,
+    setMessages,
+  } = useChat({
+    transport: new DefaultChatTransport({
+      api: `${API_BASE}/ai/chat`,
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: { source: "miniprogram" },
+    }),
+  });
 
-  // 自动滚动到底部
+  const [input, setInput] = useState("");
+  const [welcomeData, setWelcomeData] = useState<WelcomeResponse>(FALLBACK_WELCOME);
+  const [hotKeywords, setHotKeywords] = useState<HotKeywordItem[]>([]);
+  const [isWelcomeLoading, setIsWelcomeLoading] = useState(true);
+  const [showTopMenu, setShowTopMenu] = useState(false);
+
+  const isLoading = status === "submitted" || status === "streaming";
+  const hasInput = input.length > 0;
+  const scrollRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    if (!scrollRef.current) return;
+    scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages, isLoading]);
+
+  const loadWelcomeAndKeywords = useCallback(async (signal?: AbortSignal) => {
+    setIsWelcomeLoading(true);
+
+    const [welcomeResult, hotKeywordsResult] = await Promise.allSettled([
+      fetchWelcome(signal),
+      fetchHotKeywords(signal),
+    ]);
+
+    if (signal?.aborted) {
+      return;
     }
-  }, [messages])
 
-  const handleSubmit = useCallback(async () => {
-    const text = input.trim()
-    if (!text || isStreaming) return
-
-    setIsStreaming(true)
-    setInput("")
-
-    // 添加用户消息
-    const userMsg: ChatMessage = { role: "user", content: text }
-    setMessages((prev) => [...prev, userMsg])
-
-    // 添加空的 assistant 消息占位
-    setMessages((prev) => [...prev, { role: "assistant", content: "" }])
-
-    try {
-      const res = await fetch(`${API_BASE}/ai/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: [...messages, userMsg].map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
-          source: "miniprogram",
-        }),
-      })
-
-      if (!res.ok) {
-        throw new Error("AI 服务暂时不可用")
-      }
-
-      // 读取 Data Stream 格式的流式响应
-      const reader = res.body?.getReader()
-      if (!reader) throw new Error("无法读取响应流")
-
-      const decoder = new TextDecoder()
-      let assistantContent = ""
-      let reasoning = ""
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        const chunk = decoder.decode(value, { stream: true })
-        const lines = chunk.split("\n")
-
-        for (const line of lines) {
-          if (!line.trim()) continue
-
-          // Data Stream Protocol 格式: type:data
-          // 0:"text" - 文本增量
-          // g:"reasoning" - 推理增量
-          if (line.startsWith("0:")) {
-            try {
-              const text = JSON.parse(line.slice(2))
-              assistantContent += text
-              setMessages((prev) => {
-                const updated = [...prev]
-                const last = updated[updated.length - 1]
-                if (last?.role === "assistant") {
-                  updated[updated.length - 1] = {
-                    ...last,
-                    content: assistantContent,
-                    reasoning: reasoning || undefined,
-                  }
-                }
-                return updated
-              })
-            } catch {
-              // 忽略解析错误
-            }
-          } else if (line.startsWith("g:")) {
-            try {
-              const text = JSON.parse(line.slice(2))
-              reasoning += text
-              setMessages((prev) => {
-                const updated = [...prev]
-                const last = updated[updated.length - 1]
-                if (last?.role === "assistant") {
-                  updated[updated.length - 1] = {
-                    ...last,
-                    content: assistantContent,
-                    reasoning,
-                  }
-                }
-                return updated
-              })
-            } catch {
-              // 忽略解析错误
-            }
-          }
-        }
-      }
-    } catch (error) {
-      // 更新最后一条消息为错误提示
-      setMessages((prev) => {
-        const updated = [...prev]
-        const last = updated[updated.length - 1]
-        if (last?.role === "assistant" && !last.content) {
-          updated[updated.length - 1] = {
-            ...last,
-            content: "网络有点慢，再试一次？",
-          }
-        }
-        return updated
-      })
-    } finally {
-      setIsStreaming(false)
+    if (welcomeResult.status === "fulfilled") {
+      setWelcomeData(welcomeResult.value);
+    } else {
+      setWelcomeData(FALLBACK_WELCOME);
     }
-  }, [input, isStreaming, messages])
+
+    if (hotKeywordsResult.status === "fulfilled") {
+      setHotKeywords(hotKeywordsResult.value);
+    } else {
+      setHotKeywords([]);
+    }
+
+    setIsWelcomeLoading(false);
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadWelcomeAndKeywords(controller.signal);
+    return () => controller.abort();
+  }, [loadWelcomeAndKeywords]);
+
+  useEffect(() => {
+    if (!showTopMenu) return;
+
+    const closeMenu = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (target.closest("[data-top-menu]")) return;
+      if (target.closest("[data-top-menu-trigger]")) return;
+      setShowTopMenu(false);
+    };
+
+    document.addEventListener("mousedown", closeMenu);
+    return () => document.removeEventListener("mousedown", closeMenu);
+  }, [showTopMenu]);
+
+  const onSubmit = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!input.trim() || isLoading) return;
+
+      const text = input.trim();
+      setInput("");
+      await sendMessage({ text });
+    },
+    [input, isLoading, sendMessage]
+  );
+
+  const handlePromptSend = useCallback(
+    async (text: string) => {
+      if (isLoading || !text.trim()) return;
+      await sendMessage({ text: text.trim() });
+    },
+    [isLoading, sendMessage]
+  );
+
+  const promptChips = useMemo(() => {
+    const pool: PromptChip[] = [];
+
+    welcomeData.quickPrompts.forEach((item, index) => {
+      const text = item.text?.trim();
+      const prompt = item.prompt?.trim() || text;
+      if (!text || !prompt) return;
+      pool.push({ id: `welcome-quick-${index}`, text, prompt });
+    });
+
+    welcomeData.sections.forEach((section, sectionIndex) => {
+      section.items.forEach((item, itemIndex) => {
+        const text = item.label?.trim();
+        const prompt = item.prompt?.trim();
+        if (!text || !prompt) return;
+        pool.push({
+          id: `welcome-section-${sectionIndex}-${itemIndex}`,
+          text,
+          prompt,
+        });
+      });
+    });
+
+    hotKeywords.forEach((item) => {
+      const keyword = item.keyword.trim();
+      if (!keyword) return;
+      pool.push({ id: `hot-${item.id}`, text: keyword, prompt: keyword });
+    });
+
+    const deduped: PromptChip[] = [];
+    const seen = new Set<string>();
+
+    for (const item of pool) {
+      const key = item.prompt.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(item);
+      if (deduped.length >= 10) break;
+    }
+
+    return deduped;
+  }, [hotKeywords, welcomeData]);
 
   return (
-    <div className="mx-auto flex h-screen max-w-2xl flex-col">
-      {/* 顶栏 */}
-      <header className="shrink-0 border-b border-gray-200 px-4 py-3 text-center">
-        <h1 className="text-base font-medium text-gray-900">
-          小聚 · 你的 AI 活动助理
-        </h1>
+    <div className="min-h-screen bg-zinc-100">
+      <div className="mx-auto flex h-[100dvh] w-full max-w-[430px] flex-col border-x border-zinc-200 bg-zinc-50">
+      <header className="relative shrink-0 border-b border-zinc-200 bg-white/95 px-4 py-2 backdrop-blur-sm">
+        <div className="mx-auto grid max-w-2xl grid-cols-[32px_1fr_32px] items-center">
+          <button
+            onClick={() => setShowTopMenu((prev) => !prev)}
+            className="flex h-8 w-8 items-center justify-center rounded-md text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+            aria-label="菜单"
+            data-top-menu-trigger
+          >
+            <Menu className="h-4 w-4" />
+          </button>
+
+          <h1 className="text-center text-sm font-semibold tracking-[0.04em] text-zinc-900">
+            聚场
+          </h1>
+
+          <div className="h-8 w-8" />
+        </div>
+
+        {showTopMenu && (
+          <div
+            data-top-menu
+            className="absolute left-4 top-11 z-20 w-40 rounded-lg border border-zinc-200 bg-white p-1.5 shadow-lg"
+          >
+            <button
+              onClick={() => {
+                setShowTopMenu(false);
+                router.push("/message");
+              }}
+              className="w-full rounded-md px-3 py-2 text-left text-sm text-zinc-700 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+            >
+              消息中心
+            </button>
+            <div className="mx-2 my-1 h-px bg-zinc-200" />
+            <button
+              onClick={() => {
+                setShowTopMenu(false);
+                setMessages([]);
+                setInput("");
+              }}
+              className="w-full rounded-md px-3 py-2 text-left text-sm text-zinc-700 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+            >
+              新对话
+            </button>
+          </div>
+        )}
       </header>
 
-      {/* 消息列表 */}
-      <Conversation className="flex-1 overflow-y-auto" ref={scrollRef}>
-        <ConversationContent>
-          {messages.length === 0 && (
-            <div className="flex flex-1 items-center justify-center py-20">
-              <p className="text-sm text-gray-400">
-                想找点乐子？还是想约人？跟我说说。
-              </p>
-            </div>
+      <Conversation ref={scrollRef}>
+        <ConversationContent className="mx-auto max-w-2xl">
+          {messages.length === 0 ? (
+            <WelcomeScreen
+              data={welcomeData}
+              loading={isWelcomeLoading}
+              onQuickPrompt={handlePromptSend}
+            />
+          ) : (
+            <>
+              {messages.map((message, index) => (
+                <ChatMessage
+                  key={message.id}
+                  message={message}
+                  isLast={index === messages.length - 1}
+                  isLoading={isLoading}
+                />
+              ))}
+
+              {isLoading && !hasContent(messages) && <ThinkingIndicator />}
+              {error && <ErrorMessage error={error} onRetry={() => void regenerate()} />}
+            </>
           )}
-          {messages.map((msg, i) => (
-            <div key={i}>
-              {/* 推理过程 */}
-              {msg.role === "assistant" && msg.reasoning && (
-                <Reasoning className="mb-2">
-                  <ReasoningTrigger />
-                  <ReasoningContent>{msg.reasoning}</ReasoningContent>
-                </Reasoning>
-              )}
-              <Message from={msg.role}>
-                <MessageContent>
-                  {msg.content || (isStreaming && i === messages.length - 1 ? "思考中..." : "")}
-                </MessageContent>
-              </Message>
-            </div>
-          ))}
         </ConversationContent>
       </Conversation>
 
-      {/* 输入栏 */}
-      <div className="shrink-0 border-t border-gray-200 p-4">
-        <PromptInput onSubmit={handleSubmit}>
-          <PromptInputTextarea
-            value={input}
-            onChange={(e) => setInput(e.currentTarget.value)}
-            placeholder="想找点乐子？还是想约人？跟我说说。"
-          />
-          <PromptInputSubmit
-            status={isStreaming ? "streaming" : "ready"}
-            disabled={!input.trim()}
-          />
-        </PromptInput>
+      <div className="shrink-0 border-t border-zinc-200 bg-white p-4">
+        <div className="mx-auto max-w-2xl">
+          {promptChips.length > 0 && (
+            <div className="mb-3 flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {promptChips.map((chip) => (
+                <button
+                  key={chip.id}
+                  onClick={() => void handlePromptSend(chip.prompt)}
+                  disabled={isLoading}
+                  className="shrink-0 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs text-zinc-700 transition-all hover:border-zinc-400 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {chip.text}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <PromptInput
+            onSubmit={onSubmit}
+            className={hasInput ? "flex-col items-stretch gap-2" : "gap-2"}
+          >
+            {hasInput ? (
+              <>
+                <PromptInputTextarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder="想找点乐子？跟我说说..."
+                  disabled={isLoading}
+                  className="max-h-[120px] flex-1 overflow-y-auto"
+                />
+                <div className="flex items-center justify-between px-1 pb-0.5">
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      className="inline-flex h-8 items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-2.5 text-xs text-zinc-600"
+                      aria-label="位置工具"
+                    >
+                      <MapPin className="h-3.5 w-3.5" />
+                      位置
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex h-8 items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-2.5 text-xs text-zinc-600"
+                      aria-label="附件工具"
+                    >
+                      <Paperclip className="h-3.5 w-3.5" />
+                      附件
+                    </button>
+                  </div>
+                  {isLoading ? (
+                    <PromptInputSubmit isLoading onClick={() => void stop()}>
+                      <Square className="h-4 w-4 fill-current" />
+                    </PromptInputSubmit>
+                  ) : (
+                    <PromptInputSubmit disabled={!input.trim()}>
+                      <ArrowUp className="h-4 w-4" />
+                    </PromptInputSubmit>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <PromptInputTextarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder="想找点乐子？跟我说说..."
+                  disabled={isLoading}
+                  className="flex-1"
+                />
+                {isLoading ? (
+                  <PromptInputSubmit isLoading onClick={() => void stop()}>
+                    <Square className="h-4 w-4 fill-current" />
+                  </PromptInputSubmit>
+                ) : (
+                  <PromptInputSubmit disabled={!input.trim()}>
+                    <ArrowUp className="h-4 w-4" />
+                  </PromptInputSubmit>
+                )}
+              </>
+            )}
+          </PromptInput>
+        </div>
+      </div>
       </div>
     </div>
-  )
+  );
+}
+
+function ChatMessage({
+  message,
+  isLast,
+  isLoading,
+}: {
+  message: any;
+  isLast: boolean;
+  isLoading: boolean;
+}) {
+  const [showReasoning, setShowReasoning] = useState(false);
+  const isUser = message.role === "user";
+  const textContent = getMessageText(message);
+  const reasoningContent = getReasoningText(message);
+  const isStreaming = isLast && isLoading && !textContent;
+  const toolInvocations = getToolInvocations(message);
+
+  if (isUser) {
+    return (
+      <Message role="user">
+        <MessageContent role="user">{textContent}</MessageContent>
+        <MessageFooter>{formatTime(message.createdAt)}</MessageFooter>
+      </Message>
+    );
+  }
+
+  return (
+    <Message role="assistant">
+      <MessageAvatar fallback="聚" />
+      <div className="flex flex-col gap-1">
+        {reasoningContent && (
+          <Reasoning>
+            <ReasoningTrigger
+              isOpen={showReasoning}
+              onClick={() => setShowReasoning(!showReasoning)}
+            />
+            <ReasoningContent isOpen={showReasoning}>{reasoningContent}</ReasoningContent>
+          </Reasoning>
+        )}
+
+        <MessageContent role="assistant">
+          {isStreaming ? <StreamingDots /> : textContent}
+        </MessageContent>
+
+        {toolInvocations.length > 0 && (
+          <div className="mt-1 space-y-2">
+            {toolInvocations.map((invocation) => (
+              <ToolInvocationCard key={invocation.toolCallId} toolInvocation={invocation} />
+            ))}
+          </div>
+        )}
+
+        <MessageFooter>{formatTime(message.createdAt)}</MessageFooter>
+      </div>
+    </Message>
+  );
+}
+
+function WelcomeScreen({
+  data,
+  loading,
+  onQuickPrompt,
+}: {
+  data: WelcomeResponse;
+  loading: boolean;
+  onQuickPrompt: (text: string) => void;
+}) {
+  const quickPrompts = data.quickPrompts.filter(
+    (item) => item.text.trim() && (item.prompt || item.text).trim()
+  );
+  const sectionItems = getSectionPromptItems(data);
+
+  return (
+    <ConversationEmpty>
+      <h2 className="mb-2 text-center text-xl font-semibold text-zinc-900">
+        {data.greeting}
+      </h2>
+
+      <p className="mb-6 text-center text-sm text-zinc-500">
+        {data.subGreeting || "想约点什么？"}
+      </p>
+
+      {data.socialProfile && (
+        <div className="mb-6 grid w-full max-w-sm grid-cols-3 gap-2">
+          <StatCard label="参与" value={String(data.socialProfile.participationCount)} />
+          <StatCard label="发起" value={String(data.socialProfile.activitiesCreatedCount)} />
+          <StatCard label="偏好" value={`${data.socialProfile.preferenceCompleteness}%`} />
+        </div>
+      )}
+
+      {quickPrompts.length > 0 ? (
+        <div className="w-full max-w-sm space-y-2">
+          {quickPrompts.slice(0, 4).map((item, index) => (
+            <button
+              key={`${item.text}-${index}`}
+              onClick={() => onQuickPrompt(item.prompt || item.text)}
+              className="flex w-full items-center justify-between rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-left transition-all hover:border-zinc-400 hover:bg-zinc-50"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-zinc-500">{item.icon || "•"}</span>
+                <span className="text-sm text-zinc-800">{item.text}</span>
+              </div>
+              <ChevronRight className="h-4 w-4 text-zinc-400" />
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="grid w-full max-w-sm grid-cols-2 gap-3">
+          {sectionItems.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => onQuickPrompt(item.prompt)}
+              className="group flex min-h-24 flex-col items-start justify-between rounded-xl border border-zinc-200 bg-white p-3 text-left transition-all hover:border-zinc-500 hover:bg-zinc-50 active:scale-[0.99]"
+            >
+              <span className="text-[11px] text-zinc-500">{item.label}</span>
+              <span className="text-xs leading-relaxed text-zinc-700">{item.text}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {loading && (
+        <div className="mt-4 text-xs text-zinc-400 animate-pulse">正在同步欢迎内容...</div>
+      )}
+    </ConversationEmpty>
+  );
+}
+
+function StatCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-zinc-200 bg-white px-2 py-2 text-center">
+      <div className="text-[10px] text-zinc-500">{label}</div>
+      <div className="text-sm font-semibold text-zinc-900">{value}</div>
+    </div>
+  );
+}
+
+function ThinkingIndicator() {
+  return (
+    <div className="flex items-center gap-3 py-2 pl-11">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-800">
+        <Bot className="h-4 w-4 text-white" />
+      </div>
+      <div className="flex items-center gap-2 rounded-2xl bg-zinc-100 px-4 py-2.5">
+        <div className="flex items-center gap-1">
+          {[0, 1, 2].map((i) => (
+            <span
+              key={i}
+              className="h-2 w-2 animate-pulse rounded-full bg-zinc-500"
+              style={{ animationDelay: `${i * 0.12}s` }}
+            />
+          ))}
+        </div>
+        <span className="text-xs text-zinc-500">思考中...</span>
+      </div>
+    </div>
+  );
+}
+
+function StreamingDots() {
+  return (
+    <div className="flex items-center gap-1 py-1">
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className="h-1.5 w-1.5 animate-pulse rounded-full bg-zinc-500"
+          style={{ animationDelay: `${i * 0.12}s` }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ErrorMessage({
+  error,
+  onRetry,
+}: {
+  error: Error;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="flex justify-center py-4">
+      <div className="rounded-lg border border-zinc-300 bg-zinc-100 px-4 py-2 text-sm text-zinc-700">
+        出错了：{error.message || "请重试"}
+        <button onClick={onRetry} className="ml-2 underline hover:no-underline">
+          重试
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function hasContent(messages: any[]): boolean {
+  const lastMessage = messages[messages.length - 1];
+  return lastMessage?.role === "assistant" && !!getMessageText(lastMessage);
+}
+
+function formatTime(date?: Date | string): string {
+  if (!date) return "";
+  const d = new Date(date);
+  return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+}
+
+function getMessageText(message: any): string {
+  if (Array.isArray(message?.parts)) {
+    return message.parts
+      .filter((part: any) => part?.type === "text" && typeof part.text === "string")
+      .map((part: any) => part.text)
+      .join("");
+  }
+
+  return typeof message?.content === "string" ? message.content : "";
+}
+
+function getReasoningText(message: any): string {
+  if (Array.isArray(message?.parts)) {
+    return message.parts
+      .filter((part: any) => part?.type === "reasoning" && typeof part.text === "string")
+      .map((part: any) => part.text)
+      .join("\n");
+  }
+
+  return typeof message?.reasoning === "string" ? message.reasoning : "";
+}
+
+function getToolInvocations(message: any): Array<{
+  toolCallId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  result?: Record<string, unknown>;
+  state: "partial-call" | "call" | "result";
+}> {
+  if (Array.isArray(message?.toolInvocations)) {
+    return message.toolInvocations;
+  }
+
+  if (!Array.isArray(message?.parts)) {
+    return [];
+  }
+
+  return message.parts
+    .map((part: any) => {
+      const isStaticTool = typeof part?.type === "string" && part.type.startsWith("tool-");
+      const isDynamicTool = part?.type === "dynamic-tool";
+
+      if (!isStaticTool && !isDynamicTool) {
+        return null;
+      }
+
+      const toolName = isDynamicTool ? part.toolName : String(part.type).slice(5);
+      const toolCallId = typeof part.toolCallId === "string" ? part.toolCallId : "";
+      const args =
+        part.input && typeof part.input === "object" && !Array.isArray(part.input)
+          ? (part.input as Record<string, unknown>)
+          : {};
+
+      const state =
+        part.state === "input-streaming"
+          ? "partial-call"
+          : part.state === "input-available"
+            ? "call"
+            : "result";
+
+      const result =
+        part.state === "output-error"
+          ? { error: part.errorText ?? "工具调用失败" }
+          : part.output && typeof part.output === "object" && !Array.isArray(part.output)
+            ? (part.output as Record<string, unknown>)
+            : part.output !== undefined
+              ? { value: part.output }
+              : undefined;
+
+      return {
+        toolCallId,
+        toolName,
+        args,
+        result,
+        state,
+      };
+    })
+    .filter(Boolean);
+}
+
+function getSectionPromptItems(data: WelcomeResponse): Array<{
+  id: string;
+  label: string;
+  text: string;
+  prompt: string;
+}> {
+  const sectionItems = data.sections.flatMap((section, sectionIndex) =>
+    section.items.map((item, itemIndex) => ({
+      id: `section-${section.id}-${itemIndex}`,
+      label: section.title || `推荐 ${sectionIndex + 1}`,
+      text: item.label,
+      prompt: item.prompt,
+    }))
+  );
+
+  const fromSections = sectionItems
+    .filter((item) => item.text.trim() && item.prompt.trim())
+    .slice(0, 4);
+
+  if (fromSections.length > 0) {
+    return fromSections;
+  }
+
+  return data.quickPrompts
+    .map((item, index) => ({
+      id: `quick-${index}`,
+      label: "推荐",
+      text: item.text,
+      prompt: item.prompt || item.text,
+    }))
+    .filter((item) => item.text.trim() && item.prompt.trim())
+    .slice(0, 4);
+}
+
+async function fetchWelcome(signal?: AbortSignal): Promise<WelcomeResponse> {
+  const location = await getLocationIfGranted();
+  const query = new URLSearchParams();
+
+  if (location) {
+    query.append("lat", String(location.lat));
+    query.append("lng", String(location.lng));
+  }
+
+  const queryString = query.toString();
+  const url = queryString
+    ? `${API_BASE}/ai/welcome?${queryString}`
+    : `${API_BASE}/ai/welcome`;
+
+  const response = await fetch(url, {
+    method: "GET",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(`welcome request failed: ${response.status}`);
+  }
+
+  const payload = (await response.json()) as unknown;
+  return normalizeWelcomeResponse(payload);
+}
+
+async function fetchHotKeywords(signal?: AbortSignal): Promise<HotKeywordItem[]> {
+  const response = await fetch(`${API_BASE}/hot-keywords?limit=${HOT_KEYWORD_LIMIT}`, {
+    method: "GET",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(`hot keywords request failed: ${response.status}`);
+  }
+
+  const payload = (await response.json()) as { items?: unknown[] };
+
+  if (!Array.isArray(payload.items)) {
+    return [];
+  }
+
+  return payload.items
+    .map((item, index) => {
+      if (!isRecord(item)) return null;
+      const keyword = typeof item.keyword === "string" ? item.keyword.trim() : "";
+      if (!keyword) return null;
+      const id = typeof item.id === "string" ? item.id : `keyword-${index}`;
+      return { id, keyword };
+    })
+    .filter((item): item is HotKeywordItem => Boolean(item));
+}
+
+async function getLocationIfGranted(): Promise<{ lat: number; lng: number } | null> {
+  if (typeof window === "undefined" || !("geolocation" in navigator)) {
+    return null;
+  }
+
+  try {
+    if (!("permissions" in navigator) || !navigator.permissions?.query) {
+      return null;
+    }
+
+    const permission = await navigator.permissions.query({
+      name: "geolocation" as PermissionName,
+    });
+
+    if (permission.state !== "granted") {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+
+    const done = (value: { lat: number; lng: number } | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+
+    const timeout = window.setTimeout(() => done(null), 1200);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        window.clearTimeout(timeout);
+        done({ lat: position.coords.latitude, lng: position.coords.longitude });
+      },
+      () => {
+        window.clearTimeout(timeout);
+        done(null);
+      },
+      {
+        enableHighAccuracy: false,
+        maximumAge: 5 * 60 * 1000,
+        timeout: 1000,
+      }
+    );
+  });
+}
+
+function normalizeWelcomeResponse(payload: unknown): WelcomeResponse {
+  if (!isRecord(payload)) {
+    return FALLBACK_WELCOME;
+  }
+
+  const sections = Array.isArray(payload.sections)
+    ? payload.sections
+        .map((section, sectionIndex) => normalizeSection(section, sectionIndex))
+        .filter((section): section is WelcomeSection => Boolean(section))
+    : [];
+
+  const quickPrompts = Array.isArray(payload.quickPrompts)
+    ? payload.quickPrompts
+        .map((item, index) => normalizeQuickPrompt(item, index))
+        .filter((item): item is QuickPrompt => Boolean(item))
+    : [];
+
+  const socialProfile = normalizeSocialProfile(payload.socialProfile);
+
+  return {
+    greeting:
+      typeof payload.greeting === "string" && payload.greeting.trim()
+        ? payload.greeting
+        : FALLBACK_WELCOME.greeting,
+    subGreeting:
+      typeof payload.subGreeting === "string" && payload.subGreeting.trim()
+        ? payload.subGreeting
+        : FALLBACK_WELCOME.subGreeting,
+    sections: sections.length > 0 ? sections : FALLBACK_WELCOME.sections,
+    socialProfile,
+    quickPrompts: quickPrompts.length > 0 ? quickPrompts : FALLBACK_WELCOME.quickPrompts,
+  };
+}
+
+function normalizeSection(section: unknown, sectionIndex: number): WelcomeSection | null {
+  if (!isRecord(section)) return null;
+
+  const rawItems = Array.isArray(section.items) ? section.items : [];
+  const items = rawItems
+    .map((item) => normalizeQuickItem(item))
+    .filter((item): item is WelcomeQuickItem => Boolean(item));
+
+  if (items.length === 0) return null;
+
+  const id = typeof section.id === "string" && section.id.trim()
+    ? section.id
+    : `section-${sectionIndex}`;
+
+  const title = typeof section.title === "string" && section.title.trim()
+    ? section.title
+    : "推荐";
+
+  return {
+    id,
+    title,
+    icon: typeof section.icon === "string" ? section.icon : "",
+    items,
+  };
+}
+
+function normalizeQuickItem(item: unknown): WelcomeQuickItem | null {
+  if (!isRecord(item)) return null;
+
+  const label = typeof item.label === "string" ? item.label.trim() : "";
+  const prompt = typeof item.prompt === "string" ? item.prompt.trim() : "";
+
+  if (!label || !prompt) return null;
+
+  const type = item.type;
+  const normalizedType: WelcomeQuickItem["type"] =
+    type === "draft" || type === "suggestion" || type === "explore"
+      ? type
+      : "suggestion";
+
+  return {
+    type: normalizedType,
+    label,
+    prompt,
+    icon: typeof item.icon === "string" ? item.icon : "",
+  };
+}
+
+function normalizeQuickPrompt(item: unknown, index: number): QuickPrompt | null {
+  if (!isRecord(item)) return null;
+
+  const text = typeof item.text === "string" ? item.text.trim() : "";
+  const prompt = typeof item.prompt === "string" ? item.prompt.trim() : text;
+
+  if (!text || !prompt) return null;
+
+  return {
+    icon: typeof item.icon === "string" ? item.icon : `quick-${index}`,
+    text,
+    prompt,
+  };
+}
+
+function normalizeSocialProfile(profile: unknown): SocialProfile | undefined {
+  if (!isRecord(profile)) return undefined;
+
+  const participationCount =
+    typeof profile.participationCount === "number" ? profile.participationCount : 0;
+  const activitiesCreatedCount =
+    typeof profile.activitiesCreatedCount === "number" ? profile.activitiesCreatedCount : 0;
+  const preferenceCompleteness =
+    typeof profile.preferenceCompleteness === "number" ? profile.preferenceCompleteness : 0;
+
+  if (
+    participationCount <= 0 &&
+    activitiesCreatedCount <= 0 &&
+    preferenceCompleteness <= 0
+  ) {
+    return undefined;
+  }
+
+  return {
+    participationCount,
+    activitiesCreatedCount,
+    preferenceCompleteness,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return typeof value === "object" && value !== null;
 }

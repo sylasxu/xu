@@ -1,57 +1,95 @@
 "use client";
 
 import * as React from "react";
+import { cn } from "@/lib/utils";
 
-/* -------------------------------------------------------------------------- */
-/*  Conversation – container for a list of chat messages                      */
-/*  API modelled after AI SDK Elements (https://elements.ai-sdk.dev)          */
-/* -------------------------------------------------------------------------- */
+/**
+ * Conversation - AI SDK Elements
+ * 
+ * 对话容器组件，提供滚动上下文和布局结构
+ * @see https://elements.ai-sdk.dev/docs/components/conversation
+ */
 
 interface ConversationProps extends React.HTMLAttributes<HTMLDivElement> {
   children: React.ReactNode;
 }
 
 /**
- * Root wrapper that provides scroll context for a chat conversation.
- * Renders a flex column that fills its parent and scrolls vertically.
+ * Conversation 根组件
+ * 提供滚动容器和 flex 布局
  */
-export function Conversation({
-  children,
-  className = "",
-  ...props
-}: ConversationProps) {
-  return (
-    <div
-      className={`flex flex-1 flex-col overflow-y-auto ${className}`}
-      {...props}
-    >
-      {children}
-    </div>
-  );
-}
+const Conversation = React.forwardRef<HTMLDivElement, ConversationProps>(
+  ({ children, className, ...props }, ref) => {
+    return (
+      <div
+        ref={ref}
+        className={cn(
+          "flex flex-1 flex-col overflow-y-auto scroll-smooth",
+          className
+        )}
+        {...props}
+      >
+        {children}
+      </div>
+    );
+  }
+);
+Conversation.displayName = "Conversation";
 
-/* -------------------------------------------------------------------------- */
-
-interface ConversationContentProps
-  extends React.HTMLAttributes<HTMLDivElement> {
+interface ConversationContentProps extends React.HTMLAttributes<HTMLDivElement> {
   children: React.ReactNode;
 }
 
 /**
- * Inner content area that holds the message list.
- * Applies consistent padding and spacing between messages.
+ * ConversationContent - 对话内容包装器
+ * 提供统一的内边距和间距
  */
-export function ConversationContent({
-  children,
-  className = "",
-  ...props
-}: ConversationContentProps) {
-  return (
-    <div
-      className={`flex flex-1 flex-col gap-4 p-4 ${className}`}
-      {...props}
-    >
-      {children}
-    </div>
-  );
+const ConversationContent = React.forwardRef<HTMLDivElement, ConversationContentProps>(
+  ({ children, className, ...props }, ref) => {
+    return (
+      <div
+        ref={ref}
+        className={cn(
+          "flex flex-1 flex-col gap-4 p-4",
+          className
+        )}
+        {...props}
+      >
+        {children}
+      </div>
+    );
+  }
+);
+ConversationContent.displayName = "ConversationContent";
+
+interface ConversationEmptyProps extends React.HTMLAttributes<HTMLDivElement> {
+  children: React.ReactNode;
 }
+
+/**
+ * ConversationEmpty - 空状态展示
+ * 当没有消息时显示的内容
+ */
+const ConversationEmpty = React.forwardRef<HTMLDivElement, ConversationEmptyProps>(
+  ({ children, className, ...props }, ref) => {
+    return (
+      <div
+        ref={ref}
+        className={cn(
+          "flex min-h-[60vh] flex-col items-center justify-center px-6 py-12",
+          className
+        )}
+        {...props}
+      >
+        {children}
+      </div>
+    );
+  }
+);
+ConversationEmpty.displayName = "ConversationEmpty";
+
+export {
+  Conversation,
+  ConversationContent,
+  ConversationEmpty,
+};

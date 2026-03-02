@@ -34,7 +34,7 @@ const PromptInput = React.forwardRef<HTMLFormElement, PromptInputProps>(
         ref={ref}
         onSubmit={handleSubmit}
         className={cn(
-          "flex w-full items-end gap-2 rounded-[20px] border border-zinc-200 bg-white px-2 py-2 shadow-[0_10px_24px_-20px_rgba(24,24,27,0.7)] transition-all duration-150 focus-within:border-zinc-500 focus-within:shadow-[0_14px_28px_-22px_rgba(24,24,27,0.85)]",
+          "flex w-full items-end gap-2 rounded-[20px] border border-zinc-200 bg-white px-2 py-2 shadow-[0_8px_20px_-20px_rgba(24,24,27,0.35)] outline-none transition-all duration-150 focus-within:border-zinc-300 focus-within:shadow-[0_10px_24px_-22px_rgba(24,24,27,0.25)] focus-within:outline-none",
           className
         )}
         {...props}

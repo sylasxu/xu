@@ -1,7 +1,13 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { isWechatBrowser, getMiniProgramUrl } from "@/lib/wechat"
+import {
+  getInviteUrl,
+  getMiniProgramPathLabel,
+  getMiniProgramQrImageUrl,
+  getMiniProgramUrl,
+  isWechatBrowser,
+} from "@/lib/wechat"
 
 /**
  * 微信跳转引导组件
@@ -16,27 +22,45 @@ export function WechatRedirect({ activityId }: { activityId: string }) {
   }, [])
 
   const miniProgramUrl = getMiniProgramUrl(activityId)
+  const miniProgramQrUrl = getMiniProgramQrImageUrl(activityId)
+  const inviteUrl = getInviteUrl(activityId)
+  const miniProgramPath = getMiniProgramPathLabel(activityId)
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-20 bg-white/95 backdrop-blur-sm border-t border-gray-200 px-4 py-3 safe-area-bottom">
       <div className="mx-auto max-w-lg">
         {isWechat ? (
-          <a
-            href={miniProgramUrl}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#07C160] px-6 py-3 text-base font-medium text-white transition-colors active:bg-[#06AD56]"
-          >
-            <WechatIcon />
-            打开小程序报名
-          </a>
+          miniProgramUrl ? (
+            <a
+              href={miniProgramUrl}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#07C160] px-6 py-3 text-base font-medium text-white transition-colors active:bg-[#06AD56]"
+            >
+              <WechatIcon />
+              打开小程序报名
+            </a>
+          ) : (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+              当前环境未配置 `NEXT_PUBLIC_WECHAT_APPID`，请先完成配置后再启用微信直跳。
+            </div>
+          )
         ) : (
           <div className="flex flex-col items-center gap-2 py-1">
-            <p className="text-sm text-gray-500">
-              微信扫码打开小程序报名
+            <p className="text-sm text-gray-600">微信扫码打开小程序报名</p>
+            <img
+              src={miniProgramQrUrl}
+              alt="小程序二维码"
+              className="h-24 w-24 rounded-lg border border-gray-200 bg-white object-cover"
+              loading="lazy"
+            />
+            <a
+              href={inviteUrl}
+              className="text-xs text-gray-400 underline-offset-2 hover:underline"
+            >
+              链接：{inviteUrl}
+            </a>
+            <p className="text-[11px] text-gray-400">
+              小程序路径：{miniProgramPath}
             </p>
-            {/* 小程序码占位 - 实际部署时替换为真实小程序码图片 */}
-            <div className="flex h-24 w-24 items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50">
-              <span className="text-xs text-gray-400">小程序码</span>
-            </div>
           </div>
         )}
       </div>

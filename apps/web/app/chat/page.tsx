@@ -3,7 +3,6 @@
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   ArrowUp,
   Bot,
@@ -109,7 +108,6 @@ const FALLBACK_WELCOME: WelcomeResponse = {
 };
 
 export default function ChatPage() {
-  const router = useRouter();
   const {
     messages,
     sendMessage,
@@ -122,7 +120,7 @@ export default function ChatPage() {
     transport: new DefaultChatTransport({
       api: `${API_BASE}/ai/chat`,
       headers: { "Content-Type": "application/json" },
-      credentials: "include",
+      credentials: "omit",
       body: { source: "miniprogram" },
     }),
   });
@@ -136,6 +134,11 @@ export default function ChatPage() {
   const isLoading = status === "submitted" || status === "streaming";
   const hasInput = input.length > 0;
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const resetChat = useCallback(() => {
+    setMessages([]);
+    setInput("");
+  }, [setMessages]);
 
   useEffect(() => {
     if (!scrollRef.current) return;
@@ -211,26 +214,11 @@ export default function ChatPage() {
 
   const promptChips = useMemo(() => {
     const pool: PromptChip[] = [];
-
-    welcomeData.quickPrompts.forEach((item, index) => {
-      const text = item.text?.trim();
-      const prompt = item.prompt?.trim() || text;
-      if (!text || !prompt) return;
-      pool.push({ id: `welcome-quick-${index}`, text, prompt });
-    });
-
-    welcomeData.sections.forEach((section, sectionIndex) => {
-      section.items.forEach((item, itemIndex) => {
-        const text = item.label?.trim();
-        const prompt = item.prompt?.trim();
-        if (!text || !prompt) return;
-        pool.push({
-          id: `welcome-section-${sectionIndex}-${itemIndex}`,
-          text,
-          prompt,
-        });
-      });
-    });
+    const deduped: PromptChip[] = [];
+    const visibleWelcomePromptKeys = new Set(
+      getVisibleWelcomePrompts(welcomeData).map((item) => normalizePromptKey(item))
+    );
+    const seen = new Set<string>();
 
     hotKeywords.forEach((item) => {
       const keyword = item.keyword.trim();
@@ -238,19 +226,39 @@ export default function ChatPage() {
       pool.push({ id: `hot-${item.id}`, text: keyword, prompt: keyword });
     });
 
-    const deduped: PromptChip[] = [];
-    const seen = new Set<string>();
+    if (messages.length > 0) {
+      welcomeData.sections.forEach((section, sectionIndex) => {
+        section.items.forEach((item, itemIndex) => {
+          const text = item.label?.trim();
+          const prompt = item.prompt?.trim();
+          if (!text || !prompt) return;
+          pool.push({
+            id: `welcome-section-${sectionIndex}-${itemIndex}`,
+            text,
+            prompt,
+          });
+        });
+      });
+
+      welcomeData.quickPrompts.forEach((item, index) => {
+        const text = item.text?.trim();
+        const prompt = item.prompt?.trim() || text;
+        if (!text || !prompt) return;
+        pool.push({ id: `welcome-quick-${index}`, text, prompt });
+      });
+    }
 
     for (const item of pool) {
-      const key = item.prompt.toLowerCase();
+      const key = normalizePromptKey(item.prompt);
       if (seen.has(key)) continue;
+      if (visibleWelcomePromptKeys.has(key)) continue;
       seen.add(key);
       deduped.push(item);
-      if (deduped.length >= 10) break;
+      if (deduped.length >= 8) break;
     }
 
     return deduped;
-  }, [hotKeywords, welcomeData]);
+  }, [hotKeywords, messages.length, welcomeData]);
 
   return (
     <div className="min-h-screen bg-zinc-100">
@@ -281,18 +289,7 @@ export default function ChatPage() {
             <button
               onClick={() => {
                 setShowTopMenu(false);
-                router.push("/message");
-              }}
-              className="w-full rounded-md px-3 py-2 text-left text-sm text-zinc-700 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
-            >
-              消息中心
-            </button>
-            <div className="mx-2 my-1 h-px bg-zinc-200" />
-            <button
-              onClick={() => {
-                setShowTopMenu(false);
-                setMessages([]);
-                setInput("");
+                resetChat();
               }}
               className="w-full rounded-md px-3 py-2 text-left text-sm text-zinc-700 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
             >
@@ -497,14 +494,6 @@ function WelcomeScreen({
         {data.subGreeting || "想约点什么？"}
       </p>
 
-      {data.socialProfile && (
-        <div className="mb-6 grid w-full max-w-sm grid-cols-3 gap-2">
-          <StatCard label="参与" value={String(data.socialProfile.participationCount)} />
-          <StatCard label="发起" value={String(data.socialProfile.activitiesCreatedCount)} />
-          <StatCard label="偏好" value={`${data.socialProfile.preferenceCompleteness}%`} />
-        </div>
-      )}
-
       {quickPrompts.length > 0 ? (
         <div className="w-full max-w-sm space-y-2">
           {quickPrompts.slice(0, 4).map((item, index) => (
@@ -540,15 +529,6 @@ function WelcomeScreen({
         <div className="mt-4 text-xs text-zinc-400 animate-pulse">正在同步欢迎内容...</div>
       )}
     </ConversationEmpty>
-  );
-}
-
-function StatCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-zinc-200 bg-white px-2 py-2 text-center">
-      <div className="text-[10px] text-zinc-500">{label}</div>
-      <div className="text-sm font-semibold text-zinc-900">{value}</div>
-    </div>
   );
 }
 
@@ -698,6 +678,29 @@ function getToolInvocations(message: any): Array<{
     .filter(Boolean);
 }
 
+function getVisibleWelcomePrompts(data: WelcomeResponse): string[] {
+  const quickPrompts = data.quickPrompts
+    .map((item) => item.prompt?.trim() || item.text?.trim() || "")
+    .filter(Boolean)
+    .slice(0, 4);
+
+  if (quickPrompts.length > 0) {
+    return quickPrompts;
+  }
+
+  return getSectionPromptItems(data)
+    .map((item) => item.prompt.trim())
+    .filter(Boolean)
+    .slice(0, 4);
+}
+
+function normalizePromptKey(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[?？!！。,.，、;；:：'"`~\-_/\\()[\]{}]/g, "");
+}
+
 function getSectionPromptItems(data: WelcomeResponse): Array<{
   id: string;
   label: string;
@@ -733,22 +736,9 @@ function getSectionPromptItems(data: WelcomeResponse): Array<{
 }
 
 async function fetchWelcome(signal?: AbortSignal): Promise<WelcomeResponse> {
-  const location = await getLocationIfGranted();
-  const query = new URLSearchParams();
-
-  if (location) {
-    query.append("lat", String(location.lat));
-    query.append("lng", String(location.lng));
-  }
-
-  const queryString = query.toString();
-  const url = queryString
-    ? `${API_BASE}/ai/welcome?${queryString}`
-    : `${API_BASE}/ai/welcome`;
-
-  const response = await fetch(url, {
+  const response = await fetch(`${API_BASE}/ai/welcome`, {
     method: "GET",
-    credentials: "include",
+    credentials: "omit",
     headers: { "Content-Type": "application/json" },
     signal,
   });
@@ -764,7 +754,7 @@ async function fetchWelcome(signal?: AbortSignal): Promise<WelcomeResponse> {
 async function fetchHotKeywords(signal?: AbortSignal): Promise<HotKeywordItem[]> {
   const response = await fetch(`${API_BASE}/hot-keywords?limit=${HOT_KEYWORD_LIMIT}`, {
     method: "GET",
-    credentials: "include",
+    credentials: "omit",
     headers: { "Content-Type": "application/json" },
     signal,
   });
@@ -788,56 +778,6 @@ async function fetchHotKeywords(signal?: AbortSignal): Promise<HotKeywordItem[]>
       return { id, keyword };
     })
     .filter((item): item is HotKeywordItem => Boolean(item));
-}
-
-async function getLocationIfGranted(): Promise<{ lat: number; lng: number } | null> {
-  if (typeof window === "undefined" || !("geolocation" in navigator)) {
-    return null;
-  }
-
-  try {
-    if (!("permissions" in navigator) || !navigator.permissions?.query) {
-      return null;
-    }
-
-    const permission = await navigator.permissions.query({
-      name: "geolocation" as PermissionName,
-    });
-
-    if (permission.state !== "granted") {
-      return null;
-    }
-  } catch {
-    return null;
-  }
-
-  return new Promise((resolve) => {
-    let settled = false;
-
-    const done = (value: { lat: number; lng: number } | null) => {
-      if (settled) return;
-      settled = true;
-      resolve(value);
-    };
-
-    const timeout = window.setTimeout(() => done(null), 1200);
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        window.clearTimeout(timeout);
-        done({ lat: position.coords.latitude, lng: position.coords.longitude });
-      },
-      () => {
-        window.clearTimeout(timeout);
-        done(null);
-      },
-      {
-        enableHighAccuracy: false,
-        maximumAge: 5 * 60 * 1000,
-        timeout: 1000,
-      }
-    );
-  });
 }
 
 function normalizeWelcomeResponse(payload: unknown): WelcomeResponse {

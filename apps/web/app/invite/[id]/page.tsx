@@ -8,6 +8,7 @@ import { DiscussionPreview } from "@/components/invite/discussion-preview"
 import { WechatRedirect } from "@/components/invite/wechat-redirect"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:1996"
+const WEB_BASE = process.env.NEXT_PUBLIC_WEB_URL || "https://juchang.app"
 
 async function getPublicActivity(id: string): Promise<PublicActivity | null> {
   try {
@@ -55,8 +56,22 @@ export async function generateMetadata({
     openGraph: {
       title: activity.title,
       description: `${fomoText} · ${activity.locationName}`,
-      url: `https://juchang.app/invite/${id}`,
+      url: `${WEB_BASE}/invite/${id}`,
       type: "website",
+      images: [
+        {
+          url: `${WEB_BASE}/og/invite-default.svg`,
+          width: 1200,
+          height: 630,
+          alt: "聚场活动邀请函",
+        },
+      ],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: activity.title,
+      description: `${fomoText} · ${activity.locationName}`,
+      images: [`${WEB_BASE}/og/invite-default.svg`],
     },
   }
 }

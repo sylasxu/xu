@@ -761,7 +761,7 @@ WebSocket 服务器接收
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                                                         │
-│              [React Bits 动态背景]                       │
+│              [主题背景渲染层]                            │
 │                                                         │
 │  ┌─────────────────────────────────────────────────┐   │
 │  │                                                 │   │
@@ -793,7 +793,7 @@ WebSocket 服务器接收
 |------|------|
 | **SSR 渲染** | Next.js 服务端渲染，自动生成 OG meta 标签 |
 | **OG 标签** | `og:title`、`og:description`（含报名人数 FOMO 文案）、`og:image`、`og:url` |
-| **动态背景** | 根据活动主题渲染 React Bits 动态背景（Aurora、Ballpit、Particles 等） |
+| **主题背景** | 根据活动主题渲染轻量 CSS 背景（Aurora/Ballpit/Particles 风格） |
 | **讨论区预览** | 展示最近 2-3 条讨论消息，营造社交氛围 |
 | **微信跳转** | 微信内使用 URL Scheme 跳转小程序，非微信显示小程序码 |
 | **响应式设计** | Mobile-First，桌面端 `max-w-lg` 居中约束 |
@@ -818,9 +818,10 @@ WebSocket 服务器接收
 | 特性 | 说明 |
 |------|------|
 | **AI SDK Elements** | 使用 Vercel AI SDK Elements 组件（Conversation、Message、Reasoning、PromptInput） |
-| **流式响应** | 通过 Eden Treaty 调用 Elysia `POST /ai/chat` 端点，支持流式文本渲染 |
+| **流式响应** | 通过 `DefaultChatTransport` 调用 Elysia `POST /ai/chat` 端点，支持流式文本渲染 |
 | **Reasoning 展示** | 展示 AI 思考过程（可折叠） |
-| **响应式设计** | Mobile-First，桌面端 `max-w-2xl` 居中约束 |
+| **响应式设计** | Mobile-First，固定移动端容器 `max-w-[430px]` |
+| **游客模式** | H5 Chat 默认无登录态，不依赖手机号/JWT，会话仅用于当次承接 |
 
 **页面布局**：
 
@@ -869,17 +870,29 @@ WebSocket 服务器接收
 | 维度 | 选择 | 理由 |
 |------|------|------|
 | 框架 | Next.js | SSR 天然生成 OG 标签，AI SDK Elements 开箱即用 |
-| API 调用 | Eden Treaty | 与 Elysia API 类型安全对接，统一技术栈 |
-| 动态背景 | React Bits | 开源动效库，提供 Aurora、Ballpit、Particles 等组件 |
+| API 调用 | Fetch + AI SDK Transport | 现阶段 H5 聚焦降级承接，最小依赖、快速交付 |
+| 动态背景 | ThemeBackground | 轻量背景渲染器，按主题配置生成 CSS 背景 |
 | AI 对话 UI | AI SDK Elements | Vercel 官方组件，copy-paste 模式安装 |
 | 样式 | Tailwind CSS | 与 admin 保持一致 |
 
 **关键约束**：
 - Next.js 只做前端渲染层，**不使用 API Routes**
-- 所有数据请求走 Elysia API，统一使用 Eden Treaty
-- AI 对话也通过 Eden Treaty 调用 `POST /ai/chat`（流式响应）
+- 所有数据请求走 Elysia API（无 BFF）
+- `/chat` 仅做游客承接，不依赖登录态，不承载消息中心
+- AI 对话通过 `POST /ai/chat`（流式响应）
 
-#### 1.7.6 成功指标
+#### 1.7.6 v5.2 当前交付范围（执行约束）
+
+> 为保证上线节奏，H5 当前阶段严格收敛到「邀请函展示 + 游客对话降级」两条链路。
+
+| 模块 | 当前状态 | 说明 |
+|------|---------|------|
+| `/invite/:id` 邀请函 | ✅ 交付 | SSR + OG + 微信跳转引导 |
+| `/chat` 游客对话 | ✅ 交付 | 无登录态承接，移动端单栏布局 |
+| H5 消息中心 | ❌ 不做 | 消息中心收敛到小程序侧 |
+| H5 报名/发布 | ❌ 不做 | 统一引导至小程序完成 |
+
+#### 1.7.7 成功指标
 
 | 指标 | 说明 | 目标 |
 |------|------|------|
@@ -1849,6 +1862,8 @@ API: GET /api/hot-keywords
 ---
 
 ## 9. 消息中心 (Message Center)
+
+> 注：本章描述的是小程序消息中心能力。H5 Web 当前阶段不提供消息中心页面。
 
 ### 9.1 功能
 
@@ -2900,12 +2915,12 @@ AI 检测活动内容风险：
 | **Offline_Notification** | **离线通知，用户不在线时通过客服消息或服务通知推送消息 (v4.9)** |
 | **H5_Invitation** | **H5 活动邀请函，URL 格式 `https://juchang.app/invite/{activityId}`，SSR 渲染 + OG 标签，支持跨平台分享 (v5.0)** |
 | **Theme_System** | **活动主题系统，为每个活动分配视觉主题（动态背景 + 配色 + 文字效果）(v5.0)** |
-| **ThemeConfig** | **主题配置 JSON，存储 React Bits Background Studio 导出的动态背景参数 (v5.0)** |
+| **ThemeConfig** | **主题配置 JSON，存储邀请函背景与配色参数（由预设或配置工具生成）(v5.0)** |
 | **OG_Tags** | **Open Graph 标签，社交平台分享时展示标题、描述、图片的 HTML meta 标签 (v5.0)** |
 | **React_Bits** | **开源 React 动效库，提供 Aurora、Ballpit、Particles 等动态背景组件 (v5.0)** |
 | **Preset_Theme** | **预设主题，6 种内置主题：aurora（极光）、party（派对）、minimal（简约）、neon（霓虹）、warm（暖色）、sport（运动）(v5.0)** |
 | **AI_Elements** | **Vercel AI SDK Elements (https://elements.ai-sdk.dev)，copy-paste 模式安装的 AI 对话 UI 组件 (v5.0)** |
-| **Eden_Treaty** | **Elysia 类型安全 HTTP 客户端，apps/web 中所有 API 调用统一使用 (v5.0)** |
+| **Eden_Treaty** | **Elysia 类型安全 HTTP 客户端（admin 已使用；web 侧当前阶段为 Fetch/Transport，后续可接入）(v5.0)** |
 | **Post_Activity_Flow** | **活动后流程，活动结束后自动触发的反馈收集和 AI 跟进 (v5.0)** |
 
 **设计原则*

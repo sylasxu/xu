@@ -1,7 +1,7 @@
 # 聚场 (JuChang) 技术架构文档
 
-> **版本**：v5.1 (AI Core Enhancement)
-> **更新日期**：2026-02-15
+> **版本**：v5.2 (H5 Scope Focus)
+> **更新日期**：2026-03-02
 > **架构**：原生小程序 + Zustand Vanilla + Elysia API + Drizzle ORM + Next.js Web
 
 ---
@@ -37,8 +37,8 @@
 | **Admin 后台** | Vite + React + TanStack | Eden Treaty 调用 API |
 | **Web 应用** | Next.js 15 (App Router) | SSR + React 19 + Tailwind CSS 4 |
 | **Web Chat UI** | AI SDK Elements | Copy-paste 模式安装，20+ 组件开箱即用 |
-| **Web 动态背景** | React Bits | Aurora、Ballpit、Particles 等动效组件 |
-| **Web API 客户端** | Eden Treaty | 类型安全 HTTP 客户端，统一调用 Elysia API |
+| **Web 主题背景** | ThemeBackground (CSS) | 根据主题参数渲染轻量背景，无额外运行时动效依赖 |
+| **Web API 客户端** | Fetch + AI SDK Transport | 当前阶段最小依赖调用 Elysia API（Eden 预留） |
 | **API 网关** | Elysia | Bun 原生高性能框架 |
 | **数据库** | PostgreSQL + PostGIS | LBS 地理查询 |
 | **ORM** | Drizzle ORM | TypeScript Native |
@@ -149,13 +149,13 @@
 │   │   │   │   ├── reasoning.tsx
 │   │   │   │   └── prompt-input.tsx
 │   │   │   ├── invite/             # 邀请函页面组件
-│   │   │   │   ├── theme-background.tsx   # React Bits 动态背景渲染器
+│   │   │   │   ├── theme-background.tsx   # 主题背景渲染器（CSS）
 │   │   │   │   ├── activity-card.tsx      # 活动信息卡片
 │   │   │   │   ├── discussion-preview.tsx # 讨论区预览
 │   │   │   │   └── wechat-redirect.tsx    # 微信跳转引导
 │   │   │   └── ui/                 # shadcn/ui 基础组件
 │   │   ├── lib/              # 工具库
-│   │   │   ├── eden.ts             # Eden Treaty 客户端（所有 API 调用）
+│   │   │   ├── eden.ts             # Eden Treaty 客户端（预留，后续阶段）
 │   │   │   ├── themes.ts           # 预设主题配置（与 API 端同步）
 │   │   │   └── wechat.ts           # 微信环境检测工具
 │   │   ├── next.config.ts
@@ -2589,9 +2589,10 @@ apps/web 是面向用户的 H5 Web 应用，基于 Next.js 15 构建，提供跨
 
 **关键约束**：
 - Next.js 只做前端渲染层，**不使用 API Routes**
-- 所有数据请求走 Elysia API，统一使用 Eden Treaty
-- AI 对话也通过 Eden Treaty 调用 `POST /ai/chat`（流式响应）
-- **Mobile-First 响应式设计**：所有页面以移动端为基准设计，桌面端通过 `max-w-lg`（邀请函）/ `max-w-2xl`（对话页）居中约束内容宽度
+- 所有数据请求走 Elysia API（无 BFF）
+- AI 对话通过 `DefaultChatTransport` 调用 `POST /ai/chat`（流式响应）
+- `/chat` 当前阶段为游客承接模式（无登录态，不提供消息中心）
+- **Mobile-First 响应式设计**：所有页面以移动端为基准设计，桌面端通过 `max-w-lg`（邀请函）/ `max-w-[430px]`（对话页）居中约束内容宽度
 
 ### 6.19.2 技术栈
 
@@ -2601,8 +2602,8 @@ apps/web 是面向用户的 H5 Web 应用，基于 Next.js 15 构建，提供跨
 | React | 19 | UI 框架 |
 | Tailwind CSS | 4 | 样式系统 |
 | AI SDK Elements | latest | Chat UI 组件（copy-paste 模式，类似 shadcn/ui） |
-| React Bits | latest | 动态背景组件（Aurora、Ballpit、Particles 等） |
-| Eden Treaty | latest | 类型安全 HTTP 客户端，统一调用 Elysia API |
+| 主题背景渲染器 | 内置组件 | 按主题参数渲染 CSS 背景（邀请函） |
+| Fetch + AI Transport | - | 统一调用 Elysia API（当前阶段） |
 
 ### 6.19.3 目录结构
 
@@ -2623,13 +2624,13 @@ apps/web/
 │   │   ├── reasoning.tsx          # 思考过程展示
 │   │   └── prompt-input.tsx       # 输入框
 │   ├── invite/                    # 邀请函页面组件
-│   │   ├── theme-background.tsx   # React Bits 动态背景渲染器
+│   │   ├── theme-background.tsx   # 主题背景渲染器（CSS）
 │   │   ├── activity-card.tsx      # 活动信息卡片
 │   │   ├── discussion-preview.tsx # 讨论区预览
 │   │   └── wechat-redirect.tsx    # 微信跳转引导
 │   └── ui/                        # shadcn/ui 基础组件
 ├── lib/
-│   ├── eden.ts                    # Eden Treaty 客户端（所有 API 调用）
+│   ├── eden.ts                    # Eden Treaty 客户端（预留，后续阶段）
 │   ├── themes.ts                  # 预设主题配置（与 API 端同步）
 │   └── wechat.ts                  # 微信环境检测工具
 ├── next.config.ts
@@ -2659,7 +2660,7 @@ Next.js SSR
          │
          ▼
 ┌─────────────────┐
-│ Eden Treaty     │ ← GET /activities/:id/public（无需认证）
+│ Fetch (Server)  │ ← GET /activities/:id/public（无需认证）
 │ 获取活动数据    │
 └────────┬────────┘
          │
@@ -2672,7 +2673,7 @@ Next.js SSR
 ┌─────────────────────────────────────────┐
 │ 页面组件组合                             │
 │ ┌─────────────────────────────────────┐ │
-│ │ ThemeBackground (React Bits 动态背景) │ │
+│ │ ThemeBackground (主题背景渲染层) │ │
 │ │ ┌─────────────────────────────────┐ │ │
 │ │ │ ActivityCard (活动信息卡片)      │ │ │
 │ │ │ DiscussionPreview (讨论区预览)  │ │ │
@@ -2687,9 +2688,9 @@ Next.js SSR
 - `og:description` = "已有X人报名 · 地点 · 时间"（FOMO 文案）
 - `og:url` = `https://juchang.app/invite/{activityId}`
 
-**React Bits 动态背景**：
-- 使用 `next/dynamic` 动态导入（`ssr: false`），避免 SSR 报错
-- 根据 `ThemeConfig.background.component` 渲染对应组件（Aurora/Ballpit/Particles/Threads/Gradient/Squares）
+**邀请函主题背景**：
+- 由 `ThemeBackground` 根据 `ThemeConfig.background.component` 渲染对应背景
+- 当前实现采用轻量 CSS 背景组合，避免引入大体积运行时动效依赖
 - 6 种预设主题：aurora（极光）、party（派对）、minimal（简约）、neon（霓虹）、warm（暖色）、sport（运动）
 
 **微信环境检测与跳转**：
@@ -2701,9 +2702,10 @@ Next.js SSR
 
 **技术实现**：
 - 使用 AI SDK Elements 组件（Conversation、Message、Reasoning、PromptInput）
-- 通过 Eden Treaty 调用 `POST /ai/chat` 端点（流式响应）
+- 通过 `DefaultChatTransport` 调用 `POST /ai/chat` 端点（流式响应）
 - 支持流式文本渲染和 Reasoning（思考过程）展示
 - 作为小程序的降级方案，在小程序不可用时承接用户
+- 当前为游客模式：不依赖登录态，不提供消息中心和账号状态
 
 **组件映射**：
 
@@ -2714,7 +2716,15 @@ Next.js SSR
 | `Reasoning` | AI 思考过程展示（可折叠） |
 | `PromptInput` | 输入框 + 发送按钮 |
 
-### 6.19.7 Eden Treaty 客户端
+### 6.19.7 当前交付范围（v5.2）
+
+| 模块 | 状态 | 说明 |
+|------|------|------|
+| `/invite/[id]` | ✅ | SSR 邀请函 + 微信跳转引导 |
+| `/chat` | ✅ | 游客对话降级页 |
+| `/message` | ❌ | H5 不提供，消息中心由小程序承载 |
+
+### 6.19.8 Eden Treaty 客户端（后续阶段预留）
 
 ```typescript
 // apps/web/lib/eden.ts
@@ -2724,11 +2734,11 @@ import type { App } from '@juchang/api';
 export const eden = treaty<App>(process.env.NEXT_PUBLIC_API_URL!);
 ```
 
-所有 API 调用统一通过此客户端，包括：
+后续切换到 Eden Treaty 后，可统一通过此客户端调用：
 - `eden.activities({ id }).public.get()` — 获取活动公开详情
 - `eden.ai.chat.post({ message, stream: true })` — AI 对话（流式）
 
-### 6.19.8 预设主题配置
+### 6.19.9 预设主题配置
 
 ```typescript
 // apps/web/lib/themes.ts
@@ -2743,7 +2753,7 @@ const ACTIVITY_TYPE_THEME_MAP: Record<string, string> = {
   other: 'minimal',
 };
 
-// 6 种预设主题配置（含 React Bits 组件参数 + 配色方案）
+// 6 种预设主题配置（含背景组件参数 + 配色方案）
 const PRESET_THEMES: Record<string, ThemeConfig> = {
   aurora: { background: { component: 'Aurora', config: { ... } }, colorScheme: { ... } },
   party: { background: { component: 'Ballpit', config: { ... } }, colorScheme: { ... } },

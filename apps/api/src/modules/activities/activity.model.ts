@@ -5,7 +5,7 @@ import { Elysia, t, type Static } from 'elysia';
  * Activity Model Plugin (MVP 简化版 + v3.2 附近搜索)
  * 
  * MVP 接口：
- * - GET /activities/mine - 获取我相关的活动
+ * - GET /activities/user/:userId - 获取指定用户相关的活动
  * - GET /activities/:id - 获取活动详情
  * - POST /activities - 创建活动
  * - PATCH /activities/:id/status - 更新状态

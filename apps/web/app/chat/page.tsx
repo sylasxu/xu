@@ -1,898 +1,231 @@
 "use client";
 
-import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport } from "ai";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowUp,
-  Bot,
+  Camera,
   ChevronRight,
-  MapPin,
   Menu,
-  Paperclip,
-  Square,
+  Mic,
+  MoreHorizontal,
+  Plus,
+  QrCode,
+  Sparkles,
+  Volume2,
 } from "lucide-react";
 
 import {
   Conversation,
   ConversationContent,
-  ConversationEmpty,
+  ConversationEmptyState,
 } from "@/components/ai-elements/conversation";
 import {
   Message,
-  MessageAvatar,
   MessageContent,
-  MessageFooter,
+  MessageResponse,
 } from "@/components/ai-elements/message";
 import {
   PromptInput,
-  PromptInputTextarea,
+  PromptInputButton,
+  PromptInputFooter,
   PromptInputSubmit,
+  PromptInputTools,
+  PromptInputTextarea,
 } from "@/components/ai-elements/prompt-input";
 import {
-  Reasoning,
-  ReasoningContent,
-  ReasoningTrigger,
-} from "@/components/ai-elements/reasoning";
-import { ToolInvocationCard } from "@/components/ai-elements/tool-invocation";
+  Suggestion,
+  Suggestions,
+} from "@/components/ai-elements/suggestion";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
+import type {
+  GenUIAlertBlock,
+  GenUIBlock,
+  GenUIChoiceBlock,
+  GenUIChoiceOption,
+  GenUICtaGroupBlock,
+  GenUICtaItem,
+  GenUIEntityCardBlock,
+  GenUIFormBlock,
+  GenUIInput,
+  GenUIListBlock,
+  GenUIStreamEvent,
+  GenUITextBlock,
+  GenUITurnEnvelope,
+} from "@/src/gen/genui-contract";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:1996";
-const HOT_KEYWORD_LIMIT = 6;
+const GROUP_INVITE_URL = process.env.NEXT_PUBLIC_GROUP_INVITE_URL || "https://juchang.app";
+const GROUP_QR_IMAGE_URL =
+  process.env.NEXT_PUBLIC_GROUP_QR_URL ||
+  `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(GROUP_INVITE_URL)}`;
+const DEFAULT_PROMPTS = [
+  "想租个周五晚上的局",
+  "我在观音桥，想组个桌游局",
+  "周末附近有什么活动",
+];
+const DEFAULT_WELCOME_GREETING = "你好～";
+const DEFAULT_WELCOME_SUB_GREETING = "今天想约什么局？";
+const DEFAULT_BOTTOM_ACTIONS: string[] = [
+  "快速组局",
+  "找搭子",
+  "附近活动",
+  "我的草稿",
+];
+const DEFAULT_PROFILE_HINTS = {
+  low: "补充偏好后，小聚推荐会更准",
+  medium: "社交画像正在完善中，继续聊聊你的习惯",
+  high: "社交画像已较完整，可直接让小聚给你安排",
+};
 
-interface WelcomeQuickItem {
-  type: "draft" | "suggestion" | "explore";
-  label: string;
-  prompt: string;
-  icon?: string;
-}
+type ComposerStatus = "ready" | "submitted";
 
-interface WelcomeSection {
-  id: string;
-  icon: string;
-  title: string;
-  items: WelcomeQuickItem[];
-}
+type ChatRecord =
+  | {
+      id: string;
+      role: "user";
+      text: string;
+    }
+  | {
+      id: string;
+      role: "assistant";
+      pending?: boolean;
+      turn?: GenUITurnEnvelope;
+      error?: string;
+    };
 
-interface SocialProfile {
+type AssistantRecord = Extract<ChatRecord, { role: "assistant" }>;
+type ActionOption = Pick<GenUIChoiceOption, "label" | "action" | "params"> | GenUICtaItem;
+type WelcomeSocialProfile = {
   participationCount: number;
   activitiesCreatedCount: number;
   preferenceCompleteness: number;
-}
-
-interface QuickPrompt {
-  icon: string;
-  text: string;
-  prompt: string;
-}
-
-interface WelcomeResponse {
-  greeting: string;
-  subGreeting?: string;
-  sections: WelcomeSection[];
-  socialProfile?: SocialProfile;
-  quickPrompts: QuickPrompt[];
-}
-
-interface HotKeywordItem {
-  id: string;
-  keyword: string;
-}
-
-interface PromptChip {
-  id: string;
-  text: string;
-  prompt: string;
-}
-
-const FALLBACK_WELCOME: WelcomeResponse = {
-  greeting: "我是小聚，你的 AI 活动助理",
-  subGreeting: "想约点什么？",
-  sections: [
-    {
-      id: "suggestions",
-      icon: "",
-      title: "快速组局",
-      items: [
-        { type: "suggestion", label: "约饭局", prompt: "帮我组一个吃饭的局" },
-        { type: "suggestion", label: "找运动搭子", prompt: "帮我找个运动搭子" },
-        { type: "suggestion", label: "周末活动", prompt: "周末附近有什么活动" },
-        { type: "suggestion", label: "组周五晚局", prompt: "想组个周五晚的局" },
-      ],
-    },
-  ],
-  quickPrompts: [
-    { icon: "", text: "周末附近有什么活动？", prompt: "周末附近有什么活动" },
-    { icon: "", text: "帮我找个运动搭子", prompt: "帮我找个运动搭子" },
-    { icon: "", text: "想组个周五晚的局", prompt: "想组个周五晚的局" },
-  ],
+};
+type WelcomeUiPayload = {
+  bottomQuickActions: string[];
+  profileHints: {
+    low: string;
+    medium: string;
+    high: string;
+  };
 };
 
-export default function ChatPage() {
-  const {
-    messages,
-    sendMessage,
-    status,
-    stop,
-    error,
-    regenerate,
-    setMessages,
-  } = useChat({
-    transport: new DefaultChatTransport({
-      api: `${API_BASE}/ai/chat`,
-      headers: { "Content-Type": "application/json" },
-      credentials: "omit",
-      body: { source: "miniprogram" },
-    }),
+const TYPEWRITER_INTERVAL_MS = 18;
+
+function randomId(prefix: string): string {
+  return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function readClientToken(): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const tokenKeys = ["token", "authToken", "accessToken"];
+  for (const key of tokenKeys) {
+    const value = window.localStorage.getItem(key);
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return null;
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
   });
+}
 
-  const [input, setInput] = useState("");
-  const [welcomeData, setWelcomeData] = useState<WelcomeResponse>(FALLBACK_WELCOME);
-  const [hotKeywords, setHotKeywords] = useState<HotKeywordItem[]>([]);
-  const [isWelcomeLoading, setIsWelcomeLoading] = useState(true);
-  const [showTopMenu, setShowTopMenu] = useState(false);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
 
-  const isLoading = status === "submitted" || status === "streaming";
-  const hasInput = input.length > 0;
-  const scrollRef = useRef<HTMLDivElement>(null);
+function parseSSEPacket(packet: string): { eventName: string; dataText: string } | null {
+  const trimmed = packet.trim();
+  if (!trimmed) {
+    return null;
+  }
 
-  const resetChat = useCallback(() => {
-    setMessages([]);
-    setInput("");
-  }, [setMessages]);
+  const lines = trimmed.split(/\r?\n/);
+  let eventName = "message";
+  const dataLines: string[] = [];
 
-  useEffect(() => {
-    if (!scrollRef.current) return;
-    scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [messages, isLoading]);
-
-  const loadWelcomeAndKeywords = useCallback(async (signal?: AbortSignal) => {
-    setIsWelcomeLoading(true);
-
-    const [welcomeResult, hotKeywordsResult] = await Promise.allSettled([
-      fetchWelcome(signal),
-      fetchHotKeywords(signal),
-    ]);
-
-    if (signal?.aborted) {
-      return;
+  for (const line of lines) {
+    if (line.startsWith("event:")) {
+      eventName = line.slice(6).trim();
+      continue;
     }
 
-    if (welcomeResult.status === "fulfilled") {
-      setWelcomeData(welcomeResult.value);
-    } else {
-      setWelcomeData(FALLBACK_WELCOME);
+    if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).trim());
     }
+  }
 
-    if (hotKeywordsResult.status === "fulfilled") {
-      setHotKeywords(hotKeywordsResult.value);
-    } else {
-      setHotKeywords([]);
-    }
+  return {
+    eventName,
+    dataText: dataLines.join("\n"),
+  };
+}
 
-    setIsWelcomeLoading(false);
-  }, []);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void loadWelcomeAndKeywords(controller.signal);
-    return () => controller.abort();
-  }, [loadWelcomeAndKeywords]);
-
-  useEffect(() => {
-    if (!showTopMenu) return;
-
-    const closeMenu = (event: MouseEvent) => {
-      const target = event.target as HTMLElement;
-      if (target.closest("[data-top-menu]")) return;
-      if (target.closest("[data-top-menu-trigger]")) return;
-      setShowTopMenu(false);
-    };
-
-    document.addEventListener("mousedown", closeMenu);
-    return () => document.removeEventListener("mousedown", closeMenu);
-  }, [showTopMenu]);
-
-  const onSubmit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!input.trim() || isLoading) return;
-
-      const text = input.trim();
-      setInput("");
-      await sendMessage({ text });
+function createEmptyEnvelope(params: {
+  traceId: string;
+  conversationId: string;
+  turnId: string;
+}): GenUITurnEnvelope {
+  return {
+    traceId: params.traceId,
+    conversationId: params.conversationId,
+    turn: {
+      turnId: params.turnId,
+      role: "assistant",
+      status: "streaming",
+      blocks: [],
     },
-    [input, isLoading, sendMessage]
-  );
-
-  const handlePromptSend = useCallback(
-    async (text: string) => {
-      if (isLoading || !text.trim()) return;
-      await sendMessage({ text: text.trim() });
-    },
-    [isLoading, sendMessage]
-  );
-
-  const promptChips = useMemo(() => {
-    const pool: PromptChip[] = [];
-    const deduped: PromptChip[] = [];
-    const visibleWelcomePromptKeys = new Set(
-      getVisibleWelcomePrompts(welcomeData).map((item) => normalizePromptKey(item))
-    );
-    const seen = new Set<string>();
-
-    hotKeywords.forEach((item) => {
-      const keyword = item.keyword.trim();
-      if (!keyword) return;
-      pool.push({ id: `hot-${item.id}`, text: keyword, prompt: keyword });
-    });
-
-    if (messages.length > 0) {
-      welcomeData.sections.forEach((section, sectionIndex) => {
-        section.items.forEach((item, itemIndex) => {
-          const text = item.label?.trim();
-          const prompt = item.prompt?.trim();
-          if (!text || !prompt) return;
-          pool.push({
-            id: `welcome-section-${sectionIndex}-${itemIndex}`,
-            text,
-            prompt,
-          });
-        });
-      });
-
-      welcomeData.quickPrompts.forEach((item, index) => {
-        const text = item.text?.trim();
-        const prompt = item.prompt?.trim() || text;
-        if (!text || !prompt) return;
-        pool.push({ id: `welcome-quick-${index}`, text, prompt });
-      });
-    }
-
-    for (const item of pool) {
-      const key = normalizePromptKey(item.prompt);
-      if (seen.has(key)) continue;
-      if (visibleWelcomePromptKeys.has(key)) continue;
-      seen.add(key);
-      deduped.push(item);
-      if (deduped.length >= 8) break;
-    }
-
-    return deduped;
-  }, [hotKeywords, messages.length, welcomeData]);
-
-  return (
-    <div className="min-h-screen bg-zinc-100">
-      <div className="mx-auto flex h-[100dvh] w-full max-w-[430px] flex-col border-x border-zinc-200 bg-zinc-50">
-      <header className="relative shrink-0 border-b border-zinc-200 bg-white/95 px-4 py-2 backdrop-blur-sm">
-        <div className="mx-auto grid max-w-2xl grid-cols-[32px_1fr_32px] items-center">
-          <button
-            onClick={() => setShowTopMenu((prev) => !prev)}
-            className="flex h-8 w-8 items-center justify-center rounded-md text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
-            aria-label="菜单"
-            data-top-menu-trigger
-          >
-            <Menu className="h-4 w-4" />
-          </button>
-
-          <h1 className="text-center text-sm font-semibold tracking-[0.04em] text-zinc-900">
-            聚场
-          </h1>
-
-          <div className="h-8 w-8" />
-        </div>
-
-        {showTopMenu && (
-          <div
-            data-top-menu
-            className="absolute left-4 top-11 z-20 w-40 rounded-lg border border-zinc-200 bg-white p-1.5 shadow-lg"
-          >
-            <button
-              onClick={() => {
-                setShowTopMenu(false);
-                resetChat();
-              }}
-              className="w-full rounded-md px-3 py-2 text-left text-sm text-zinc-700 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
-            >
-              新对话
-            </button>
-          </div>
-        )}
-      </header>
-
-      <Conversation ref={scrollRef}>
-        <ConversationContent className="mx-auto max-w-2xl">
-          {messages.length === 0 ? (
-            <WelcomeScreen
-              data={welcomeData}
-              loading={isWelcomeLoading}
-              onQuickPrompt={handlePromptSend}
-            />
-          ) : (
-            <>
-              {messages.map((message, index) => (
-                <ChatMessage
-                  key={message.id}
-                  message={message}
-                  isLast={index === messages.length - 1}
-                  isLoading={isLoading}
-                />
-              ))}
-
-              {isLoading && !hasContent(messages) && <ThinkingIndicator />}
-              {error && <ErrorMessage error={error} onRetry={() => void regenerate()} />}
-            </>
-          )}
-        </ConversationContent>
-      </Conversation>
-
-      <div className="shrink-0 border-t border-zinc-200 bg-white p-4">
-        <div className="mx-auto max-w-2xl">
-          {promptChips.length > 0 && (
-            <div className="mb-3 flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {promptChips.map((chip) => (
-                <button
-                  key={chip.id}
-                  onClick={() => void handlePromptSend(chip.prompt)}
-                  disabled={isLoading}
-                  className="shrink-0 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs text-zinc-700 transition-all hover:border-zinc-400 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {chip.text}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <PromptInput
-            onSubmit={onSubmit}
-            className={hasInput ? "flex-col items-stretch gap-2" : "gap-2"}
-          >
-            {hasInput ? (
-              <>
-                <PromptInputTextarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder="想找点乐子？跟我说说..."
-                  disabled={isLoading}
-                  className="max-h-[120px] flex-1 overflow-y-auto"
-                />
-                <div className="flex items-center justify-between px-1 pb-0.5">
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      className="inline-flex h-8 items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-2.5 text-xs text-zinc-600"
-                      aria-label="位置工具"
-                    >
-                      <MapPin className="h-3.5 w-3.5" />
-                      位置
-                    </button>
-                    <button
-                      type="button"
-                      className="inline-flex h-8 items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 px-2.5 text-xs text-zinc-600"
-                      aria-label="附件工具"
-                    >
-                      <Paperclip className="h-3.5 w-3.5" />
-                      附件
-                    </button>
-                  </div>
-                  {isLoading ? (
-                    <PromptInputSubmit isLoading onClick={() => void stop()}>
-                      <Square className="h-4 w-4 fill-current" />
-                    </PromptInputSubmit>
-                  ) : (
-                    <PromptInputSubmit disabled={!input.trim()}>
-                      <ArrowUp className="h-4 w-4" />
-                    </PromptInputSubmit>
-                  )}
-                </div>
-              </>
-            ) : (
-              <>
-                <PromptInputTextarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder="想找点乐子？跟我说说..."
-                  disabled={isLoading}
-                  className="flex-1"
-                />
-                {isLoading ? (
-                  <PromptInputSubmit isLoading onClick={() => void stop()}>
-                    <Square className="h-4 w-4 fill-current" />
-                  </PromptInputSubmit>
-                ) : (
-                  <PromptInputSubmit disabled={!input.trim()}>
-                    <ArrowUp className="h-4 w-4" />
-                  </PromptInputSubmit>
-                )}
-              </>
-            )}
-          </PromptInput>
-        </div>
-      </div>
-      </div>
-    </div>
-  );
+  };
 }
 
-function ChatMessage({
-  message,
-  isLast,
-  isLoading,
-}: {
-  message: any;
-  isLast: boolean;
-  isLoading: boolean;
-}) {
-  const [showReasoning, setShowReasoning] = useState(false);
-  const isUser = message.role === "user";
-  const textContent = getMessageText(message);
-  const reasoningContent = getReasoningText(message);
-  const isStreaming = isLast && isLoading && !textContent;
-  const toolInvocations = getToolInvocations(message);
-
-  if (isUser) {
-    return (
-      <Message role="user">
-        <MessageContent role="user">{textContent}</MessageContent>
-        <MessageFooter>{formatTime(message.createdAt)}</MessageFooter>
-      </Message>
-    );
-  }
-
-  return (
-    <Message role="assistant">
-      <MessageAvatar fallback="聚" />
-      <div className="flex flex-col gap-1">
-        {reasoningContent && (
-          <Reasoning>
-            <ReasoningTrigger
-              isOpen={showReasoning}
-              onClick={() => setShowReasoning(!showReasoning)}
-            />
-            <ReasoningContent isOpen={showReasoning}>{reasoningContent}</ReasoningContent>
-          </Reasoning>
-        )}
-
-        <MessageContent role="assistant">
-          {isStreaming ? <StreamingDots /> : textContent}
-        </MessageContent>
-
-        {toolInvocations.length > 0 && (
-          <div className="mt-1 space-y-2">
-            {toolInvocations.map((invocation) => (
-              <ToolInvocationCard key={invocation.toolCallId} toolInvocation={invocation} />
-            ))}
-          </div>
-        )}
-
-        <MessageFooter>{formatTime(message.createdAt)}</MessageFooter>
-      </div>
-    </Message>
-  );
-}
-
-function WelcomeScreen({
-  data,
-  loading,
-  onQuickPrompt,
-}: {
-  data: WelcomeResponse;
-  loading: boolean;
-  onQuickPrompt: (text: string) => void;
-}) {
-  const quickPrompts = data.quickPrompts.filter(
-    (item) => item.text.trim() && (item.prompt || item.text).trim()
-  );
-  const sectionItems = getSectionPromptItems(data);
-
-  return (
-    <ConversationEmpty>
-      <h2 className="mb-2 text-center text-xl font-semibold text-zinc-900">
-        {data.greeting}
-      </h2>
-
-      <p className="mb-6 text-center text-sm text-zinc-500">
-        {data.subGreeting || "想约点什么？"}
-      </p>
-
-      {quickPrompts.length > 0 ? (
-        <div className="w-full max-w-sm space-y-2">
-          {quickPrompts.slice(0, 4).map((item, index) => (
-            <button
-              key={`${item.text}-${index}`}
-              onClick={() => onQuickPrompt(item.prompt || item.text)}
-              className="flex w-full items-center justify-between rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-left transition-all hover:border-zinc-400 hover:bg-zinc-50"
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-zinc-500">{item.icon || "•"}</span>
-                <span className="text-sm text-zinc-800">{item.text}</span>
-              </div>
-              <ChevronRight className="h-4 w-4 text-zinc-400" />
-            </button>
-          ))}
-        </div>
-      ) : (
-        <div className="grid w-full max-w-sm grid-cols-2 gap-3">
-          {sectionItems.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => onQuickPrompt(item.prompt)}
-              className="group flex min-h-24 flex-col items-start justify-between rounded-xl border border-zinc-200 bg-white p-3 text-left transition-all hover:border-zinc-500 hover:bg-zinc-50 active:scale-[0.99]"
-            >
-              <span className="text-[11px] text-zinc-500">{item.label}</span>
-              <span className="text-xs leading-relaxed text-zinc-700">{item.text}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {loading && (
-        <div className="mt-4 text-xs text-zinc-400 animate-pulse">正在同步欢迎内容...</div>
-      )}
-    </ConversationEmpty>
-  );
-}
-
-function ThinkingIndicator() {
-  return (
-    <div className="flex items-center gap-3 py-2 pl-11">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-800">
-        <Bot className="h-4 w-4 text-white" />
-      </div>
-      <div className="flex items-center gap-2 rounded-2xl bg-zinc-100 px-4 py-2.5">
-        <div className="flex items-center gap-1">
-          {[0, 1, 2].map((i) => (
-            <span
-              key={i}
-              className="h-2 w-2 animate-pulse rounded-full bg-zinc-500"
-              style={{ animationDelay: `${i * 0.12}s` }}
-            />
-          ))}
-        </div>
-        <span className="text-xs text-zinc-500">思考中...</span>
-      </div>
-    </div>
-  );
-}
-
-function StreamingDots() {
-  return (
-    <div className="flex items-center gap-1 py-1">
-      {[0, 1, 2].map((i) => (
-        <span
-          key={i}
-          className="h-1.5 w-1.5 animate-pulse rounded-full bg-zinc-500"
-          style={{ animationDelay: `${i * 0.12}s` }}
-        />
-      ))}
-    </div>
-  );
-}
-
-function ErrorMessage({
-  error,
-  onRetry,
-}: {
-  error: Error;
-  onRetry: () => void;
-}) {
-  return (
-    <div className="flex justify-center py-4">
-      <div className="rounded-lg border border-zinc-300 bg-zinc-100 px-4 py-2 text-sm text-zinc-700">
-        出错了：{error.message || "请重试"}
-        <button onClick={onRetry} className="ml-2 underline hover:no-underline">
-          重试
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function hasContent(messages: any[]): boolean {
-  const lastMessage = messages[messages.length - 1];
-  return lastMessage?.role === "assistant" && !!getMessageText(lastMessage);
-}
-
-function formatTime(date?: Date | string): string {
-  if (!date) return "";
-  const d = new Date(date);
-  return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-}
-
-function getMessageText(message: any): string {
-  if (Array.isArray(message?.parts)) {
-    return message.parts
-      .filter((part: any) => part?.type === "text" && typeof part.text === "string")
-      .map((part: any) => part.text)
-      .join("");
-  }
-
-  return typeof message?.content === "string" ? message.content : "";
-}
-
-function getReasoningText(message: any): string {
-  if (Array.isArray(message?.parts)) {
-    return message.parts
-      .filter((part: any) => part?.type === "reasoning" && typeof part.text === "string")
-      .map((part: any) => part.text)
-      .join("\n");
-  }
-
-  return typeof message?.reasoning === "string" ? message.reasoning : "";
-}
-
-function getToolInvocations(message: any): Array<{
-  toolCallId: string;
-  toolName: string;
-  args: Record<string, unknown>;
-  result?: Record<string, unknown>;
-  state: "partial-call" | "call" | "result";
-}> {
-  if (Array.isArray(message?.toolInvocations)) {
-    return message.toolInvocations;
-  }
-
-  if (!Array.isArray(message?.parts)) {
+function extractWelcomePrompts(payload: unknown): string[] {
+  if (!isRecord(payload) || !Array.isArray(payload.quickPrompts)) {
     return [];
   }
 
-  return message.parts
-    .map((part: any) => {
-      const isStaticTool = typeof part?.type === "string" && part.type.startsWith("tool-");
-      const isDynamicTool = part?.type === "dynamic-tool";
-
-      if (!isStaticTool && !isDynamicTool) {
-        return null;
+  return payload.quickPrompts
+    .map((item) => {
+      if (!isRecord(item)) {
+        return "";
       }
 
-      const toolName = isDynamicTool ? part.toolName : String(part.type).slice(5);
-      const toolCallId = typeof part.toolCallId === "string" ? part.toolCallId : "";
-      const args =
-        part.input && typeof part.input === "object" && !Array.isArray(part.input)
-          ? (part.input as Record<string, unknown>)
-          : {};
+      if (typeof item.prompt === "string" && item.prompt.trim()) {
+        return item.prompt.trim();
+      }
 
-      const state =
-        part.state === "input-streaming"
-          ? "partial-call"
-          : part.state === "input-available"
-            ? "call"
-            : "result";
+      if (typeof item.text === "string" && item.text.trim()) {
+        return item.text.trim();
+      }
 
-      const result =
-        part.state === "output-error"
-          ? { error: part.errorText ?? "工具调用失败" }
-          : part.output && typeof part.output === "object" && !Array.isArray(part.output)
-            ? (part.output as Record<string, unknown>)
-            : part.output !== undefined
-              ? { value: part.output }
-              : undefined;
-
-      return {
-        toolCallId,
-        toolName,
-        args,
-        result,
-        state,
-      };
+      return "";
     })
-    .filter(Boolean);
-}
-
-function getVisibleWelcomePrompts(data: WelcomeResponse): string[] {
-  const quickPrompts = data.quickPrompts
-    .map((item) => item.prompt?.trim() || item.text?.trim() || "")
     .filter(Boolean)
-    .slice(0, 4);
+    .slice(0, 5);
+}
 
-  if (quickPrompts.length > 0) {
-    return quickPrompts;
+function extractWelcomeSocialProfile(payload: unknown): WelcomeSocialProfile | null {
+  if (!isRecord(payload) || !isRecord(payload.socialProfile)) {
+    return null;
   }
 
-  return getSectionPromptItems(data)
-    .map((item) => item.prompt.trim())
-    .filter(Boolean)
-    .slice(0, 4);
-}
-
-function normalizePromptKey(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/\s+/g, "")
-    .replace(/[?？!！。,.，、;；:：'"`~\-_/\\()[\]{}]/g, "");
-}
-
-function getSectionPromptItems(data: WelcomeResponse): Array<{
-  id: string;
-  label: string;
-  text: string;
-  prompt: string;
-}> {
-  const sectionItems = data.sections.flatMap((section, sectionIndex) =>
-    section.items.map((item, itemIndex) => ({
-      id: `section-${section.id}-${itemIndex}`,
-      label: section.title || `推荐 ${sectionIndex + 1}`,
-      text: item.label,
-      prompt: item.prompt,
-    }))
-  );
-
-  const fromSections = sectionItems
-    .filter((item) => item.text.trim() && item.prompt.trim())
-    .slice(0, 4);
-
-  if (fromSections.length > 0) {
-    return fromSections;
-  }
-
-  return data.quickPrompts
-    .map((item, index) => ({
-      id: `quick-${index}`,
-      label: "推荐",
-      text: item.text,
-      prompt: item.prompt || item.text,
-    }))
-    .filter((item) => item.text.trim() && item.prompt.trim())
-    .slice(0, 4);
-}
-
-async function fetchWelcome(signal?: AbortSignal): Promise<WelcomeResponse> {
-  const response = await fetch(`${API_BASE}/ai/welcome`, {
-    method: "GET",
-    credentials: "omit",
-    headers: { "Content-Type": "application/json" },
-    signal,
-  });
-
-  if (!response.ok) {
-    throw new Error(`welcome request failed: ${response.status}`);
-  }
-
-  const payload = (await response.json()) as unknown;
-  return normalizeWelcomeResponse(payload);
-}
-
-async function fetchHotKeywords(signal?: AbortSignal): Promise<HotKeywordItem[]> {
-  const response = await fetch(`${API_BASE}/hot-keywords?limit=${HOT_KEYWORD_LIMIT}`, {
-    method: "GET",
-    credentials: "omit",
-    headers: { "Content-Type": "application/json" },
-    signal,
-  });
-
-  if (!response.ok) {
-    throw new Error(`hot keywords request failed: ${response.status}`);
-  }
-
-  const payload = (await response.json()) as { items?: unknown[] };
-
-  if (!Array.isArray(payload.items)) {
-    return [];
-  }
-
-  return payload.items
-    .map((item, index) => {
-      if (!isRecord(item)) return null;
-      const keyword = typeof item.keyword === "string" ? item.keyword.trim() : "";
-      if (!keyword) return null;
-      const id = typeof item.id === "string" ? item.id : `keyword-${index}`;
-      return { id, keyword };
-    })
-    .filter((item): item is HotKeywordItem => Boolean(item));
-}
-
-function normalizeWelcomeResponse(payload: unknown): WelcomeResponse {
-  if (!isRecord(payload)) {
-    return FALLBACK_WELCOME;
-  }
-
-  const sections = Array.isArray(payload.sections)
-    ? payload.sections
-        .map((section, sectionIndex) => normalizeSection(section, sectionIndex))
-        .filter((section): section is WelcomeSection => Boolean(section))
-    : [];
-
-  const quickPrompts = Array.isArray(payload.quickPrompts)
-    ? payload.quickPrompts
-        .map((item, index) => normalizeQuickPrompt(item, index))
-        .filter((item): item is QuickPrompt => Boolean(item))
-    : [];
-
-  const socialProfile = normalizeSocialProfile(payload.socialProfile);
-
-  return {
-    greeting:
-      typeof payload.greeting === "string" && payload.greeting.trim()
-        ? payload.greeting
-        : FALLBACK_WELCOME.greeting,
-    subGreeting:
-      typeof payload.subGreeting === "string" && payload.subGreeting.trim()
-        ? payload.subGreeting
-        : FALLBACK_WELCOME.subGreeting,
-    sections: sections.length > 0 ? sections : FALLBACK_WELCOME.sections,
-    socialProfile,
-    quickPrompts: quickPrompts.length > 0 ? quickPrompts : FALLBACK_WELCOME.quickPrompts,
-  };
-}
-
-function normalizeSection(section: unknown, sectionIndex: number): WelcomeSection | null {
-  if (!isRecord(section)) return null;
-
-  const rawItems = Array.isArray(section.items) ? section.items : [];
-  const items = rawItems
-    .map((item) => normalizeQuickItem(item))
-    .filter((item): item is WelcomeQuickItem => Boolean(item));
-
-  if (items.length === 0) return null;
-
-  const id = typeof section.id === "string" && section.id.trim()
-    ? section.id
-    : `section-${sectionIndex}`;
-
-  const title = typeof section.title === "string" && section.title.trim()
-    ? section.title
-    : "推荐";
-
-  return {
-    id,
-    title,
-    icon: typeof section.icon === "string" ? section.icon : "",
-    items,
-  };
-}
-
-function normalizeQuickItem(item: unknown): WelcomeQuickItem | null {
-  if (!isRecord(item)) return null;
-
-  const label = typeof item.label === "string" ? item.label.trim() : "";
-  const prompt = typeof item.prompt === "string" ? item.prompt.trim() : "";
-
-  if (!label || !prompt) return null;
-
-  const type = item.type;
-  const normalizedType: WelcomeQuickItem["type"] =
-    type === "draft" || type === "suggestion" || type === "explore"
-      ? type
-      : "suggestion";
-
-  return {
-    type: normalizedType,
-    label,
-    prompt,
-    icon: typeof item.icon === "string" ? item.icon : "",
-  };
-}
-
-function normalizeQuickPrompt(item: unknown, index: number): QuickPrompt | null {
-  if (!isRecord(item)) return null;
-
-  const text = typeof item.text === "string" ? item.text.trim() : "";
-  const prompt = typeof item.prompt === "string" ? item.prompt.trim() : text;
-
-  if (!text || !prompt) return null;
-
-  return {
-    icon: typeof item.icon === "string" ? item.icon : `quick-${index}`,
-    text,
-    prompt,
-  };
-}
-
-function normalizeSocialProfile(profile: unknown): SocialProfile | undefined {
-  if (!isRecord(profile)) return undefined;
-
-  const participationCount =
-    typeof profile.participationCount === "number" ? profile.participationCount : 0;
-  const activitiesCreatedCount =
-    typeof profile.activitiesCreatedCount === "number" ? profile.activitiesCreatedCount : 0;
-  const preferenceCompleteness =
-    typeof profile.preferenceCompleteness === "number" ? profile.preferenceCompleteness : 0;
+  const participationCount = Number(payload.socialProfile.participationCount);
+  const activitiesCreatedCount = Number(payload.socialProfile.activitiesCreatedCount);
+  const preferenceCompleteness = Number(payload.socialProfile.preferenceCompleteness);
 
   if (
-    participationCount <= 0 &&
-    activitiesCreatedCount <= 0 &&
-    preferenceCompleteness <= 0
+    !Number.isFinite(participationCount) ||
+    !Number.isFinite(activitiesCreatedCount) ||
+    !Number.isFinite(preferenceCompleteness)
   ) {
-    return undefined;
+    return null;
   }
 
   return {
@@ -902,6 +235,1294 @@ function normalizeSocialProfile(profile: unknown): SocialProfile | undefined {
   };
 }
 
-function isRecord(value: unknown): value is Record<string, any> {
-  return typeof value === "object" && value !== null;
+function extractWelcomeGreeting(payload: unknown): { greeting: string; subGreeting: string } {
+  if (!isRecord(payload)) {
+    return {
+      greeting: DEFAULT_WELCOME_GREETING,
+      subGreeting: DEFAULT_WELCOME_SUB_GREETING,
+    };
+  }
+
+  const greeting =
+    typeof payload.greeting === "string" && payload.greeting.trim()
+      ? payload.greeting.trim()
+      : DEFAULT_WELCOME_GREETING;
+  const subGreeting =
+    typeof payload.subGreeting === "string" && payload.subGreeting.trim()
+      ? payload.subGreeting.trim()
+      : DEFAULT_WELCOME_SUB_GREETING;
+
+  return { greeting, subGreeting };
+}
+
+function extractWelcomeUi(payload: unknown): WelcomeUiPayload {
+  if (!isRecord(payload) || !isRecord(payload.ui)) {
+    return {
+      bottomQuickActions: DEFAULT_BOTTOM_ACTIONS,
+      profileHints: DEFAULT_PROFILE_HINTS,
+    };
+  }
+
+  const actions = Array.isArray(payload.ui.bottomQuickActions)
+    ? payload.ui.bottomQuickActions
+        .map((item) => (typeof item === "string" ? item.trim() : ""))
+        .filter(Boolean)
+    : [];
+
+  const hintsSource = isRecord(payload.ui.profileHints) ? payload.ui.profileHints : {};
+  const profileHints = {
+    low:
+      typeof hintsSource.low === "string" && hintsSource.low.trim()
+        ? hintsSource.low.trim()
+        : DEFAULT_PROFILE_HINTS.low,
+    medium:
+      typeof hintsSource.medium === "string" && hintsSource.medium.trim()
+        ? hintsSource.medium.trim()
+        : DEFAULT_PROFILE_HINTS.medium,
+    high:
+      typeof hintsSource.high === "string" && hintsSource.high.trim()
+        ? hintsSource.high.trim()
+        : DEFAULT_PROFILE_HINTS.high,
+  };
+
+  return {
+    bottomQuickActions: actions.length ? actions : DEFAULT_BOTTOM_ACTIONS,
+    profileHints,
+  };
+}
+
+function getProfileHint(
+  completeness: number,
+  profileHints: WelcomeUiPayload["profileHints"] = DEFAULT_PROFILE_HINTS
+): string {
+  if (completeness < 30) {
+    return profileHints.low;
+  }
+
+  if (completeness < 70) {
+    return profileHints.medium;
+  }
+
+  return profileHints.high;
+}
+
+function upsertBlockWithMode(
+  blocks: GenUIBlock[],
+  block: GenUIBlock,
+  mode: "append" | "replace"
+): { blocks: GenUIBlock[]; index: number } {
+  if (mode === "replace") {
+    const targetIndex = blocks.findIndex((item) => item.blockId === block.blockId);
+    if (targetIndex >= 0) {
+      const nextBlocks = [...blocks];
+      nextBlocks[targetIndex] = block;
+      return { blocks: nextBlocks, index: targetIndex };
+    }
+  }
+
+  const nextBlocks = [...blocks, block];
+  return { blocks: nextBlocks, index: nextBlocks.length - 1 };
+}
+
+export default function ChatPage() {
+  const [messages, setMessages] = useState<ChatRecord[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [input, setInput] = useState("");
+  const [status, setStatus] = useState<ComposerStatus>("ready");
+  const [quickPrompts, setQuickPrompts] = useState<string[]>(DEFAULT_PROMPTS);
+  const [welcomeProfile, setWelcomeProfile] = useState<WelcomeSocialProfile | null>(null);
+  const [welcomeGreeting, setWelcomeGreeting] = useState(DEFAULT_WELCOME_GREETING);
+  const [welcomeSubGreeting, setWelcomeSubGreeting] = useState(DEFAULT_WELCOME_SUB_GREETING);
+  const [welcomeUi, setWelcomeUi] = useState<WelcomeUiPayload>({
+    bottomQuickActions: DEFAULT_BOTTOM_ACTIONS,
+    profileHints: DEFAULT_PROFILE_HINTS,
+  });
+  const [isComposerFocused, setIsComposerFocused] = useState(false);
+  const isDarkMode = false;
+
+  const isSending = status === "submitted";
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    void fetch(`${API_BASE}/ai/welcome`, {
+      method: "GET",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          return;
+        }
+        const payload = (await response.json()) as unknown;
+        const prompts = extractWelcomePrompts(payload);
+        if (prompts.length > 0) {
+          setQuickPrompts(prompts);
+        }
+        const { greeting, subGreeting } = extractWelcomeGreeting(payload);
+        setWelcomeGreeting(greeting);
+        setWelcomeSubGreeting(subGreeting);
+        setWelcomeUi(extractWelcomeUi(payload));
+        setWelcomeProfile(extractWelcomeSocialProfile(payload));
+      })
+      .catch(() => {
+        // keep local fallback prompts
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, []);
+
+  const sendTurn = useCallback(
+    async (nextInput: GenUIInput, userDisplayText: string) => {
+      if (isSending) {
+        return;
+      }
+
+      const userMessageId = randomId("user");
+      const assistantMessageId = randomId("assistant");
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: userMessageId,
+          role: "user",
+          text: userDisplayText,
+        },
+        {
+          id: assistantMessageId,
+          role: "assistant",
+          pending: true,
+        },
+      ]);
+      setStatus("submitted");
+
+      try {
+        let currentEnvelope: GenUITurnEnvelope | null = null;
+
+        const patchAssistantMessage = (
+          updater: (message: AssistantRecord) => AssistantRecord
+        ) => {
+          setMessages((prev) =>
+            prev.map((message) => {
+              if (message.id !== assistantMessageId || message.role !== "assistant") {
+                return message;
+              }
+              return updater(message);
+            })
+          );
+        };
+
+        const applyEnvelope = (nextEnvelope: GenUITurnEnvelope, pending = true) => {
+          currentEnvelope = nextEnvelope;
+          patchAssistantMessage(() => ({
+            id: assistantMessageId,
+            role: "assistant",
+            pending,
+            turn: nextEnvelope,
+          }));
+        };
+
+        const ensureEnvelope = () => {
+          if (currentEnvelope) {
+            return currentEnvelope;
+          }
+
+          const fallbackConversationId = conversationId ?? randomId("conv");
+          const nextEnvelope = createEmptyEnvelope({
+            traceId: randomId("trace"),
+            conversationId: fallbackConversationId,
+            turnId: randomId("turn"),
+          });
+          applyEnvelope(nextEnvelope, true);
+          return nextEnvelope;
+        };
+
+        const applyBlock = (block: GenUIBlock, mode: "append" | "replace") => {
+          const baseEnvelope = ensureEnvelope();
+          const merge = upsertBlockWithMode(baseEnvelope.turn.blocks, block, mode);
+          const nextEnvelope: GenUITurnEnvelope = {
+            ...baseEnvelope,
+            turn: {
+              ...baseEnvelope.turn,
+              blocks: merge.blocks,
+            },
+          };
+          applyEnvelope(nextEnvelope, true);
+          return merge.index;
+        };
+
+        const typewriteTextBlock = async (
+          block: GenUITextBlock,
+          mode: "append" | "replace"
+        ) => {
+          const text = block.content || "";
+          const typingBlock: GenUITextBlock = {
+            ...block,
+            content: "",
+          };
+          const blockIndex = applyBlock(typingBlock, mode);
+          if (!text) {
+            return;
+          }
+
+          for (let cursor = 1; cursor <= text.length; cursor += 1) {
+            const activeEnvelope = ensureEnvelope();
+            const nextBlocks = [...activeEnvelope.turn.blocks];
+            const currentBlock = nextBlocks[blockIndex];
+            if (!currentBlock || currentBlock.type !== "text") {
+              break;
+            }
+
+            nextBlocks[blockIndex] = {
+              ...currentBlock,
+              content: text.slice(0, cursor),
+            };
+
+            const nextEnvelope: GenUITurnEnvelope = {
+              ...activeEnvelope,
+              turn: {
+                ...activeEnvelope.turn,
+                blocks: nextBlocks,
+              },
+            };
+            applyEnvelope(nextEnvelope, true);
+            await sleep(TYPEWRITER_INTERVAL_MS);
+          }
+        };
+
+        const token = readClientToken();
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+        };
+        if (token) {
+          headers.Authorization = `Bearer ${token}`;
+        }
+
+        const response = await fetch(`${API_BASE}/ai/chat`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            ...(conversationId ? { conversationId } : {}),
+            input: nextInput,
+            context: {
+              client: "web",
+              locale: "zh-CN",
+              timezone: "Asia/Shanghai",
+              platformVersion: "web-vnext",
+            },
+            stream: true,
+          }),
+        });
+
+        if (!response.ok || !response.body) {
+          throw new Error(`请求失败（${response.status}）`);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let sawTurnComplete = false;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+
+          let separatorIndex = buffer.indexOf("\n\n");
+          while (separatorIndex >= 0) {
+            const packet = buffer.slice(0, separatorIndex);
+            buffer = buffer.slice(separatorIndex + 2);
+
+            const parsed = parseSSEPacket(packet);
+            if (!parsed || !parsed.dataText) {
+              separatorIndex = buffer.indexOf("\n\n");
+              continue;
+            }
+
+            if (parsed.dataText === "[DONE]") {
+              separatorIndex = buffer.indexOf("\n\n");
+              continue;
+            }
+
+            let payload: unknown = parsed.dataText;
+            try {
+              payload = JSON.parse(parsed.dataText) as GenUIStreamEvent;
+            } catch {
+              payload = { raw: parsed.dataText };
+            }
+
+            const eventName =
+              isRecord(payload) && typeof payload.event === "string"
+                ? payload.event
+                : parsed.eventName;
+
+            if (eventName === "turn-start" && isRecord(payload) && isRecord(payload.data)) {
+              const traceId =
+                typeof payload.data.traceId === "string"
+                  ? payload.data.traceId
+                  : randomId("trace");
+              const streamConversationId =
+                typeof payload.data.conversationId === "string"
+                  ? payload.data.conversationId
+                  : conversationId ?? randomId("conv");
+              const turnId =
+                typeof payload.data.turnId === "string"
+                  ? payload.data.turnId
+                  : randomId("turn");
+
+              setConversationId(streamConversationId);
+              applyEnvelope(
+                createEmptyEnvelope({
+                  traceId,
+                  conversationId: streamConversationId,
+                  turnId,
+                }),
+                true
+              );
+            }
+
+            if (
+              (eventName === "block-append" || eventName === "block-replace") &&
+              isRecord(payload) &&
+              isRecord(payload.data) &&
+              isRecord(payload.data.block)
+            ) {
+              const block = payload.data.block as unknown as GenUIBlock;
+              const mode = eventName === "block-replace" ? "replace" : "append";
+
+              if (block.type === "text") {
+                await typewriteTextBlock(block as GenUITextBlock, mode);
+              } else {
+                applyBlock(block, mode);
+              }
+            }
+
+            if (eventName === "turn-status" && isRecord(payload) && isRecord(payload.data)) {
+              const statusText =
+                payload.data.status === "streaming" ||
+                payload.data.status === "completed" ||
+                payload.data.status === "error"
+                  ? payload.data.status
+                  : null;
+              if (statusText) {
+                const activeEnvelope = ensureEnvelope();
+                applyEnvelope(
+                  {
+                    ...activeEnvelope,
+                    turn: {
+                      ...activeEnvelope.turn,
+                      status: statusText,
+                    },
+                  },
+                  true
+                );
+              }
+            }
+
+            if (eventName === "turn-complete" && isRecord(payload) && isRecord(payload.data)) {
+              const completeEnvelope = payload.data as unknown as GenUITurnEnvelope;
+              sawTurnComplete = true;
+              setConversationId(completeEnvelope.conversationId);
+              applyEnvelope(completeEnvelope, false);
+            }
+
+            if (eventName === "turn-error" && isRecord(payload) && isRecord(payload.data)) {
+              const message =
+                typeof payload.data.message === "string"
+                  ? payload.data.message
+                  : "生成失败，请稍后再试";
+              throw new Error(message);
+            }
+
+            separatorIndex = buffer.indexOf("\n\n");
+          }
+        }
+
+        if (!sawTurnComplete && currentEnvelope) {
+          const envelope = currentEnvelope as GenUITurnEnvelope;
+          const completedEnvelope: GenUITurnEnvelope = {
+            traceId: envelope.traceId,
+            conversationId: envelope.conversationId,
+            turn: {
+              ...envelope.turn,
+              status: "completed",
+            },
+          };
+          applyEnvelope(completedEnvelope, false);
+        }
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : "请求失败，请稍后再试";
+
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.id === assistantMessageId
+              ? {
+                  id: assistantMessageId,
+                  role: "assistant",
+                  pending: false,
+                  error: errorMessage,
+                }
+              : message
+          )
+        );
+      } finally {
+        setStatus("ready");
+      }
+    },
+    [conversationId, isSending]
+  );
+
+  const handleSubmit = useCallback(
+    async ({ text }: { text: string }) => {
+      const value = text.trim();
+      if (!value || isSending) {
+        return;
+      }
+
+      setInput("");
+      await sendTurn(
+        {
+          type: "text",
+          text: value,
+        },
+        value
+      );
+    },
+    [isSending, sendTurn]
+  );
+
+  const handleActionSelect = useCallback(
+    async (option: ActionOption) => {
+      if (isSending) {
+        return;
+      }
+
+      await sendTurn(
+        {
+          type: "action",
+          action: option.action,
+          actionId: randomId("action"),
+          params: option.params,
+          displayText: option.label,
+        },
+        option.label
+      );
+    },
+    [isSending, sendTurn]
+  );
+
+  const latestAssistantTurn = useMemo(() => {
+    const lastAssistant = [...messages]
+      .reverse()
+      .find(
+        (message): message is AssistantRecord =>
+          message.role === "assistant" && Boolean(message.turn)
+      );
+
+    return lastAssistant?.turn;
+  }, [messages]);
+
+  const bottomQuickActions = useMemo(() => {
+    const actionBlock = latestAssistantTurn?.turn.blocks.find(
+      (block): block is GenUICtaGroupBlock => block.type === "cta-group"
+    );
+
+    if (actionBlock?.items?.length) {
+      return actionBlock.items.slice(0, 5).map((item, index) => ({
+        id: `cta-${index}-${item.action}`,
+        label: item.label,
+        option: item,
+      }));
+    }
+
+    return welcomeUi.bottomQuickActions.map((label) => ({
+      id: `default-${label}`,
+      label,
+      prompt: label,
+    }));
+  }, [latestAssistantTurn, welcomeUi.bottomQuickActions]);
+
+  const handleBottomAction = useCallback(
+    async (action: { label: string; option?: ActionOption; prompt?: string }) => {
+      if (isSending) {
+        return;
+      }
+
+      if (action.option) {
+        await handleActionSelect(action.option);
+        return;
+      }
+
+      const fallbackPrompt = action.prompt || action.label;
+      await sendTurn(
+        {
+          type: "text",
+          text: fallbackPrompt,
+        },
+        fallbackPrompt
+      );
+    },
+    [handleActionSelect, isSending, sendTurn]
+  );
+
+  return (
+    <div
+      className={cn(
+        "relative min-h-screen overflow-hidden [font-family:SF_Pro_Display,SF_Pro_Text,PingFang_SC,-apple-system,BlinkMacSystemFont,Segoe_UI,sans-serif]",
+        isDarkMode
+          ? "bg-[linear-gradient(180deg,#0f142e_0%,#111736_45%,#11182f_100%)]"
+          : "bg-[linear-gradient(180deg,#ebeefb_0%,#edf0fb_45%,#f2f4ff_100%)]"
+      )}
+    >
+      <div
+        className={cn(
+          "pointer-events-none absolute inset-0",
+          isDarkMode
+            ? "bg-[radial-gradient(circle_at_22%_-8%,rgba(88,112,255,0.22)_0%,rgba(27,35,84,0.18)_50%,rgba(16,20,46,0)_72%)]"
+            : "bg-[radial-gradient(circle_at_22%_-8%,rgba(102,120,255,0.24)_0%,rgba(188,198,255,0.09)_48%,rgba(235,238,251,0)_72%)]"
+        )}
+      />
+
+      <div className={cn("relative mx-auto flex h-[100dvh] w-full max-w-[430px] flex-col", isDarkMode ? "text-slate-100" : "text-slate-900")}>
+        <header className="flex shrink-0 items-center justify-between px-3 pb-2 pt-3">
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              className={cn(
+                "inline-flex h-9 w-9 items-center justify-center rounded-full",
+                isDarkMode ? "text-[#dde2ff]" : "text-[#1d2151]"
+              )}
+            >
+              <Menu className="h-5 w-5" />
+            </button>
+            <p className={cn("text-[18px] font-semibold tracking-tight", isDarkMode ? "text-[#f0f3ff]" : "text-[#111633]")}>聚场</p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className={cn(
+                    "inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium shadow-[0_8px_18px_-14px_rgba(66,85,164,0.7)]",
+                    isDarkMode
+                      ? "border border-[#3a4589]/70 bg-[#1b234f]/85 text-[#f0f3ff]"
+                      : "border border-white/60 bg-white/88 text-[#111633]"
+                  )}
+                >
+                  <QrCode className="h-4 w-4" />
+                  群二维码
+                </button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="end"
+                sideOffset={8}
+                className={cn(
+                  "w-[232px] rounded-2xl border p-3",
+                  isDarkMode
+                    ? "border-[#3a4589] bg-[#141d42] text-[#e6eaff]"
+                    : "border-[#dfe4ff] bg-white text-[#1f275c]"
+                )}
+              >
+                <p className="text-sm font-semibold">社群二维码</p>
+                <p className={cn("mt-1 text-xs", isDarkMode ? "text-[#b8c0f4]" : "text-slate-500")}>
+                  扫码加入聚场交流群
+                </p>
+                <div
+                  className={cn(
+                    "mt-2 rounded-xl border p-2",
+                    isDarkMode ? "border-[#2f3979] bg-[#0f1533]" : "border-[#e7ebff] bg-[#f8f9ff]"
+                  )}
+                >
+                  <img
+                    src={GROUP_QR_IMAGE_URL}
+                    alt="聚场群二维码"
+                    className="h-[180px] w-[180px] rounded-md bg-white object-cover"
+                  />
+                </div>
+              </PopoverContent>
+            </Popover>
+
+            <div
+              className={cn(
+                "inline-flex h-9 items-center rounded-full px-1 shadow-[0_8px_18px_-14px_rgba(66,85,164,0.7)]",
+                isDarkMode
+                  ? "border border-[#3a4589]/70 bg-[#1b234f]/85 text-[#e6eaff]"
+                  : "border border-white/60 bg-white/88 text-[#22274d]"
+              )}
+            >
+              <button type="button" className="inline-flex h-7 w-7 items-center justify-center rounded-full">
+                <Volume2 className="h-4 w-4" />
+              </button>
+              <div className={cn("mx-1 h-4 w-px", isDarkMode ? "bg-[#425095]" : "bg-slate-200")} />
+              <button type="button" className="inline-flex h-7 w-7 items-center justify-center rounded-full">
+                <MoreHorizontal className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <Conversation className="relative">
+          <ConversationContent className="w-full gap-4 px-3 pb-4 pt-1">
+            {messages.length === 0 ? (
+              <ConversationEmptyState className="justify-start px-1 pt-2">
+                <div className="w-full space-y-3">
+                  <div className="flex items-start justify-between px-2">
+                    <div className="space-y-1 text-left">
+                      <p className={cn("text-[28px] font-bold leading-none", isDarkMode ? "text-[#e6eaff]" : "text-[#272f8b]")}>{welcomeGreeting}</p>
+                      <p className={cn("text-[28px] font-bold leading-none", isDarkMode ? "text-[#e6eaff]" : "text-[#272f8b]")}>{welcomeSubGreeting}</p>
+                    </div>
+                    <div className={cn("mt-1 flex items-start justify-end pb-1", isDarkMode ? "text-[#8e9cff]" : "text-[#5b67f4]")}>
+                      <Sparkles className="h-8 w-8" />
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 rounded-[28px] border border-white/65 bg-white/30 p-3 backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.72),inset_0_-14px_30px_rgba(109,126,255,0.08),0_22px_34px_-30px_rgba(60,75,156,0.6)]">
+                    <div className="rounded-2xl border border-white/70 bg-white/58 px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.68)]">
+                      <div className="mb-2 flex items-center gap-2 text-[#2b3168]">
+                        <span className="h-4 w-1 rounded-full bg-[linear-gradient(180deg,#6d78ff_0%,#8b8eff_100%)]" />
+                        <span className="text-[16px] font-semibold">我的社交状态</span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="rounded-xl bg-white/76 px-2 py-2 text-center text-[#2f3870]">
+                          <p className="text-[11px] text-slate-500">参与</p>
+                          <p className="text-[16px] font-semibold">{welcomeProfile?.participationCount ?? 0}<span className="ml-0.5 text-[11px] font-normal">场</span></p>
+                        </div>
+                        <div className="rounded-xl bg-white/76 px-2 py-2 text-center text-[#2f3870]">
+                          <p className="text-[11px] text-slate-500">发起</p>
+                          <p className="text-[16px] font-semibold">{welcomeProfile?.activitiesCreatedCount ?? 0}<span className="ml-0.5 text-[11px] font-normal">场</span></p>
+                        </div>
+                        <div className="rounded-xl bg-white/76 px-2 py-2 text-center text-[#2f3870]">
+                          <p className="text-[11px] text-slate-500">偏好完善</p>
+                          <p className="text-[16px] font-semibold">{welcomeProfile?.preferenceCompleteness ?? 0}<span className="ml-0.5 text-[11px] font-normal">%</span></p>
+                        </div>
+                      </div>
+                      <p className="mt-2 text-[12px] text-[#616c9f]">
+                        {getProfileHint(
+                          welcomeProfile?.preferenceCompleteness ?? 0,
+                          welcomeUi.profileHints
+                        )}
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      {quickPrompts.slice(0, 3).map((prompt) => (
+                        <button
+                          key={prompt}
+                          type="button"
+                          onClick={() => {
+                            void sendTurn(
+                              {
+                                type: "text",
+                                text: prompt,
+                              },
+                              prompt
+                            );
+                          }}
+                          className="flex w-full items-start gap-2 rounded-2xl bg-white/86 px-3 py-2.5 text-left text-[14px] text-[#2a315e] shadow-[0_12px_24px_-20px_rgba(67,86,170,0.52)]"
+                        >
+                          <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[linear-gradient(140deg,#4e5dff_0%,#8658f8_100%)] text-[12px] font-semibold text-white">
+                            #
+                          </span>
+                          <span className="flex-1 break-words pr-2 leading-5">{prompt}</span>
+                          <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-slate-300" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </ConversationEmptyState>
+            ) : (
+              messages.map((message, index) => {
+                if (message.role === "user") {
+                  return <UserMessage key={message.id} text={message.text} />;
+                }
+
+                return (
+                  <AssistantMessage
+                    key={message.id}
+                    message={message}
+                    isLast={index === messages.length - 1}
+                    disabled={isSending}
+                    onActionSelect={handleActionSelect}
+                  />
+                );
+              })
+            )}
+          </ConversationContent>
+        </Conversation>
+
+        <div
+          className={cn(
+            "shrink-0 px-3 pb-[calc(12px+env(safe-area-inset-bottom,0px))] pt-2",
+            isDarkMode
+              ? "border-t border-[#394480]/75 bg-[linear-gradient(180deg,rgba(17,24,55,0.92)_0%,rgba(15,21,48,0.96)_100%)]"
+              : "border-t border-white/65 bg-[linear-gradient(180deg,rgba(245,247,255,0.92)_0%,rgba(238,241,254,0.96)_100%)]"
+          )}
+        >
+          <div className="mb-2 overflow-x-auto">
+            <Suggestions className="flex w-max gap-2 pr-1">
+              {bottomQuickActions.map((action) => (
+                <Suggestion
+                  key={action.id}
+                  suggestion={action.label}
+                  onClick={() => {
+                    void handleBottomAction(action);
+                  }}
+                  disabled={isSending}
+                  className="h-8 rounded-full border border-white/60 bg-white/88 px-3 text-xs text-[#20264f] shadow-[0_8px_16px_-14px_rgba(68,83,166,0.6)] hover:bg-white"
+                />
+              ))}
+            </Suggestions>
+          </div>
+
+          <PromptInput
+            onSubmit={handleSubmit}
+            className={cn(
+              "rounded-3xl border border-transparent bg-transparent p-0 has-[[data-slot=input-group-control]:focus-visible]:!ring-0 has-[[data-slot=input-group-control]:focus-visible]:!border-transparent [&_[data-slot=input-group]]:h-auto [&_[data-slot=input-group]]:rounded-[20px] [&_[data-slot=input-group]]:!border-transparent [&_[data-slot=input-group]]:px-2 [&_[data-slot=input-group]]:py-1.5 [&_[data-slot=input-group]]:shadow-[0_14px_24px_-18px_rgba(66,84,156,0.52)] [&_[data-slot=input-group]]:focus-within:!ring-0 [&_[data-slot=input-group]]:focus-within:!border-transparent",
+              isDarkMode ? "[&_[data-slot=input-group]]:bg-[#1b244f]" : "[&_[data-slot=input-group]]:bg-white"
+            )}
+          >
+            <PromptInputTextarea
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onFocus={() => setIsComposerFocused(true)}
+              onBlur={() => setIsComposerFocused(false)}
+              rows={isComposerFocused ? 2 : 1}
+              placeholder="发消息或按住说话..."
+              disabled={isSending}
+              className={cn(
+                "max-h-[116px] flex-1 border-none bg-transparent px-2 py-2 text-[16px] leading-6 focus-visible:ring-0 focus-visible:outline-none",
+                isComposerFocused ? "" : "overflow-hidden",
+                isDarkMode ? "text-[#e9edff] placeholder:text-[#808bc1]" : "text-[#252c5b] placeholder:text-slate-400"
+              )}
+            />
+
+            <PromptInputFooter
+              align={isComposerFocused ? "block-end" : "inline-end"}
+              className={cn("items-center", isComposerFocused ? "" : "pr-1")}
+            >
+              <PromptInputTools className="gap-1">
+                <PromptInputButton
+                  className="h-9 w-9 rounded-full border border-[#e6e9f9] bg-white text-[#1d2451] hover:bg-[#f4f6ff]"
+                >
+                  <Mic className="h-4 w-4" />
+                </PromptInputButton>
+              </PromptInputTools>
+
+              <div className="flex items-center gap-2">
+                <PromptInputSubmit
+                  status={isSending ? "submitted" : "ready"}
+                  disabled={isSending}
+                  className="h-9 w-9 rounded-full border border-[#e6e9f9] bg-white text-[#1d2451] hover:bg-[#f4f6ff] disabled:opacity-40"
+                >
+                  {input.trim() ? <ArrowUp className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                </PromptInputSubmit>
+
+                <PromptInputButton
+                  className="h-9 w-9 rounded-full border border-[#e6e9f9] bg-white text-[#1d2451] hover:bg-[#f4f6ff]"
+                >
+                  <Camera className="h-4 w-4" />
+                </PromptInputButton>
+              </div>
+            </PromptInputFooter>
+          </PromptInput>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UserMessage({ text }: { text: string }) {
+  return (
+    <Message from="user" className="max-w-[82%]">
+      <MessageContent className="rounded-[18px] rounded-tr-[8px] bg-[linear-gradient(135deg,#6271ff_0%,#5766f9_46%,#4f59e4_100%)] px-4 py-3 text-white shadow-[0_14px_26px_-16px_rgba(81,99,230,0.72)]">
+        <MessageResponse className="text-[15px] leading-6 text-white">{text}</MessageResponse>
+      </MessageContent>
+    </Message>
+  );
+}
+
+function AssistantMessage({
+  message,
+  isLast,
+  disabled,
+  onActionSelect,
+}: {
+  message: Extract<ChatRecord, { role: "assistant" }>;
+  isLast: boolean;
+  disabled: boolean;
+  onActionSelect: (option: ActionOption) => Promise<void>;
+}) {
+  return (
+    <Message from="assistant" className="max-w-full pr-1">
+      <MessageContent className="w-full rounded-[20px] bg-white px-4 py-3 text-slate-800 shadow-[0_16px_30px_-24px_rgba(83,105,152,0.52)]">
+        {message.pending && isLast ? (
+          <ThinkingDots />
+        ) : message.error ? (
+          <p className="text-sm text-rose-600">{message.error}</p>
+        ) : message.turn ? (
+          <div className="space-y-3">
+            {message.turn.turn.blocks.map((block) => (
+              <TurnBlockRenderer
+                key={block.blockId}
+                block={block}
+                disabled={disabled}
+                onActionSelect={onActionSelect}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-slate-500">这条消息暂时没有可展示内容</p>
+        )}
+      </MessageContent>
+    </Message>
+  );
+}
+
+function TurnBlockRenderer({
+  block,
+  disabled,
+  onActionSelect,
+}: {
+  block: GenUIBlock;
+  disabled: boolean;
+  onActionSelect: (option: ActionOption) => Promise<void>;
+}) {
+  if (block.type === "text") {
+    return (
+      <MessageResponse className="text-[15px] leading-7 text-slate-800">
+        {block.content}
+      </MessageResponse>
+    );
+  }
+
+  if (block.type === "choice") {
+    return (
+      <ChoiceBlockCard
+        block={block}
+        disabled={disabled}
+        onActionSelect={onActionSelect}
+      />
+    );
+  }
+
+  if (block.type === "entity-card") {
+    if (isShareEntityCard(block)) {
+      return <ShareEntityCardBlock block={block} />;
+    }
+
+    return <EntityCardBlock block={block} />;
+  }
+
+  if (block.type === "list") {
+    return <ListBlockCard block={block} />;
+  }
+
+  if (block.type === "form") {
+    return <FormBlockCard block={block} />;
+  }
+
+  if (block.type === "cta-group") {
+    return (
+      <CtaGroupBlockCard
+        block={block}
+        disabled={disabled}
+        onActionSelect={onActionSelect}
+      />
+    );
+  }
+
+  if (block.type === "alert") {
+    return <AlertBlockCard block={block} />;
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-xs text-slate-500">
+      block 已返回，下一阶段接入专用渲染组件。
+    </div>
+  );
+}
+
+function ChoiceBlockCard({
+  block,
+  disabled,
+  onActionSelect,
+}: {
+  block: GenUIChoiceBlock;
+  disabled: boolean;
+  onActionSelect: (option: ActionOption) => Promise<void>;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white/85 p-3">
+      <p className="text-sm font-medium text-slate-700">{block.question}</p>
+      <Suggestions className="mt-2 gap-2">
+        {block.options.map((option, index) => (
+          <Suggestion
+            key={`${option.label}-${index}`}
+            suggestion={option.label}
+            onClick={() => {
+              void onActionSelect(option);
+            }}
+            disabled={disabled}
+            className="h-8 border-transparent bg-sky-50 px-3 text-xs text-sky-700 hover:bg-sky-100 disabled:opacity-45"
+          />
+        ))}
+      </Suggestions>
+    </div>
+  );
+}
+
+function readStringField(
+  fields: Record<string, unknown>,
+  key: string,
+  fallback = ""
+): string {
+  const value = fields[key];
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  return fallback;
+}
+
+function readNumberField(
+  fields: Record<string, unknown>,
+  key: string,
+  fallback: number
+): number {
+  const value = fields[key];
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return fallback;
+}
+
+function isShareEntityCard(block: GenUIEntityCardBlock): boolean {
+  const fields =
+    typeof block.fields === "object" && block.fields !== null
+      ? (block.fields as Record<string, unknown>)
+      : {};
+  const activityId = readStringField(fields, "activityId");
+  const hasShareData =
+    readStringField(fields, "shareTitle") ||
+    readStringField(fields, "shareUrl") ||
+    readStringField(fields, "sharePath");
+
+  return (
+    block.dedupeKey === "published_activity" ||
+    block.dedupeKey === "share_payload" ||
+    (!!activityId && !activityId.startsWith("draft_") && !!hasShareData)
+  );
+}
+
+function ShareEntityCardBlock({ block }: { block: GenUIEntityCardBlock }) {
+  const fields =
+    typeof block.fields === "object" && block.fields !== null
+      ? (block.fields as Record<string, unknown>)
+      : {};
+
+  const activityId = readStringField(fields, "activityId", "activity_unknown");
+  const title = readStringField(fields, "title", "周五活动局");
+  const locationName = readStringField(fields, "locationName", "待定地点");
+  const startAt = renderFieldValue(fields.startAt);
+  const maxParticipants = readNumberField(fields, "maxParticipants", 6);
+  const currentParticipants = readNumberField(fields, "currentParticipants", 1);
+  const remaining = Math.max(maxParticipants - currentParticipants, 0);
+  const shareTitle =
+    readStringField(fields, "shareTitle") ||
+    `🔥 ${title}，还差${remaining}人，速来！`;
+  const shareUrl = readStringField(fields, "shareUrl");
+  const sharePath = readStringField(fields, "sharePath");
+
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
+
+  const copySharePayload = useCallback(async () => {
+    if (!shareUrl || typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+      setCopyStatus("failed");
+      return;
+    }
+
+    const copyText = [shareTitle, shareUrl, sharePath ? `小程序路径：${sharePath}` : ""]
+      .filter(Boolean)
+      .join("\n");
+    try {
+      await navigator.clipboard.writeText(copyText);
+      setCopyStatus("copied");
+      window.setTimeout(() => setCopyStatus("idle"), 1200);
+    } catch {
+      setCopyStatus("failed");
+      window.setTimeout(() => setCopyStatus("idle"), 1500);
+    }
+  }, [sharePath, shareTitle, shareUrl]);
+
+  return (
+    <div className="rounded-xl border border-sky-100 bg-[linear-gradient(180deg,#ffffff_0%,#f2f7ff_100%)] p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-sm font-semibold text-slate-900">{block.title || "分享卡片"}</p>
+        <span className="rounded bg-white/80 px-1.5 py-0.5 text-[10px] text-slate-500">
+          ID: {activityId}
+        </span>
+      </div>
+      <p className="text-sm text-slate-800">{shareTitle}</p>
+      <p className="mt-1 text-xs text-slate-500">
+        {locationName} · {startAt}
+      </p>
+      <p className="mt-1 text-xs text-slate-500">
+        已有 {currentParticipants}/{maxParticipants} 人报名
+      </p>
+
+      {(shareUrl || sharePath) && (
+        <div className="mt-3 space-y-1 rounded-lg bg-white/80 px-2 py-2">
+          {shareUrl && (
+            <p className="break-all text-[11px] text-slate-600">H5: {shareUrl}</p>
+          )}
+          {sharePath && (
+            <p className="break-all text-[11px] text-slate-600">Mini: {sharePath}</p>
+          )}
+        </div>
+      )}
+
+      <div className="mt-3 flex gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            void copySharePayload();
+          }}
+          className="rounded-full bg-sky-500 px-3 py-1.5 text-xs text-white hover:bg-sky-600"
+        >
+          {copyStatus === "copied"
+            ? "已复制"
+            : copyStatus === "failed"
+              ? "复制失败"
+              : "复制文案"}
+        </button>
+        {shareUrl && (
+          <a
+            href={shareUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-full bg-white px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100"
+          >
+            打开邀请页
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function EntityCardBlock({ block }: { block: GenUIEntityCardBlock }) {
+  const entries = Object.entries(block.fields || {});
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white/85 p-3">
+      <p className="text-sm font-semibold text-slate-800">{block.title}</p>
+      <div className="mt-2 space-y-1.5">
+        {entries.map(([key, value]) => (
+          <div key={key} className="flex items-start justify-between gap-3 text-xs">
+            <span className="text-slate-500">{prettyFieldLabel(key)}</span>
+            <span className="text-right text-slate-700">{renderFieldValue(value)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ListBlockCard({ block }: { block: GenUIListBlock }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white/85 p-3">
+      {block.title && <p className="text-sm font-semibold text-slate-800">{block.title}</p>}
+      <div className="mt-2 space-y-2">
+        {block.items.map((item, index) => (
+          <div
+            key={String(item.id ?? index)}
+            className="rounded-lg bg-slate-50/90 px-3 py-2"
+          >
+            <p className="text-sm font-medium text-slate-800">
+              {String(item.title ?? `活动 ${index + 1}`)}
+            </p>
+            <p className="mt-0.5 text-xs text-slate-500">
+              {String(item.locationName ?? "附近")} ·{" "}
+              {formatDistance(item.distance)}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FormBlockCard({ block }: { block: GenUIFormBlock }) {
+  const initial = block.initialValues || {};
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white/85 p-3">
+      <p className="text-sm font-semibold text-slate-800">{block.title || "参数设置"}</p>
+      <div className="mt-2 space-y-2">
+        {Object.entries(initial).map(([key, value]) => (
+          <div key={key} className="rounded-lg bg-slate-50/90 px-3 py-2">
+            <p className="text-[11px] text-slate-500">{prettyFieldLabel(key)}</p>
+            <p className="text-sm text-slate-800">{renderFieldValue(value)}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CtaGroupBlockCard({
+  block,
+  disabled,
+  onActionSelect,
+}: {
+  block: GenUICtaGroupBlock;
+  disabled: boolean;
+  onActionSelect: (option: ActionOption) => Promise<void>;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white/85 p-3">
+      <p className="text-xs text-slate-500">接下来你可以：</p>
+      <Suggestions className="mt-2 gap-2">
+        {block.items.map((item, index) => (
+          <Suggestion
+            key={`${item.label}-${index}`}
+            suggestion={item.label}
+            onClick={() => {
+              void onActionSelect(item);
+            }}
+            disabled={disabled}
+            className="h-8 border-transparent bg-slate-100 px-3 text-xs text-slate-700 hover:bg-slate-200 disabled:opacity-45"
+          />
+        ))}
+      </Suggestions>
+    </div>
+  );
+}
+
+function AlertBlockCard({ block }: { block: GenUIAlertBlock }) {
+  const alertStyleMap: Record<
+    GenUIAlertBlock["level"],
+    { className: string; label: string }
+  > = {
+    info: {
+      className: "border-sky-200 bg-sky-50 text-sky-800",
+      label: "提示",
+    },
+    warning: {
+      className: "border-amber-200 bg-amber-50 text-amber-800",
+      label: "注意",
+    },
+    error: {
+      className: "border-rose-200 bg-rose-50 text-rose-700",
+      label: "异常",
+    },
+    success: {
+      className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+      label: "成功",
+    },
+  };
+
+  const style = alertStyleMap[block.level];
+
+  return (
+    <div className={`rounded-xl border px-3 py-2 text-sm ${style.className}`}>
+      <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide">{style.label}</p>
+      <p>{block.message}</p>
+    </div>
+  );
+}
+
+function prettyFieldLabel(key: string): string {
+  const map: Record<string, string> = {
+    activityId: "活动 ID",
+    title: "标题",
+    type: "类型",
+    startAt: "时间",
+    locationName: "地点",
+    locationHint: "位置说明",
+    maxParticipants: "人数上限",
+    currentParticipants: "当前人数",
+    lat: "纬度",
+    lng: "经度",
+    slot: "时段",
+    max_participants: "人数上限",
+  };
+
+  return map[key] || key;
+}
+
+function renderFieldValue(value: unknown): string {
+  if (typeof value === "number") {
+    return Number.isInteger(value) ? String(value) : value.toFixed(5);
+  }
+
+  if (typeof value === "string") {
+    if (/^\d{4}-\d{2}-\d{2}T/.test(value)) {
+      const date = new Date(value);
+      if (!Number.isNaN(date.getTime())) {
+        return date.toLocaleString("zh-CN", {
+          month: "numeric",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+      }
+    }
+
+    return value;
+  }
+
+  if (value === null || value === undefined) {
+    return "-";
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item)).join(", ");
+  }
+
+  return JSON.stringify(value);
+}
+
+function formatDistance(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "-";
+  }
+
+  if (value < 1000) {
+    return `${Math.round(value)}m`;
+  }
+
+  return `${(value / 1000).toFixed(1)}km`;
+}
+
+function ThinkingDots() {
+  return (
+    <div className="flex items-center gap-1 py-1">
+      {[0, 1, 2].map((index) => (
+        <span
+          key={index}
+          className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500"
+          style={{ animationDelay: `${index * 0.12}s` }}
+        />
+      ))}
+    </div>
+  );
 }

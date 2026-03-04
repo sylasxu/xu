@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://juchang.dev/schemas/genui/stream-event.schema.json",
+  "title": "GenUIStreamEvent",
+  "type": "object",
+  "required": ["eventId", "event", "timestamp", "data"],
+  "properties": {
+    "eventId": { "type": "string", "minLength": 1 },
+    "event": {
+      "type": "string",
+      "enum": [
+        "turn-start",
+        "block-append",
+        "block-replace",
+        "turn-status",
+        "turn-complete",
+        "turn-error",
+        "trace"
+      ]
+    },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "data": {}
+  },
+  "additionalProperties": false
+}

@@ -16,6 +16,8 @@
       <text class="prompt-icon">{{item.icon}}</text>
       <text class="prompt-text">{{item.text}}</text>
     </view>
-    <t-icon name="chevron-right" size="32rpx" color="#9CA3AF" />
+    <view class="prompt-arrow">
+      <t-icon name="chevron-right" size="32rpx" color="#9CA3AF" />
+    </view>
   </view>
 </view>

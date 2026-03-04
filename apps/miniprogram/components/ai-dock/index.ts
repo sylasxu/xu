@@ -373,5 +373,18 @@ Component({
     clearAndFocus() {
       this.setData({ inputValue: '', isFocused: true });
     },
+
+    /**
+     * 查看档案（聚焦态第二行入口）
+     */
+    onViewProfileTap() {
+      wx.vibrateShort({ type: 'light' });
+      wx.navigateTo({
+        url: '/pages/profile/index',
+        fail: () => {
+          wx.switchTab({ url: '/pages/my/index' });
+        },
+      });
+    },
   },
 });

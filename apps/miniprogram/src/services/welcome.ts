@@ -6,7 +6,7 @@
  * 调用 /ai/welcome API 获取个性化欢迎卡片数据
  */
 
-import { wxRequest } from '../utils/wx-request';
+import { getAiWelcome } from '../api/endpoints/ai/ai';
 
 // 快捷项类型
 export type QuickItemType = 'draft' | 'suggestion' | 'explore';
@@ -49,6 +49,14 @@ export interface WelcomeResponse {
   sections: WelcomeSection[];
   socialProfile?: SocialProfile;
   quickPrompts: QuickPrompt[];
+  ui?: {
+    bottomQuickActions?: string[];
+    profileHints?: {
+      low?: string;
+      medium?: string;
+      high?: string;
+    };
+  };
 }
 
 // Welcome API 查询参数
@@ -65,23 +73,11 @@ export interface WelcomeQuery {
  * @returns 欢迎卡片数据
  */
 export async function getWelcomeCard(params?: WelcomeQuery): Promise<WelcomeResponse> {
-  const queryParams = new URLSearchParams();
-  
-  if (params?.lat !== undefined) {
-    queryParams.append('lat', params.lat.toString());
+  const response = await getAiWelcome(params);
+  if (response.status !== 200) {
+    throw new Error('获取欢迎卡片失败');
   }
-  if (params?.lng !== undefined) {
-    queryParams.append('lng', params.lng.toString());
-  }
-  
-  const queryString = queryParams.toString();
-  const url = queryString ? `/ai/welcome?${queryString}` : '/ai/welcome';
-  
-  const response = await wxRequest<WelcomeResponse>(url, {
-    method: 'GET',
-  });
-  
-  return response;
+  return response.data as WelcomeResponse;
 }
 
 /**

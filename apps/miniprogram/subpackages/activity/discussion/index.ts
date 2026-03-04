@@ -4,7 +4,6 @@
  */
 import { useDiscussionStore, type DiscussionMessage } from '../../../src/stores/discussion'
 import { useUserStore } from '../../../src/stores/user'
-import Toast from 'tdesign-miniprogram/toast/index'
 
 // 格式化时间
 function formatTime(dateStr: string): string {
@@ -60,12 +59,7 @@ Page({
   onLoad(options: { id?: string }) {
     const activityId = options.id
     if (!activityId) {
-      Toast({
-        context: this,
-        selector: '#t-toast',
-        message: '活动ID缺失',
-        theme: 'error',
-      })
+      wx.showToast({ title: '活动ID缺失', icon: 'none' })
       setTimeout(() => wx.navigateBack(), 1500)
       return
     }
@@ -137,12 +131,7 @@ Page({
 
       // 显示错误提示
       if (state.error && state.error !== this.data.error) {
-        Toast({
-          context: this,
-          selector: '#t-toast',
-          message: state.error,
-          theme: 'error',
-        })
+        wx.showToast({ title: state.error, icon: 'none' })
         // 清除错误
         store.getState().clearError()
       }
@@ -165,12 +154,7 @@ Page({
     const token = userStore.token
 
     if (!token) {
-      Toast({
-        context: this,
-        selector: '#t-toast',
-        message: '请先登录',
-        theme: 'error',
-      })
+      wx.showToast({ title: '请先登录', icon: 'none' })
       setTimeout(() => {
         wx.navigateTo({ url: '/pages/login/index' })
       }, 1500)

@@ -1,0 +1,55 @@
+{
+  "name": "friday-night-roundtrip",
+  "description": "Core multi-turn fixture: text input and action reply for Friday-night matchmaking.",
+  "request": {
+    "conversationId": "conv_fixture_001",
+    "input": {
+      "type": "text",
+      "text": "想租个周五晚上的局"
+    },
+    "context": {
+      "client": "web",
+      "locale": "zh-CN",
+      "timezone": "Asia/Shanghai"
+    }
+  },
+  "response": {
+    "traceId": "trace_fixture_001",
+    "conversationId": "conv_fixture_001",
+    "turn": {
+      "turnId": "turn_fixture_001",
+      "role": "assistant",
+      "status": "completed",
+      "blocks": [
+        {
+          "blockId": "b_text_1",
+          "type": "text",
+          "content": "可以，先帮你把这个周五晚上的局梳理好。"
+        },
+        {
+          "blockId": "b_choice_1",
+          "type": "choice",
+          "dedupeKey": "ask_location",
+          "replacePolicy": "replace",
+          "question": "想在哪儿组局呢？",
+          "options": [
+            {
+              "label": "观音桥",
+              "action": "choose_location",
+              "params": {
+                "location": "观音桥"
+              }
+            },
+            {
+              "label": "解放碑",
+              "action": "choose_location",
+              "params": {
+                "location": "解放碑"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

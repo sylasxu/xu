@@ -71,6 +71,14 @@ interface ComponentData {
   hasQuickPrompts: boolean;
   // 从 properties 同步
   nickname: string;
+  ui: {
+    bottomQuickActions?: string[];
+    profileHints?: {
+      low?: string;
+      medium?: string;
+      high?: string;
+    };
+  } | null;
 }
 
 Component({
@@ -114,6 +122,10 @@ Component({
       type: Array,
       value: [] as QuickPrompt[],
     },
+    ui: {
+      type: Object,
+      value: {} as any,
+    },
   },
 
   data: {
@@ -129,6 +141,7 @@ Component({
     hasSocialProfile: false,
     hasQuickPrompts: false,
     nickname: '搭子',
+    ui: null,
   } as ComponentData,
 
   observers: {
@@ -164,6 +177,11 @@ Component({
         hasQuickPrompts: (prompts || []).length > 0,
       });
     },
+    'ui': function(ui: ComponentData['ui']) {
+      this.setData({
+        ui: ui && typeof ui === 'object' ? ui : null,
+      });
+    },
   },
 
   lifetimes: {
@@ -175,38 +193,16 @@ Component({
   methods: {
     /**
      * 更新问候语
-     * v3.10: 优先使用 API 返回的问候语
+     * v3.10: 使用 welcome API 返回的问候语字段
      */
     updateGreeting() {
       const apiGreeting = this.properties.greeting as string;
       const apiSubGreeting = this.properties.subGreeting as string;
-      
-      if (apiGreeting) {
-        this.setData({ 
-          greeting: apiGreeting,
-          subGreeting: apiSubGreeting || '',
-        });
-        return;
-      }
 
-      // 降级：本地生成问候语
-      const hour = new Date().getHours();
-      const nickname = (this.properties as any).nickname || this.data.nickname || '搭子';
-      
-      let greeting = '';
-      let subGreeting = '想玩点什么？';
-      
-      if (hour >= 0 && hour < 6) {
-        greeting = '这么晚还没睡？';
-      } else if (hour >= 6 && hour < 12) {
-        greeting = `早上好，${nickname}！`;
-      } else if (hour >= 12 && hour < 18) {
-        greeting = `下午好，${nickname}！`;
-      } else {
-        greeting = `晚上好，${nickname}`;
-      }
-      
-      this.setData({ greeting, subGreeting });
+      this.setData({
+        greeting: apiGreeting || '你好～',
+        subGreeting: apiSubGreeting || '今天想约什么局？',
+      });
     },
 
     /**

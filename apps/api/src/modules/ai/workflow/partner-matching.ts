@@ -408,26 +408,3 @@ export async function clearPartnerMatchingState(conversationId: string): Promise
   // 这样可以保留历史记录
   logger.debug('Partner matching state cleared', { conversationId });
 }
-
-// ============ 向后兼容别名 (deprecated) ============
-
-/** @deprecated Use PartnerMatchingState instead */
-export type BrokerState = PartnerMatchingState;
-/** @deprecated Use PartnerMatchingQuestion instead */
-export type BrokerQuestion = PartnerMatchingQuestion;
-/** @deprecated Use shouldStartPartnerMatching instead */
-export const shouldEnterBrokerMode = shouldStartPartnerMatching;
-/** @deprecated Use createPartnerMatchingState instead */
-export const createBrokerState = createPartnerMatchingState;
-/** @deprecated Use updatePartnerMatchingState instead */
-export const updateBrokerState = updatePartnerMatchingState;
-/** @deprecated Use pausePartnerMatchingState instead */
-export const pauseBrokerState = pausePartnerMatchingState;
-/** @deprecated Use completePartnerMatchingState instead */
-export const completeBrokerState = completePartnerMatchingState;
-/** @deprecated Use persistPartnerMatchingState instead */
-export const persistBrokerState = persistPartnerMatchingState;
-/** @deprecated Use recoverPartnerMatchingState instead */
-export const recoverBrokerState = recoverPartnerMatchingState;
-/** @deprecated Use clearPartnerMatchingState instead */
-export const clearBrokerState = clearPartnerMatchingState;

@@ -81,6 +81,7 @@
                     sections="{{part.data.sections}}"
                     socialProfile="{{part.data.socialProfile}}"
                     quickPrompts="{{part.data.quickPrompts}}"
+                    ui="{{part.data.ui}}"
                     bind:activitytap="onDashboardActivityTap"
                     bind:prompttap="onDashboardPromptTap"
                     bind:quickitemtap="onDashboardQuickItemTap"
@@ -90,12 +91,7 @@
                 
                 <!-- Widget_Draft -->
                 <block wx:elif="{{part.widgetType === 'draft'}}">
-                  <widget-draft 
-                    draft="{{part.data}}"
-                    bind:confirm="onDraftConfirm"
-                    bind:adjustlocation="onDraftAdjustLocation"
-                    bind:sendMessage="onDraftSendMessage"
-                  />
+                  <widget-draft draft="{{part.data}}" />
                 </block>
                 
                 <!-- Widget_Share -->

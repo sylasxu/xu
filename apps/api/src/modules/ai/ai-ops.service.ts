@@ -419,6 +419,7 @@ export async function searchUsers(query: string, limit: number = 10): Promise<Ar
   nickname: string | null;
   phoneNumber: string | null;
 }>> {
+  const safeQuery = query.trim();
   const results = await db
     .select({
       id: users.id,
@@ -426,7 +427,7 @@ export async function searchUsers(query: string, limit: number = 10): Promise<Ar
       phoneNumber: users.phoneNumber,
     })
     .from(users)
-    .where(sql`${users.nickname} ILIKE ${'%' + query + '%'} OR ${users.id} = ${query}`)
+    .where(sql`${users.nickname} ILIKE ${'%' + safeQuery + '%'} OR ${users.id}::text = ${safeQuery}`)
     .limit(limit);
   
   return results;

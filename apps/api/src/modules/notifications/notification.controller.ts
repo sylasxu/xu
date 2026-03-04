@@ -1,10 +1,9 @@
 // Notification Controller - MVP 简化版 + Admin 扩展
 import { Elysia } from 'elysia';
-import { basePlugins, verifyAuth, verifyAdmin, AuthError } from '../../setup';
+import { basePlugins, verifyAuth } from '../../setup';
 import { notificationModel, type ErrorResponse } from './notification.model';
 import { 
   getNotifications, 
-  getAllNotifications,
   getNotificationsByUserId,
   markAsRead, 
   getUnreadCount 
@@ -14,41 +13,30 @@ export const notificationController = new Elysia({ prefix: '/notifications' })
   .use(basePlugins)
   .use(notificationModel)
 
-  // 获取通知列表（支持显式的 scope 参数）
+  // 获取通知列表（按 userId 查询）
   .get(
     '/',
     async ({ query, set, jwt, headers }) => {
-      const { scope = 'mine', userId } = query;
-
-      // scope=all 或 userId 参数需要 Admin 权限
-      if (scope === 'all' || userId) {
-        try {
-          await verifyAdmin(jwt, headers);
-        } catch (error) {
-          if (error instanceof AuthError) {
-            set.status = error.status;
-            return { code: error.status, msg: error.message } satisfies ErrorResponse;
-          }
-          set.status = 500;
-          return { code: 500, msg: '服务器错误' } satisfies ErrorResponse;
-        }
-
-        // Admin 查指定用户的通知
-        if (userId) {
-          const result = await getNotificationsByUserId(userId, query);
-          return result;
-        }
-
-        // Admin 查所有用户的通知
-        const result = await getAllNotifications(query);
-        return result;
-      }
-
-      // scope=mine（默认）：普通用户查自己的通知
       const user = await verifyAuth(jwt, headers);
       if (!user) {
         set.status = 401;
         return { code: 401, msg: '未授权' } satisfies ErrorResponse;
+      }
+
+      const { userId } = query;
+      if (!userId) {
+        set.status = 400;
+        return { code: 400, msg: '缺少 userId 参数' } satisfies ErrorResponse;
+      }
+
+      if (user.role !== 'admin' && user.id !== userId) {
+        set.status = 403;
+        return { code: 403, msg: '无权限访问该用户通知' } satisfies ErrorResponse;
+      }
+
+      if (user.role === 'admin') {
+        const result = await getNotificationsByUserId(userId, query);
+        return result;
       }
 
       const result = await getNotifications(user.id, query);
@@ -58,14 +46,13 @@ export const notificationController = new Elysia({ prefix: '/notifications' })
       detail: {
         tags: ['Notifications'],
         summary: '获取通知列表',
-        description: `获取通知列表，支持显式的 scope 参数区分模式：
-- scope=mine（默认）：获取当前用户的通知
-- scope=all：获取所有用户的通知（需 Admin 权限）
-- userId 参数：获取指定用户的通知（需 Admin 权限）`,
+        description: `按 userId 获取通知列表（普通用户仅可查询本人，Admin 可查询任意用户）。`,
       },
       query: 'notification.listQuery',
       response: {
         200: 'notification.listResponse',
+        400: 'notification.error',
+        403: 'notification.error',
         401: 'notification.error',
       },
     }

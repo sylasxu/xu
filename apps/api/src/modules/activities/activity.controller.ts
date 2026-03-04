@@ -114,10 +114,10 @@ export const activityController = new Elysia({ prefix: '/activities' })
     }
   )
 
-  // 获取我相关的活动（发布的 + 参与的）
+  // 按用户 ID 获取相关活动（发布的 + 参与的）
   .get(
-    '/mine',
-    async ({ query, set, jwt, headers }) => {
+    '/user/:userId',
+    async ({ params, query, set, jwt, headers }) => {
       const user = await verifyAuth(jwt, headers);
       if (!user) {
         set.status = 401;
@@ -127,8 +127,16 @@ export const activityController = new Elysia({ prefix: '/activities' })
         } satisfies ErrorResponse;
       }
 
+      if (user.role !== 'admin' && user.id !== params.userId) {
+        set.status = 403;
+        return {
+          code: 403,
+          msg: '无权限访问该用户活动',
+        } satisfies ErrorResponse;
+      }
+
       try {
-        const result = await getMyActivities(user.id, query.type);
+        const result = await getMyActivities(params.userId, query.type);
         return result;
       } catch (error: any) {
         set.status = 500;
@@ -141,13 +149,17 @@ export const activityController = new Elysia({ prefix: '/activities' })
     {
       detail: {
         tags: ['Activities'],
-        summary: '获取我相关的活动',
-        description: '获取当前用户发布的和参与的活动列表',
+        summary: '按用户ID获取相关活动',
+        description: '获取指定用户发布的和参与的活动列表',
       },
+      params: t.Object({
+        userId: t.String({ description: '用户ID' }),
+      }),
       query: 'activity.myActivitiesQuery',
       response: {
         200: 'activity.myActivitiesResponse',
         401: 'activity.error',
+        403: 'activity.error',
         500: 'activity.error',
       },
     }

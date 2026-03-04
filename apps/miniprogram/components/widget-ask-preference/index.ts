@@ -19,6 +19,8 @@ import { useChatStore } from '../../src/stores/chat';
 interface PreferenceOption {
   label: string;
   value: string;
+  action?: string;
+  params?: Record<string, unknown>;
 }
 
 /** 已收集信息 */
@@ -28,7 +30,7 @@ interface CollectedInfo {
 }
 
 interface ComponentData {
-  // 无额外 data
+  isSubmitting: boolean;
 }
 
 interface ComponentProperties {
@@ -78,16 +80,30 @@ Component({
     },
   },
 
+  data: {
+    isSubmitting: false,
+  },
+
+  observers: {
+    'question, options, disabled': function(_question: string, _options: PreferenceOption[], disabled: boolean) {
+      if (!disabled && this.data.isSubmitting) {
+        this.setData({ isSubmitting: false });
+      }
+    },
+  },
+
   methods: {
     /**
      * 点击选项 (A2UI)
      * v4.7: 发送结构化 action
      */
     onSelectOption(e: WechatMiniprogram.TouchEvent) {
-      if (this.properties.disabled) return;
+      if (this.properties.disabled || this.data.isSubmitting) return;
       
       const { option } = e.currentTarget.dataset as { option: PreferenceOption };
       if (!option) return;
+
+      this.setData({ isSubmitting: true });
       
       // 触感反馈
       wx.vibrateShort({ type: 'light' });
@@ -98,17 +114,23 @@ Component({
         selectedOption: option,
         collectedInfo: this.properties.collectedInfo,
       });
+
+      const actionPayload: Record<string, unknown> = {
+        questionType: this.properties.questionType,
+        selectedValue: option.value,
+        selectedLabel: option.label,
+        collectedInfo: this.properties.collectedInfo,
+      };
+
+      if (option.params && typeof option.params === 'object') {
+        Object.assign(actionPayload, option.params);
+      }
       
       // 发送结构化 action
       const chatStore = useChatStore.getState();
       chatStore.sendAction({
-        action: 'select_preference',
-        payload: {
-          questionType: this.properties.questionType,
-          selectedValue: option.value,
-          selectedLabel: option.label,
-          collectedInfo: this.properties.collectedInfo,
-        },
+        action: option.action || 'select_preference',
+        payload: actionPayload,
         source: 'widget_ask_preference',
         originalText: option.label,
       });
@@ -119,7 +141,9 @@ Component({
      * v4.7: 发送结构化 action
      */
     onSkip() {
-      if (this.properties.disabled) return;
+      if (this.properties.disabled || this.data.isSubmitting) return;
+
+      this.setData({ isSubmitting: true });
       
       // 触感反馈
       wx.vibrateShort({ type: 'light' });

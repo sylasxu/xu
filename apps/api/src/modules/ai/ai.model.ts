@@ -147,21 +147,13 @@ const ConversationMessage = t.Object({
   createdAt: t.String(),
 });
 
-// 获取对话历史查询参数 (增强版 - 支持显式 scope 参数)
+// 获取对话历史查询参数 (增强版 - 按显式 ID 查询)
 const ConversationsQuery = t.Object({
   // 分页参数
   cursor: t.Optional(t.String({ description: '分页游标（上一页最后一条消息的 ID）' })),
   limit: t.Optional(t.Number({ minimum: 1, maximum: 100, default: 20, description: '获取数量' })),
-  // 显式模式参数（避免隐式行为）
-  scope: t.Optional(t.Union([
-    t.Literal('mine'),
-    t.Literal('all'),
-  ], { 
-    default: 'mine',
-    description: 'mine=当前用户的对话, all=所有用户的对话(需Admin权限)' 
-  })),
-  // 筛选参数 (可选，用于 Admin 审计等场景)
-  userId: t.Optional(t.String({ description: 'Admin 可指定查看某用户的对话' })),
+  // 查询参数：按用户 ID 获取会话列表（activityId 查询可不传）
+  userId: t.Optional(t.String({ description: '目标用户ID；查询会话列表时必传' })),
   activityId: t.Optional(t.String({ description: '按关联活动 ID 筛选' })),
   messageType: t.Optional(t.String({ description: '按消息类型筛选' })),
   role: t.Optional(t.Union([t.Literal('user'), t.Literal('assistant')], { description: '按角色筛选' })),
@@ -193,7 +185,7 @@ const ConversationListItem = t.Composite([
 ]);
 
 // 获取对话历史响应 (增强版)
-// items 可以是消息列表（activityId 查询）或会话列表（scope/userId 查询）
+// items 可以是消息列表（activityId 查询）或会话列表（userId 查询）
 const ConversationsResponse = t.Object({
   items: t.Union([t.Array(ConversationMessageWithUser), t.Array(ConversationListItem)]),
   total: t.Number({ description: '总数量' }),
@@ -271,43 +263,20 @@ const WelcomeResponse = t.Object({
     text: t.String(),
     prompt: t.String(),
   }), { description: '快捷入口' }),
+  ui: t.Optional(t.Object({
+    bottomQuickActions: t.Array(t.String(), { description: '底部快捷操作标签' }),
+    profileHints: t.Object({
+      low: t.String({ description: '偏好完善度较低时文案' }),
+      medium: t.String({ description: '偏好完善度中等时文案' }),
+      high: t.String({ description: '偏好完善度较高时文案' }),
+    }),
+  })),
 });
 
 // Welcome Card 查询参数
 const WelcomeQuery = t.Object({
   lat: t.Optional(t.Number({ description: '用户纬度' })),
   lng: t.Optional(t.Number({ description: '用户经度' })),
-});
-
-// 兼容旧版 quickActions（deprecated）
-const QuickActionType = t.Union([
-  t.Literal('explore_nearby'),
-  t.Literal('continue_draft'),
-  t.Literal('find_partner'),
-]);
-
-const ExploreNearbyContext = t.Object({
-  locationName: t.String(),
-  lat: t.Number(),
-  lng: t.Number(),
-  activityCount: t.Number(),
-});
-
-const ContinueDraftContext = t.Object({
-  activityId: t.String(),
-  activityTitle: t.String(),
-});
-
-const FindPartnerContext = t.Object({
-  activityType: t.String(),
-  activityTypeLabel: t.String(),
-  suggestedPrompt: t.String(),
-});
-
-const QuickAction = t.Object({
-  type: QuickActionType,
-  label: t.String(),
-  context: t.Union([ExploreNearbyContext, ContinueDraftContext, FindPartnerContext]),
 });
 
 // ==========================================
@@ -818,7 +787,6 @@ export const aiModel = new Elysia({ name: 'aiModel' })
     // Welcome Card (v3.4 新增)
     'ai.welcomeQuery': WelcomeQuery,
     'ai.welcomeResponse': WelcomeResponse,
-    'ai.quickAction': QuickAction,
     // Metrics (v3.4 新增)
     'ai.metricsUsageQuery': MetricsUsageQuery,
     'ai.metricsUsageResponse': MetricsUsageResponse,
@@ -893,11 +861,6 @@ export type ClearConversationsResponse = Static<typeof ClearConversationsRespons
 export type ErrorResponse = Static<typeof ErrorResponse>;
 
 // Welcome Card 类型导出 (v3.4 新增)
-export type QuickActionType = Static<typeof QuickActionType>;
-export type ExploreNearbyContext = Static<typeof ExploreNearbyContext>;
-export type ContinueDraftContext = Static<typeof ContinueDraftContext>;
-export type FindPartnerContext = Static<typeof FindPartnerContext>;
-export type QuickAction = Static<typeof QuickAction>;
 export type WelcomeResponse = Static<typeof WelcomeResponse>;
 export type WelcomeQuery = Static<typeof WelcomeQuery>;
 

@@ -19,7 +19,11 @@
     "build": "bun build src/index.ts --outdir dist --target bun",
     "start": "bun dist/index.js",
     "test": "bun test",
-    "test:pbt": "bun test --test-name-pattern 'Property'"
+    "test:pbt": "bun test --test-name-pattern 'Property'",
+    "genui:regression:turns": "bun ../../scripts/genui-turns-regression.ts",
+    "genui:regression:parity": "bun ../../scripts/genui-parity-regression.ts",
+    "genui:regression:snapshot": "bun ../../scripts/genui-turns-snapshot.ts",
+    "genui:regression": "bun ../../scripts/genui-turns-regression.ts && bun ../../scripts/genui-parity-regression.ts && bun ../../scripts/genui-turns-snapshot.ts"
   },
   "dependencies": {
     "@ai-sdk/deepseek": "^2.0.2",
@@ -29,6 +33,7 @@
     "@elysiajs/jwt": "^1.1.0",
     "@elysiajs/openapi": "^1.1.0",
     "@juchang/db": "workspace:*",
+    "@juchang/genui-contract": "workspace:*",
     "@juchang/utils": "workspace:*",
     "ai": "^6.0.5",
     "chalk": "^5.6.2",

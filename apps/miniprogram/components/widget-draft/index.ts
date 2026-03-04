@@ -1,7 +1,7 @@
 /**
  * Widget Draft 组件
  * Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8, 6.9
- * v3.4 新增: 多轮对话支持 - 快捷操作按钮触发 sendMessage 事件
+ * v3.4 新增: 多轮对话支持
  * 
  * 意图解析卡片 (v3.5 零成本地图方案)
  * - 显示 AI 预填的标题、时间、地点、类型
@@ -9,10 +9,11 @@
  * - 点击位置卡片打开原生地图导航
  * - 实现 [📍 调整位置] 按钮（使用 wx.chooseLocation）
  * - 实现 [✅ 确认发布] 按钮
- * - v3.4: 快捷操作按钮（换地方、换时间）触发 sendMessage 事件带 draftContext
+ * - v5.2: 快捷操作直接发送 A2UI action（edit_draft/save_draft_settings/confirm_publish）
  */
 
-import { openMapNavigation, chooseLocation } from '../../src/config/index';
+import { chooseLocation, openMapNavigation } from '../../src/config/index';
+import { useChatStore } from '../../src/stores/chat';
 
 // 活动类型映射
 const TYPE_CONFIG: Record<string, { icon: string; label: string; colorClass: string }> = {
@@ -31,6 +32,15 @@ const TYPE_CONFIG: Record<string, { icon: string; label: string; colorClass: str
   other: { icon: 'ellipsis', label: '其他', colorClass: 'blue' },
 };
 
+const ACTION_TYPE_MAP: Record<string, string> = {
+  food: '美食',
+  entertainment: '娱乐',
+  sports: '运动',
+  boardgame: '桌游',
+  ktv: 'K歌',
+  other: '其他',
+};
+
 // 草稿数据类型
 interface DraftData {
   activityId: string;
@@ -43,25 +53,29 @@ interface DraftData {
   address?: string;
   locationHint: string;
   maxParticipants: number;
+  currentParticipants?: number;
 }
 
-// v3.4 新增：草稿上下文类型（用于多轮对话）
-interface DraftContext {
-  activityId: string;
-  currentDraft: {
-    title: string;
-    type: string;
-    locationName: string;
-    locationHint: string;
-    startAt: string;
-    maxParticipants: number;
-  };
-}
+function resolveSlotFromStartAt(startAt: string): string {
+  if (!startAt) {
+    return 'fri_20_00';
+  }
 
-// v3.4 新增：sendMessage 事件详情类型
-interface SendMessageEventDetail {
-  text: string;
-  draftContext: DraftContext;
+  const date = new Date(startAt);
+  if (Number.isNaN(date.getTime())) {
+    return 'fri_20_00';
+  }
+
+  const hour = date.getHours();
+  if (hour <= 19) {
+    return 'fri_19_00';
+  }
+
+  if (hour >= 21) {
+    return 'fri_21_00';
+  }
+
+  return 'fri_20_00';
 }
 
 Component({
@@ -170,6 +184,43 @@ Component({
       return date.getTime() < Date.now();
     },
 
+    toActionActivityType(draftType: string): string {
+      return ACTION_TYPE_MAP[draftType] || draftType || '桌游';
+    },
+
+    buildDraftActionPayload(draft: DraftData, overrides?: Record<string, unknown>): Record<string, unknown> {
+      const [lng, lat] = Array.isArray(draft.location) ? draft.location : [106.52988, 29.58567];
+      const basePayload: Record<string, unknown> = {
+        activityId: draft.activityId,
+        title: draft.title,
+        type: draft.type || 'other',
+        activityType: this.toActionActivityType(draft.type),
+        startAt: draft.startAt,
+        locationName: draft.locationName,
+        locationHint: draft.locationHint || draft.address || `${draft.locationName || '观音桥'}商圈`,
+        slot: resolveSlotFromStartAt(draft.startAt),
+        maxParticipants: draft.maxParticipants || 6,
+        currentParticipants: draft.currentParticipants || 1,
+        lat,
+        lng,
+      };
+
+      return {
+        ...basePayload,
+        ...(overrides || {}),
+      };
+    },
+
+    dispatchDraftAction(action: string, payload: Record<string, unknown>, originalText: string): void {
+      const chatStore = useChatStore.getState();
+      chatStore.sendAction({
+        action,
+        payload,
+        source: 'widget_draft',
+        originalText,
+      });
+    },
+
     /**
      * 点击位置卡片 - 打开原生地图导航
      * Requirements: 6.4 (零成本方案)
@@ -211,6 +262,20 @@ Component({
             address: result.address,
           },
         });
+
+        const payload = this.buildDraftActionPayload(draft, {
+          location: result.name || draft.locationName,
+          locationName: result.name || draft.locationName,
+          locationHint: result.address || result.name || draft.locationHint,
+          lat: result.latitude,
+          lng: result.longitude,
+        });
+
+        this.dispatchDraftAction(
+          'save_draft_settings',
+          payload,
+          `位置改为${result.name || '新地点'}`
+        );
       } catch (err: any) {
         // 用户取消不提示
         if (!err.message?.includes('取消')) {
@@ -238,99 +303,39 @@ Component({
         });
         return;
       }
-      
-      // 跳转到草稿编辑页，允许用户修改时间和标题后发布
-      const params = new URLSearchParams({
-        id: draft.activityId || '',
-        title: encodeURIComponent(draft.title || ''),
-        type: draft.type || 'other',
-        startAt: encodeURIComponent(draft.startAt || ''),
-        locationName: encodeURIComponent(draft.locationName || ''),
-        locationHint: encodeURIComponent(draft.locationHint || ''),
-        lat: String(draft.location?.[1] || 0),
-        lng: String(draft.location?.[0] || 0),
-        maxParticipants: String(draft.maxParticipants || 10),
-      });
-      
-      wx.navigateTo({
-        url: `/subpackages/activity/draft-edit/index?${params.toString()}`,
-        fail: () => {
-          // 如果跳转失败，触发事件让父组件处理
-          this.triggerEvent('confirm', { draft });
-        },
-      });
+
+      this.triggerEvent('confirm', { draft });
+      this.dispatchDraftAction('confirm_publish', this.buildDraftActionPayload(draft), '确认发布');
     },
 
     /**
-     * 构建草稿上下文
-     * v3.4 新增：用于多轮对话
-     */
-    buildDraftContext(draft: DraftData): DraftContext {
-      return {
-        activityId: draft.activityId,
-        currentDraft: {
-          title: draft.title,
-          type: draft.type,
-          locationName: draft.locationName,
-          locationHint: draft.locationHint,
-          startAt: draft.startAt,
-          maxParticipants: draft.maxParticipants,
-        },
-      };
-    },
-
-    /**
-     * 点击换地方按钮
-     * v3.4 新增：触发 sendMessage 事件，带上 draftContext
-     * Requirements: 多轮对话支持
+     * 点击换地方按钮（A2UI）
      */
     onChangeLocation() {
       const draft = this.properties.draft as DraftData;
       if (!draft?.activityId) return;
 
-      const draftContext = this.buildDraftContext(draft);
-      const eventDetail: SendMessageEventDetail = {
-        text: '换个地方',
-        draftContext,
-      };
-
-      this.triggerEvent('sendMessage', eventDetail);
+      this.dispatchDraftAction('edit_draft', this.buildDraftActionPayload(draft), '改下地点');
     },
 
     /**
-     * 点击换时间按钮
-     * v3.4 新增：触发 sendMessage 事件，带上 draftContext
-     * Requirements: 多轮对话支持
+     * 点击换时间按钮（A2UI）
      */
     onChangeTime() {
       const draft = this.properties.draft as DraftData;
       if (!draft?.activityId) return;
 
-      const draftContext = this.buildDraftContext(draft);
-      const eventDetail: SendMessageEventDetail = {
-        text: '换个时间',
-        draftContext,
-      };
-
-      this.triggerEvent('sendMessage', eventDetail);
+      this.dispatchDraftAction('edit_draft', this.buildDraftActionPayload(draft), '改下时间');
     },
 
     /**
-     * 点击加人按钮
-     * v3.4 新增：触发 sendMessage 事件，带上 draftContext
-     * Requirements: 多轮对话支持
+     * 点击加人按钮（A2UI）
      */
     onChangeParticipants() {
       const draft = this.properties.draft as DraftData;
       if (!draft?.activityId) return;
 
-      const draftContext = this.buildDraftContext(draft);
-      const eventDetail: SendMessageEventDetail = {
-        text: '加几个人',
-        draftContext,
-      };
-
-      this.triggerEvent('sendMessage', eventDetail);
+      this.dispatchDraftAction('edit_draft', this.buildDraftActionPayload(draft), '改下人数设置');
     },
   },
 });

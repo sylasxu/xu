@@ -817,9 +817,9 @@ WebSocket 服务器接收
 
 | 特性 | 说明 |
 |------|------|
-| **AI SDK Elements** | 使用 Vercel AI SDK Elements 组件（Conversation、Message、Reasoning、PromptInput） |
-| **流式响应** | 通过 `DefaultChatTransport` 调用 Elysia `POST /ai/chat` 端点，支持流式文本渲染 |
-| **Reasoning 展示** | 展示 AI 思考过程（可折叠） |
+| **AI SDK Elements** | 使用官方 AI Elements 组件（Conversation、Message、PromptInput、Suggestion 等） |
+| **流式响应** | 通过 `fetch + SSE` 调用 Elysia `POST /ai/chat`（`stream=true`） |
+| **生成式 UI** | 同一条 assistant 气泡内渲染文本 + 结构化组件（choice/entity-card/list/form/cta-group） |
 | **响应式设计** | Mobile-First，固定移动端容器 `max-w-[430px]` |
 | **游客模式** | H5 Chat 默认无登录态，不依赖手机号/JWT，会话仅用于当次承接 |
 
@@ -1280,7 +1280,7 @@ AI 创建活动时，根据活动类型自动分配预设主题：
 |--------|---------|------|
 | `nearby_activities` | GET /activities/nearby | 附近活动列表 |
 | `activity_detail` | GET /activities/:id | 活动详情 |
-| `my_activities` | GET /activities/mine | 我的活动 |
+| `my_activities` | GET /activities/user/:userId | 我的活动 |
 | `partner_intents_nearby` | GET /partner-intents/nearby | 附近搭子意向 |
 | `activity_participants` | GET /activities/:id/participants | 活动参与者 |
 

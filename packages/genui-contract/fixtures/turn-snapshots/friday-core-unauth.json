@@ -1,0 +1,314 @@
+{
+  "name": "friday-core-unauth",
+  "description": "周五组局核心链路（未登录发布保护路径）",
+  "steps": [
+    {
+      "input": {
+        "type": "text",
+        "text": "想租个周五晚上的局"
+      },
+      "expected": {
+        "blocks": [
+          {
+            "type": "text",
+            "content": "可以，先帮你把这个周五晚上的局梳理好。"
+          },
+          {
+            "type": "choice",
+            "dedupeKey": "ask_location",
+            "replacePolicy": "replace",
+            "question": "想在哪儿组局呢？",
+            "options": [
+              {
+                "label": "观音桥",
+                "action": "choose_location",
+                "params": {
+                  "location": "观音桥"
+                }
+              },
+              {
+                "label": "解放碑",
+                "action": "choose_location",
+                "params": {
+                  "location": "解放碑"
+                }
+              },
+              {
+                "label": "南坪",
+                "action": "choose_location",
+                "params": {
+                  "location": "南坪"
+                }
+              },
+              {
+                "label": "江北嘴",
+                "action": "choose_location",
+                "params": {
+                  "location": "江北嘴"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "input": {
+        "type": "action",
+        "action": "choose_location",
+        "actionId": "snapshot_choose_location_1",
+        "displayText": "观音桥",
+        "params": {
+          "location": "观音桥"
+        }
+      },
+      "expected": {
+        "blocks": [
+          {
+            "type": "text",
+            "content": "好，地点先定在观音桥。"
+          },
+          {
+            "type": "choice",
+            "dedupeKey": "ask_activity_type",
+            "replacePolicy": "replace",
+            "question": "想组哪种类型的局？",
+            "options": [
+              {
+                "label": "桌游",
+                "action": "choose_activity_type",
+                "params": {
+                  "activityType": "桌游",
+                  "location": "观音桥"
+                }
+              },
+              {
+                "label": "羽毛球",
+                "action": "choose_activity_type",
+                "params": {
+                  "activityType": "羽毛球",
+                  "location": "观音桥"
+                }
+              },
+              {
+                "label": "夜跑",
+                "action": "choose_activity_type",
+                "params": {
+                  "activityType": "夜跑",
+                  "location": "观音桥"
+                }
+              },
+              {
+                "label": "K歌",
+                "action": "choose_activity_type",
+                "params": {
+                  "activityType": "K歌",
+                  "location": "观音桥"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "input": {
+        "type": "action",
+        "action": "choose_activity_type",
+        "actionId": "snapshot_choose_type_1",
+        "displayText": "桌游",
+        "params": {
+          "activityType": "桌游",
+          "location": "观音桥"
+        }
+      },
+      "expected": {
+        "blocks": [
+          {
+            "type": "text",
+            "content": "收到，先按桌游来组局。接下来我帮你确定时间和人数。"
+          },
+          {
+            "type": "choice",
+            "dedupeKey": "ask_time_slot",
+            "replacePolicy": "replace",
+            "question": "你更偏好哪个时间段？",
+            "options": [
+              {
+                "label": "周五 19:00",
+                "action": "choose_time_slot",
+                "params": {
+                  "slot": "fri_19_00",
+                  "activityType": "桌游",
+                  "location": "观音桥"
+                }
+              },
+              {
+                "label": "周五 20:00",
+                "action": "choose_time_slot",
+                "params": {
+                  "slot": "fri_20_00",
+                  "activityType": "桌游",
+                  "location": "观音桥"
+                }
+              },
+              {
+                "label": "周五 21:00",
+                "action": "choose_time_slot",
+                "params": {
+                  "slot": "fri_21_00",
+                  "activityType": "桌游",
+                  "location": "观音桥"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "input": {
+        "type": "action",
+        "action": "choose_time_slot",
+        "actionId": "snapshot_choose_slot_1",
+        "displayText": "周五 20:00",
+        "params": {
+          "slot": "fri_20_00",
+          "activityType": "桌游",
+          "location": "观音桥"
+        }
+      },
+      "expected": {
+        "blocks": [
+          {
+            "type": "text",
+            "content": "太好了，已帮你把周五 20:00在观音桥的桌游局整理成草稿。"
+          },
+          {
+            "type": "entity-card",
+            "dedupeKey": "draft_summary",
+            "replacePolicy": "replace",
+            "title": "组局草稿",
+            "fields": {
+              "activityId": "draft_观音桥_fri_20_00",
+              "title": "周五 20:00桌游局",
+              "type": "boardgame",
+              "startAt": "2026-03-06T20:00:00+08:00",
+              "locationName": "观音桥",
+              "locationHint": "观音桥商圈",
+              "maxParticipants": 6,
+              "currentParticipants": 1,
+              "lat": 29.58567,
+              "lng": 106.52988
+            }
+          },
+          {
+            "type": "cta-group",
+            "dedupeKey": "draft_next_actions",
+            "replacePolicy": "replace",
+            "items": [
+              {
+                "label": "就按这个发布",
+                "action": "confirm_publish",
+                "params": {
+                  "activityId": "draft_观音桥_fri_20_00",
+                  "title": "周五 20:00桌游局",
+                  "type": "boardgame",
+                  "startAt": "2026-03-06T20:00:00+08:00",
+                  "locationName": "观音桥",
+                  "locationHint": "观音桥商圈",
+                  "maxParticipants": 6,
+                  "currentParticipants": 1,
+                  "lat": 29.58567,
+                  "lng": 106.52988
+                }
+              },
+              {
+                "label": "先看附近同类局",
+                "action": "explore_nearby",
+                "params": {
+                  "location": "观音桥",
+                  "activityType": "桌游",
+                  "slot": "fri_20_00"
+                }
+              },
+              {
+                "label": "改下人数设置",
+                "action": "edit_draft",
+                "params": {
+                  "activityId": "draft_观音桥_fri_20_00",
+                  "title": "周五 20:00桌游局",
+                  "type": "桌游",
+                  "slot": "fri_20_00",
+                  "location": "观音桥",
+                  "maxParticipants": 6
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "input": {
+        "type": "action",
+        "action": "confirm_publish",
+        "actionId": "snapshot_confirm_publish_1",
+        "displayText": "就按这个发布",
+        "params": {
+          "activityId": "draft_观音桥_fri_20_00",
+          "title": "周五 20:00桌游局",
+          "type": "boardgame",
+          "startAt": "2026-03-06T20:00:00+08:00",
+          "locationName": "观音桥",
+          "locationHint": "观音桥商圈",
+          "maxParticipants": 6,
+          "currentParticipants": 1,
+          "lat": 29.58567,
+          "lng": 106.52988
+        }
+      },
+      "expected": {
+        "blocks": [
+          {
+            "type": "text",
+            "content": "发布到活动大厅前，需要先登录账号。登录后我会直接帮你完成发布。"
+          },
+          {
+            "type": "alert",
+            "dedupeKey": "publish_requires_login",
+            "replacePolicy": "replace",
+            "level": "warning",
+            "message": "当前未登录，已保留草稿参数。"
+          },
+          {
+            "type": "cta-group",
+            "dedupeKey": "publish_guard_actions",
+            "replacePolicy": "replace",
+            "items": [
+              {
+                "label": "先看附近同类局",
+                "action": "explore_nearby",
+                "params": {
+                  "location": "观音桥",
+                  "activityType": "boardgame",
+                  "slot": "fri_20_00"
+                }
+              },
+              {
+                "label": "改下草稿设置",
+                "action": "edit_draft",
+                "params": {
+                  "location": "观音桥",
+                  "activityType": "boardgame",
+                  "slot": "fri_20_00",
+                  "maxParticipants": 6
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

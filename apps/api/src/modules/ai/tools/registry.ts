@@ -4,9 +4,9 @@
  * 管理所有 AI Tools 的注册和获取
  * 支持按意图动态加载 Tools
  *
- * v4.9: 合并工具解析函数
- * - resolveToolsForIntent: 统一的工具实例解析入口（合并原 getToolsByIntent + getToolsForIntent）
- * - getToolNamesByIntent: 统一的工具名称解析入口（合并原 getToolsForIntent(router) + getToolNamesForIntent）
+ * v4.9: 统一工具解析函数
+ * - resolveToolsForIntent: 统一的工具实例解析入口
+ * - getToolNamesByIntent: 统一的工具名称解析入口
  *
  * v5.0: 动态配置
  * - INTENT_TOOL_MAP 通过 getConfigValue('tools.intent_map', ...) 动态配置
@@ -83,7 +83,7 @@ const TOOL_FACTORIES: Record<string, ToolFactory> = {
 /**
  * 获取意图对应的 Tool 名称列表
  *
- * 统一入口，合并原 intent/router.ts 的 getToolsForIntent 和 registry.ts 的 getToolNamesForIntent。
+ * 统一入口，返回意图对应的工具名称列表。
  * 返回 string[]（工具名称），用于日志、trace、条件判断等场景。
  *
  * v5.0: 映射通过 getConfigValue('tools.intent_map', INTENT_TOOL_MAP) 动态配置
@@ -105,10 +105,23 @@ export async function getToolNamesByIntent(
   // 创建意图：根据草稿上下文调整
   if (intent === 'create') {
     if (options.hasDraftContext) {
-      toolNames = ['refineDraft', 'publishActivity', 'getDraft'];
+      toolNames = [
+        'refineDraft',
+        'publishActivity',
+        'getDraft',
+        'createActivityDraft',
+        'exploreNearby',
+        'askPreference',
+      ];
     } else {
-      toolNames = ['createActivityDraft', 'getDraft'];
+      toolNames = ['createActivityDraft', 'getDraft', 'askPreference', 'exploreNearby'];
     }
+  }
+
+  // 修改意图：保留草稿能力，同时允许回退到探索/追问，避免 unavailable tool
+  if (intent === 'modify') {
+    if (!toolNames.includes('exploreNearby')) toolNames.push('exploreNearby');
+    if (!toolNames.includes('askPreference')) toolNames.push('askPreference');
   }
 
   // 有草稿上下文时，确保修改意图包含草稿工具
@@ -140,7 +153,6 @@ export async function getToolNamesByIntent(
 /**
  * 统一的工具实例解析入口
  *
- * 合并原 tools/index.ts 的 getToolsByIntent 和 tools/registry.ts 的 getToolsForIntent。
  * 返回 Record<string, unknown>（实例化的工具对象），用于传递给 LLM。
  *
  * @param userId - 用户 ID
@@ -157,6 +169,7 @@ export async function resolveToolsForIntent(
 ): Promise<Record<string, any>> {
   const toolNames = await getToolNamesByIntent(intent, {
     hasDraftContext: options.hasDraftContext,
+    hasLocation: Boolean(options.location),
   });
 
   const tools: Record<string, any> = {};

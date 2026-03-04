@@ -1,0 +1,62 @@
+{
+  "name": "share-activity-payload",
+  "description": "分享动作返回邀请卡片 payload（无数据库命中时走参数兜底）",
+  "steps": [
+    {
+      "input": {
+        "type": "action",
+        "action": "share_activity",
+        "actionId": "snapshot_share_activity_1",
+        "displayText": "分享给群友",
+        "params": {
+          "activityId": "activity_demo_001",
+          "title": "周五 20:00桌游局",
+          "type": "boardgame",
+          "startAt": "2026-03-06T20:00:00+08:00",
+          "locationName": "观音桥",
+          "locationHint": "观音桥商圈",
+          "maxParticipants": 6,
+          "currentParticipants": 1,
+          "lat": 29.58567,
+          "lng": 106.52988
+        }
+      },
+      "expected": {
+        "blocks": [
+          {
+            "type": "text",
+            "content": "分享内容已经准备好了，发到群里就能直接报名进局。"
+          },
+          {
+            "type": "alert",
+            "dedupeKey": "share_ready",
+            "replacePolicy": "replace",
+            "level": "success",
+            "message": "已生成邀请链接与小程序路径。"
+          },
+          {
+            "type": "entity-card",
+            "dedupeKey": "share_payload",
+            "replacePolicy": "replace",
+            "title": "分享卡片",
+            "fields": {
+              "activityId": "activity_demo_001",
+              "title": "周五 20:00桌游局",
+              "type": "boardgame",
+              "startAt": "2026-03-06T20:00:00+08:00",
+              "locationName": "观音桥",
+              "locationHint": "观音桥商圈",
+              "maxParticipants": 6,
+              "currentParticipants": 1,
+              "lat": 29.58567,
+              "lng": 106.52988,
+              "shareTitle": "🔥 周五 20:00桌游局，还差5人，速来！",
+              "shareUrl": "https://juchang.app/invite/activity_demo_001",
+              "sharePath": "/subpackages/activity/detail/index?id=activity_demo_001&share=1"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

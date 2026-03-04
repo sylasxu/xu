@@ -3,8 +3,32 @@
  * 将 Orval 生成的参数映射到 wx.request
  */
 
-// 基础 URL - 建议从环境变量读取
-const BASE_URL = 'http://localhost:3000'
+import { API_CONFIG } from '../config'
+
+const BASE_URL = API_CONFIG.BASE_URL
+
+type WxRequestHeaders = Record<string, string>
+
+interface WxMutatorResponse<T> {
+  data: T
+  status: number
+  headers: Headers
+}
+
+function createHeaders(header: WechatMiniprogram.IAnyObject): Headers {
+  if (typeof Headers !== 'undefined') {
+    const headers = new Headers()
+    Object.entries(header || {}).forEach(([key, value]) => {
+      if (value === undefined || value === null) {
+        return
+      }
+      headers.set(key, String(value))
+    })
+    return headers
+  }
+
+  return {} as Headers
+}
 
 /**
  * 自定义 Mutator 函数
@@ -14,7 +38,7 @@ export const wxRequest = <T>(url: string, options?: RequestInit): Promise<T> => 
   return new Promise((resolve, reject) => {
     // 1. 处理 headers
     const token = wx.getStorageSync('token') as string
-    const header: Record<string, string> = {
+    const header: WxRequestHeaders = {
       'Content-Type': 'application/json',
     }
     
@@ -68,11 +92,13 @@ export const wxRequest = <T>(url: string, options?: RequestInit): Promise<T> => 
       data: data,
       header: header,
       success: (res) => {
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          resolve(res.data as T)
-        } else {
-          reject(res.data || res)
+        const wrappedResponse: WxMutatorResponse<unknown> = {
+          data: res.data,
+          status: res.statusCode,
+          headers: createHeaders(res.header || {}),
         }
+
+        resolve(wrappedResponse as T)
       },
       fail: (err) => {
         reject(err)

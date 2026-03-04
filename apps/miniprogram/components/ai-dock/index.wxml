@@ -11,69 +11,82 @@
   class="ai-dock {{isFocused ? 'focused' : ''}} {{disabled ? 'disabled' : ''}}"
   style="bottom: calc({{bottomOffset}}rpx + env(safe-area-inset-bottom));"
 >
-  <!-- 快捷按钮区域 -->
-  <view class="dock-actions" wx:if="{{!isFocused && !inputValue}}">
-    <!-- 粘贴按钮 -->
-    <view 
-      class="action-btn btn-pressable" 
-      bindtap="onPasteTap"
-      hover-class="action-btn--hover"
-    >
-      <t-icon name="file-paste" size="36rpx" />
-      <text class="action-text">粘贴</text>
-    </view>
-    
-    <!-- 语音按钮 -->
-    <view 
-      class="action-btn btn-pressable {{isRecording ? 'recording' : ''}}" 
-      bindtap="onVoiceTap"
-      hover-class="action-btn--hover"
-    >
-      <view wx:if="{{isRecording}}" class="recording-indicator">
-        <view class="recording-dot"></view>
-        <text class="recording-time">{{recordingDuration}}s</text>
+  <view class="dock-main-row">
+    <!-- 快捷按钮区域 -->
+    <view class="dock-actions" wx:if="{{!isFocused && !inputValue}}">
+      <!-- 粘贴按钮 -->
+      <view 
+        class="action-btn btn-pressable" 
+        bindtap="onPasteTap"
+        hover-class="action-btn--hover"
+      >
+        <t-icon name="file-paste" size="36rpx" />
+        <text class="action-text">粘贴</text>
       </view>
-      <block wx:else>
-        <t-icon name="sound" size="36rpx" />
-        <text class="action-text">语音</text>
-      </block>
+      
+      <!-- 语音按钮 -->
+      <view 
+        class="action-btn btn-pressable {{isRecording ? 'recording' : ''}}" 
+        bindtap="onVoiceTap"
+        hover-class="action-btn--hover"
+      >
+        <view wx:if="{{isRecording}}" class="recording-indicator">
+          <view class="recording-dot"></view>
+          <text class="recording-time">{{recordingDuration}}s</text>
+        </view>
+        <block wx:else>
+          <t-icon name="sound" size="36rpx" />
+          <text class="action-text">语音</text>
+        </block>
+      </view>
     </view>
-  </view>
-  
-  <!-- 输入区域 -->
-  <view class="dock-input-wrapper">
-    <input
-      class="dock-input"
-      type="text"
-      placeholder="{{placeholder}}"
-      placeholder-class="dock-placeholder"
-      value="{{inputValue}}"
-      disabled="{{disabled}}"
-      confirm-type="send"
-      adjust-position="{{false}}"
-      bindinput="onInputChange"
-      bindfocus="onInputFocus"
-      bindblur="onInputBlur"
-      bindconfirm="onInputConfirm"
-    />
     
-    <!-- 清空按钮 -->
+    <!-- 输入区域 -->
+    <view class="dock-input-wrapper">
+      <input
+        class="dock-input"
+        type="text"
+        placeholder="{{placeholder}}"
+        placeholder-class="dock-placeholder"
+        value="{{inputValue}}"
+        disabled="{{disabled}}"
+        confirm-type="send"
+        adjust-position="{{false}}"
+        bindinput="onInputChange"
+        bindfocus="onInputFocus"
+        bindblur="onInputBlur"
+        bindconfirm="onInputConfirm"
+      />
+      
+      <!-- 清空按钮 -->
+      <view 
+        wx:if="{{inputValue}}" 
+        class="clear-btn btn-pressable" 
+        catchtap="onClearTap"
+      >
+        <t-icon name="close-circle-filled" size="36rpx" color="var(--text-tertiary)" />
+      </view>
+    </view>
+    
+    <!-- 发送按钮 -->
     <view 
-      wx:if="{{inputValue}}" 
-      class="clear-btn btn-pressable" 
-      catchtap="onClearTap"
+      wx:if="{{inputValue}}"
+      class="send-btn btn-pressable" 
+      bindtap="onSendTap"
+      hover-class="send-btn--hover"
     >
-      <t-icon name="close-circle-filled" size="36rpx" color="var(--text-tertiary)" />
+      <t-icon name="send" size="40rpx" color="#FFFFFF" />
     </view>
   </view>
   
-  <!-- 发送按钮 -->
-  <view 
-    wx:if="{{inputValue}}"
-    class="send-btn btn-pressable" 
-    bindtap="onSendTap"
-    hover-class="send-btn--hover"
-  >
-    <t-icon name="send" size="40rpx" color="#FFFFFF" />
+  <view class="dock-secondary-row" wx:if="{{isFocused}}">
+    <view class="consultant-chip">
+      <t-icon name="task" size="30rpx" />
+      <text class="consultant-text">未选择咨询人</text>
+    </view>
+    <view class="profile-link btn-pressable" bindtap="onViewProfileTap">
+      <text class="profile-text">查看档案</text>
+      <t-icon name="chevron-right" size="28rpx" />
+    </view>
   </view>
 </view>

@@ -4,7 +4,7 @@
   "globalDependencies": ["**/.env.*local"],
   "tasks": {
     "build": {
-      "dependsOn": ["^build", "gen:api"],
+      "dependsOn": ["^build", "gen:api", "gen:contract"],
       "outputs": ["dist/**", ".next/**", "!.next/cache/**", "build/**"]
     },
     "dev": {
@@ -38,6 +38,31 @@
         "../api/src/**/*.js"
       ]
     },
+    "gen:contract": {
+      "cache": false,
+      "outputs": [
+        "apps/web/src/gen/**",
+        "apps/miniprogram/src/gen/**"
+      ],
+      "inputs": [
+        "packages/genui-contract/src/**/*.ts",
+        "packages/genui-contract/schema/**/*.json",
+        "packages/genui-contract/fixtures/**/*.json",
+        "scripts/gen-genui-contract.ts"
+      ]
+    },
+    "genui:regression:turns": {
+      "cache": false
+    },
+    "genui:regression:parity": {
+      "cache": false
+    },
+    "genui:regression:snapshot": {
+      "cache": false
+    },
+    "genui:regression": {
+      "cache": false
+    },
     "db:generate": {
       "cache": false,
       "outputs": ["drizzle/**"]
@@ -55,13 +80,13 @@
       "persistent": true
     },
     "lint": {
-      "dependsOn": ["^build", "gen:api"]
+      "dependsOn": ["^build", "gen:api", "gen:contract"]
     },
     "format": {
       "cache": false
     },
     "type-check": {
-      "dependsOn": ["^build", "gen:api"]
+      "dependsOn": ["^build", "gen:api", "gen:contract"]
     },
     "clean": {
       "cache": false

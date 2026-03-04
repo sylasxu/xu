@@ -1,6 +1,7 @@
 import { db } from './db';
 import { users, activities, participants } from './schema';
 import * as dotenv from 'dotenv';
+import { seedAiConfigs } from './seed-ai-configs';
 
 // 加载环境变量
 dotenv.config({ path: '../../.env' });
@@ -9,6 +10,11 @@ async function seed() {
   console.log('🌱 开始种子数据...');
 
   try {
+    // 0. 初始化 AI 参数配置（可在线编辑，不再写死前端）
+    console.log('⚙️ 初始化 AI 参数配置...');
+    await seedAiConfigs();
+    console.log('✅ AI 参数配置初始化完成');
+
     // 1. 创建测试用户 (MVP 精简版)
     console.log('👤 创建测试用户...');
     const testUsers = await db.insert(users).values([

@@ -13,7 +13,7 @@
   <!-- 问候语区域 -->
   <view class="dashboard-header">
     <view class="greeting-icon icon-circle icon-circle--blue">
-      <t-icon name="sunny" size="40rpx" />
+      <t-icon name="chat" size="40rpx" />
     </view>
     <view class="greeting-content">
       <text class="greeting-text">{{greeting}}</text>
@@ -26,6 +26,7 @@
     <social-profile-card 
       profile="{{socialProfile}}"
       collapsed="{{hasActivities}}"
+      profileHints="{{ui.profileHints}}"
     />
   </block>
   

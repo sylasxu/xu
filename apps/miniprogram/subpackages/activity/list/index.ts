@@ -3,7 +3,7 @@
  * Requirements: 8.5, 8.6, 8.7
  * 支持三种类型：created（我发布的）、joined（我参与的）、archived（历史归档）
  */
-import { getActivitiesMine } from '../../../src/api/endpoints/activities/activities';
+import { getActivitiesUserByUserId } from '../../../src/api/endpoints/activities/activities';
 import type { ActivityMyActivitiesResponseDataItem } from '../../../src/api/model';
 
 type ListType = 'created' | 'joined' | 'archived';
@@ -81,9 +81,14 @@ Page({
 
     try {
       const { type } = this.data;
+      const cachedUserInfo = wx.getStorageSync('userInfo') as { id?: string } | null;
+      const userId = cachedUserInfo?.id || '';
+      if (!userId) {
+        throw new Error('缺少用户ID，请重新登录');
+      }
       
       // 调用 API 获取活动列表
-      const response = await getActivitiesMine({
+      const response = await getActivitiesUserByUserId(userId, {
         type: type === 'archived' ? undefined : type,
       });
 

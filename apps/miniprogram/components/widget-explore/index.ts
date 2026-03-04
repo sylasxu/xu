@@ -10,9 +10,8 @@
 
 import { useChatStore } from '../../src/stores/chat';
 import { fetchWidgetData } from '../../src/utils/widget-fetcher';
-import { executeWidgetAction } from '../../src/utils/widget-actions';
 import type { FetchState } from '../../src/utils/widget-fetcher';
-import type { ActionState, ActionResultPayload, WidgetAction } from '../../src/utils/widget-actions';
+import type { ActionState, WidgetAction } from '../../src/utils/widget-actions';
 
 // 探索结果类型
 interface ExploreResult {
@@ -61,6 +60,15 @@ interface Interaction {
   actions?: WidgetAction[];
 }
 
+interface WidgetExploreProperties {
+  results?: ExploreResult[];
+  center?: CenterPoint;
+  title?: string;
+  fetchConfig?: FetchConfig;
+  interaction?: Interaction;
+  preview?: PreviewData;
+}
+
 Component({
   options: {
     styleIsolation: 'apply-shared',
@@ -75,9 +83,9 @@ Component({
     },
     title: { type: String, value: '' },
     // 引用模式新增
-    fetchConfig: { type: Object, value: null },
-    interaction: { type: Object, value: null },
-    preview: { type: Object, value: null },
+    fetchConfig: { type: Object, value: undefined },
+    interaction: { type: Object, value: undefined },
+    preview: { type: Object, value: undefined },
   },
 
   data: {
@@ -90,8 +98,6 @@ Component({
     activeIndex: 0,
     // 操作状态 { [activityId_actionType]: ActionState }
     actionStates: {} as Record<string, ActionState>,
-    // 操作结果 { [activityId]: ActionResultPayload }
-    actionResults: {} as Record<string, ActionResultPayload>,
     // 半屏详情
     halfScreenVisible: false,
     halfScreenActivityId: '',
@@ -104,7 +110,8 @@ Component({
       title: string,
     ) {
       // 自包含模式：直接用 results 渲染
-      const fetchConfig = this.properties.fetchConfig as FetchConfig | null;
+      const props = this.properties as unknown as WidgetExploreProperties;
+      const fetchConfig = props.fetchConfig;
       if (fetchConfig) return; // 引用模式由 fetchConfig observer 处理
 
       const displayResults = (results || []).slice(0, 3);
@@ -128,7 +135,7 @@ Component({
           : '正在加载附近活动...');
 
       this.setData({ swiperMode, headerTitle });
-      this.loadReferenceData(fetchConfig);
+      void this.loadReferenceData(fetchConfig);
     },
   },
 
@@ -161,18 +168,20 @@ Component({
 
     /** 重试加载 */
     onRetryFetch() {
-      const fetchConfig = this.properties.fetchConfig as FetchConfig | null;
+      const props = this.properties as unknown as WidgetExploreProperties;
+      const fetchConfig = props.fetchConfig || null;
       if (fetchConfig) {
-        this.loadReferenceData(fetchConfig);
+        void this.loadReferenceData(fetchConfig);
       }
     },
 
     /** 点击展开地图 */
     onExpandMap() {
+      const props = this.properties as unknown as WidgetExploreProperties;
       const results = this.data.fetchedResults.length
         ? this.data.fetchedResults
-        : (this.properties.results as ExploreResult[]);
-      const center = this.properties.center as CenterPoint;
+        : (props.results || []);
+      const center = props.center || { lat: 29.5647, lng: 106.5507, name: '观音桥' };
 
       this.triggerEvent('expandmap', { results, center });
 
@@ -187,7 +196,8 @@ Component({
       const { id } = e.currentTarget.dataset;
       if (!id) return;
 
-      const interaction = this.properties.interaction as Interaction | null;
+      const props = this.properties as unknown as WidgetExploreProperties;
+      const interaction = props.interaction || null;
 
       if (interaction?.halfScreenDetail) {
         // 引用模式：弹出半屏详情
@@ -210,8 +220,19 @@ Component({
     },
 
     /** 卡内操作按钮点击 */
-    async onActionTap(e: WechatMiniprogram.TouchEvent) {
-      const { actiontype, activityid, activitytitle, startat, locationname } =
+    toTurnsAction(actionType: string): string {
+      const map: Record<string, string> = {
+        join: 'join_activity',
+        publish: 'confirm_publish',
+        confirm_match: 'confirm_match',
+        cancel: 'cancel_activity',
+      };
+
+      return map[actionType] || actionType;
+    },
+
+    onActionTap(e: WechatMiniprogram.TouchEvent) {
+      const { actiontype, activityid, activitytitle, startat, locationname, actionparams } =
         e.currentTarget.dataset;
       if (!actiontype || !activityid) return;
 
@@ -233,41 +254,30 @@ Component({
         return;
       }
 
-      // 通用操作：走 Action Handler
+      // 通用操作：统一走 turns action
       this.setData({ [`actionStates.${stateKey}`]: 'loading' });
-
-      const result = await executeWidgetAction(actiontype, {
+      const chatStore = useChatStore.getState();
+      const payload: Record<string, unknown> = {
         activityId: activityid,
         title: activitytitle,
         startAt: startat,
         locationName: locationname,
+      };
+      if (actionparams && typeof actionparams === 'object') {
+        Object.assign(payload, actionparams as Record<string, unknown>);
+      }
+
+      chatStore.sendAction({
+        action: this.toTurnsAction(actiontype),
+        payload,
+        source: 'widget_explore',
+        originalText: activitytitle ? `处理「${activitytitle}」` : `执行${actiontype}`,
       });
 
-      if (result.state === 'success') {
-        this.setData({ [`actionStates.${stateKey}`]: 'success' });
-        if (result.resultPayload) {
-          this.setData({ [`actionResults.${activityid}`]: result.resultPayload });
-        }
-        // 注入操作结果到对话历史，让 AI 下次对话时感知
-        const chatStore = useChatStore.getState();
-        chatStore.appendActionResult(
-          actiontype,
-          { activityId: activityid, title: activitytitle },
-          true,
-          result.resultPayload?.summary || `${actiontype} 操作成功`,
-        );
-      } else {
+      this.setData({ [`actionStates.${stateKey}`]: 'success' });
+      setTimeout(() => {
         this.setData({ [`actionStates.${stateKey}`]: 'idle' });
-        wx.showToast({ title: result.error || '操作失败', icon: 'none' });
-      }
-    },
-
-    /** 操作结果卡片的 nextAction 点击 */
-    onNextActionTap(e: WechatMiniprogram.TouchEvent) {
-      const { actiontype, activityid } = e.currentTarget.dataset;
-      if (actiontype === 'detail' && activityid) {
-        this.setData({ halfScreenVisible: true, halfScreenActivityId: activityid });
-      }
+      }, 900);
     },
 
     /** 点击报名按钮 (A2UI — 自包含模式保留) */

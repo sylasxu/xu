@@ -8,9 +8,9 @@ import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import type {
-  AiConversationsResponseItemsItem,
-  AiConversationsResponseItemsItemRole,
-  AiConversationsResponseItemsItemType,
+  AiConversationsResponseItemsAnyOfItem,
+  AiConversationsResponseItemsAnyOfItemRole,
+  AiConversationsResponseItemsAnyOfItemType,
 } from '../api/model'
 import {
   getAiConversations,
@@ -22,9 +22,9 @@ import {
 const MAX_CACHED_MESSAGES = 50
 
 // 消息类型别名（方便使用）
-export type ConversationMessage = AiConversationsResponseItemsItem
-export type MessageRole = AiConversationsResponseItemsItemRole
-export type MessageType = AiConversationsResponseItemsItemType
+export type ConversationMessage = AiConversationsResponseItemsAnyOfItem
+export type MessageRole = AiConversationsResponseItemsAnyOfItemRole
+export type MessageType = AiConversationsResponseItemsAnyOfItemType
 
 /**
  * AI SDK v6 UIMessagePart 接口
@@ -119,6 +119,25 @@ const wechatStorage = {
 // 生成本地消息 ID
 const generateLocalId = () => `local_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
 
+function getCurrentUserId(): string {
+  const userInfo = wx.getStorageSync('userInfo') as { id?: string } | null
+  return typeof userInfo?.id === 'string' ? userInfo.id : ''
+}
+
+function isConversationMessage(item: unknown): item is ConversationMessage {
+  if (!item || typeof item !== 'object') {
+    return false
+  }
+
+  const candidate = item as Record<string, unknown>
+  return (
+    typeof candidate.id === 'string' &&
+    typeof candidate.role === 'string' &&
+    typeof candidate.type === 'string' &&
+    Object.prototype.hasOwnProperty.call(candidate, 'content')
+  )
+}
+
 export const useHomeStore = create<HomeState>()(
   persist(
     immer((set, get) => ({
@@ -142,16 +161,23 @@ export const useHomeStore = create<HomeState>()(
         })
 
         try {
+          const userId = getCurrentUserId()
+          if (!userId) {
+            throw new Error('缺少用户ID，请重新登录')
+          }
+
           const response = await getAiConversations({
+            userId,
             limit: 20,
           })
 
           if (response.status === 200 && response.data) {
             const { items, cursor, hasMore, total } = response.data
+            const messageItems = (Array.isArray(items) ? items : []).filter(isConversationMessage)
             
             set((draft) => {
               // 按时间正序排列（旧消息在前，新消息在后）
-              draft.messages = [...items].reverse()
+              draft.messages = [...messageItems].reverse()
               draft.cursor = cursor
               draft.hasMore = hasMore
               draft.total = total
@@ -180,17 +206,24 @@ export const useHomeStore = create<HomeState>()(
         })
 
         try {
+          const userId = getCurrentUserId()
+          if (!userId) {
+            throw new Error('缺少用户ID，请重新登录')
+          }
+
           const response = await getAiConversations({
+            userId,
             cursor: state.cursor,
             limit: 20,
           })
 
           if (response.status === 200 && response.data) {
             const { items, cursor, hasMore, total } = response.data
+            const messageItems = (Array.isArray(items) ? items : []).filter(isConversationMessage)
             
             set((draft) => {
               // 旧消息插入到列表前面
-              const newMessages = [...items].reverse()
+              const newMessages = [...messageItems].reverse()
               draft.messages = [...newMessages, ...draft.messages]
               draft.cursor = cursor
               draft.hasMore = hasMore

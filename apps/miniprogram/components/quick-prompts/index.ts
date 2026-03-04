@@ -17,11 +17,7 @@ interface ComponentData {
   hasPrompts: boolean;
 }
 
-interface ComponentProperties {
-  prompts: WechatMiniprogram.Component.PropertyOption;
-}
-
-Component<ComponentData, ComponentProperties>({
+Component({
   options: {
     styleIsolation: 'apply-shared',
   },
@@ -37,7 +33,7 @@ Component<ComponentData, ComponentProperties>({
   data: {
     displayPrompts: [] as QuickPrompt[],
     hasPrompts: false,
-  },
+  } as ComponentData,
 
   observers: {
     'prompts': function(prompts: QuickPrompt[]) {

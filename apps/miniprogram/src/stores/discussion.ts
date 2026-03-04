@@ -19,7 +19,8 @@
  */
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
-import { API_BASE_URL } from '../config/api'
+import { getChatByActivityIdMessages } from '../api/endpoints/chat/chat'
+import { API_CONFIG } from '../config/index'
 
 // ============================================================================
 // Types
@@ -92,11 +93,21 @@ interface DiscussionState {
   _reconnectCount: number
   /** Token（用于重连） */
   _token: string | null
+  /** 处理服务端消息 */
+  _handleMessage: (msg: WsServerMessage) => void
+  /** 启动心跳 */
+  _startHeartbeat: () => void
+  /** 停止心跳 */
+  _stopHeartbeat: () => void
+  /** 尝试重连 */
+  _tryReconnect: () => void
+  /** 停止重连 */
+  _stopReconnect: () => void
 }
 
 // WebSocket URL 构建
 const getWsUrl = (activityId: string, token: string) => {
-  const baseUrl = API_BASE_URL.replace('https://', 'wss://').replace('http://', 'ws://')
+  const baseUrl = API_CONFIG.BASE_URL.replace('https://', 'wss://').replace('http://', 'ws://')
   return `${baseUrl}/chat/${activityId}/ws?token=${token}`
 }
 
@@ -321,21 +332,17 @@ export const useDiscussionStore = create<DiscussionState>()(
         const oldestMessage = state.messages[0]
         const since = oldestMessage?.id
         
-        // 调用 HTTP 接口获取更多历史消息
-        const { request } = await import('../api/client')
-        const response = await request<{
-          messages: DiscussionMessage[]
-          isArchived: boolean
-        }>({
-          url: `/chat/${state.activityId}/messages`,
-          method: 'GET',
-          data: {
-            since,
-            limit: 20,
-          },
+        // 调用 Orval 接口获取更多历史消息
+        const response = await getChatByActivityIdMessages(state.activityId, {
+          since: since || undefined,
+          limit: 20,
         })
-        
-        if (response.messages.length < 20) {
+        if (response.status !== 200) {
+          throw new Error((response.data as { msg?: string })?.msg || '加载失败')
+        }
+
+        const responseData = response.data
+        if (responseData.messages.length < 20) {
           set((draft) => {
             draft.hasMore = false
           })
@@ -343,7 +350,8 @@ export const useDiscussionStore = create<DiscussionState>()(
         
         // 将新消息添加到列表开头
         set((draft) => {
-          draft.messages = [...response.messages, ...draft.messages]
+          draft.messages = [...(responseData.messages as DiscussionMessage[]), ...draft.messages]
+          draft.isArchived = responseData.isArchived
           draft.isLoadingMore = false
         })
       } catch (error) {

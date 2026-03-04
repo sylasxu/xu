@@ -2,7 +2,7 @@
  * Prompts Module - 提示词模块
  *
  * 核心导出：getSystemPrompt 由 prompt-template.service 提供（DB 模板 + 插值 + 降级）
- * 保留向后兼容的类型和工具函数导出
+ * 同步导出模板构建所需类型和工具函数
  */
 
 // 核心：DB 模板驱动的 System Prompt

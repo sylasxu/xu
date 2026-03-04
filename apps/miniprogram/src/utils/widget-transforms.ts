@@ -8,10 +8,29 @@
 import type { ExploreData } from '../types/global'
 
 type WidgetTransformFn = (result: unknown) => unknown
+type AskPreferenceQuestionType = 'location' | 'type'
+
+interface AskPreferenceOption {
+  label: string
+  value: string
+  action?: string
+  params?: Record<string, unknown>
+}
+
+interface AskPreferenceWidgetData {
+  questionType: AskPreferenceQuestionType
+  question: string
+  options: AskPreferenceOption[]
+  allowSkip: boolean
+  collectedInfo?: { location?: string; type?: string }
+  disabled: boolean
+}
+
+const DEFAULT_ASK_QUESTION = '想在哪儿组局呢？'
 
 const WIDGET_TRANSFORMS: Record<string, WidgetTransformFn> = {
   widget_explore: (result: unknown) => {
-    const toolOutput = result as Record<string, unknown>
+    const toolOutput = isRecord(result) ? result : {}
     const exploreData = (toolOutput.explore || toolOutput) as ExploreData
     return {
       results: exploreData?.results || exploreData?.activities || [],
@@ -21,25 +40,31 @@ const WIDGET_TRANSFORMS: Record<string, WidgetTransformFn> = {
         name: exploreData?.locationName || '附近',
       },
       title: exploreData?.title || '',
-      fetchConfig: (toolOutput.fetchConfig as Record<string, unknown>) || null,
-      interaction: (toolOutput.interaction as Record<string, unknown>) || null,
-      preview: (toolOutput.preview as Record<string, unknown>) || null,
+      fetchConfig: isRecord(toolOutput.fetchConfig) ? toolOutput.fetchConfig : null,
+      interaction: isRecord(toolOutput.interaction) ? toolOutput.interaction : null,
+      preview: isRecord(toolOutput.preview) ? toolOutput.preview : null,
     }
   },
 
   widget_ask_preference: (result: unknown) => {
-    const askData = result as {
-      questionType: 'location' | 'type'
-      question: string
-      options: Array<{ label: string; value: string }>
-      allowSkip: boolean
-      collectedInfo?: { location?: string; type?: string }
-    }
-    return {
-      ...askData,
+    const askData = isRecord(result) ? result : {}
+    const question =
+      typeof askData.question === 'string' && askData.question.trim()
+        ? askData.question.trim()
+        : DEFAULT_ASK_QUESTION
+
+    const collectedInfo = normalizeCollectedInfo(askData.collectedInfo)
+
+    const widgetData: AskPreferenceWidgetData = {
+      questionType: inferQuestionType(askData.questionType, question),
+      question,
+      options: normalizePreferenceOptions(askData.options),
       allowSkip: askData.allowSkip !== false,
-      disabled: false,
+      disabled: Boolean(askData.disabled),
+      ...(collectedInfo ? { collectedInfo } : {}),
     }
+
+    return widgetData
   },
 }
 
@@ -50,4 +75,86 @@ const WIDGET_TRANSFORMS: Record<string, WidgetTransformFn> = {
 export function transformToolResult(widgetType: string, result: unknown): unknown {
   const transform = WIDGET_TRANSFORMS[widgetType]
   return transform ? transform(result) : result
+}
+
+function normalizeCollectedInfo(value: unknown): { location?: string; type?: string } | undefined {
+  if (!isRecord(value)) {
+    return undefined
+  }
+
+  const location = typeof value.location === 'string' ? value.location.trim() : ''
+  const type = typeof value.type === 'string' ? value.type.trim() : ''
+
+  if (!location && !type) {
+    return undefined
+  }
+
+  return {
+    ...(location ? { location } : {}),
+    ...(type ? { type } : {}),
+  }
+}
+
+function inferQuestionType(value: unknown, question: string): AskPreferenceQuestionType {
+  if (value === 'location' || value === 'type') {
+    return value
+  }
+
+  return /哪|位置|地点|附近|区域|where/i.test(question) ? 'location' : 'type'
+}
+
+function normalizePreferenceOptions(value: unknown): AskPreferenceOption[] {
+  const source = parseOptionsSource(value)
+  if (!Array.isArray(source)) {
+    return []
+  }
+
+  return source
+    .map((item) => {
+      if (!isRecord(item)) {
+        return null
+      }
+
+      const label = typeof item.label === 'string' ? item.label.trim() : ''
+      const optionValue = typeof item.value === 'string' ? item.value.trim() : label
+      const action = typeof item.action === 'string' ? item.action.trim() : ''
+      const params = isRecord(item.params) ? item.params : undefined
+      if (!label) {
+        return null
+      }
+
+      return {
+        label,
+        value: optionValue,
+        ...(action ? { action } : {}),
+        ...(params ? { params } : {}),
+      }
+    })
+    .filter((item): item is AskPreferenceOption => Boolean(item))
+    .slice(0, 8)
+}
+
+function parseOptionsSource(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value
+  }
+
+  if (typeof value === 'string') {
+    const text = value.trim()
+    if (!text) {
+      return []
+    }
+
+    try {
+      return JSON.parse(text)
+    } catch {
+      return []
+    }
+  }
+
+  return []
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
 }

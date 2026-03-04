@@ -1,0 +1,184 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://juchang.dev/schemas/genui/turn-envelope.schema.json",
+  "title": "GenUITurnEnvelope",
+  "type": "object",
+  "required": ["traceId", "conversationId", "turn"],
+  "properties": {
+    "traceId": { "type": "string", "minLength": 1 },
+    "conversationId": { "type": "string", "minLength": 1 },
+    "turn": {
+      "type": "object",
+      "required": ["turnId", "role", "status", "blocks"],
+      "properties": {
+        "turnId": { "type": "string", "minLength": 1 },
+        "role": { "const": "assistant" },
+        "status": {
+          "type": "string",
+          "enum": ["streaming", "completed", "error"]
+        },
+        "blocks": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/block" }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "definitions": {
+    "block": {
+      "oneOf": [
+        { "$ref": "#/definitions/textBlock" },
+        { "$ref": "#/definitions/choiceBlock" },
+        { "$ref": "#/definitions/entityCardBlock" },
+        { "$ref": "#/definitions/listBlock" },
+        { "$ref": "#/definitions/formBlock" },
+        { "$ref": "#/definitions/ctaGroupBlock" },
+        { "$ref": "#/definitions/alertBlock" }
+      ]
+    },
+    "blockBase": {
+      "type": "object",
+      "required": ["blockId", "type"],
+      "properties": {
+        "blockId": { "type": "string", "minLength": 1 },
+        "type": { "type": "string" },
+        "dedupeKey": { "type": "string" },
+        "replacePolicy": {
+          "type": "string",
+          "enum": ["append", "replace", "ignore-if-exists"]
+        },
+        "meta": { "type": "object" }
+      },
+      "additionalProperties": true
+    },
+    "textBlock": {
+      "allOf": [
+        { "$ref": "#/definitions/blockBase" },
+        {
+          "type": "object",
+          "required": ["type", "content"],
+          "properties": {
+            "type": { "const": "text" },
+            "content": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "choiceBlock": {
+      "allOf": [
+        { "$ref": "#/definitions/blockBase" },
+        {
+          "type": "object",
+          "required": ["type", "question", "options"],
+          "properties": {
+            "type": { "const": "choice" },
+            "question": { "type": "string" },
+            "options": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["label", "action"],
+                "properties": {
+                  "label": { "type": "string" },
+                  "action": { "type": "string" },
+                  "params": { "type": "object" }
+                },
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      ]
+    },
+    "entityCardBlock": {
+      "allOf": [
+        { "$ref": "#/definitions/blockBase" },
+        {
+          "type": "object",
+          "required": ["type", "title", "fields"],
+          "properties": {
+            "type": { "const": "entity-card" },
+            "title": { "type": "string" },
+            "fields": { "type": "object" }
+          }
+        }
+      ]
+    },
+    "listBlock": {
+      "allOf": [
+        { "$ref": "#/definitions/blockBase" },
+        {
+          "type": "object",
+          "required": ["type", "items"],
+          "properties": {
+            "type": { "const": "list" },
+            "title": { "type": "string" },
+            "items": {
+              "type": "array",
+              "items": { "type": "object" }
+            }
+          }
+        }
+      ]
+    },
+    "formBlock": {
+      "allOf": [
+        { "$ref": "#/definitions/blockBase" },
+        {
+          "type": "object",
+          "required": ["type", "schema"],
+          "properties": {
+            "type": { "const": "form" },
+            "title": { "type": "string" },
+            "schema": { "type": "object" },
+            "initialValues": { "type": "object" }
+          }
+        }
+      ]
+    },
+    "ctaGroupBlock": {
+      "allOf": [
+        { "$ref": "#/definitions/blockBase" },
+        {
+          "type": "object",
+          "required": ["type", "items"],
+          "properties": {
+            "type": { "const": "cta-group" },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["label", "action"],
+                "properties": {
+                  "label": { "type": "string" },
+                  "action": { "type": "string" },
+                  "params": { "type": "object" }
+                },
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      ]
+    },
+    "alertBlock": {
+      "allOf": [
+        { "$ref": "#/definitions/blockBase" },
+        {
+          "type": "object",
+          "required": ["type", "level", "message"],
+          "properties": {
+            "type": { "const": "alert" },
+            "level": {
+              "type": "string",
+              "enum": ["info", "warning", "error", "success"]
+            },
+            "message": { "type": "string" }
+          }
+        }
+      ]
+    }
+  },
+  "additionalProperties": false
+}

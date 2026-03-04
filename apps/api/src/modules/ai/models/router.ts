@@ -247,18 +247,8 @@ export async function getAvailableProviders(): Promise<ModelProviderName[]> {
     .map(([name]) => name);
 }
 
-// ============ 便捷导出（向后兼容） ============
-
-/**
- * 获取模型实例（向后兼容）
- */
-export function getModel(modelId: string): LanguageModel {
-  return getChatModel(modelId);
-}
-
 // ============ 内部工具函数 ============
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
-

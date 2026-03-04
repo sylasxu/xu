@@ -12,7 +12,8 @@
     "db:studio": "drizzle-kit studio",
     "db:drop": "drizzle-kit drop",
     "db:check": "drizzle-kit check",
-    "seed": "bun src/seed.ts"
+    "seed": "bun src/seed.ts",
+    "seed:ai-configs": "bun src/seed-ai-configs.ts"
   },
   "dependencies": {
     "@sinclair/typebox": "^0.34.8",

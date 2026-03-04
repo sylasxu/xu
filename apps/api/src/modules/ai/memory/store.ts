@@ -12,6 +12,7 @@ import {
   eq,
   desc,
   sql,
+  toTimestamp,
   type Conversation,
   type Message,
 } from '@juchang/db';
@@ -40,7 +41,7 @@ export async function getOrCreateThread(
   const [recent] = await db
     .select({ id: conversations.id })
     .from(conversations)
-    .where(sql`${conversations.userId} = ${userId} AND ${conversations.lastMessageAt} > ${windowStart}`)
+    .where(sql`${conversations.userId} = ${userId} AND ${conversations.lastMessageAt} > ${toTimestamp(windowStart)}`)
     .orderBy(desc(conversations.lastMessageAt))
     .limit(1);
 

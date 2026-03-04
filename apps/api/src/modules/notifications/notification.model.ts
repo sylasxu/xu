@@ -4,7 +4,7 @@ import { selectNotificationSchema } from '@juchang/db';
 
 /**
  * Notification Model Plugin - MVP 版本 + Admin 扩展
- * 支持显式的 scope 参数区分用户模式和 Admin 模式
+ * 按 userId 显式查询通知
  */
 
 // 通知列表查询参数（扩展支持 Admin 模式）
@@ -12,17 +12,10 @@ const NotificationListQuery = t.Object({
   page: t.Optional(t.Number({ minimum: 1, default: 1 })),
   limit: t.Optional(t.Number({ minimum: 1, maximum: 50, default: 20 })),
   type: t.Optional(t.String({ description: '通知类型筛选' })),
-  scope: t.Optional(t.Union([
-    t.Literal('mine'),
-    t.Literal('all'),
-  ], { 
-    default: 'mine',
-    description: 'mine=当前用户的通知, all=所有用户的通知(需Admin权限)' 
-  })),
-  userId: t.Optional(t.String({ 
+  userId: t.String({ 
     format: 'uuid',
-    description: 'Admin 可指定查看某用户的通知' 
-  })),
+    description: '目标用户ID（普通用户仅可传本人）' 
+  }),
 });
 
 // 通知列表响应

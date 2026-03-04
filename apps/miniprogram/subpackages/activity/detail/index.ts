@@ -3,11 +3,10 @@
  * Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 10.1-10.7, 16.1-16.6
  */
 import { getActivitiesById, postActivitiesByIdJoin, deleteActivitiesById, patchActivitiesByIdStatus } from '../../../src/api/endpoints/activities/activities';
-import { getActivitiesByIdPublic } from '../../../src/api/endpoints/activities/activities-custom';
-import type { RecentMessage } from '../../../src/api/endpoints/activities/activities-custom';
+import { getActivitiesByIdPublic } from '../../../src/api/endpoints/activities/activities';
 import { getUsersById } from '../../../src/api/endpoints/users/users';
 import { useAppStore } from '../../../src/stores/app';
-import type { ActivityDetailResponse } from '../../../src/api/model';
+import type { ActivityDetailResponse, ActivityPublicResponseRecentMessagesItem as RecentMessage } from '../../../src/api/model';
 
 interface User {
   id: string;

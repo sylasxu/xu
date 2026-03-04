@@ -9,7 +9,7 @@
   <view class="card-header btn-pressable" bindtap="onToggle">
     <view class="header-left">
       <text class="header-icon">📊</text>
-      <text class="header-title">我的社交档案</text>
+      <text class="header-title">我的社交状态</text>
     </view>
     <view class="header-right">
       <t-icon 
@@ -36,6 +36,13 @@
         <text class="stat-label">发起</text>
         <text class="stat-value">{{displayProfile.activitiesCreatedCount}}</text>
         <text class="stat-unit">场</text>
+      </view>
+      <view class="stat-divider"></view>
+      <view class="stat-item">
+        <text class="stat-icon">✨</text>
+        <text class="stat-label">偏好</text>
+        <text class="stat-value">{{displayProfile.preferenceCompleteness}}</text>
+        <text class="stat-unit">%</text>
       </view>
     </view>
     

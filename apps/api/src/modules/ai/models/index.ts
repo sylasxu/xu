@@ -48,7 +48,6 @@ export {
   getEmbeddings,
   getEmbedding,
   getDefaultChatModel,
-  getModel,
   setFallbackConfig,
   getFallbackConfig,
   withRetry,
@@ -61,4 +60,3 @@ export {
 // Adapters
 export { deepseekProvider, getDeepSeekChat, getDeepSeekReasoner } from './adapters/deepseek';
 export { zhipuProvider, getZhipuEmbeddings, getZhipuEmbedding } from './adapters/zhipu';
-

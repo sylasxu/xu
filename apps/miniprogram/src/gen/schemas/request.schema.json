@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://juchang.dev/schemas/genui/request.schema.json",
+  "title": "GenUIRequest",
+  "type": "object",
+  "required": ["input"],
+  "properties": {
+    "conversationId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "input": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "text"],
+          "properties": {
+            "type": { "const": "text" },
+            "text": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["type", "action", "actionId"],
+          "properties": {
+            "type": { "const": "action" },
+            "action": { "type": "string", "minLength": 1 },
+            "actionId": { "type": "string", "minLength": 1 },
+            "displayText": { "type": "string" },
+            "params": { "type": "object" }
+          },
+          "additionalProperties": true
+        }
+      ]
+    },
+    "context": {
+      "type": "object",
+      "properties": {
+        "client": {
+          "type": "string",
+          "enum": ["web", "miniprogram", "admin"]
+        },
+        "locale": { "type": "string" },
+        "timezone": { "type": "string" },
+        "platformVersion": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

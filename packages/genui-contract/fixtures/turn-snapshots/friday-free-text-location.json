@@ -1,0 +1,110 @@
+{
+  "name": "friday-free-text-location",
+  "description": "周五首轮后通过自由文本补充地点",
+  "steps": [
+    {
+      "input": {
+        "type": "text",
+        "text": "想租个周五晚上的局"
+      },
+      "expected": {
+        "blocks": [
+          {
+            "type": "text",
+            "content": "可以，先帮你把这个周五晚上的局梳理好。"
+          },
+          {
+            "type": "choice",
+            "dedupeKey": "ask_location",
+            "replacePolicy": "replace",
+            "question": "想在哪儿组局呢？",
+            "options": [
+              {
+                "label": "观音桥",
+                "action": "choose_location",
+                "params": {
+                  "location": "观音桥"
+                }
+              },
+              {
+                "label": "解放碑",
+                "action": "choose_location",
+                "params": {
+                  "location": "解放碑"
+                }
+              },
+              {
+                "label": "南坪",
+                "action": "choose_location",
+                "params": {
+                  "location": "南坪"
+                }
+              },
+              {
+                "label": "江北嘴",
+                "action": "choose_location",
+                "params": {
+                  "location": "江北嘴"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "input": {
+        "type": "text",
+        "text": "解放碑"
+      },
+      "expected": {
+        "blocks": [
+          {
+            "type": "text",
+            "content": "收到，地点先定在解放碑。"
+          },
+          {
+            "type": "choice",
+            "dedupeKey": "ask_activity_type",
+            "replacePolicy": "replace",
+            "question": "想组哪种类型的局？",
+            "options": [
+              {
+                "label": "桌游",
+                "action": "choose_activity_type",
+                "params": {
+                  "activityType": "桌游",
+                  "location": "解放碑"
+                }
+              },
+              {
+                "label": "羽毛球",
+                "action": "choose_activity_type",
+                "params": {
+                  "activityType": "羽毛球",
+                  "location": "解放碑"
+                }
+              },
+              {
+                "label": "夜跑",
+                "action": "choose_activity_type",
+                "params": {
+                  "activityType": "夜跑",
+                  "location": "解放碑"
+                }
+              },
+              {
+                "label": "K歌",
+                "action": "choose_activity_type",
+                "params": {
+                  "activityType": "K歌",
+                  "location": "解放碑"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

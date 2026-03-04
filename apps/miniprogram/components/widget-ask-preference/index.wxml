@@ -7,7 +7,7 @@
   - 渲染选项按钮供用户快速选择
   - 支持"随便/都可以"跳过按钮
 -->
-<view class="widget-ask-preference halo-card {{disabled ? 'widget--disabled' : ''}}">
+<view class="widget-ask-preference halo-card {{(disabled || isSubmitting) ? 'widget--disabled' : ''}}">
   <!-- 问题文本 -->
   <view class="question-section">
     <view class="question-icon icon-circle icon-circle--purple">
@@ -22,7 +22,7 @@
     <view 
       wx:for="{{options}}" 
       wx:key="value"
-      class="option-btn btn-pressable {{disabled ? 'option-btn--disabled' : ''}}"
+      class="option-btn btn-pressable {{(disabled || isSubmitting) ? 'option-btn--disabled' : ''}}"
       data-option="{{item}}"
       bindtap="onSelectOption"
     >
@@ -32,7 +32,7 @@
   
   <!-- 跳过按钮 -->
   <view 
-    wx:if="{{allowSkip && !disabled}}"
+    wx:if="{{allowSkip && !disabled && !isSubmitting}}"
     class="skip-section"
     bindtap="onSkip"
   >

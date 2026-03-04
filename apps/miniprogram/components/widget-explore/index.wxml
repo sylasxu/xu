@@ -92,33 +92,12 @@
               data-activitytitle="{{item.title}}"
               data-startat="{{item.startAt}}"
               data-locationname="{{item.locationName}}"
+              data-actionparams="{{action.params}}"
               catchtap="onActionTap"
             >
               <text wx:if="{{actionStates[item.id + '_' + action.type] === 'loading'}}">...</text>
               <text wx:elif="{{actionStates[item.id + '_' + action.type] === 'success'}}">{{action.type === 'join' ? '已报名' : action.label}}</text>
               <text wx:else>{{action.label}}</text>
-            </view>
-          </view>
-
-          <!-- 操作结果卡片 -->
-          <view wx:if="{{actionResults[item.id]}}" class="action-result-card">
-            <text class="result-title">{{actionResults[item.id].title}}</text>
-            <text class="result-summary">{{actionResults[item.id].summary}}</text>
-            <view wx:if="{{actionResults[item.id].details.length > 0}}" class="result-details">
-              <view wx:for="{{actionResults[item.id].details}}" wx:for-item="detail" wx:key="label" class="result-detail-row">
-                <text class="detail-label">{{detail.label}}</text>
-                <text class="detail-value">{{detail.value}}</text>
-              </view>
-            </view>
-            <view
-              wx:if="{{actionResults[item.id].nextAction}}"
-              class="result-next-action btn-pressable"
-              data-actiontype="{{actionResults[item.id].nextAction.type}}"
-              data-activityid="{{item.id}}"
-              bindtap="onNextActionTap"
-            >
-              <text>{{actionResults[item.id].nextAction.label}}</text>
-              <t-icon name="chevron-right" size="28rpx" />
             </view>
           </view>
         </view>

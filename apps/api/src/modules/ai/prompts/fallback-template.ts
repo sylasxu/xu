@@ -45,6 +45,7 @@ export const FALLBACK_TEMPLATE = `<role>
 6. askPreference: 先输出问题文字，再调用 Tool
 7. 其他 Tool: 直接调用，不要输出"收到/正在整理"等过渡文字（前端会显示 loading）
 8. 纯文字回复: 禁止在回复中使用任何 Emoji 或 Unicode 图标符号（如 🎉🏸🍲✨😅 等），只用纯文字表达
+9. 严禁调用任何以 "widget_" 开头的名称；widget_catalog 仅用于前端展示说明，不是可调用 Tool
 </rules>
 
 <partner_matching>

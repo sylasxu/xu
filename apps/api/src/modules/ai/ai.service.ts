@@ -1,25 +1,14 @@
 /**
- * AI Service - v4.5 模块化架构
+ * AI Service - 模块化架构
  * 
  * 精简的服务层，编排各模块完成 AI Chat
  * 
- * v4.5 更新：
- * - 新增 Agent 封装层 (Mastra 风格)
- * - handleChatStream/generateChat 委托给 agent/chat.ts
- * - 保留原有 handleChatStream 实现用于兼容
- * 
  * 模块依赖：
- * - agent/ - Agent 核心 (v4.5 新增)
  * - intent/ - 意图识别
  * - memory/ - 会话存储
  * - tools/ - 工具系统
  * - models/ - 模型路由
  */
-
-// ==========================================
-// v4.5 Agent 模块已废弃，功能由 Processor 架构替代
-// 保留类型别名用于向后兼容
-// ==========================================
 
 import { db, users, conversations, conversationMessages, eq, desc, sql, inArray, and } from '@juchang/db';
 import {
@@ -82,6 +71,7 @@ import {
 } from './workflow/partner-matching';
 // User Action — A2UI (Action-to-UI: 结构化用户操作直接映射为 UI 响应)
 import { handleUserAction, type UserAction } from './user-action';
+import { getConfigValue } from './config/config.service';
 
 const logger = createLogger('ai.service');
 
@@ -90,8 +80,14 @@ const logger = createLogger('ai.service');
 // ==========================================
 
 export interface ChatRequest {
-  messages: Array<Omit<UIMessage, 'id'>>;
+  messages: Array<{
+    role: 'user' | 'assistant' | 'system';
+    content?: string;
+    parts?: Array<Record<string, unknown>>;
+  }>;
   userId: string | null;
+  rateLimitUserId?: string | null;
+  conversationId?: string;
   location?: [number, number];
   source: 'miniprogram' | 'admin';
   draftContext?: { activityId: string; currentDraft: ActivityDraftForPrompt };
@@ -144,7 +140,7 @@ export async function consumeAIQuota(userId: string): Promise<boolean> {
 
 export async function handleChatStream(request: ChatRequest): Promise<Response> {
   return runWithTrace(async () => {
-  const { messages, userId, location, source, draftContext, trace, modelParams, userAction } = request;
+  const { messages, userId, rateLimitUserId, conversationId, location, source, draftContext, trace, modelParams, userAction } = request;
   const startTime = Date.now();
 
   // 0. A2UI: 检查是否为结构化 userAction（跳过 LLM 意图识别）
@@ -198,7 +194,8 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
   const rawUserInput = conversationHistory.filter(m => m.role === 'user').pop()?.content || '';
 
   // 1. 频率限制检查
-  const rateLimitResult = await checkRateLimit(userId, { maxRequests: 30, windowSeconds: 60 });
+  const rateLimitSubject = userId || rateLimitUserId || null;
+  const rateLimitResult = await checkRateLimit(rateLimitSubject, { maxRequests: 30, windowSeconds: 60 });
   if (!rateLimitResult.allowed) {
     logger.warn('Rate limit exceeded', { userId, retryAfter: rateLimitResult.retryAfter });
     return createDirectResponse('请求太频繁了，休息一下再来吧～', trace);
@@ -460,7 +457,7 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
         ],
         metadata: {
           ...preLLMContext.metadata,
-          conversationId: undefined,
+          conversationId: conversationId ?? undefined,
           activityId: (toolCallRecords.find(tc => (tc.result as any)?.activityId)?.result as any)?.activityId,
           // record-metrics-processor 数据
           metricsData: {
@@ -1466,19 +1463,270 @@ export interface WelcomeResponse {
   sections: WelcomeSection[];
   socialProfile?: SocialProfile | undefined;
   quickPrompts: QuickPrompt[];
+  ui?: {
+    bottomQuickActions: string[];
+    profileHints: {
+      low: string;
+      medium: string;
+      high: string;
+    };
+  };
 }
 
-export function generateGreeting(nickname: string | null): string {
-  const hour = new Date().getHours();
-  const name = nickname || '朋友';
+type WelcomeGreetingPeriod =
+  | 'lateNight'
+  | 'morning'
+  | 'forenoon'
+  | 'noon'
+  | 'afternoon'
+  | 'evening'
+  | 'night';
 
-  if (hour < 6) return `夜深了，${name}～`;
-  if (hour < 9) return `早上好，${name}！`;
-  if (hour < 12) return `上午好，${name}！`;
-  if (hour < 14) return `中午好，${name}！`;
-  if (hour < 18) return `下午好，${name}！`;
-  if (hour < 22) return `晚上好，${name}！`;
-  return `夜深了，${name}～`;
+interface WelcomeCopyConfig {
+  fallbackNickname: string;
+  subGreeting: string;
+  greetingTemplates: Record<WelcomeGreetingPeriod, string>;
+}
+
+interface WelcomeUiConfig {
+  sectionTitles: {
+    suggestions: string;
+    explore: string;
+  };
+  exploreTemplates: {
+    label: string;
+    prompt: string;
+  };
+  suggestionItems: Array<{
+    icon: string;
+    label: string;
+    prompt: string;
+  }>;
+  quickPrompts: QuickPrompt[];
+  bottomQuickActions: string[];
+  profileHints: {
+    low: string;
+    medium: string;
+    high: string;
+  };
+}
+
+const DEFAULT_WELCOME_COPY_CONFIG: WelcomeCopyConfig = {
+  fallbackNickname: '朋友',
+  subGreeting: '今天想约什么局？',
+  greetingTemplates: {
+    lateNight: '夜深了，{nickname}～',
+    morning: '早上好，{nickname}！',
+    forenoon: '上午好，{nickname}！',
+    noon: '中午好，{nickname}！',
+    afternoon: '下午好，{nickname}！',
+    evening: '晚上好，{nickname}！',
+    night: '夜深了，{nickname}～',
+  },
+};
+
+const DEFAULT_WELCOME_UI_CONFIG: WelcomeUiConfig = {
+  sectionTitles: {
+    suggestions: '快速组局',
+    explore: '探索附近',
+  },
+  exploreTemplates: {
+    label: '看看{locationName}有什么局',
+    prompt: '看看{locationName}附近有什么活动',
+  },
+  suggestionItems: [
+    { icon: '🍜', label: '约饭局', prompt: '帮我组一个吃饭的局' },
+    { icon: '🎮', label: '打游戏', prompt: '想找人一起打游戏' },
+    { icon: '🏃', label: '运动', prompt: '想找人一起运动' },
+    { icon: '☕', label: '喝咖啡', prompt: '想约人喝咖啡聊天' },
+  ],
+  quickPrompts: [
+    { icon: '🗓️', text: '周末附近有什么活动？', prompt: '周末附近有什么活动' },
+    { icon: '🤝', text: '帮我找个运动搭子', prompt: '帮我找个运动搭子' },
+    { icon: '🎉', text: '想组个周五晚的局', prompt: '想组个周五晚的局' },
+  ],
+  bottomQuickActions: ['快速组局', '找搭子', '附近活动', '我的草稿'],
+  profileHints: {
+    low: '补充偏好后，小聚推荐会更准',
+    medium: '社交画像正在完善中，继续聊聊你的习惯',
+    high: '社交画像已较完整，可直接让小聚给你安排',
+  },
+};
+
+function normalizeWelcomeCopyConfig(raw: unknown): WelcomeCopyConfig {
+  if (!raw || typeof raw !== 'object') {
+    return DEFAULT_WELCOME_COPY_CONFIG;
+  }
+
+  const config = raw as Partial<WelcomeCopyConfig> & {
+    greetingTemplates?: Partial<Record<WelcomeGreetingPeriod, unknown>>;
+  };
+
+  const greetingTemplates = { ...DEFAULT_WELCOME_COPY_CONFIG.greetingTemplates };
+  if (config.greetingTemplates && typeof config.greetingTemplates === 'object') {
+    for (const key of Object.keys(greetingTemplates) as WelcomeGreetingPeriod[]) {
+      const next = config.greetingTemplates[key];
+      if (typeof next === 'string' && next.trim()) {
+        greetingTemplates[key] = next.trim();
+      }
+    }
+  }
+
+  return {
+    fallbackNickname:
+      typeof config.fallbackNickname === 'string' && config.fallbackNickname.trim()
+        ? config.fallbackNickname.trim()
+        : DEFAULT_WELCOME_COPY_CONFIG.fallbackNickname,
+    subGreeting:
+      typeof config.subGreeting === 'string' && config.subGreeting.trim()
+        ? config.subGreeting.trim()
+        : DEFAULT_WELCOME_COPY_CONFIG.subGreeting,
+    greetingTemplates,
+  };
+}
+
+function normalizeWelcomeUiConfig(raw: unknown): WelcomeUiConfig {
+  if (!raw || typeof raw !== 'object') {
+    return DEFAULT_WELCOME_UI_CONFIG;
+  }
+
+  const config = raw as Partial<WelcomeUiConfig> & {
+    sectionTitles?: Partial<Record<'suggestions' | 'explore', unknown>>;
+    exploreTemplates?: Partial<Record<'label' | 'prompt', unknown>>;
+    suggestionItems?: unknown;
+    quickPrompts?: unknown;
+    bottomQuickActions?: unknown;
+    profileHints?: Partial<Record<'low' | 'medium' | 'high', unknown>>;
+  };
+
+  const suggestionItems = Array.isArray(config.suggestionItems)
+    ? config.suggestionItems
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null;
+        const record = item as Partial<{ icon: unknown; label: unknown; prompt: unknown }>;
+        if (
+          typeof record.icon !== 'string' ||
+          typeof record.label !== 'string' ||
+          typeof record.prompt !== 'string'
+        ) {
+          return null;
+        }
+        return {
+          icon: record.icon.trim(),
+          label: record.label.trim(),
+          prompt: record.prompt.trim(),
+        };
+      })
+      .filter((item): item is { icon: string; label: string; prompt: string } => Boolean(item?.label && item.prompt))
+    : [];
+
+  const quickPrompts = Array.isArray(config.quickPrompts)
+    ? config.quickPrompts
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null;
+        const record = item as Partial<{ icon: unknown; text: unknown; prompt: unknown }>;
+        if (
+          typeof record.icon !== 'string' ||
+          typeof record.text !== 'string' ||
+          typeof record.prompt !== 'string'
+        ) {
+          return null;
+        }
+        return {
+          icon: record.icon.trim(),
+          text: record.text.trim(),
+          prompt: record.prompt.trim(),
+        };
+      })
+      .filter((item): item is QuickPrompt => Boolean(item?.text && item.prompt))
+    : [];
+
+  const bottomQuickActions = Array.isArray(config.bottomQuickActions)
+    ? config.bottomQuickActions
+      .map((item) => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean)
+    : [];
+
+  const profileHints = {
+    low:
+      typeof config.profileHints?.low === 'string' && config.profileHints.low.trim()
+        ? config.profileHints.low.trim()
+        : DEFAULT_WELCOME_UI_CONFIG.profileHints.low,
+    medium:
+      typeof config.profileHints?.medium === 'string' && config.profileHints.medium.trim()
+        ? config.profileHints.medium.trim()
+        : DEFAULT_WELCOME_UI_CONFIG.profileHints.medium,
+    high:
+      typeof config.profileHints?.high === 'string' && config.profileHints.high.trim()
+        ? config.profileHints.high.trim()
+        : DEFAULT_WELCOME_UI_CONFIG.profileHints.high,
+  };
+
+  const sectionTitles = {
+    suggestions:
+      typeof config.sectionTitles?.suggestions === 'string' && config.sectionTitles.suggestions.trim()
+        ? config.sectionTitles.suggestions.trim()
+        : DEFAULT_WELCOME_UI_CONFIG.sectionTitles.suggestions,
+    explore:
+      typeof config.sectionTitles?.explore === 'string' && config.sectionTitles.explore.trim()
+        ? config.sectionTitles.explore.trim()
+        : DEFAULT_WELCOME_UI_CONFIG.sectionTitles.explore,
+  };
+
+  const exploreTemplates = {
+    label:
+      typeof config.exploreTemplates?.label === 'string' && config.exploreTemplates.label.trim()
+        ? config.exploreTemplates.label.trim()
+        : DEFAULT_WELCOME_UI_CONFIG.exploreTemplates.label,
+    prompt:
+      typeof config.exploreTemplates?.prompt === 'string' && config.exploreTemplates.prompt.trim()
+        ? config.exploreTemplates.prompt.trim()
+        : DEFAULT_WELCOME_UI_CONFIG.exploreTemplates.prompt,
+  };
+
+  return {
+    sectionTitles,
+    exploreTemplates,
+    suggestionItems: suggestionItems.length ? suggestionItems : DEFAULT_WELCOME_UI_CONFIG.suggestionItems,
+    quickPrompts: quickPrompts.length ? quickPrompts : DEFAULT_WELCOME_UI_CONFIG.quickPrompts,
+    bottomQuickActions: bottomQuickActions.length ? bottomQuickActions : DEFAULT_WELCOME_UI_CONFIG.bottomQuickActions,
+    profileHints,
+  };
+}
+
+function resolveWelcomePeriod(hour: number): WelcomeGreetingPeriod {
+  if (hour < 6) return 'lateNight';
+  if (hour < 9) return 'morning';
+  if (hour < 12) return 'forenoon';
+  if (hour < 14) return 'noon';
+  if (hour < 18) return 'afternoon';
+  if (hour < 22) return 'evening';
+  return 'night';
+}
+
+function renderTemplate(template: string, vars: Record<string, string>): string {
+  let output = template;
+  for (const [key, value] of Object.entries(vars)) {
+    output = output.replaceAll(`{${key}}`, value);
+  }
+  return output;
+}
+
+function renderWelcomeTemplate(template: string, nickname: string): string {
+  return renderTemplate(template, {
+    nickname,
+    name: nickname,
+  });
+}
+
+export function generateGreeting(
+  nickname: string | null,
+  config: WelcomeCopyConfig = DEFAULT_WELCOME_COPY_CONFIG,
+): string {
+  const hour = new Date().getHours();
+  const name = nickname?.trim() || config.fallbackNickname;
+  const period = resolveWelcomePeriod(hour);
+  return renderWelcomeTemplate(config.greetingTemplates[period], name);
 }
 
 export async function getWelcomeCard(
@@ -1486,7 +1734,11 @@ export async function getWelcomeCard(
   nickname: string | null,
   location: { lat: number; lng: number } | null
 ): Promise<WelcomeResponse> {
-  const greeting = generateGreeting(nickname);
+  const welcomeCopyRaw = await getConfigValue<unknown>('welcome.copy', DEFAULT_WELCOME_COPY_CONFIG);
+  const welcomeCopy = normalizeWelcomeCopyConfig(welcomeCopyRaw);
+  const welcomeUiRaw = await getConfigValue<unknown>('welcome.ui', DEFAULT_WELCOME_UI_CONFIG);
+  const welcomeUi = normalizeWelcomeUiConfig(welcomeUiRaw);
+  const greeting = generateGreeting(nickname, welcomeCopy);
   const sections: WelcomeSection[] = [];
 
   // 社交档案（已登录用户）
@@ -1526,13 +1778,13 @@ export async function getWelcomeCard(
   const suggestions: WelcomeSection = {
     id: 'suggestions',
     icon: '💡',
-    title: '快速组局',
-    items: [
-      { type: 'suggestion', icon: '🍜', label: '约饭局', prompt: '帮我组一个吃饭的局' },
-      { type: 'suggestion', icon: '🎮', label: '打游戏', prompt: '想找人一起打游戏' },
-      { type: 'suggestion', icon: '🏃', label: '运动', prompt: '想找人一起运动' },
-      { type: 'suggestion', icon: '☕', label: '喝咖啡', prompt: '想约人喝咖啡聊天' },
-    ],
+    title: welcomeUi.sectionTitles.suggestions,
+    items: welcomeUi.suggestionItems.map((item) => ({
+      type: 'suggestion' as const,
+      icon: item.icon,
+      label: item.label,
+      prompt: item.prompt,
+    })),
   };
   sections.push(suggestions);
 
@@ -1542,13 +1794,13 @@ export async function getWelcomeCard(
     const explore: WelcomeSection = {
       id: 'explore',
       icon: '📍',
-      title: '探索附近',
+      title: welcomeUi.sectionTitles.explore,
       items: [
         {
           type: 'explore',
           icon: '🔍',
-          label: `看看${locationName}有什么局`,
-          prompt: `看看${locationName}附近有什么活动`,
+          label: renderTemplate(welcomeUi.exploreTemplates.label, { locationName, location: locationName }),
+          prompt: renderTemplate(welcomeUi.exploreTemplates.prompt, { locationName, location: locationName }),
           context: { locationName, lat: location.lat, lng: location.lng },
         },
       ],
@@ -1557,18 +1809,18 @@ export async function getWelcomeCard(
   }
 
   // 快捷入口（v4.4 新增）
-  const quickPrompts = [
-    { icon: '🗓️', text: '周末附近有什么活动？', prompt: '周末附近有什么活动' },
-    { icon: '🤝', text: '帮我找个运动搭子', prompt: '帮我找个运动搭子' },
-    { icon: '🎉', text: '想组个周五晚的局', prompt: '想组个周五晚的局' },
-  ];
+  const quickPrompts = welcomeUi.quickPrompts;
 
   return {
     greeting,
-    subGreeting: '想约点什么？',
+    subGreeting: welcomeCopy.subGreeting,
     sections,
     socialProfile,
     quickPrompts,
+    ui: {
+      bottomQuickActions: welcomeUi.bottomQuickActions,
+      profileHints: welcomeUi.profileHints,
+    },
   };
 }
 

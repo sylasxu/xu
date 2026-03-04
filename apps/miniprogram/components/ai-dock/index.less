@@ -14,10 +14,10 @@
   right: 32rpx;
   z-index: 100;
   display: flex;
-  align-items: center;
-  gap: @spacing-2;
+  flex-direction: column;
+  align-items: stretch;
+  gap: @spacing-1;
   padding: @spacing-2 @spacing-3;
-  min-height: 96rpx;
   background: var(--bg-card, @bg-card);
   border-radius: var(--radius-xl, @rounded-xl);  // 48rpx 胶囊形
   box-shadow: var(--shadow-lg, @shadow-lg);
@@ -44,6 +44,7 @@
   
   // 聚焦状态
   &.focused {
+    padding-bottom: @spacing-2;
     box-shadow: var(--shadow-xl, @shadow-xl);
     
     &::before {
@@ -60,6 +61,13 @@
     opacity: 0.5;
     pointer-events: none;
   }
+}
+
+.dock-main-row {
+  display: flex;
+  align-items: center;
+  gap: @spacing-2;
+  width: 100%;
 }
 
 // 快捷按钮区域
@@ -169,6 +177,41 @@
   }
 }
 
+.dock-secondary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0 @spacing-1;
+}
+
+.consultant-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: @spacing-1;
+  height: 52rpx;
+  padding: 0 @spacing-2;
+  background: var(--bg-input, @bg-input);
+  border: 1rpx solid var(--border-default, @border-default);
+  border-radius: var(--radius-full, @rounded-full);
+  color: var(--text-secondary, @text-secondary);
+}
+
+.consultant-text {
+  font-size: @text-sm;
+}
+
+.profile-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4rpx;
+  color: var(--text-secondary, @text-secondary);
+}
+
+.profile-text {
+  font-size: @text-sm;
+}
+
 // 深色模式
 @media (prefers-color-scheme: dark) {
   .ai-dock {
@@ -211,5 +254,15 @@
   
   .dock-placeholder {
     color: var(--text-placeholder, @text-placeholder-dark);
+  }
+
+  .consultant-chip {
+    background: var(--bg-input, @bg-input-dark);
+    border-color: var(--border-default, @border-default-dark);
+    color: var(--text-secondary, @text-secondary-dark);
+  }
+
+  .profile-link {
+    color: var(--text-secondary, @text-secondary-dark);
   }
 }

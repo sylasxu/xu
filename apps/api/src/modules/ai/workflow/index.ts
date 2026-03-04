@@ -54,9 +54,6 @@ export {
 export type {
   PartnerMatchingState,
   PartnerMatchingQuestion,
-  // Deprecated aliases
-  BrokerState,
-  BrokerQuestion,
 } from './partner-matching';
 export {
   shouldStartPartnerMatching,
@@ -71,13 +68,4 @@ export {
   persistPartnerMatchingState,
   recoverPartnerMatchingState,
   clearPartnerMatchingState,
-  // Deprecated aliases
-  shouldEnterBrokerMode,
-  createBrokerState,
-  updateBrokerState,
-  pauseBrokerState,
-  completeBrokerState,
-  persistBrokerState,
-  recoverBrokerState,
-  clearBrokerState,
 } from './partner-matching';

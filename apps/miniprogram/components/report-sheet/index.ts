@@ -53,13 +53,6 @@ const REASON_OPTIONS: ReasonOption[] = [
   { value: 'other', label: '其他' },
 ]
 
-// 举报类型标题映射
-const TYPE_TITLES: Record<ReportType, string> = {
-  activity: '举报活动',
-  message: '举报消息',
-  user: '举报用户',
-}
-
 Component({
   options: {
     styleIsolation: 'apply-shared',
@@ -99,13 +92,6 @@ Component({
     },
   },
 
-  computed: {
-    /** 弹窗标题 */
-    title(): string {
-      return TYPE_TITLES[this.data.type as ReportType] || '举报'
-    },
-  },
-
   methods: {
     /** 选择举报原因 */
     onReasonChange(e: WechatMiniprogram.CustomEvent) {
@@ -124,7 +110,8 @@ Component({
 
     /** 提交举报 (Requirements: 7.5, 7.6) */
     async onSubmit() {
-      const { type, targetId, selectedReason, description, submitting } = this.data
+      const { selectedReason, description, submitting } = this.data
+      const { type, targetId } = this.properties as unknown as ReportSheetProps
 
       if (submitting) return
 
@@ -143,13 +130,14 @@ Component({
 
       try {
         const response = await postReports({
-          type: type as ReportType,
+          type,
           reason: selectedReason,
           targetId,
           description: description || undefined,
         })
 
-        if (response.status === 200 || response.status === 201) {
+        const statusCode = Number(response.status)
+        if (statusCode >= 200 && statusCode < 300) {
           // 触感反馈
           wx.vibrateShort({ type: 'light' })
 

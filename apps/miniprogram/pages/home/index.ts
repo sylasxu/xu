@@ -8,15 +8,14 @@
  * - 集成 useChatStore（类似 @ai-sdk/react 的 useChat）
  * - 实现空气感渐变背景
  */
-import { useChatStore, type UIMessage, type WidgetPart, getTextContent, getWidgetPart } from '../../src/stores/chat'
+import { useChatStore, type UIMessage } from '../../src/stores/chat'
 import { useHomeStore } from '../../src/stores/home'
 import { useAppStore } from '../../src/stores/app'
 import { useUserStore } from '../../src/stores/user'
-import { postActivitiesByIdPublish } from '../../src/api/endpoints/activities/activities'
 import { getWelcomeCard, getUserLocation, type WelcomeResponse, type QuickItem } from '../../src/services/welcome'
-import type { ShareActivityData, SendEventDetail, SendMessageEventDetail, DraftContext } from '../../src/types/global'
+import type { ShareActivityData, SendEventDetail } from '../../src/types/global'
 import { getHotKeywords } from '../../src/api/endpoints/hot-keywords/hot-keywords'
-import type { HotKeywordsListResponseDataItem } from '../../src/api/model'
+import type { HotKeywordsListResponseItemsItem } from '../../src/api/model'
 
 // 页面数据类型
 interface PageData {
@@ -37,7 +36,7 @@ interface PageData {
   isWelcomeLoading: boolean
   
   // 热词列表 (v4.7 全局关键词系统)
-  hotKeywords: HotKeywordsListResponseDataItem[]
+  hotKeywords: HotKeywordsListResponseItemsItem[]
 }
 
 Page<PageData, WechatMiniprogram.Page.CustomOption>({
@@ -175,13 +174,15 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
       const response = await getHotKeywords({ limit: 5 })
       
       if (response.status === 200) {
-        this.setData({ hotKeywords: response.data.data })
+        this.setData({ hotKeywords: response.data.items })
         
         // 埋点：记录热词曝光事件 - Requirements: 3.9
-        if (response.data.data.length > 0) {
+        if (response.data.items.length > 0) {
           wx.reportEvent('hot_chip_show', {
-            keyword_count: response.data.data.length,
-            keywords: response.data.data.map(k => k.keyword).join(','),
+            keyword_count: response.data.items.length,
+            keywords: response.data.items
+              .map((k: HotKeywordsListResponseItemsItem) => k.keyword)
+              .join(','),
           })
         }
       }
@@ -222,6 +223,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
         sections: welcomeData.sections,
         socialProfile: welcomeData.socialProfile,
         quickPrompts: welcomeData.quickPrompts,
+        ui: welcomeData.ui,
       })
     } catch (error) {
       console.error('[Home] Failed to load welcome card:', error)
@@ -262,17 +264,6 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     chatStore.sendMessage(text)
   },
 
-  /**
-   * 处理 Widget_Draft 的 sendMessage 事件（多轮对话）
-   */
-  onDraftSendMessage(e: WechatMiniprogram.CustomEvent<SendMessageEventDetail>) {
-    const { text, draftContext } = e.detail
-    if (!text?.trim()) return
-    
-    const chatStore = useChatStore.getState()
-    chatStore.sendMessage(text, { draftContext })
-  },
-
   onParse(_e: WechatMiniprogram.CustomEvent<{ text: string }>) {
     // 防抖已在 ai-dock 组件中处理
   },
@@ -311,70 +302,46 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     wx.navigateTo({ url: '/subpackages/activity/list/index?type=joined' })
   },
 
-  async onDraftConfirm(e: WechatMiniprogram.CustomEvent<{ draft: any }>) {
-    const { draft } = e.detail
-    const userStore = useUserStore.getState()
-    if (!userStore.user?.phoneNumber) {
-      const appStore = useAppStore.getState()
-      appStore.showAuthSheet({ type: 'publish', payload: { draft } })
-      return
+  resolveSlotFromStartAt(startAt: string): string {
+    if (!startAt) {
+      return 'fri_20_00'
     }
-    await this.publishDraftActivity(draft)
+
+    const date = new Date(startAt)
+    if (Number.isNaN(date.getTime())) {
+      return 'fri_20_00'
+    }
+
+    const hour = date.getHours()
+    if (hour <= 19) {
+      return 'fri_19_00'
+    }
+
+    if (hour >= 21) {
+      return 'fri_21_00'
+    }
+
+    return 'fri_20_00'
   },
 
-  async publishDraftActivity(draft: any) {
-    if (!draft?.activityId) {
-      wx.showToast({ title: '活动数据异常', icon: 'none' })
-      return
+  buildPublishPayloadFromDraft(draft: any): Record<string, unknown> {
+    const location = Array.isArray(draft?.location) ? draft.location : [106.52988, 29.58567]
+    const [lng, lat] = location
+
+    return {
+      activityId: draft?.activityId || '',
+      title: draft?.title || '周五活动局',
+      type: draft?.type || 'other',
+      activityType: draft?.type || 'other',
+      startAt: draft?.startAt || '2026-03-06T20:00:00+08:00',
+      locationName: draft?.locationName || '观音桥',
+      locationHint: draft?.locationHint || `${draft?.locationName || '观音桥'}商圈`,
+      maxParticipants: draft?.maxParticipants || 6,
+      currentParticipants: draft?.currentParticipants || 1,
+      lat: Number(lat) || 29.58567,
+      lng: Number(lng) || 106.52988,
+      slot: this.resolveSlotFromStartAt(draft?.startAt || ''),
     }
-
-    wx.showLoading({ title: '发布中...' })
-
-    try {
-      const response = await postActivitiesByIdPublish(draft.activityId, {})
-
-      if (response.status === 200) {
-        wx.hideLoading()
-        const chatStore = useChatStore.getState()
-        const appStore = useAppStore.getState()
-        
-        const activityData = {
-          id: draft.activityId,
-          title: draft.title,
-          type: draft.type,
-          startAt: draft.startAt,
-          location: draft.location,
-          locationName: draft.locationName,
-          locationHint: draft.locationHint,
-          maxParticipants: draft.maxParticipants || 4,
-          currentParticipants: 1,
-          shareTitle: `🔥 ${draft.title}，快来！`,
-        }
-
-        // 使用 useChatStore 添加 Share Widget
-        chatStore.addWidgetMessage('share', activityData)
-
-        appStore.showShareGuide({
-          activityId: draft.activityId,
-          title: draft.title,
-          locationName: draft.locationName || draft.locationHint || '活动地点',
-        })
-
-        wx.showToast({ title: '搞定！快分享给朋友吧', icon: 'success' })
-      } else {
-        wx.hideLoading()
-        const errorData = response.data as { msg?: string }
-        wx.showToast({ title: errorData?.msg || '发布失败', icon: 'none' })
-      }
-    } catch (error: any) {
-      wx.hideLoading()
-      console.error('[Home] Publish draft failed:', error)
-      wx.showToast({ title: error?.message || '网络有点慢，再试一次？', icon: 'none' })
-    }
-  },
-
-  onDraftAdjustLocation(_e: WechatMiniprogram.CustomEvent<{ draft: any }>) {
-    // 由 widget-draft 组件内部处理跳转
   },
 
   onExploreExpandMap(_e: WechatMiniprogram.CustomEvent<{ results: any[]; center: any }>) {
@@ -385,11 +352,19 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     this.loadUserInfo()
   },
 
-  async onPendingAction(e: WechatMiniprogram.CustomEvent<{ type: string; payload: any }>) {
+  onPendingAction(e: WechatMiniprogram.CustomEvent<{ type: string; payload: any }>) {
     const { type, payload } = e.detail
-    if (type === 'publish' && payload?.draft) {
-      await this.publishDraftActivity(payload.draft)
+    if (type !== 'publish' || !payload?.draft) {
+      return
     }
+
+    const chatStore = useChatStore.getState()
+    chatStore.sendAction({
+      action: 'confirm_publish',
+      payload: this.buildPublishPayloadFromDraft(payload.draft),
+      source: 'auth_sheet',
+      originalText: '确认发布',
+    })
   },
 
   shareActivityData: null as ShareActivityData | null,
@@ -442,9 +417,13 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     selectedOption: { label: string; value: string };
     collectedInfo?: { location?: string; type?: string };
   }>) {
-    const { selectedOption } = e.detail
-    const chatStore = useChatStore.getState()
-    chatStore.sendMessage(selectedOption.label)
+    // Widget 内部已通过 sendAction 发送结构化请求，这里仅保留事件用于埋点/扩展。
+    const { selectedOption, questionType } = e.detail
+    wx.reportEvent('ask_preference_select', {
+      question_type: questionType,
+      option_label: selectedOption?.label || '',
+      option_value: selectedOption?.value || '',
+    })
   },
 
   /**
@@ -454,8 +433,10 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     questionType: 'location' | 'type';
     collectedInfo?: { location?: string; type?: string };
   }>) {
-    const chatStore = useChatStore.getState()
-    chatStore.sendMessage('随便，你推荐吧')
+    // Widget 内部已通过 sendAction 发送结构化请求，这里仅保留埋点。
+    wx.reportEvent('ask_preference_skip', {
+      source: 'widget_ask_preference',
+    })
   },
 
   onNetworkRetry() {
@@ -466,10 +447,10 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
    * 处理热词点击 - Requirements: 3.5, 3.6, 3.11
    */
   onHotChipClick(e: WechatMiniprogram.CustomEvent<{ id: string; keyword: string }>) {
-    const { id, keyword } = e.detail
+    const { keyword } = e.detail
     
-    // 发送消息到 AI，并传递 keywordId 到 metadata
+    // 发送消息到 AI
     const chatStore = useChatStore.getState()
-    chatStore.sendMessage(keyword, { keywordId: id })
+    chatStore.sendMessage(keyword)
   },
 })

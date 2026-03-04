@@ -12,6 +12,7 @@ export type Notification = NotificationListResponse['items'] extends (infer T)[]
 
 // 通知筛选参数类型 (前端特有，允许手动定义)
 export interface NotificationFilters {
+  userId: string
   page?: number
   limit?: number
   type?: string
@@ -26,13 +27,13 @@ const notificationKeys = {
 }
 
 // 获取通知列表
-export function useNotificationsList(filters: NotificationFilters = {}) {
-  const { page = 1, limit = 10, type } = filters
+export function useNotificationsList(filters: NotificationFilters) {
+  const { userId, page = 1, limit = 10, type } = filters
 
   return useQuery({
-    queryKey: notificationKeys.list({ page, limit, type }),
+    queryKey: notificationKeys.list({ userId, page, limit, type }),
     queryFn: async () => {
-      const query: Record<string, unknown> = { scope: 'all', page, limit }
+      const query: Record<string, unknown> = { userId, page, limit }
       if (type && type !== 'all') query.type = type
       const result = await unwrap(api.notifications.get({ query }))
       return result

@@ -50,6 +50,7 @@ export interface WelcomeResponse {
   socialProfile?: SocialProfile;
   quickPrompts: QuickPrompt[];
   ui?: {
+    composerPlaceholder?: string;
     bottomQuickActions?: string[];
     profileHints?: {
       low?: string;

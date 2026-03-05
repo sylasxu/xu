@@ -17,6 +17,8 @@ import type { ShareActivityData, SendEventDetail } from '../../src/types/global'
 import { getHotKeywords } from '../../src/api/endpoints/hot-keywords/hot-keywords'
 import type { HotKeywordsListResponseItemsItem } from '../../src/api/model'
 
+const DEFAULT_COMPOSER_PLACEHOLDER = '你想找什么活动？'
+
 // 页面数据类型
 interface PageData {
   // 从 useChatStore 同步
@@ -34,6 +36,7 @@ interface PageData {
   // 欢迎卡片 (v3.10 新结构)
   welcomeData: WelcomeResponse | null
   isWelcomeLoading: boolean
+  composerPlaceholder: string
   
   // 热词列表 (v4.7 全局关键词系统)
   hotKeywords: HotKeywordsListResponseItemsItem[]
@@ -51,6 +54,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     scrollToView: '',
     welcomeData: null,
     isWelcomeLoading: false,
+    composerPlaceholder: DEFAULT_COMPOSER_PLACEHOLDER,
     hotKeywords: [],
   },
 
@@ -209,10 +213,16 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
       const welcomeData = await getWelcomeCard(
         this.userLocation ? { lat: this.userLocation.lat, lng: this.userLocation.lng } : undefined
       )
+
+      const composerPlaceholder =
+        typeof welcomeData.ui?.composerPlaceholder === 'string' && welcomeData.ui.composerPlaceholder.trim()
+          ? welcomeData.ui.composerPlaceholder.trim()
+          : DEFAULT_COMPOSER_PLACEHOLDER
       
       this.setData({ 
         welcomeData,
         isWelcomeLoading: false,
+        composerPlaceholder,
       })
       
       // 使用 useChatStore 添加 Dashboard Widget (v4.4 新结构)

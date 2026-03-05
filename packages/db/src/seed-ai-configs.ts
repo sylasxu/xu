@@ -21,6 +21,7 @@ const welcomeCopyConfig = {
 };
 
 const welcomeUiConfig = {
+  composerPlaceholder: '你想找什么活动？',
   sectionTitles: {
     suggestions: '快速组局',
     explore: '探索附近',

@@ -8,7 +8,8 @@
  */
 
 import { Elysia, t } from 'elysia';
-import { basePlugins, verifyAuth } from '../../../setup';
+import { basePlugins } from '../../../setup';
+import { requireCapability } from '../policy/capability';
 import {
   getAllConfigs,
   getConfigValue,
@@ -26,10 +27,14 @@ export const configController = new Elysia({ prefix: '/ai/configs' })
   .get(
     '/',
     async ({ set, jwt, headers }) => {
-      const user = await verifyAuth(jwt, headers);
-      if (!user) {
-        set.status = 401;
-        return { code: 401, msg: '未授权' } satisfies ErrorResponse;
+      const { error } = await requireCapability({
+        capability: 'ai.config.read',
+        jwt,
+        headers,
+        set,
+      });
+      if (error) {
+        return error;
       }
 
       try {
@@ -53,10 +58,14 @@ export const configController = new Elysia({ prefix: '/ai/configs' })
   .get(
     '/:configKey',
     async ({ params, set, jwt, headers }) => {
-      const user = await verifyAuth(jwt, headers);
-      if (!user) {
-        set.status = 401;
-        return { code: 401, msg: '未授权' } satisfies ErrorResponse;
+      const { error } = await requireCapability({
+        capability: 'ai.config.read',
+        jwt,
+        headers,
+        set,
+      });
+      if (error) {
+        return error;
       }
 
       try {
@@ -88,14 +97,22 @@ export const configController = new Elysia({ prefix: '/ai/configs' })
   .put(
     '/:configKey',
     async ({ params, body, set, jwt, headers }) => {
-      const user = await verifyAuth(jwt, headers);
-      if (!user) {
+      const { actorContext, error } = await requireCapability({
+        capability: 'ai.config.write',
+        jwt,
+        headers,
+        set,
+      });
+      if (error) {
+        return error;
+      }
+      if (!actorContext?.userId) {
         set.status = 401;
         return { code: 401, msg: '未授权' } satisfies ErrorResponse;
       }
 
       try {
-        const result = await setConfigValue(params.configKey, body.configValue, user.id);
+        const result = await setConfigValue(params.configKey, body.configValue, actorContext.userId);
         return {
           configKey: params.configKey,
           configValue: body.configValue,
@@ -125,10 +142,14 @@ export const configController = new Elysia({ prefix: '/ai/configs' })
   .get(
     '/:configKey/history',
     async ({ params, set, jwt, headers }) => {
-      const user = await verifyAuth(jwt, headers);
-      if (!user) {
-        set.status = 401;
-        return { code: 401, msg: '未授权' } satisfies ErrorResponse;
+      const { error } = await requireCapability({
+        capability: 'ai.config.read',
+        jwt,
+        headers,
+        set,
+      });
+      if (error) {
+        return error;
       }
 
       try {
@@ -155,14 +176,22 @@ export const configController = new Elysia({ prefix: '/ai/configs' })
   .post(
     '/:configKey/rollback',
     async ({ params, body, set, jwt, headers }) => {
-      const user = await verifyAuth(jwt, headers);
-      if (!user) {
+      const { actorContext, error } = await requireCapability({
+        capability: 'ai.config.write',
+        jwt,
+        headers,
+        set,
+      });
+      if (error) {
+        return error;
+      }
+      if (!actorContext?.userId) {
         set.status = 401;
         return { code: 401, msg: '未授权' } satisfies ErrorResponse;
       }
 
       try {
-        const result = await rollbackConfig(params.configKey, body.targetVersion, user.id);
+        const result = await rollbackConfig(params.configKey, body.targetVersion, actorContext.userId);
         if (!result) {
           set.status = 404;
           return { code: 404, msg: '目标版本不存在' } satisfies ErrorResponse;

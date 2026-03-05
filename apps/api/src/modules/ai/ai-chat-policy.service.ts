@@ -1,12 +1,18 @@
 import { randomUUID } from 'crypto';
 import type {
-  GenUIAlertBlock,
   GenUIBlock,
   GenUIChoiceOption,
   GenUIRequest,
   GenUITracePayload,
   GenUITurnEnvelope,
 } from '@juchang/genui-contract';
+import {
+  createChoiceBlock,
+  createEntityCardBlock,
+  createCtaGroupBlock,
+  createAlertBlock,
+  pushBlock,
+} from './shared/genui-blocks';
 
 interface ViewerContext {
   id: string;
@@ -20,10 +26,6 @@ interface ApplyAiChatTurnPolicyParams {
   traces: GenUITracePayload[];
 }
 
-function createBlockId(): string {
-  return `block_${randomUUID().slice(0, 8)}`;
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -32,94 +34,13 @@ function toStringValue(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
 }
 
-function createChoiceBlock(params: {
-  question: string;
-  options: GenUIChoiceOption[];
-  dedupeKey: string;
-  traceRef: string;
-}): GenUIBlock {
-  return {
-    blockId: createBlockId(),
-    type: 'choice',
-    question: params.question,
-    options: params.options,
-    dedupeKey: params.dedupeKey,
-    replacePolicy: 'replace',
-    meta: { traceRef: params.traceRef },
-  };
-}
-
-function createEntityCardBlock(params: {
-  title: string;
-  fields: Record<string, unknown>;
-  dedupeKey: string;
-  traceRef: string;
-}): GenUIBlock {
-  return {
-    blockId: createBlockId(),
-    type: 'entity-card',
-    title: params.title,
-    fields: params.fields,
-    dedupeKey: params.dedupeKey,
-    replacePolicy: 'replace',
-    meta: { traceRef: params.traceRef },
-  };
-}
-
-function createCtaGroupBlock(params: {
-  items: Array<{ label: string; action: string; params?: Record<string, unknown> }>;
-  dedupeKey: string;
-  traceRef: string;
-}): GenUIBlock {
-  return {
-    blockId: createBlockId(),
-    type: 'cta-group',
-    items: params.items,
-    dedupeKey: params.dedupeKey,
-    replacePolicy: 'replace',
-    meta: { traceRef: params.traceRef },
-  };
-}
-
-function createAlertBlock(params: {
-  level: GenUIAlertBlock['level'];
-  message: string;
-  dedupeKey: string;
-  traceRef: string;
-}): GenUIBlock {
-  return {
-    blockId: createBlockId(),
-    type: 'alert',
-    level: params.level,
-    message: params.message,
-    dedupeKey: params.dedupeKey,
-    replacePolicy: 'replace',
-    meta: { traceRef: params.traceRef },
-  };
-}
-
-function pushBlock(blocks: GenUIBlock[], block: GenUIBlock): void {
-  if (!block.dedupeKey) {
-    blocks.push(block);
-    return;
-  }
-
-  const index = blocks.findIndex((item) => item.dedupeKey === block.dedupeKey);
-  if (index >= 0) {
-    blocks[index] = block;
-    return;
-  }
-
-  blocks.push(block);
-}
-
 function isEmptyStructuredResponse(blocks: GenUIBlock[]): boolean {
   if (blocks.length !== 1) {
     return false;
   }
 
   const block = blocks[0];
-  return block.type === 'alert' && block.dedupeKey === 'empty_response';
+  return block.dedupeKey === 'empty_response';
 }
 
 function buildFallbackBlocksForInput(

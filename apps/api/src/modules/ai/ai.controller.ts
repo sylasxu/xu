@@ -1,8 +1,9 @@
 // AI Controller - vNext 统一 AI Chat 接口 (GenUI Protocol)
 // 瘦身后只保留用户端路由 + 少量 Admin 路由，子领域通过 .use() 挂载
 import { Elysia, t } from 'elysia';
-import { basePlugins, verifyAuth, verifyAdmin, AuthError } from '../../setup';
+import { basePlugins, verifyAuth } from '../../setup';
 import { aiModel, type ErrorResponse, type ConversationMessageType } from './ai.model';
+import { requireCapability } from './policy/capability';
 import {
   checkAIQuota,
   consumeAIQuota,
@@ -34,7 +35,8 @@ import { aiSessionsController } from './ai-sessions.controller';
 import { aiRagController } from './ai-rag.controller';
 import { aiMemoryController } from './ai-memory.controller';
 import { aiSecurityController } from './ai-security.controller';
-import { aiOpsController } from './ai-ops.controller';
+import { aiMetricsController } from './ai-metrics.controller';
+import { aiLegacyRoutesController } from './ai-legacy-routes.controller';
 
 const chatInputTextSchema = t.Object({
   type: t.Literal('text'),
@@ -428,18 +430,19 @@ export const aiController = new Elysia({ prefix: '/ai' })
   )
 
   // ==========================================
-  // Admin 路由（需要 verifyAdmin 权限）
+  // Admin 路由（通过 capability 鉴权）
   // ==========================================
   .guard(
     {
       async beforeHandle({ jwt, headers, set }) {
-        try {
-          await verifyAdmin(jwt, headers);
-        } catch (error) {
-          if (error instanceof AuthError) {
-            set.status = error.status;
-            return { code: error.status, msg: error.message };
-          }
+        const { error } = await requireCapability({
+          capability: 'ai.metrics.read',
+          jwt,
+          headers,
+          set,
+        });
+        if (error) {
+          return error;
         }
       },
     },
@@ -576,4 +579,5 @@ Prompt 通过 Git 版本控制，此接口为只读查看。
   .use(aiRagController)
   .use(aiMemoryController)
   .use(aiSecurityController)
-  .use(aiOpsController);
+  .use(aiMetricsController)
+  .use(aiLegacyRoutesController);

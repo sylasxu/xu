@@ -1,8 +1,9 @@
 // AI Security Controller - 安全运营（敏感词、审核、违规统计）
 // 从 ai.controller.ts 提取，所有路由需要 Admin 权限
 import { Elysia, t } from 'elysia';
-import { basePlugins, verifyAdmin, AuthError } from '../../setup';
+import { basePlugins } from '../../setup';
 import { aiModel, type ErrorResponse } from './ai.model';
+import { requireCapability } from './policy/capability';
 import {
   getSecurityOverview,
   getSensitiveWords,
@@ -14,19 +15,20 @@ import {
   rejectModeration,
   banModeration,
   getViolationStats,
-} from './ai-ops.service';
+} from './ai.service';
 
 export const aiSecurityController = new Elysia({ prefix: '/security' })
   .use(basePlugins)
   .use(aiModel)
   .onBeforeHandle(async ({ jwt, headers, set }) => {
-    try {
-      await verifyAdmin(jwt, headers);
-    } catch (error) {
-      if (error instanceof AuthError) {
-        set.status = error.status;
-        return { code: error.status, msg: error.message };
-      }
+    const { error } = await requireCapability({
+      capability: 'ai.security.word.write',
+      jwt,
+      headers,
+      set,
+    });
+    if (error) {
+      return error;
     }
   })
 
@@ -46,7 +48,7 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-Security'],
         summary: '获取安全总览',
         description: '获取今日安全指标、趋势图和护栏状态（Admin 用）。',
       },
@@ -71,7 +73,7 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-Security'],
         summary: '获取敏感词列表',
         description: '获取当前敏感词库（Admin 用）。',
       },
@@ -95,7 +97,7 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-Security'],
         summary: '添加敏感词',
         description: '添加单个敏感词到词库（Admin 用）。',
       },
@@ -123,7 +125,7 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-Security'],
         summary: '删除敏感词',
         description: '从词库中删除指定敏感词（Admin 用）。',
       },
@@ -147,7 +149,7 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-Security'],
         summary: '批量导入敏感词',
         description: '批量导入敏感词到词库（Admin 用）。',
       },
@@ -179,7 +181,7 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-Security'],
         summary: '获取审核队列',
         description: '获取待审核内容列表（Admin 用）。',
       },
@@ -209,7 +211,7 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-Security'],
         summary: '审核通过',
         description: '将指定内容标记为审核通过（Admin 用）。',
       },
@@ -238,7 +240,7 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-Security'],
         summary: '审核拒绝',
         description: '将指定内容标记为审核拒绝（Admin 用）。',
       },
@@ -267,7 +269,7 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-Security'],
         summary: '审核拒绝并封号',
         description: '将指定内容标记为审核拒绝，删除内容并封禁用户（Admin 用）。',
       },
@@ -298,7 +300,7 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-Security'],
         summary: '获取违规统计',
         description: '获取违规类型分布、趋势和高频违规用户（Admin 用）。',
       },

@@ -1,25 +1,27 @@
 // AI Memory Controller - Memory 运营管理（Admin 用）
 // 从 ai.controller.ts 提取，所有路由需要 Admin 权限
 import { Elysia, t } from 'elysia';
-import { basePlugins, verifyAdmin, AuthError } from '../../setup';
+import { basePlugins } from '../../setup';
 import { aiModel, type ErrorResponse } from './ai.model';
+import { requireCapability } from './policy/capability';
 import {
   getUserMemoryProfile,
   searchUsers,
   testMaxSim,
-} from './ai-ops.service';
+} from './ai.service';
 
 export const aiMemoryController = new Elysia({ prefix: '/memory' })
   .use(basePlugins)
   .use(aiModel)
   .onBeforeHandle(async ({ jwt, headers, set }) => {
-    try {
-      await verifyAdmin(jwt, headers);
-    } catch (error) {
-      if (error instanceof AuthError) {
-        set.status = error.status;
-        return { code: error.status, msg: error.message };
-      }
+    const { error } = await requireCapability({
+      capability: 'ai.memory.read',
+      jwt,
+      headers,
+      set,
+    });
+    if (error) {
+      return error;
     }
   })
 
@@ -41,7 +43,7 @@ export const aiMemoryController = new Elysia({ prefix: '/memory' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-Memory'],
         summary: '搜索用户',
         description: '按昵称或 ID 搜索用户（Admin 用）。',
       },
@@ -75,7 +77,7 @@ export const aiMemoryController = new Elysia({ prefix: '/memory' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-Memory'],
         summary: '获取用户画像',
         description: '获取指定用户的工作记忆和兴趣向量（Admin 用）。',
       },
@@ -108,7 +110,7 @@ export const aiMemoryController = new Elysia({ prefix: '/memory' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-Memory'],
         summary: 'MaxSim 测试',
         description: '测试用户兴趣向量与查询的 MaxSim 相似度（Admin 用）。',
       },

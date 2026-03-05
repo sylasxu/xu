@@ -23,7 +23,7 @@ let recordSecurityEventFn: ((event: {
 
 async function getRecordSecurityEvent() {
   if (!recordSecurityEventFn) {
-    const { recordSecurityEvent } = await import('../ai-ops.service');
+    const { recordSecurityEvent } = await import('../security/security.service');
     recordSecurityEventFn = recordSecurityEvent;
   }
   return recordSecurityEventFn;
@@ -224,4 +224,3 @@ export async function shouldBlock(input: string): Promise<boolean> {
   const result = await checkInput(input);
   return result.blocked;
 }
-

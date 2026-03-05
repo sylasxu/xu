@@ -937,13 +937,22 @@ type SSEEvent =
 
 ### 6.2 模块目录结构
 
+**AI 模块分层原则（v5.2）**：
+
+1. `ai.service.ts` 是编排总线（入口、串联、trace、能力门面导出）。
+2. `processors/`、`memory/`、`rag/`、`tools/`、`guardrails/`、`workflow/` 保持子域模块化。
+3. 权限统一走 `policy/actor-context.ts + policy/capability.ts`，Controller 不再散落硬编码鉴权。
+4. 禁止按消费端命名 service（如 `admin/ops/web/mp`），仅按领域能力命名。
+5. 兼容迁移期可保留旧 API 路径 alias，但新实现统一落到领域模块。
+
 ```
 apps/api/src/modules/ai/
 ├── index.ts              # 模块入口，统一导出
 ├── ai.controller.ts      # HTTP 路由控制器
 ├── ai.model.ts           # TypeBox Schema 定义
-├── ai.service.ts         # 核心服务（handleChatStream, 会话管理）
-├── chat-genui.service.ts # Chat->GenUI 适配（复用 workflow，输出 blocks/SSE）
+├── ai.service.ts         # 编排总线（handleChatStream + 子域能力门面导出）
+├── ai-chat-gateway.service.ts # Chat→GenUI 网关编排（输出 turn/blocks/SSE）
+├── ai-chat-policy.service.ts  # Chat 响应策略层（fallback/结构化块策略）
 │
 ├── processors/           # v5.1 Processor 管线架构 (纯函数)
 │   ├── index.ts          # 统一导出 + runProcessors/runPostLLMProcessors/runAsyncProcessors 编排器
@@ -961,6 +970,13 @@ apps/api/src/modules/ai/
 ├── config/               # v5.1 AI 参数配置模块 (新增)
 │   ├── config.controller.ts # 配置 CRUD + 版本历史 + 回滚 API
 │   └── config.service.ts    # 配置加载服务 (内存缓存 TTL 30s + 数据库 + 默认值降级)
+│
+├── policy/               # v5.2 统一权限策略 (新增)
+│   ├── actor-context.ts  # 标准化 actor 上下文（userId/role/scopes/source）
+│   └── capability.ts     # 能力判定与鉴权入口（requireCapability）
+│
+├── shared/               # v5.2 跨模块共享纯函数 (新增)
+│   └── genui-blocks.ts   # GenUI block 工厂与 dedupe 逻辑（gateway/policy 共用）
 │
 ├── user-action/          # v4.7 结构化用户操作模块
 │   ├── index.ts          # 模块导出

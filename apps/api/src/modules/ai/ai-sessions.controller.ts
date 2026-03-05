@@ -1,8 +1,9 @@
 // AI Sessions Controller - 会话管理（Admin 对话审计用）
 // 从 ai.controller.ts 提取，所有路由需要 Admin 权限
 import { Elysia, t } from 'elysia';
-import { basePlugins, verifyAdmin, AuthError } from '../../setup';
+import { basePlugins } from '../../setup';
 import { aiModel, type ErrorResponse } from './ai.model';
+import { requireCapability } from './policy/capability';
 import {
   listConversations,
   getConversationMessages,
@@ -15,13 +16,14 @@ export const aiSessionsController = new Elysia({ prefix: '/sessions' })
   .use(basePlugins)
   .use(aiModel)
   .onBeforeHandle(async ({ jwt, headers, set }) => {
-    try {
-      await verifyAdmin(jwt, headers);
-    } catch (error) {
-      if (error instanceof AuthError) {
-        set.status = error.status;
-        return { code: error.status, msg: error.message };
-      }
+    const { error } = await requireCapability({
+      capability: 'ai.session.evaluate',
+      jwt,
+      headers,
+      set,
+    });
+    if (error) {
+      return error;
     }
   })
 

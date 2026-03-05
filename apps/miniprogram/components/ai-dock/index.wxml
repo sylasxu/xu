@@ -1,6 +1,6 @@
 <!--
   AI Dock 组件 (Floating Capsule)
-  Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 15.1, 15.17
+  Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.7, 5.8, 15.1, 15.17
   
   Chat-First 架构的超级输入坞
   - 悬浮胶囊样式
@@ -21,23 +21,6 @@
         hover-class="action-btn--hover"
       >
         <t-icon name="file-paste" size="36rpx" />
-        <text class="action-text">粘贴</text>
-      </view>
-      
-      <!-- 语音按钮 -->
-      <view 
-        class="action-btn btn-pressable {{isRecording ? 'recording' : ''}}" 
-        bindtap="onVoiceTap"
-        hover-class="action-btn--hover"
-      >
-        <view wx:if="{{isRecording}}" class="recording-indicator">
-          <view class="recording-dot"></view>
-          <text class="recording-time">{{recordingDuration}}s</text>
-        </view>
-        <block wx:else>
-          <t-icon name="sound" size="36rpx" />
-          <text class="action-text">语音</text>
-        </block>
       </view>
     </view>
     
@@ -70,12 +53,11 @@
     
     <!-- 发送按钮 -->
     <view 
-      wx:if="{{inputValue}}"
-      class="send-btn btn-pressable" 
+      class="send-btn btn-pressable {{canSend ? 'is-ready' : 'is-disabled'}}" 
       bindtap="onSendTap"
       hover-class="send-btn--hover"
     >
-      <t-icon name="send" size="40rpx" color="#FFFFFF" />
+      <t-icon name="arrow-up" size="40rpx" color="currentColor" />
     </view>
   </view>
   

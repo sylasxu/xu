@@ -14,6 +14,13 @@ import {
   handleChatStream,
   type ChatRequest,
 } from './ai.service';
+import {
+  createChoiceBlock,
+  createEntityCardBlock,
+  createCtaGroupBlock,
+  createAlertBlock,
+  pushBlock,
+} from './shared/genui-blocks';
 
 const ID_PREFIX = {
   conversation: 'conv',
@@ -436,40 +443,6 @@ function createTextBlock(content: string, traceRef: string, dedupeKey?: string):
   };
 }
 
-function createChoiceBlock(params: {
-  question: string;
-  options: GenUIChoiceOption[];
-  dedupeKey: string;
-  traceRef: string;
-}): GenUIBlock {
-  return {
-    blockId: createId(ID_PREFIX.block),
-    type: 'choice',
-    question: params.question,
-    options: params.options,
-    dedupeKey: params.dedupeKey,
-    replacePolicy: 'replace',
-    meta: { traceRef: params.traceRef },
-  };
-}
-
-function createEntityCardBlock(params: {
-  title: string;
-  fields: Record<string, unknown>;
-  dedupeKey: string;
-  traceRef: string;
-}): GenUIBlock {
-  return {
-    blockId: createId(ID_PREFIX.block),
-    type: 'entity-card',
-    title: params.title,
-    fields: params.fields,
-    dedupeKey: params.dedupeKey,
-    replacePolicy: 'replace',
-    meta: { traceRef: params.traceRef },
-  };
-}
-
 function createListBlock(params: {
   title?: string;
   items: Record<string, unknown>[];
@@ -485,53 +458,6 @@ function createListBlock(params: {
     replacePolicy: 'replace',
     meta: { traceRef: params.traceRef },
   };
-}
-
-function createCtaGroupBlock(params: {
-  items: Array<{ label: string; action: string; params?: Record<string, unknown> }>;
-  dedupeKey: string;
-  traceRef: string;
-}): GenUIBlock {
-  return {
-    blockId: createId(ID_PREFIX.block),
-    type: 'cta-group',
-    items: params.items,
-    dedupeKey: params.dedupeKey,
-    replacePolicy: 'replace',
-    meta: { traceRef: params.traceRef },
-  };
-}
-
-function createAlertBlock(params: {
-  level: 'info' | 'warning' | 'error' | 'success';
-  message: string;
-  dedupeKey: string;
-  traceRef: string;
-}): GenUIBlock {
-  return {
-    blockId: createId(ID_PREFIX.block),
-    type: 'alert',
-    level: params.level,
-    message: params.message,
-    dedupeKey: params.dedupeKey,
-    replacePolicy: 'replace',
-    meta: { traceRef: params.traceRef },
-  };
-}
-
-function pushBlock(blocks: GenUIBlock[], block: GenUIBlock): void {
-  if (!block.dedupeKey) {
-    blocks.push(block);
-    return;
-  }
-
-  const index = blocks.findIndex((item) => item.dedupeKey === block.dedupeKey);
-  if (index >= 0) {
-    blocks[index] = block;
-    return;
-  }
-
-  blocks.push(block);
 }
 
 function hasProcessorTraceStep(
@@ -972,12 +898,11 @@ function buildBlocksFromDataStream(events: DataStreamEvent[]): {
   if (blocks.length === 0) {
     pushBlock(
       blocks,
-      createAlertBlock({
-        level: 'warning',
-        message: '这轮回复没有可渲染的结构化内容，你可以换个说法再试一次。',
-        dedupeKey: 'empty_response',
-        traceRef: 'genui_adapter',
-      })
+      createTextBlock(
+        '这个话题和组局关系不大，我先帮你聊活动相关的。你可以试试说“周末附近有什么活动？”',
+        'genui_adapter',
+        'empty_response'
+      )
     );
   }
 

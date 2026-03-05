@@ -264,6 +264,7 @@ const WelcomeResponse = t.Object({
     prompt: t.String(),
   }), { description: '快捷入口' }),
   ui: t.Optional(t.Object({
+    composerPlaceholder: t.String({ description: '输入框占位文案' }),
     bottomQuickActions: t.Array(t.String(), { description: '底部快捷操作标签' }),
     profileHints: t.Object({
       low: t.String({ description: '偏好完善度较低时文案' }),
@@ -704,8 +705,8 @@ const AIHealthMetricsResponse = t.Object({
   toolErrorTrend: t.Number(),
 });
 
-// Ops 敏感词项（数据库版）
-const OpsSensitiveWordItem = t.Object({
+// Security 敏感词项（数据库版）
+const SecuritySensitiveWordItem = t.Object({
   id: t.String(),
   word: t.String(),
   category: t.Union([t.String(), t.Null()]),
@@ -714,21 +715,21 @@ const OpsSensitiveWordItem = t.Object({
   createdAt: t.String(),
 });
 
-// Ops 敏感词列表响应（数据库版）
-const OpsSensitiveWordsDBResponse = t.Object({
-  words: t.Array(OpsSensitiveWordItem),
+// Security 敏感词列表响应（数据库版）
+const SecuritySensitiveWordsDBResponse = t.Object({
+  words: t.Array(SecuritySensitiveWordItem),
   total: t.Number(),
 });
 
-// Ops 添加敏感词响应
-const OpsAddSensitiveWordResponse = t.Object({
+// Security 添加敏感词响应
+const SecurityAddSensitiveWordResponse = t.Object({
   success: t.Boolean(),
   message: t.String(),
   id: t.Optional(t.String()),
 });
 
-// Ops 删除敏感词响应
-const OpsDeleteSensitiveWordResponse = t.Object({
+// Security 删除敏感词响应
+const SecurityDeleteSensitiveWordResponse = t.Object({
   success: t.Boolean(),
   message: t.String(),
 });
@@ -825,15 +826,19 @@ export const aiModel = new Elysia({ name: 'aiModel' })
     'ai.moderationOpResponse': ModerationOpResponse,
     'ai.violationStatsResponse': ViolationStatsResponse,
     // ==========================================
-    // Ops (v4.6 - 运营指标)
+    // Metrics & Security (v4.6 - 指标与安全持久化)
     // ==========================================
     'ai.qualityMetricsResponse': QualityMetricsResponse,
     'ai.conversionMetricsResponse': ConversionMetricsResponse,
     'ai.playgroundStatsResponse': PlaygroundStatsResponse,
     'ai.aiHealthMetricsResponse': AIHealthMetricsResponse,
-    'ai.opsSensitiveWordsDBResponse': OpsSensitiveWordsDBResponse,
-    'ai.opsAddSensitiveWordResponse': OpsAddSensitiveWordResponse,
-    'ai.opsDeleteSensitiveWordResponse': OpsDeleteSensitiveWordResponse,
+    'ai.securitySensitiveWordsDBResponse': SecuritySensitiveWordsDBResponse,
+    'ai.securityAddSensitiveWordResponse': SecurityAddSensitiveWordResponse,
+    'ai.securityDeleteSensitiveWordResponse': SecurityDeleteSensitiveWordResponse,
+    // 兼容别名：保留旧 key，避免前端一次性迁移
+    'ai.opsSensitiveWordsDBResponse': SecuritySensitiveWordsDBResponse,
+    'ai.opsAddSensitiveWordResponse': SecurityAddSensitiveWordResponse,
+    'ai.opsDeleteSensitiveWordResponse': SecurityDeleteSensitiveWordResponse,
     'ai.securityEventsResponse': SecurityEventsResponse,
     'ai.securityStatsDBResponse': SecurityStatsDBResponse,
     // ==========================================

@@ -3,12 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowUp,
-  Camera,
   ChevronRight,
   Menu,
-  Mic,
   MoreHorizontal,
-  Plus,
   QrCode,
   Sparkles,
   Volume2,
@@ -26,10 +23,8 @@ import {
 } from "@/components/ai-elements/message";
 import {
   PromptInput,
-  PromptInputButton,
   PromptInputFooter,
   PromptInputSubmit,
-  PromptInputTools,
   PromptInputTextarea,
 } from "@/components/ai-elements/prompt-input";
 import {
@@ -66,6 +61,7 @@ const DEFAULT_PROMPTS = [
 ];
 const DEFAULT_WELCOME_GREETING = "你好～";
 const DEFAULT_WELCOME_SUB_GREETING = "今天想约什么局？";
+const DEFAULT_COMPOSER_PLACEHOLDER = "你想找什么活动？";
 const DEFAULT_BOTTOM_ACTIONS: string[] = [
   "快速组局",
   "找搭子",
@@ -102,6 +98,7 @@ type WelcomeSocialProfile = {
   preferenceCompleteness: number;
 };
 type WelcomeUiPayload = {
+  composerPlaceholder: string;
   bottomQuickActions: string[];
   profileHints: {
     low: string;
@@ -258,6 +255,7 @@ function extractWelcomeGreeting(payload: unknown): { greeting: string; subGreeti
 function extractWelcomeUi(payload: unknown): WelcomeUiPayload {
   if (!isRecord(payload) || !isRecord(payload.ui)) {
     return {
+      composerPlaceholder: DEFAULT_COMPOSER_PLACEHOLDER,
       bottomQuickActions: DEFAULT_BOTTOM_ACTIONS,
       profileHints: DEFAULT_PROFILE_HINTS,
     };
@@ -285,7 +283,14 @@ function extractWelcomeUi(payload: unknown): WelcomeUiPayload {
         : DEFAULT_PROFILE_HINTS.high,
   };
 
+  const composerPlaceholder =
+    typeof payload.ui.composerPlaceholder === "string" &&
+    payload.ui.composerPlaceholder.trim()
+      ? payload.ui.composerPlaceholder.trim()
+      : DEFAULT_COMPOSER_PLACEHOLDER;
+
   return {
+    composerPlaceholder,
     bottomQuickActions: actions.length ? actions : DEFAULT_BOTTOM_ACTIONS,
     profileHints,
   };
@@ -334,6 +339,7 @@ export default function ChatPage() {
   const [welcomeGreeting, setWelcomeGreeting] = useState(DEFAULT_WELCOME_GREETING);
   const [welcomeSubGreeting, setWelcomeSubGreeting] = useState(DEFAULT_WELCOME_SUB_GREETING);
   const [welcomeUi, setWelcomeUi] = useState<WelcomeUiPayload>({
+    composerPlaceholder: DEFAULT_COMPOSER_PLACEHOLDER,
     bottomQuickActions: DEFAULT_BOTTOM_ACTIONS,
     profileHints: DEFAULT_PROFILE_HINTS,
   });
@@ -975,7 +981,12 @@ export default function ChatPage() {
                     void handleBottomAction(action);
                   }}
                   disabled={isSending}
-                  className="h-8 rounded-full border border-white/60 bg-white/88 px-3 text-xs text-[#20264f] shadow-[0_8px_16px_-14px_rgba(68,83,166,0.6)] hover:bg-white"
+                  className={cn(
+                    "h-8 rounded-full border-0 px-3 text-xs backdrop-blur-sm shadow-[0_10px_22px_-14px_rgba(82,102,191,0.34)] transition-[filter,transform] hover:brightness-[1.02] hover:-translate-y-[0.5px]",
+                    isDarkMode
+                      ? "bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.22)_0%,rgba(129,150,236,0.2)_56%,rgba(79,97,171,0.2)_100%)] text-[#e9edff]"
+                      : "bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.98)_0%,rgba(244,248,255,0.96)_54%,rgba(230,238,255,0.95)_100%)] text-[#2d396f]"
+                  )}
                 />
               ))}
             </Suggestions>
@@ -984,52 +995,55 @@ export default function ChatPage() {
           <PromptInput
             onSubmit={handleSubmit}
             className={cn(
-              "rounded-3xl border border-transparent bg-transparent p-0 has-[[data-slot=input-group-control]:focus-visible]:!ring-0 has-[[data-slot=input-group-control]:focus-visible]:!border-transparent [&_[data-slot=input-group]]:h-auto [&_[data-slot=input-group]]:rounded-[20px] [&_[data-slot=input-group]]:!border-transparent [&_[data-slot=input-group]]:px-2 [&_[data-slot=input-group]]:py-1.5 [&_[data-slot=input-group]]:shadow-[0_14px_24px_-18px_rgba(66,84,156,0.52)] [&_[data-slot=input-group]]:focus-within:!ring-0 [&_[data-slot=input-group]]:focus-within:!border-transparent",
+              "rounded-3xl border border-transparent bg-transparent p-0 has-[[data-slot=input-group-control]:focus-visible]:!ring-0 has-[[data-slot=input-group-control]:focus-visible]:!border-transparent [&_[data-slot=input-group]]:h-auto [&_[data-slot=input-group]]:rounded-[20px] [&_[data-slot=input-group]]:!border-transparent [&_[data-slot=input-group]]:px-2 [&_[data-slot=input-group]]:py-1 [&_[data-slot=input-group]]:shadow-[0_14px_24px_-18px_rgba(66,84,156,0.52)] [&_[data-slot=input-group]]:focus-within:!ring-0 [&_[data-slot=input-group]]:focus-within:!border-transparent",
               isDarkMode ? "[&_[data-slot=input-group]]:bg-[#1b244f]" : "[&_[data-slot=input-group]]:bg-white"
             )}
           >
             <PromptInputTextarea
               value={input}
-              onChange={(event) => setInput(event.target.value)}
-              onFocus={() => setIsComposerFocused(true)}
-              onBlur={() => setIsComposerFocused(false)}
-              rows={isComposerFocused ? 2 : 1}
-              placeholder="发消息或按住说话..."
+              onChange={(event) => {
+                setInput(event.target.value);
+                event.currentTarget.style.height = "0px";
+                const nextHeight = Math.min(112, Math.max(36, event.currentTarget.scrollHeight));
+                event.currentTarget.style.height = `${nextHeight}px`;
+              }}
+              onFocus={(event) => {
+                setIsComposerFocused(true);
+                event.currentTarget.style.height = "0px";
+                const nextHeight = Math.min(112, Math.max(36, event.currentTarget.scrollHeight));
+                event.currentTarget.style.height = `${nextHeight}px`;
+              }}
+              onBlur={(event) => {
+                setIsComposerFocused(false);
+                event.currentTarget.style.height = "36px";
+              }}
+              rows={1}
+              placeholder={welcomeUi.composerPlaceholder}
               disabled={isSending}
               className={cn(
-                "max-h-[116px] flex-1 border-none bg-transparent px-2 py-2 text-[16px] leading-6 focus-visible:ring-0 focus-visible:outline-none",
-                isComposerFocused ? "" : "overflow-hidden",
+                "!max-h-none !min-h-0 flex-1 border-none bg-transparent px-3 py-1.5 text-[16px] leading-5 focus-visible:ring-0 focus-visible:outline-none",
+                isComposerFocused ? "h-auto overflow-hidden" : "h-9 overflow-hidden",
                 isDarkMode ? "text-[#e9edff] placeholder:text-[#808bc1]" : "text-[#252c5b] placeholder:text-slate-400"
               )}
             />
 
             <PromptInputFooter
               align={isComposerFocused ? "block-end" : "inline-end"}
-              className={cn("items-center", isComposerFocused ? "" : "pr-1")}
+              className={cn("items-center justify-end gap-2", isComposerFocused ? "!px-2 !pt-1 !pb-1" : "pr-1")}
             >
-              <PromptInputTools className="gap-1">
-                <PromptInputButton
-                  className="h-9 w-9 rounded-full border border-[#e6e9f9] bg-white text-[#1d2451] hover:bg-[#f4f6ff]"
-                >
-                  <Mic className="h-4 w-4" />
-                </PromptInputButton>
-              </PromptInputTools>
-
-              <div className="flex items-center gap-2">
-                <PromptInputSubmit
-                  status={isSending ? "submitted" : "ready"}
-                  disabled={isSending}
-                  className="h-9 w-9 rounded-full border border-[#e6e9f9] bg-white text-[#1d2451] hover:bg-[#f4f6ff] disabled:opacity-40"
-                >
-                  {input.trim() ? <ArrowUp className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                </PromptInputSubmit>
-
-                <PromptInputButton
-                  className="h-9 w-9 rounded-full border border-[#e6e9f9] bg-white text-[#1d2451] hover:bg-[#f4f6ff]"
-                >
-                  <Camera className="h-4 w-4" />
-                </PromptInputButton>
-              </div>
+              <PromptInputSubmit
+                status={isSending ? "submitted" : "ready"}
+                disabled={isSending || !input.trim()}
+                variant="ghost"
+                className={cn(
+                  "h-10 w-10 rounded-full border-0 p-0 shadow-[0_14px_28px_-16px_rgba(82,102,191,0.52)] backdrop-blur-sm focus-visible:ring-0 focus-visible:outline-none disabled:opacity-35",
+                  isDarkMode
+                    ? "bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.22)_0%,rgba(129,150,236,0.2)_56%,rgba(79,97,171,0.2)_100%)] text-[#e9edff] hover:brightness-110"
+                    : "bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.98)_0%,rgba(244,248,255,0.96)_54%,rgba(230,238,255,0.95)_100%)] text-[#2d396f] hover:brightness-[1.02]"
+                )}
+              >
+                <ArrowUp className="h-4 w-4" />
+              </PromptInputSubmit>
             </PromptInputFooter>
           </PromptInput>
         </div>
@@ -1060,8 +1074,8 @@ function AssistantMessage({
   onActionSelect: (option: ActionOption) => Promise<void>;
 }) {
   return (
-    <Message from="assistant" className="max-w-full pr-1">
-      <MessageContent className="w-full rounded-[20px] bg-white px-4 py-3 text-slate-800 shadow-[0_16px_30px_-24px_rgba(83,105,152,0.52)]">
+    <Message from="assistant" className="w-full max-w-none pr-0">
+      <MessageContent className="w-full overflow-visible rounded-none bg-transparent px-0 py-0 text-slate-800 shadow-none">
         {message.pending && isLast ? (
           <ThinkingDots />
         ) : message.error ? (
@@ -1096,7 +1110,7 @@ function TurnBlockRenderer({
 }) {
   if (block.type === "text") {
     return (
-      <MessageResponse className="text-[15px] leading-7 text-slate-800">
+      <MessageResponse className="w-full max-w-none text-[15px] leading-7 text-[#2b3568]">
         {block.content}
       </MessageResponse>
     );
@@ -1143,9 +1157,7 @@ function TurnBlockRenderer({
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-xs text-slate-500">
-      block 已返回，下一阶段接入专用渲染组件。
-    </div>
+    <p className="text-xs text-slate-500">这条内容正在整理展示中。</p>
   );
 }
 

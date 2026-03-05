@@ -1,27 +1,29 @@
 // AI RAG Controller - RAG 运营管理（Admin 用）
 // 从 ai.controller.ts 提取，所有路由需要 Admin 权限
 import { Elysia, t } from 'elysia';
-import { basePlugins, verifyAdmin, AuthError } from '../../setup';
+import { basePlugins } from '../../setup';
 import { aiModel, type ErrorResponse } from './ai.model';
+import { requireCapability } from './policy/capability';
 import {
   getRagStats,
   testRagSearch,
   rebuildActivityIndex,
   startBackfill,
   getBackfillStatus,
-} from './ai-ops.service';
+} from './ai.service';
 
 export const aiRagController = new Elysia({ prefix: '/rag' })
   .use(basePlugins)
   .use(aiModel)
   .onBeforeHandle(async ({ jwt, headers, set }) => {
-    try {
-      await verifyAdmin(jwt, headers);
-    } catch (error) {
-      if (error instanceof AuthError) {
-        set.status = error.status;
-        return { code: error.status, msg: error.message };
-      }
+    const { error } = await requireCapability({
+      capability: 'ai.retrieval.index.rebuild',
+      jwt,
+      headers,
+      set,
+    });
+    if (error) {
+      return error;
     }
   })
 
@@ -43,7 +45,7 @@ export const aiRagController = new Elysia({ prefix: '/rag' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-RAG'],
         summary: '获取 RAG 统计信息',
         description: '获取 RAG 索引覆盖率、未索引活动列表等统计信息（Admin 用）。',
       },
@@ -69,7 +71,7 @@ export const aiRagController = new Elysia({ prefix: '/rag' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-RAG'],
         summary: 'RAG 搜索测试',
         description: '执行语义搜索测试，返回搜索结果和性能指标（Admin 用）。',
       },
@@ -107,7 +109,7 @@ export const aiRagController = new Elysia({ prefix: '/rag' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-RAG'],
         summary: '重建单个活动索引',
         description: '重新生成指定活动的向量索引（Admin 用）。',
       },
@@ -140,7 +142,7 @@ export const aiRagController = new Elysia({ prefix: '/rag' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-RAG'],
         summary: '开始批量回填',
         description: '开始批量索引所有未索引的活动（Admin 用）。',
       },
@@ -164,7 +166,7 @@ export const aiRagController = new Elysia({ prefix: '/rag' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-RAG'],
         summary: '获取回填状态',
         description: '获取批量回填任务的当前状态（Admin 用）。',
       },

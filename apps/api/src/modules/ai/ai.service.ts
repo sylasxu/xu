@@ -73,6 +73,48 @@ import {
 import { handleUserAction, type UserAction } from './user-action';
 import { getConfigValue } from './config/config.service';
 
+// ==========================================
+// Domain Facade Exports (ai.service 总线收口)
+// ==========================================
+export {
+  getRagStats,
+  testRagSearch,
+  rebuildActivityIndex,
+  startBackfill,
+  getBackfillStatus,
+} from './rag/rag.service';
+
+export {
+  getUserMemoryProfile,
+  searchUsers,
+  testMaxSim,
+} from './memory/memory.service';
+
+export {
+  getSecurityOverview,
+  getSensitiveWords,
+  addSensitiveWord,
+  deleteSensitiveWord,
+  importSensitiveWords,
+  getModerationQueue,
+  approveModeration,
+  rejectModeration,
+  banModeration,
+  getViolationStats,
+  getSensitiveWordsFromDB,
+  addSensitiveWordToDB,
+  deleteSensitiveWordFromDB,
+  getSecurityEvents,
+  getSecurityStatsFromDB,
+} from './security/security.service';
+
+export {
+  getQualityMetrics,
+  getConversionMetrics,
+  getPlaygroundStats,
+  getAIHealthMetrics,
+} from './observability/ai-metrics.service';
+
 const logger = createLogger('ai.service');
 
 // ==========================================
@@ -225,7 +267,7 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
     logger.warn('Input blocked', { userId, error: guardResult.error });
     return createDirectResponse('这个话题我帮不了你 😅', trace);
   }
-  const sanitizedInput = guardContext.userInput;
+  const sanitizedInput = guardResult.context.userInput;
 
   // ── Pre-LLM 管线阶段 ──
   // 2.5 构建上下文（promptContext 需要在 ProcessorContext 之前准备好）
@@ -1464,6 +1506,7 @@ export interface WelcomeResponse {
   socialProfile?: SocialProfile | undefined;
   quickPrompts: QuickPrompt[];
   ui?: {
+    composerPlaceholder: string;
     bottomQuickActions: string[];
     profileHints: {
       low: string;
@@ -1489,6 +1532,7 @@ interface WelcomeCopyConfig {
 }
 
 interface WelcomeUiConfig {
+  composerPlaceholder: string;
   sectionTitles: {
     suggestions: string;
     explore: string;
@@ -1526,6 +1570,7 @@ const DEFAULT_WELCOME_COPY_CONFIG: WelcomeCopyConfig = {
 };
 
 const DEFAULT_WELCOME_UI_CONFIG: WelcomeUiConfig = {
+  composerPlaceholder: '你想找什么活动？',
   sectionTitles: {
     suggestions: '快速组局',
     explore: '探索附近',
@@ -1591,6 +1636,7 @@ function normalizeWelcomeUiConfig(raw: unknown): WelcomeUiConfig {
   }
 
   const config = raw as Partial<WelcomeUiConfig> & {
+    composerPlaceholder?: unknown;
     sectionTitles?: Partial<Record<'suggestions' | 'explore', unknown>>;
     exploreTemplates?: Partial<Record<'label' | 'prompt', unknown>>;
     suggestionItems?: unknown;
@@ -1684,7 +1730,13 @@ function normalizeWelcomeUiConfig(raw: unknown): WelcomeUiConfig {
         : DEFAULT_WELCOME_UI_CONFIG.exploreTemplates.prompt,
   };
 
+  const composerPlaceholder =
+    typeof config.composerPlaceholder === 'string' && config.composerPlaceholder.trim()
+      ? config.composerPlaceholder.trim()
+      : DEFAULT_WELCOME_UI_CONFIG.composerPlaceholder;
+
   return {
+    composerPlaceholder,
     sectionTitles,
     exploreTemplates,
     suggestionItems: suggestionItems.length ? suggestionItems : DEFAULT_WELCOME_UI_CONFIG.suggestionItems,
@@ -1818,6 +1870,7 @@ export async function getWelcomeCard(
     socialProfile,
     quickPrompts,
     ui: {
+      composerPlaceholder: welcomeUi.composerPlaceholder,
       bottomQuickActions: welcomeUi.bottomQuickActions,
       profileHints: welcomeUi.profileHints,
     },

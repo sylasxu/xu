@@ -1,34 +1,34 @@
-// AI Ops Controller - 运营指标与安全持久化（Admin 用）
+// AI Metrics Controller - 运营指标与安全持久化
 // 从 ai.controller.ts 提取，所有路由需要 Admin 权限
 import { Elysia, t } from 'elysia';
-import { basePlugins, verifyAdmin, AuthError } from '../../setup';
+import { basePlugins } from '../../setup';
 import { aiModel, type ErrorResponse } from './ai.model';
+import { requireCapability } from './policy/capability';
 import {
-  // v4.6 Quality & Conversion Metrics
   getQualityMetrics,
   getConversionMetrics,
   getPlaygroundStats,
-  // v4.6 Security Persistence
+  // v4.6: AI 健康度
+  getAIHealthMetrics,
   getSensitiveWordsFromDB,
   addSensitiveWordToDB,
   deleteSensitiveWordFromDB,
   getSecurityEvents,
   getSecurityStatsFromDB,
-  // v4.6: AI 健康度
-  getAIHealthMetrics,
-} from './ai-ops.service';
+} from './ai.service';
 
-export const aiOpsController = new Elysia({ prefix: '/ops' })
+const createAiMetricsController = (prefix = '') => new Elysia({ prefix })
   .use(basePlugins)
   .use(aiModel)
   .onBeforeHandle(async ({ jwt, headers, set }) => {
-    try {
-      await verifyAdmin(jwt, headers);
-    } catch (error) {
-      if (error instanceof AuthError) {
-        set.status = error.status;
-        return { code: error.status, msg: error.message };
-      }
+    const { error } = await requireCapability({
+      capability: 'ai.security.word.write',
+      jwt,
+      headers,
+      set,
+    });
+    if (error) {
+      return error;
     }
   })
 
@@ -57,7 +57,7 @@ export const aiOpsController = new Elysia({ prefix: '/ops' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-Metrics'],
         summary: '获取对话质量指标',
         description: '获取对话质量评分、意图识别率、Tool 成功率等指标（Admin 用）。',
       },
@@ -98,7 +98,7 @@ export const aiOpsController = new Elysia({ prefix: '/ops' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-Metrics'],
         summary: '获取转化率指标',
         description: '获取对话到活动创建/报名的转化漏斗数据（Admin 用）。',
       },
@@ -129,7 +129,7 @@ export const aiOpsController = new Elysia({ prefix: '/ops' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-Metrics'],
         summary: '获取 Playground 统计',
         description: '获取意图分布、Tool 成功率等 Playground 调试统计（Admin 用）。',
       },
@@ -155,7 +155,7 @@ export const aiOpsController = new Elysia({ prefix: '/ops' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-Metrics'],
         summary: '获取 AI 健康度指标',
         description: `获取 AI 健康度指标（Dashboard 用）。
 
@@ -191,7 +191,7 @@ export const aiOpsController = new Elysia({ prefix: '/ops' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-Security'],
         summary: '获取敏感词列表（数据库）',
         description: '从数据库获取敏感词列表，支持分页（Admin 用）。',
       },
@@ -200,7 +200,7 @@ export const aiOpsController = new Elysia({ prefix: '/ops' })
         limit: t.Optional(t.Number({ default: 50 })),
       }),
       response: {
-        200: 'ai.opsSensitiveWordsDBResponse',
+        200: 'ai.securitySensitiveWordsDBResponse',
         401: 'ai.error',
         500: 'ai.error',
       },
@@ -225,7 +225,7 @@ export const aiOpsController = new Elysia({ prefix: '/ops' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-Security'],
         summary: '添加敏感词（数据库）',
         description: '添加敏感词到数据库（Admin 用）。',
       },
@@ -235,7 +235,7 @@ export const aiOpsController = new Elysia({ prefix: '/ops' })
         severity: t.Optional(t.String({ description: '严重程度' })),
       }),
       response: {
-        200: 'ai.opsAddSensitiveWordResponse',
+        200: 'ai.securityAddSensitiveWordResponse',
         400: 'ai.error',
         401: 'ai.error',
         500: 'ai.error',
@@ -261,7 +261,7 @@ export const aiOpsController = new Elysia({ prefix: '/ops' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-Security'],
         summary: '删除敏感词（数据库）',
         description: '从数据库删除敏感词（Admin 用）。',
       },
@@ -269,7 +269,7 @@ export const aiOpsController = new Elysia({ prefix: '/ops' })
         id: t.String({ description: '敏感词 ID' }),
       }),
       response: {
-        200: 'ai.opsDeleteSensitiveWordResponse',
+        200: 'ai.securityDeleteSensitiveWordResponse',
         401: 'ai.error',
         404: 'ai.error',
         500: 'ai.error',
@@ -300,7 +300,7 @@ export const aiOpsController = new Elysia({ prefix: '/ops' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-Security'],
         summary: '获取安全事件列表',
         description: '获取安全拦截事件列表（Admin 用）。',
       },
@@ -340,7 +340,7 @@ export const aiOpsController = new Elysia({ prefix: '/ops' })
     },
     {
       detail: {
-        tags: ['AI-Ops'],
+        tags: ['AI-Security'],
         summary: '获取安全统计（真实数据）',
         description: '从数据库获取真实的安全统计数据（Admin 用）。',
       },
@@ -355,3 +355,6 @@ export const aiOpsController = new Elysia({ prefix: '/ops' })
       },
     }
   );
+
+export const aiMetricsController = createAiMetricsController();
+export const aiLegacyOpsMetricsController = createAiMetricsController('/ops');

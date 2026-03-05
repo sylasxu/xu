@@ -157,7 +157,7 @@
   <!-- AI Dock (超级输入坞) -->
   <ai-dock 
     id="aiDock"
-    placeholder="粘贴文字，或直接告诉我..."
+    placeholder="{{composerPlaceholder}}"
     bind:send="onSend"
     bind:parse="onParse"
     bind:paste="onPaste"

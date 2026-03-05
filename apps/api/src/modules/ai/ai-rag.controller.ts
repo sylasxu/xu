@@ -1,9 +1,8 @@
 // AI RAG Controller - RAG 运营管理（Admin 用）
 // 从 ai.controller.ts 提取，所有路由需要 Admin 权限
 import { Elysia, t } from 'elysia';
-import { basePlugins } from '../../setup';
+import { basePlugins, verifyAdmin, AuthError } from '../../setup';
 import { aiModel, type ErrorResponse } from './ai.model';
-import { requireCapability } from './policy/capability';
 import {
   getRagStats,
   testRagSearch,
@@ -16,14 +15,13 @@ export const aiRagController = new Elysia({ prefix: '/rag' })
   .use(basePlugins)
   .use(aiModel)
   .onBeforeHandle(async ({ jwt, headers, set }) => {
-    const { error } = await requireCapability({
-      capability: 'ai.retrieval.index.rebuild',
-      jwt,
-      headers,
-      set,
-    });
-    if (error) {
-      return error;
+    try {
+      await verifyAdmin(jwt, headers);
+    } catch (error) {
+      if (error instanceof AuthError) {
+        set.status = error.status;
+        return { code: error.status, msg: error.message };
+      }
     }
   })
 

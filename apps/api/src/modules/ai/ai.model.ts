@@ -624,8 +624,8 @@ const ContentGenerationResponse = t.Object({
 });
 
 // ==========================================
-// Ops 子 Controller Schema (v4.6)
-// 运营指标 - AI 特有聚合类型
+// Metrics 子 Controller Schema (v4.6)
+// 指标聚合 - AI 特有类型
 // ==========================================
 
 // 对话质量指标响应
@@ -835,10 +835,6 @@ export const aiModel = new Elysia({ name: 'aiModel' })
     'ai.securitySensitiveWordsDBResponse': SecuritySensitiveWordsDBResponse,
     'ai.securityAddSensitiveWordResponse': SecurityAddSensitiveWordResponse,
     'ai.securityDeleteSensitiveWordResponse': SecurityDeleteSensitiveWordResponse,
-    // 兼容别名：保留旧 key，避免前端一次性迁移
-    'ai.opsSensitiveWordsDBResponse': SecuritySensitiveWordsDBResponse,
-    'ai.opsAddSensitiveWordResponse': SecurityAddSensitiveWordResponse,
-    'ai.opsDeleteSensitiveWordResponse': SecurityDeleteSensitiveWordResponse,
     'ai.securityEventsResponse': SecurityEventsResponse,
     'ai.securityStatsDBResponse': SecurityStatsDBResponse,
     // ==========================================

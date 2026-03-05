@@ -8,8 +8,7 @@
  */
 
 import { Elysia, t } from 'elysia';
-import { basePlugins } from '../../../setup';
-import { requireCapability } from '../policy/capability';
+import { basePlugins, verifyAdmin, AuthError } from '../../../setup';
 import {
   getAllConfigs,
   getConfigValue,
@@ -22,21 +21,21 @@ type ErrorResponse = { code: number; msg: string };
 
 export const configController = new Elysia({ prefix: '/ai/configs' })
   .use(basePlugins)
+  .onBeforeHandle(async ({ jwt, headers, set }) => {
+    try {
+      await verifyAdmin(jwt, headers);
+    } catch (error) {
+      if (error instanceof AuthError) {
+        set.status = error.status;
+        return { code: error.status, msg: error.message } satisfies ErrorResponse;
+      }
+    }
+  })
 
   // GET /ai/configs — 获取所有配置（按 category 分组）
   .get(
     '/',
-    async ({ set, jwt, headers }) => {
-      const { error } = await requireCapability({
-        capability: 'ai.config.read',
-        jwt,
-        headers,
-        set,
-      });
-      if (error) {
-        return error;
-      }
-
+    async ({ set }) => {
       try {
         const configs = await getAllConfigs();
         return configs;
@@ -57,17 +56,7 @@ export const configController = new Elysia({ prefix: '/ai/configs' })
   // GET /ai/configs/:configKey — 获取单个配置
   .get(
     '/:configKey',
-    async ({ params, set, jwt, headers }) => {
-      const { error } = await requireCapability({
-        capability: 'ai.config.read',
-        jwt,
-        headers,
-        set,
-      });
-      if (error) {
-        return error;
-      }
-
+    async ({ params, set }) => {
       try {
         // 使用 null 作为默认值来检测是否存在
         const value = await getConfigValue<unknown>(params.configKey, null);
@@ -97,22 +86,9 @@ export const configController = new Elysia({ prefix: '/ai/configs' })
   .put(
     '/:configKey',
     async ({ params, body, set, jwt, headers }) => {
-      const { actorContext, error } = await requireCapability({
-        capability: 'ai.config.write',
-        jwt,
-        headers,
-        set,
-      });
-      if (error) {
-        return error;
-      }
-      if (!actorContext?.userId) {
-        set.status = 401;
-        return { code: 401, msg: '未授权' } satisfies ErrorResponse;
-      }
-
       try {
-        const result = await setConfigValue(params.configKey, body.configValue, actorContext.userId);
+        const admin = await verifyAdmin(jwt, headers);
+        const result = await setConfigValue(params.configKey, body.configValue, admin.id);
         return {
           configKey: params.configKey,
           configValue: body.configValue,
@@ -141,17 +117,7 @@ export const configController = new Elysia({ prefix: '/ai/configs' })
   // GET /ai/configs/:configKey/history — 获取变更历史
   .get(
     '/:configKey/history',
-    async ({ params, set, jwt, headers }) => {
-      const { error } = await requireCapability({
-        capability: 'ai.config.read',
-        jwt,
-        headers,
-        set,
-      });
-      if (error) {
-        return error;
-      }
-
+    async ({ params, set }) => {
       try {
         const history = await getConfigHistory(params.configKey);
         return history;
@@ -176,22 +142,9 @@ export const configController = new Elysia({ prefix: '/ai/configs' })
   .post(
     '/:configKey/rollback',
     async ({ params, body, set, jwt, headers }) => {
-      const { actorContext, error } = await requireCapability({
-        capability: 'ai.config.write',
-        jwt,
-        headers,
-        set,
-      });
-      if (error) {
-        return error;
-      }
-      if (!actorContext?.userId) {
-        set.status = 401;
-        return { code: 401, msg: '未授权' } satisfies ErrorResponse;
-      }
-
       try {
-        const result = await rollbackConfig(params.configKey, body.targetVersion, actorContext.userId);
+        const admin = await verifyAdmin(jwt, headers);
+        const result = await rollbackConfig(params.configKey, body.targetVersion, admin.id);
         if (!result) {
           set.status = 404;
           return { code: 404, msg: '目标版本不存在' } satisfies ErrorResponse;

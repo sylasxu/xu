@@ -2,7 +2,7 @@
  * Moderation Controller - 内容审核接口
  */
 import { Elysia, t } from 'elysia';
-import { basePlugins } from '../../../setup';
+import { basePlugins, verifyAdmin, AuthError } from '../../../setup';
 import { analyzeActivity, analyzeContent } from './moderation.service';
 
 const ModerationResultSchema = t.Object({
@@ -20,6 +20,16 @@ const ErrorResponseSchema = t.Object({
 
 export const moderationController = new Elysia({ prefix: '/ai/moderation' })
   .use(basePlugins)
+  .onBeforeHandle(async ({ jwt, headers, set }) => {
+    try {
+      await verifyAdmin(jwt, headers);
+    } catch (error) {
+      if (error instanceof AuthError) {
+        set.status = error.status;
+        return { code: error.status, msg: error.message };
+      }
+    }
+  })
 
   // 分析活动内容
   .post(

@@ -1,9 +1,8 @@
 // AI Security Controller - 安全运营（敏感词、审核、违规统计）
 // 从 ai.controller.ts 提取，所有路由需要 Admin 权限
 import { Elysia, t } from 'elysia';
-import { basePlugins } from '../../setup';
+import { basePlugins, verifyAdmin, AuthError } from '../../setup';
 import { aiModel, type ErrorResponse } from './ai.model';
-import { requireCapability } from './policy/capability';
 import {
   getSecurityOverview,
   getSensitiveWords,
@@ -21,14 +20,13 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
   .use(basePlugins)
   .use(aiModel)
   .onBeforeHandle(async ({ jwt, headers, set }) => {
-    const { error } = await requireCapability({
-      capability: 'ai.security.word.write',
-      jwt,
-      headers,
-      set,
-    });
-    if (error) {
-      return error;
+    try {
+      await verifyAdmin(jwt, headers);
+    } catch (error) {
+      if (error instanceof AuthError) {
+        set.status = error.status;
+        return { code: error.status, msg: error.message };
+      }
     }
   })
 

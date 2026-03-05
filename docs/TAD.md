@@ -941,9 +941,10 @@ type SSEEvent =
 
 1. `ai.service.ts` 是编排总线（入口、串联、trace、能力门面导出）。
 2. `processors/`、`memory/`、`rag/`、`tools/`、`guardrails/`、`workflow/` 保持子域模块化。
-3. 权限统一走 `policy/actor-context.ts + policy/capability.ts`，Controller 不再散落硬编码鉴权。
+3. 鉴权保持轻量：统一使用 `verifyAuth` / `verifyAdmin`，按“是否登录 / 是否管理员”两层判断；手机号门槛在业务动作层校验（CP-9）。
 4. 禁止按消费端命名 service（如 `admin/ops/web/mp`），仅按领域能力命名。
 5. 兼容迁移期可保留旧 API 路径 alias，但新实现统一落到领域模块。
+6. 文档中的“AI Ops”仅表示运营维护场景，不对应代码中的模块命名或 service 分层。
 
 ```
 apps/api/src/modules/ai/
@@ -970,10 +971,6 @@ apps/api/src/modules/ai/
 ├── config/               # v5.1 AI 参数配置模块 (新增)
 │   ├── config.controller.ts # 配置 CRUD + 版本历史 + 回滚 API
 │   └── config.service.ts    # 配置加载服务 (内存缓存 TTL 30s + 数据库 + 默认值降级)
-│
-├── policy/               # v5.2 统一权限策略 (新增)
-│   ├── actor-context.ts  # 标准化 actor 上下文（userId/role/scopes/source）
-│   └── capability.ts     # 能力判定与鉴权入口（requireCapability）
 │
 ├── shared/               # v5.2 跨模块共享纯函数 (新增)
 │   └── genui-blocks.ts   # GenUI block 工厂与 dedupe 逻辑（gateway/policy 共用）

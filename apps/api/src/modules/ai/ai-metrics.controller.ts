@@ -1,9 +1,8 @@
 // AI Metrics Controller - 运营指标与安全持久化
 // 从 ai.controller.ts 提取，所有路由需要 Admin 权限
 import { Elysia, t } from 'elysia';
-import { basePlugins } from '../../setup';
+import { basePlugins, verifyAdmin, AuthError } from '../../setup';
 import { aiModel, type ErrorResponse } from './ai.model';
-import { requireCapability } from './policy/capability';
 import {
   getQualityMetrics,
   getConversionMetrics,
@@ -21,14 +20,13 @@ const createAiMetricsController = (prefix = '') => new Elysia({ prefix })
   .use(basePlugins)
   .use(aiModel)
   .onBeforeHandle(async ({ jwt, headers, set }) => {
-    const { error } = await requireCapability({
-      capability: 'ai.security.word.write',
-      jwt,
-      headers,
-      set,
-    });
-    if (error) {
-      return error;
+    try {
+      await verifyAdmin(jwt, headers);
+    } catch (error) {
+      if (error instanceof AuthError) {
+        set.status = error.status;
+        return { code: error.status, msg: error.message };
+      }
     }
   })
 
@@ -357,4 +355,3 @@ const createAiMetricsController = (prefix = '') => new Elysia({ prefix })
   );
 
 export const aiMetricsController = createAiMetricsController();
-export const aiLegacyOpsMetricsController = createAiMetricsController('/ops');

@@ -86,6 +86,48 @@
   }
 }
 
+.join-guide {
+  margin-bottom: 24rpx;
+  padding: 24rpx;
+  background: linear-gradient(180deg, fade(@color-brand, 12%), #fff);
+  border: 1rpx solid fade(@color-brand, 18%);
+  border-radius: 24rpx;
+}
+
+.join-guide__header {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.join-guide__title {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: @color-text;
+}
+
+.join-guide__hint {
+  font-size: 24rpx;
+  color: @color-text-secondary;
+}
+
+.join-guide__chips {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+  margin-top: 20rpx;
+}
+
+.join-guide__chip {
+  padding: 20rpx 24rpx;
+  font-size: 26rpx;
+  line-height: 1.5;
+  color: @color-text;
+  background: @color-bg-container;
+  border-radius: 20rpx;
+  box-shadow: 0 6rpx 18rpx rgba(0, 0, 0, 0.04);
+}
+
 /* 空状态 */
 .empty-state {
   display: flex;

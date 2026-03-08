@@ -18,6 +18,7 @@ export { DEFAULT_SESSION_WINDOW } from './types';
 
 // Store - 会话存储
 export {
+  createThread,
   getOrCreateThread,
   getThread,
   getMessages,
@@ -69,10 +70,12 @@ export {
   calculateMaxSim,
   getEnhancedUserProfileWithVectors,
   saveEnhancedUserProfileWithVectors,
+  upsertActivityOutcomeMemory,
+  markActivityOutcomeRebookTriggered,
 } from './working';
 
 // Types - v4.5 兴趣向量
-export type { InterestVector } from './types';
+export type { ActivityOutcome, InterestVector } from './types';
 
 // Extractor - LLM 偏好提取
 export type {

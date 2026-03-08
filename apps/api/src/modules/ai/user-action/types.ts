@@ -30,12 +30,15 @@ export type UserActionType =
   | 'create_activity'         // 创建活动（从 widget_draft 确认）
   | 'edit_draft'              // 编辑草稿
   | 'publish_draft'           // 发布草稿
+  | 'confirm_publish'         // 确认并发布草稿
   // 探索相关
   | 'explore_nearby'          // 探索附近
   | 'expand_map'              // 展开地图
   | 'filter_activities'       // 筛选活动
   // 找搭子相关
   | 'find_partner'            // 找搭子
+  | 'confirm_match'           // 确认匹配成局
+  | 'cancel_match'            // 取消待确认匹配
   | 'select_preference'       // 选择偏好（多轮对话）
   | 'skip_preference'         // 跳过偏好选择
   // 通用

@@ -119,6 +119,7 @@ export interface ExploreData {
     lng: number
     name?: string
   }
+  semanticQuery?: string
   // 兼容 AI 返回的扁平结构
   lat?: number
   lng?: number

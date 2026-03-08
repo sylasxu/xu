@@ -2,10 +2,11 @@
  * 活动详情页
  * Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 10.1-10.7, 16.1-16.6
  */
-import { getActivitiesById, postActivitiesByIdJoin, deleteActivitiesById, patchActivitiesByIdStatus } from '../../../src/api/endpoints/activities/activities';
+import { getActivitiesById, deleteActivitiesById, patchActivitiesByIdStatus } from '../../../src/api/endpoints/activities/activities';
 import { getActivitiesByIdPublic } from '../../../src/api/endpoints/activities/activities';
 import { getUsersById } from '../../../src/api/endpoints/users/users';
 import { useAppStore } from '../../../src/stores/app';
+import { submitJoinAndOpenDiscussion } from '../../../src/utils/join-flow'
 import type { ActivityDetailResponse, ActivityPublicResponseRecentMessagesItem as RecentMessage } from '../../../src/api/model';
 
 interface User {
@@ -14,7 +15,6 @@ interface User {
   avatarUrl?: string;
   phoneNumber?: string;
   participationCount?: number;
-  fulfillmentCount?: number;
   organizationCount?: number;
 }
 
@@ -35,19 +35,13 @@ interface Activity {
   locationName?: string;
   address?: string;
   locationHint?: string;
-  isLocationBlurred?: boolean;
   maxParticipants?: number;
   currentParticipants?: number;
-  feeType?: string;
-  estimatedCost?: number;
   type?: string;
   status?: 'draft' | 'active' | 'completed' | 'cancelled';
-  minReliabilityRate?: number;
   creatorId: string;
   creator?: User;
   participants?: Participant[];
-  isPinPlus?: boolean;
-  isBoosted?: boolean;
 }
 
 interface ManageAction {
@@ -66,8 +60,6 @@ interface PageData {
   showJoinDialog: boolean;
   joinMessage: string;
   isHotActivity: boolean;
-  useFastPass: boolean;
-  fastPassPrice: number;
   participantStatus: 'pending' | 'approved' | 'rejected' | 'joined' | null;
   isCreator: boolean;
   // 管理操作面板
@@ -105,8 +97,6 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     showJoinDialog: false,
     joinMessage: '',
     isHotActivity: false,
-    useFastPass: false,
-    fastPassPrice: 2,
     participantStatus: null,
     isCreator: false,
     // 管理操作面板
@@ -235,19 +225,6 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     }
   },
 
-  calculateReliability(user: User | null | undefined): number {
-    if (!user || !user.participationCount) return -1;
-    return Math.round(((user.fulfillmentCount || 0) / user.participationCount) * 100);
-  },
-
-  getReliabilityLabel(rate: number): string {
-    if (rate === -1) return '🆕 新用户';
-    if (rate === 100) return '⭐⭐⭐ 非常靠谱';
-    if (rate >= 80) return '⭐⭐ 靠谱';
-    if (rate >= 60) return '⭐ 一般';
-    return '待提升';
-  },
-
   onCreatorTap() {
     const { activity } = this.data;
     if (activity?.creator) {
@@ -265,12 +242,9 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     if (!activity?.creator) return;
 
     const creator = activity.creator;
-    const reliability = this.calculateReliability(creator);
-    const reliabilityLabel = this.getReliabilityLabel(reliability);
-
     wx.showModal({
       title: creator.nickname || '匿名用户',
-      content: `靠谱度: ${reliabilityLabel}\n组织场次: ${creator.organizationCount || 0}\n参与场次: ${creator.participationCount || 0}`,
+      content: `组织场次: ${creator.organizationCount || 0}\n参与场次: ${creator.participationCount || 0}`,
       showCancel: false,
       confirmText: '知道了',
     });
@@ -300,19 +274,6 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
       this.setData({ pendingAction: 'join' });
       useAppStore.getState().showAuthSheet({ type: 'join' });
       return;
-    }
-
-    if (activity?.minReliabilityRate && currentUser) {
-      const userReliability = this.calculateReliability(currentUser);
-      if (userReliability !== -1 && userReliability < activity.minReliabilityRate) {
-        wx.showModal({
-          title: '靠谱度不足',
-          content: `该活动要求靠谱度不低于${activity.minReliabilityRate}%，你当前的靠谱度为${userReliability}%`,
-          showCancel: false,
-          confirmText: '知道了',
-        });
-        return;
-      }
     }
 
     this.setData({ showJoinDialog: true });
@@ -345,7 +306,6 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     
     // 根据活动状态显示不同操作
     if (activity.status === 'active') {
-      actions.push({ label: '编辑活动', value: 'edit' });
       actions.push({ label: '查看报名列表', value: 'participants' });
       
       // 只有未开始的活动可以取消
@@ -358,6 +318,8 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
       if (startAt && startAt <= new Date()) {
         actions.push({ label: '标记完成', value: 'complete' });
       }
+    } else if (activity.status === 'completed') {
+      actions.push({ label: '确认到场情况', value: 'fulfillment' });
     } else if (activity.status === 'draft') {
       actions.push({ label: '编辑活动', value: 'edit' });
       actions.push({ label: '删除草稿', value: 'delete' });
@@ -387,6 +349,9 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
       case 'complete':
         this.onCompleteActivity();
         break;
+      case 'fulfillment':
+        this.onConfirmFulfillment();
+        break;
       case 'delete':
         this.onDeleteActivity();
         break;
@@ -402,7 +367,15 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
   onEditActivity() {
     const { activityId } = this.data;
     wx.navigateTo({
-      url: `/subpackages/activity/confirm/index?id=${activityId}&mode=edit`,
+      url: `/subpackages/activity/draft-edit/index?id=${activityId}`,
+    });
+  },
+
+  /** 确认到场情况 */
+  onConfirmFulfillment() {
+    const { activityId } = this.data;
+    wx.navigateTo({
+      url: `/subpackages/activity/confirm/index?id=${activityId}`,
     });
   },
   
@@ -444,7 +417,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
   onCompleteActivity() {
     wx.showModal({
       title: '确认完成',
-      content: '标记完成后可以进行履约确认',
+      content: '标记完成后会进入到场确认，方便继续做再约和关系沉淀。',
       success: async (res) => {
         if (res.confirm) {
           try {
@@ -453,7 +426,9 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
             });
             if (response.status === 200) {
               wx.showToast({ title: '活动已完成', icon: 'success' });
-              this.loadActivityDetail(this.data.activityId);
+              setTimeout(() => {
+                this.onConfirmFulfillment();
+              }, 1200);
             } else {
               throw new Error((response.data as { msg?: string })?.msg || '操作失败');
             }
@@ -500,7 +475,6 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     this.setData({
       showJoinDialog: false,
       joinMessage: '',
-      useFastPass: false,
     });
   },
 
@@ -508,38 +482,40 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     this.setData({ joinMessage: e.detail.value });
   },
 
-  onFastPassChange(e: WechatMiniprogram.CustomEvent<{ value: boolean }>) {
-    this.setData({ useFastPass: e.detail.value });
-  },
-
   async onConfirmJoin() {
-    const { activityId, joinMessage, useFastPass, isJoining } = this.data;
+    const { activityId, isJoining } = this.data;
+    const activity = this.data.activity;
 
     if (isJoining) return;
 
     this.setData({ isJoining: true });
 
     try {
-      const response = await postActivitiesByIdJoin(activityId);
+      const joinResult = await submitJoinAndOpenDiscussion(
+        {
+          activityId,
+          title: activity?.title,
+          startAt: activity?.startAt,
+          locationName: activity?.locationName,
+          source: 'activity_detail',
+        },
+        {
+          onBeforeNavigate: () => {
+            this.setData({
+              showJoinDialog: false,
+              joinMessage: '',
+              participantStatus: 'joined',
+            });
 
-      if (response.status === 200) {
-        wx.showToast({ title: '报名成功', icon: 'success' });
-        this.setData({
-          showJoinDialog: false,
-          joinMessage: '',
-          useFastPass: false,
-          participantStatus: 'joined',  // v5.0: 直接设为 joined
-        });
-        this.loadActivityDetail(activityId);
+            this.loadActivityDetail(activityId);
+          },
+        },
+      )
 
-        // v5.0: 报名成功后自动跳转讨论区
-        setTimeout(() => {
-          wx.navigateTo({
-            url: `/subpackages/activity/discussion/index?id=${activityId}`,
-          });
-        }, 800); // 等 toast 显示后跳转
+      if (joinResult.success) {
+        return
       } else {
-        throw new Error((response.data as { msg?: string })?.msg || '报名失败');
+        throw new Error(joinResult.msg || '报名失败')
       }
     } catch (error) {
       console.error('报名失败', error);
@@ -627,6 +603,75 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     };
   },
 
+  onCopyActivityText() {
+    const { activity } = this.data;
+    if (!activity) {
+      wx.showToast({ title: '活动信息未加载完成', icon: 'none' });
+      return;
+    }
+
+    const text = this.buildActivityCopyText(activity);
+    wx.setClipboardData({
+      data: text,
+      success: () => {
+        wx.showToast({ title: '文案已复制', icon: 'success' });
+      },
+      fail: () => {
+        wx.showToast({ title: '复制失败，请重试', icon: 'none' });
+      },
+    });
+  },
+
+  buildActivityCopyText(activity: Activity): string {
+    const startAtText = activity.startAt ? this.formatDateTime(activity.startAt) : '时间待定';
+    const locationText = this.getDisplayAddress() || activity.locationHint || '地点待定';
+    const current = activity.currentParticipants || 0;
+    const max = activity.maxParticipants || 0;
+    const desc = activity.description || '欢迎一起参与，详情见小程序活动页。';
+    return [
+      `【${activity.title}】`,
+      `时间：${startAtText}`,
+      `地点：${locationText}`,
+      `人数：${current}/${max} 人`,
+      '',
+      desc,
+      '',
+      '点击小程序卡片即可报名',
+    ].join('\n');
+  },
+
+  onCloneActivity() {
+    const { activity } = this.data;
+    if (!activity) {
+      wx.showToast({ title: '活动信息未加载完成', icon: 'none' });
+      return;
+    }
+
+    const prompt = this.buildClonePrompt(activity);
+    wx.reLaunch({
+      url: `/pages/home/index?prefill=${encodeURIComponent(prompt)}`,
+      fail: () => {
+        wx.navigateTo({
+          url: `/pages/home/index?prefill=${encodeURIComponent(prompt)}`,
+        });
+      },
+    });
+  },
+
+  buildClonePrompt(activity: Activity): string {
+    const typeLabelMap: Record<string, string> = {
+      food: '美食',
+      entertainment: '娱乐',
+      sports: '运动',
+      boardgame: '桌游',
+      other: '活动',
+    };
+    const typeText = activity.type ? (typeLabelMap[activity.type] || activity.type) : '活动';
+    const locationText = activity.locationName || activity.locationHint || '附近';
+    const max = activity.maxParticipants || 4;
+    return `我想约一个和「${activity.title}」类似的${typeText}局，地点优先在${locationText}附近，人数大概${max}人。先帮我看看附近有没有现成的合适活动，没有再帮我生成一个更容易成局的草稿。`;
+  },
+
   onRefresh() {
     if (this.data.activityId) {
       this.loadActivityDetail(this.data.activityId);
@@ -653,18 +698,22 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     this.setData({ showReportSheet: false });
   },
 
+  formatDateTime(dateStr: string): string {
+    const date = new Date(dateStr);
+    if (Number.isNaN(date.getTime())) {
+      return '时间待定';
+    }
+    const month = `${date.getMonth() + 1}`.padStart(2, '0');
+    const day = `${date.getDate()}`.padStart(2, '0');
+    const hours = `${date.getHours()}`.padStart(2, '0');
+    const minutes = `${date.getMinutes()}`.padStart(2, '0');
+    return `${month}-${day} ${hours}:${minutes}`;
+  },
+
   getDisplayAddress(): string {
-    const { activity, participantStatus, isCreator } = this.data;
+    const { activity } = this.data;
     if (!activity) return '';
 
-    if (isCreator || participantStatus === 'approved') {
-      return activity.address || activity.locationName || '';
-    }
-
-    if (activity.isLocationBlurred) {
-      return activity.locationHint || '位置待定';
-    }
-
-    return activity.address || activity.locationName || '';
+    return activity.address || activity.locationName || activity.locationHint || '';
   },
 });

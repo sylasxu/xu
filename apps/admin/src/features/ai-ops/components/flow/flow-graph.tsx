@@ -8,6 +8,7 @@ import { useCallback, useEffect } from 'react';
 import {
   ReactFlow,
   Background,
+  BackgroundVariant,
   Controls,
   MiniMap,
   useNodesState,
@@ -96,7 +97,7 @@ export function FlowGraph({ data, onNodeClick }: FlowGraphProps) {
         elementsSelectable={true}
         selectNodesOnDrag={false}
       >
-        <Background variant="dots" gap={16} size={1} color="rgba(140, 140, 160, 0.4)" />
+        <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="rgba(140, 140, 160, 0.4)" />
         <Controls />
         <MiniMap
           maskColor="color-mix(in oklch, var(--background) 70%, transparent)"

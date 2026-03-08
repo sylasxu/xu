@@ -65,16 +65,8 @@ export const queryKeys = {
   // 仪表板相关
   dashboard: {
     all: ['dashboard'],
-    metrics: () => [...queryKeys.dashboard.all, 'metrics'],
     businessMetrics: () => [...queryKeys.dashboard.all, 'businessMetrics'],
-    analytics: () => [...queryKeys.dashboard.all, 'analytics'],
-    kpis: () => [...queryKeys.dashboard.all, 'kpis'],
     godView: () => [...queryKeys.dashboard.all, 'godView'],
-    userGrowth: (days: number) => [...queryKeys.dashboard.all, 'userGrowth', days],
-    recentActivities: (limit: number) => [...queryKeys.dashboard.all, 'recentActivities', limit],
-    activityTypes: () => [...queryKeys.dashboard.all, 'activityTypes'],
-    revenue: (days: number) => [...queryKeys.dashboard.all, 'revenue', days],
-    geographic: () => [...queryKeys.dashboard.all, 'geographic'],
   },
   
   // 审核相关
@@ -197,8 +189,8 @@ export const invalidateQueries = {
   // 仪表板相关缓存失效
   dashboard: {
     all: () => queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all }),
-    metrics: () => queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.metrics() }),
-    analytics: () => queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.analytics() }),
+    businessMetrics: () => queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.businessMetrics() }),
+    godView: () => queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.godView() }),
   },
   
   // 审核相关缓存失效

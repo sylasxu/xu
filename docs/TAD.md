@@ -1,7 +1,7 @@
 # 聚场 (JuChang) 技术架构文档
 
-> **版本**：v5.2 (H5 Scope Focus)
-> **更新日期**：2026-03-02
+> **版本**：v5.3 (Result Workflow + A2UI Passthrough + Real Social Loop)
+> **更新日期**：2026-03-09
 > **架构**：原生小程序 + Zustand Vanilla + Elysia API + Drizzle ORM + Next.js Web
 
 ---
@@ -167,23 +167,26 @@
 │       └── src/
 │           ├── index.ts      # 应用入口
 │           ├── setup.ts      # 全局插件
-│           └── modules/      # 功能模块 (12 个)
-│               ├── auth/         # 微信登录、手机号绑定
-│               ├── users/        # 用户 CRUD、额度
-│               ├── activities/   # 活动 CRUD、报名、附近搜索
-│               ├── participants/ # 参与者管理
-│               ├── chat/         # 活动群聊消息
-│               ├── ai/           # AI 解析、对话历史
-│               ├── hot-keywords/ # P0 层热词管理 (v4.8 新增)
-│               ├── dashboard/    # 首页数据聚合、God View
-│               ├── growth/       # 增长工具（文案工厂、热门洞察）
-│               ├── notifications/ # 通知管理
-│               ├── reports/      # 举报管理
-│               └── content-security/ # 内容安全检测、微信 API 封装 (v4.6)
+│           └── modules/      # 功能模块 (15 个)
+│               ├── auth/             # 微信登录、手机号绑定
+│               ├── users/            # 用户 CRUD、额度、统计
+│               ├── activities/       # 活动 CRUD、报名、附近搜索
+│               ├── participants/     # 参与者管理、履约确认、再约跟进
+│               ├── chat/             # 活动群聊消息
+│               ├── ai/               # AI 解析、对话历史、Memory
+│               ├── hot-keywords/     # P0 层热词管理
+│               ├── dashboard/        # 首页数据聚合、God View
+│               ├── analytics/        # 数据分析
+│               ├── content/          # 内容运营
+│               ├── growth/           # 兼容层增长工具
+│               ├── notifications/    # 通知管理、消息中心聚合
+│               ├── reports/          # 举报管理
+│               ├── content-security/ # 内容安全检测、微信 API 封装
+│               └── wechat/           # 微信能力封装
 │
 ├── packages/
 │   ├── db/                   # Drizzle ORM
-│   │   └── src/schema/       # 13 张核心表 (含 AI Ops)
+│   │   └── src/schema/       # 21 张表（13 张核心业务表 + 8 张运营/安全/配置支撑表）
 │   ├── genui-contract/       # Generative UI 协议合同 (Schema + Fixtures + Types)
 │   ├── utils/                # 通用工具
 │   └── ts-config/            # TypeScript 配置
@@ -193,28 +196,33 @@
 
 ---
 
-## 4. 数据库 Schema (v5.1 - 16 表)
+## 4. 数据库 Schema (v5.3 - 21 表)
 
 ### 4.1 表结构概览
 
 | 表 | 说明 | 核心字段 |
 |---|------|---------|
 | `users` | 用户表 | wxOpenId, phoneNumber, nickname, avatarUrl, aiCreateQuotaToday, workingMemory |
-| `activities` | 活动表 | title, location, locationHint, startAt, type, status, embedding (v4.5), **theme** (v5.0), **themeConfig** (v5.0) |
-| `participants` | 参与者表 | activityId, userId, status (joined/quit) |
-| `conversations` | **AI 会话表** | userId, title, messageCount, lastMessageAt |
-| `conversation_messages` | **AI 对话消息表** | conversationId, userId, role, messageType, content, activityId |
-| `activity_messages` | **活动群聊消息表** | activityId, senderId, messageType, content |
-| `notifications` | 通知表 | userId, type, title, isRead, activityId |
-| `partner_intents` | **搭子意向表 (v4.0)** | userId, type, tags, location, expiresAt, status |
-| `intent_matches` | **意向匹配表 (v4.0)** | intentAId, intentBId, tempOrganizerId, outcome |
-| `match_messages` | **匹配消息表 (v4.0)** | matchId, senderId, content |
-| `global_keywords` | **全局热词表 (v4.8)** | keyword, matchType, responseType, responseContent, priority, hitCount, conversionCount |
-| `ai_configs` | **AI 配置表 (v5.1)** | configKey, configValue (JSONB), category, description, version, updatedBy |
-| `ai_config_history` | **AI 配置变更历史 (v5.1)** | configKey, configValue, version, updatedAt, updatedBy |
-| `ai_requests` | **AI 请求记录 (v4.6)** | userId, modelId, inputTokens, outputTokens, latencyMs, processorLog, p0MatchKeyword (v4.8) |
-| `ai_tool_calls` | **AI 工具调用 (v4.6)** | requestId, toolName, durationMs, success |
-| `ai_eval_samples` | **AI 评估样本 (v4.6)** | input, output, intent, score |
+| `activities` | 活动表 | title, location, locationName, locationHint, startAt, type, status, embedding, theme, themeConfig |
+| `participants` | 参与者表 | activityId, userId, status, joinedAt, lastReadAt |
+| `conversations` | AI 会话表 | userId, title, messageCount, lastMessageAt |
+| `conversation_messages` | AI 对话消息表 | conversationId, userId, role, messageType, content, activityId, embedding |
+| `activity_messages` | 活动群聊消息表 | activityId, senderId, messageType, content |
+| `notifications` | 通知表 | userId, type, title, content, isRead, activityId |
+| `partner_intents` | 搭子意向表 | userId, type, tags, location, locationName, expiresAt, status |
+| `intent_matches` | 意向匹配表 | intentAId, intentBId, tempOrganizerId, outcome, activityId, expiresAt |
+| `match_messages` | 匹配消息表 | matchId, senderId, content |
+| `global_keywords` | 全局热词表 | keyword, matchType, responseType, responseContent, priority, hitCount, conversionCount |
+| `ai_configs` | AI 配置表 | configKey, configValue, category, version, updatedBy |
+| `ai_config_history` | AI 配置历史表 | configKey, configValue, version, updatedAt, updatedBy |
+| `ai_requests` | AI 请求记录表 | userId, modelId, inputTokens, outputTokens, latencyMs, processorLog |
+| `ai_tool_calls` | AI 工具调用表 | requestId, toolName, durationMs, success |
+| `ai_eval_samples` | AI 评估样本表 | input, output, intent, score |
+| `ai_conversation_metrics` | AI 对话质量指标表 | conversationId, userId, intent, qualityScore, latencyMs, activityCreated, activityJoined |
+| `ai_security_events` | AI 安全事件表 | userId, eventType, triggerWord, severity, metadata |
+| `ai_sensitive_words` | AI 敏感词表 | word, category, severity, isActive |
+| `content_notes` | 内容运营笔记表 | topic, contentType, batchId, title, body, hashtags |
+| `reports` | 举报表 | type, reason, targetId, targetContent, reporterId, status |
 
 ### 4.2 conversations 表 (两层会话结构)
 
@@ -578,6 +586,7 @@ export const aiConfigHistory = pgTable("ai_config_history", {
 | `growth` | `/growth` | 增长工具：(已迁移到各领域，保留兼容层) |
 | `notifications` | `/notifications` | 通知管理 |
 | `reports` | `/reports` | 举报管理 |
+| `wechat` | `/wechat` | 微信能力封装（模板消息、OpenID / 手机号相关能力） |
 | `content-security` | `/content-security` | 内容安全检测、微信 API 封装 (v4.6) |
 
 **设计原则**：API 模块按功能领域划分，而非按页面划分。Dashboard 作为 BFF 聚合层，内部调用各领域服务。
@@ -601,12 +610,25 @@ POST /activities          // 创建活动 (从 draft 变 active)
 GET  /activities/:id      // 获取活动详情
 GET  /activities/:id/public // 获取活动公开详情（无需认证，含讨论区预览）(v5.0 新增)
 GET  /activities/user/:userId     // 按用户ID获取相关活动
-GET  /activities/nearby   // 获取附近活动 (Generative UI)
+GET  /activities/nearby   // 获取附近活动 (Generative UI，v5.3 补充 keyword)
 GET  /activities/stats    // 获取活动统计 (概览/类型分布) (v5.1 新增)
 PATCH /activities/:id/status  // 更新活动状态
 DELETE /activities/:id    // 删除活动
 POST /activities/:id/join // 报名活动 (v5.0: 新增系统消息 + 全员通知)
 POST /activities/:id/quit // 退出活动
+
+// Participants
+GET  /participants/activity/:id          // 获取活动参与者列表
+POST /participants/confirm-fulfillment   // 发起人提交履约确认
+POST /participants/rebook-follow-up      // 记录活动后再约意愿（写入 AI memory）
+
+// Notifications
+GET  /notifications/message-center       // 消息中心聚合读取（系统通知 + pending match + 群聊未读）
+GET  /notifications/pending-matches      // 获取当前用户的待确认匹配列表
+GET  /notifications/pending-matches/:id  // 获取单个 pending match 详情（显式 userId）
+POST /notifications/pending-matches/:id/confirm // Temp_Organizer 确认成局
+POST /notifications/pending-matches/:id/cancel  // Temp_Organizer 取消匹配
+POST /notifications/:id/read             // 标记系统通知已读
 
 // Chat (活动群聊 + WebSocket 讨论区 v4.9)
 GET  /chat/:activityId/messages  // 获取消息列表
@@ -665,6 +687,62 @@ GET  /content/analytics             // 内容效果统计
 POST /growth/poster/generate  // 【已迁移到 /ai/generate/content】生成文案
 GET  /growth/trends           // 【已迁移到 /analytics/trends】热门洞察
 ```
+
+### 5.2.1 认证模式与动作闸门 (v5.3 对齐)
+
+当前主策略采用 **Visitor-First + Action-Gated Auth**：
+
+- Visitor-First：先放开“浏览与体验”能力，降低进入门槛
+- Action-Gated Auth：对“写入与社交风险”动作执行认证闸门（登录 + 手机号绑定）
+
+| 能力域 | 代表接口 | 认证要求 | 说明 |
+|------|---------|---------|------|
+| 公开浏览 | `GET /activities/:id/public`、`GET /activities/nearby` | 无需认证 | Visitor 可直接访问 |
+| 游客对话承接 | `POST /ai/chat`、`GET /ai/welcome` | 可选认证 | 未登录可调用；有 `userId` 才持久化历史 |
+| 个人资产读写 | `GET /ai/conversations`、`POST /ai/conversations` | 必须登录 | 仅本人或 admin 可访问 |
+| 交易/社交动作 | `POST /activities/:id/join`、`POST /activities` | 登录 + 手机号绑定 | 统一走动作闸门 |
+
+**动作闸门执行顺序**：
+1. 校验登录态（JWT）
+2. 校验手机号绑定（`users.phoneNumber`）
+3. 执行业务动作（报名/发布/联系方式等）
+
+> 说明：v4.8 中“OpenID 直接报名”的 Guest-First 为历史方案，当前版本未纳入主流程。
+
+### 5.2.2 两周闭环接口增补 (v5.3 执行锚点)
+
+> 目标：将 PRD 21.1 的闭环任务映射到可执行的接口与模块，按“先补真实链路、再补体验增强”推进。
+
+| 编号 | 接口/能力 | 合约增量 | 主要实现落点 |
+|------|----------|---------|-------------|
+| W1-1 | `GET /activities/nearby` | 为 `nearbyQuery` 增加可选 `keyword`，服务层按 `title/locationName/locationHint` 过滤并保留距离排序 | `apps/api/src/modules/activities/activity.model.ts`、`activity.service.ts`、`apps/miniprogram/pages/search/index.ts` |
+| W1-2 | `POST /participants/confirm-fulfillment` | 新增履约确认请求体：`activityId + participants[{userId, fulfilled}]`；要求“登录 + 发起人权限” | `apps/api/src/modules/participants/participant.controller.ts`、`participant.model.ts`、`participant.service.ts`、`apps/miniprogram/subpackages/activity/confirm/index.ts` |
+| W1-3 | Temp_Organizer 重分配通知 | `intent-jobs` 重分配成功后，触发通知落库并回传可读文案 | `apps/api/src/jobs/intent-jobs.ts`、`apps/api/src/modules/notifications/notification.service.ts` |
+| W2-1 | 活动详情复制文案 | 复用详情接口，前端生成标准文案并调用复制能力 | `apps/miniprogram/subpackages/activity/detail/index.ts`、`index.wxml` |
+| W2-2 | 活动克隆（我也组一个） | 详情页触发“克隆”活动文本，回跳首页并预填 AI 输入（action/text） | `apps/miniprogram/subpackages/activity/detail/index.ts`、`apps/miniprogram/pages/home/index.ts` |
+| W2-3 | `service_notification` 发送链路 | 在通知策略之外补齐发送执行器与失败降级（失败时至少保证站内通知可达） | `apps/api/src/modules/notifications/notification.service.ts`、`apps/api/src/jobs/*` |
+
+**约束**：
+1. 认证顺序必须满足 CP-44（登录校验 → 手机号绑定 → 业务执行）
+2. 所有请求/响应 Schema 维持 DB 派生优先与 TypeBox 定义规范
+3. 不改变 Visitor-First 主策略，只补齐闭环缺口
+
+### 5.2.3 社交闭环补充接口 (v5.3 P0)
+
+> 目标：把"报名后协同"、"找搭子 pending 详情态"、"活动后真实结果写回"补成可重复使用的标准接口，而不是只靠前端 toast 或 prompt 文本兜底。
+
+| 接口/能力 | 作用 | 关键返回 / 副作用 |
+|----------|------|------------------|
+| `GET /notifications/pending-matches/:id?userId=...` | 获取单个待确认匹配详情 | 返回 `commonTags`、`locationHint`、`confirmDeadline`、`nextActionOwner`、`nextActionText`、`members[]`、`icebreaker` |
+| `POST /notifications/pending-matches/:id/confirm` | Temp_Organizer 确认成局 | 创建活动后返回 `activityId`，前端可直接跳转到活动详情 / 邀请函 |
+| `POST /notifications/pending-matches/:id/cancel` | Temp_Organizer 取消匹配 | 就地返回消息中心并刷新状态 |
+| `POST /participants/confirm-fulfillment` | 发起人提交真实履约结果 | 将成员的 `fulfilled` 状态落库，并把真实结果写入 AI memory |
+| `POST /participants/rebook-follow-up` | 记录活动后"去再约" | 为当前用户的该次活动 outcome 写入 `rebookTriggered=true` |
+
+**显式参数约束**：
+- pending match 详情查询必须显式传 `userId`
+- 普通用户仅允许查询自己的匹配详情；admin 可按需代查
+- 前端不得通过"我的匹配"或隐式当前用户语义拼装接口
 
 ### 5.3 AI 解析 - 意图分类 (v3.2)
 
@@ -1167,6 +1245,7 @@ interface EnhancedUserProfile {
   version: 2;
   preferences: EnhancedPreference[];  // 偏好列表
   frequentLocations: string[];        // 常去地点
+  activityOutcomes?: ActivityOutcome[]; // 最近真实社交结果
   lastUpdated: Date;                  // 最后更新时间
 }
 
@@ -1178,7 +1257,25 @@ interface EnhancedPreference {
   mentionCount: number;    // 提及次数（v5.1 新增，初始值 1）
   updatedAt: Date;         // 更新时间（用于时间衰减计算）
 }
+
+interface ActivityOutcome {
+  activityId: string;
+  activityTitle: string;
+  activityType: string;
+  locationName: string;
+  attended: boolean | null;     // 真实到场 / 未到场 / 待确认
+  rebookTriggered: boolean;     // 是否主动再约
+  reviewSummary?: string | null;
+  happenedAt: Date;
+  updatedAt: Date;
+}
 ```
+
+**真实结果写回原则**：
+- `joinActivity` 不再把报名直接写成强正向兴趣向量；报名只算轻信号
+- 强信号来自真实履约：`confirm-fulfillment` 提交后的到场结果
+- `rebook-follow-up` 负责补充"是否主动再约"这个独立行为信号
+- `buildProfilePrompt()` 在注入偏好之外，还会注入最近 3 条真实活动结果，供复盘、再约和推荐复用
 
 **时间衰减函数 (v5.1 新增)**：
 
@@ -1892,143 +1989,114 @@ const result = await runEval({
   dataset: xiaojuEvalDataset,
   scorers: defaultScorers,
 }, async (input) => {
-  const response = await streamChat({ messages: [{ role: 'user', content: input }] });
-  return { output: response.text, intent: response.intent };
+  const envelope = await callAiChat({
+    input: { type: 'text', text: input },
+    context: { client: 'admin' },
+    stream: false,
+  });
+
+  return {
+    output: extractAssistantText(envelope.turn.blocks),
+    intent: extractIntentFromTraces(envelope.traces),
+  };
 });
 
 printEvalReport(result);
 ```
 
-### 6.11 AI 对话流程图
+### 6.11 AI 全链路流程图（结果导向）
 
 ```mermaid
 flowchart TD
-    subgraph Input["输入层"]
-        A[用户消息] --> B[提取消息内容]
-        B --> C{频率限制检查}
-        C -->|超限| C1[返回限流响应]
-        C -->|通过| D[输入护栏检查]
-        D -->|拦截| D1[返回安全提示]
-        D -->|通过| E[构建上下文]
-    end
+    A["首页 Chat + 快捷 CTA"] --> B["用户输入: text/action"]
+    B --> C["GenUI 请求 context(client/locale/timezone/platform/lat/lng)"]
+    C --> D["AI Gateway: buildAiChatTurn"]
 
-    subgraph Context["上下文层"]
-        E --> F[获取工作记忆/用户画像]
-        F --> G[意图分类]
-    end
+    D --> E{"input.type === action ?"}
+    E -->|Yes| F["构建 userAction + location 透传"]
+    F --> G["handleUserAction 快车道"]
+    G --> H{"fallbackToLLM ?"}
+    H -->|No| I["直接生成 GenUI blocks"]
+    H -->|Yes| J["回退到 LLM 主链路"]
 
-    subgraph Intent["意图路由层"]
-        G -->|create| H1[创建 Tools]
-        G -->|explore| H2[探索 Tools]
-        G -->|partner| H3[找搭子 Tools]
-        G -->|manage| H4[管理 Tools]
-        G -->|chitchat| H5[闲聊快速响应]
-    end
+    E -->|No| J
 
-    subgraph Agent["Agent 执行层"]
-        H1 & H2 & H3 & H4 --> I[构建 Prompt + Pipeline]
-        I --> J[LLM 推理 - 流式输出]
-        J -->|onStepFinish| K[Tool 执行]
-        K -->|循环| J
-        J -->|onFinish| L[响应后处理]
-    end
+    J --> K["Pre-LLM: 限流/护栏/P0 热词/Processor"]
+    K --> L["Intent 路由 + Tools 选择"]
+    L --> M["LLM + Tool 循环执行"]
+    M --> N["Post/Async: 保存历史/偏好提取/指标"]
+    N --> O["Gateway 映射为 turn.blocks + traces"]
 
-    subgraph Output["输出层"]
-        L --> M1[保存对话历史]
-        L --> M2[LLM 提取偏好]
-        L --> M3[质量评估]
-        L --> M4[记录指标]
-        M1 & M2 & M3 & M4 --> N[流式响应 SSE]
-    end
-
-    H5 --> N
-    C1 --> END[结束]
-    D1 --> END
-    N --> END
+    I --> P["返回 /ai/chat (SSE 或非流式)"]
+    O --> P
+    P --> Q["客户端渲染 GenUI Widget"]
+    Q --> R{"是否达成结果?"}
+    R -->|找到局| S["join/publish 成功"]
+    R -->|找到搭子| T["intent matched/pending"]
+    R -->|未达成| U["继续追问或推荐下一步 CTA"]
 ```
 
-### 6.12 AI 请求流程 (v4.8 Processor 架构)
+**全流程节点与代码落点**：
+- **入口层**：`apps/miniprogram/src/stores/chat.ts` 发送 `text/action`，并携带 `context.lat/lng`
+- **网关层**：`apps/api/src/modules/ai/ai-chat-gateway.service.ts` 统一构建 `ChatRequest`
+- **A2UI 快车道**：`ChatRequest.userAction` 直达 `handleUserAction`，避免按钮点击退化为纯文本
+- **位置上下文**：`context.lat/lng -> ChatRequest.location([lng,lat])`，统一给 RAG/Tool/Action 使用
+- **结果层**：通过 `join/publish/match` 状态流转判断“找到局/找到搭子”是否完成
+
+### 6.12 AI 请求流程（v5.3：Gateway + A2UI + Processor）
 
 ```
-用户消息
+客户端输入（text/action）
     │
     ▼
-┌─────────────────┐
-│ 0. 提取消息内容 │ ← 从 UIMessage 提取文本
-└────────┬────────┘
+┌──────────────────────────────────────────┐
+│ 0. Chat Gateway 规范化                   │
+│ - normalizeActionDisplayText             │
+│ - 解析 context.lat/lng -> location       │
+│ - action -> ChatRequest.userAction       │
+└────────┬─────────────────────────────────┘
          │
          ▼
-┌─────────────────┐
-│ 1. 频率限制检查 │ ← checkRateLimit(30次/分钟)
-└────────┬────────┘
-         │ (超限返回快速响应)
-         ▼
-┌─────────────────┐
-│ 2. P0 热词匹配  │ ← matchKeyword() 全局关键词
-└────────┬────────┘
-         │ (命中则直接返回预设响应，跳过 LLM)
-         ▼
-┌─────────────────┐
-│ 3. 输入护栏     │ ← [Processor] InputGuardProcessor
-└────────┬────────┘
-         │ (敏感词/注入攻击/长度限制拦截)
-         ▼
-┌─────────────────┐
-│ 4. 构建上下文   │ ← 位置逆地理编码、用户昵称
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ 5. 意图分类     │ ← classifyIntent(Regex优先/LLM兜底)
-└────────┬────────┘
-         │
-         ├──────────────────┐
-         │ (partner 意图)   │
-         ▼                  ▼
-┌─────────────────┐  ┌─────────────────┐
-│ 5.5 找搭子追问  │  │ 6. 闲聊快速响应 │
-│ (Partner Flow)  │  │ (chitchat)      │
-└────────┬────────┘  └─────────────────┘
-         │
-         ▼
-┌─────────────────┐
-│ 7. 工具选择     │ ← getToolsByIntent(按意图加载)
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────────────────────────┐
-│ 8. Prompt + Processors (v4.8)      │
-│   [1] UserProfileProcessor         │ ← 注入用户画像
-│   [2] SemanticRecallProcessor      │ ← 语义召回历史
-│   [3] TokenLimitProcessor          │ ← Token 限制截断
-└────────┬────────────────────────────┘
-         │
-         ▼
-┌─────────────────┐
-│ 9. LLM 推理     │ ← streamText(getModelByIntent())
-│   (流式输出)    │   Qwen: flash/plus/max 按意图选择
-└────────┬────────┘
-         │
-         ├─── onStepFinish ───┐
-         │                    ▼
-         │            ┌─────────────────┐
-         │            │ Tool 执行       │
-         │            │ (最多 5 步)     │
-         │            └─────────────────┘
-         │
-         ├─── onFinish (Output Processors) ───┐
-         │                                    ▼
-         │            ┌─────────────────────────────────┐
-         │            │ 10. 响应后处理 (v4.8 Processors)│
-         │            │ [4] SaveHistoryProcessor        │
-         │            │ [5] ExtractPreferencesProcessor │
-         │            │ [6] evaluateResponseQuality()   │
-         │            │ [7] recordConversationMetrics() │
-         │            └─────────────────────────────────┘
-         │
-         ▼
-    流式响应 (SSE)
+    input.type === action ?
+    ┌───────────────┴───────────────┐
+    ▼                               ▼
+┌─────────────────┐          ┌─────────────────┐
+│ A. UserAction   │          │ B. LLM 主链路   │
+│ handleUserAction│          │ 频率限制/护栏   │
+└────────┬────────┘          └────────┬────────┘
+         │                             │
+    fallbackToLLM?                     ▼
+    ┌───────┴────────┐         ┌─────────────────┐
+    ▼                ▼         │ P0 热词匹配     │
+┌─────────────┐  ┌──────────┐  └────────┬────────┘
+│ 直接返回结果 │  │ 回退到 B │           │
+└─────────────┘  └──────────┘           ▼
+                                 ┌─────────────────┐
+                                 │ Processor 管线  │
+                                 │ intent/profile/ │
+                                 │ recall/token    │
+                                 └────────┬────────┘
+                                          │
+                                          ▼
+                                 ┌─────────────────┐
+                                 │ LLM + Tool 循环 │
+                                 └────────┬────────┘
+                                          │
+                                          ▼
+                                 ┌─────────────────┐
+                                 │ Post/Async 阶段 │
+                                 │ save/extract/   │
+                                 │ metric/eval     │
+                                 └────────┬────────┘
+                                          │
+                                          ▼
+                               GenUI turn.blocks + SSE 输出
 ```
+
+**关键结果约束（Result Constraints）**：
+- Action 分支优先，不允许按钮点击无故回退纯文本 NLP
+- 位置分支优先，`lat/lng` 缺失时才允许退化到默认地理中心
+- 每次响应必须产出可决策内容：文本解释 + 至少一个 CTA 或下一步建议
 
 ### 6.12.1 Processor 架构详解 (v5.1 纯函数 + 三阶段模型)
 
@@ -2142,10 +2210,32 @@ await runPostLLMProcessors([{ processor: saveHistoryProcessor }], postLLMContext
 runAsyncProcessors([{ processor: extractPreferencesProcessor }], postLLMContext);
 ```
 
-### 6.12 结构化用户操作 (User Action) - v4.7
+### 6.12.2 结构化用户操作 (User Action) - v5.3
 
 **设计理念**：
-参考 Google A2UI 和 Vercel json-render 的设计，当用户点击 Widget 按钮时，发送结构化的 Action 数据而非文本消息，跳过 LLM 意图识别，直接路由到对应的 Service 函数执行。
+参考 Google A2UI 和 Vercel json-render 的设计，当用户点击 Widget 按钮时，发送结构化的 Action 数据而非文本消息，优先走 Action 快车道并直达 Service 执行；仅在 `fallbackToLLM=true` 时回退到 LLM 主链路。
+
+**v5.3 关键补齐**：
+- `/ai/chat` 网关层显式透传 `input.type='action' -> ChatRequest.userAction`
+- GenUI `context` 新增 `lat/lng`，并在网关映射为 `ChatRequest.location=[lng,lat]`
+- 小程序 `sendMessage/sendAction` 均携带当前定位上下文，保障“附近推荐/找搭子”一致性
+- Action 响应支持 `nextActions`，网关映射为 `cta-group`，形成“操作成功 → 下一步”闭环
+- 找搭子追问输出 `匹配进度 x/2` 与完成态分流选项，降低用户在“等待匹配”阶段流失
+
+**P0/P1 实施映射（本轮）**：
+- **P0-Action 快车道**：`apps/api/src/modules/ai/ai-chat-gateway.service.ts` + `apps/api/src/modules/ai/ai.service.ts`
+- **P0-位置上下文**：`packages/genui-contract/src/protocol.ts` + `apps/api/src/modules/ai/ai.controller.ts` + 小程序 `stores/chat.ts`
+- **P0-成功态下一步**：`apps/api/src/modules/ai/ai.service.ts` 输出 `nextActions`，网关映射 `cta-group`
+- **P0-找搭子进度**：`apps/api/src/modules/ai/ai.service.ts` 在 partner flow 输出 `匹配进度 x/2`
+- **P1-Web 定位接入**：`apps/web/app/chat/page.tsx` 获取浏览器定位并透传到 welcome/chat context
+- **P0-报名后协同统一**：小程序 `join-flow.ts` 收口所有报名成功后的跳转，统一进入 `/subpackages/activity/discussion/index?entry=join_success`，讨论区首屏展示轻引导与默认破冰话术
+- **P0-pending match 详情态**：`apps/api/src/modules/notifications/notification.controller.ts` 新增 `/notifications/pending-matches/:id`；小程序消息中心弹层与 H5 `MessageCenterDrawer` 二级态统一消费详情接口
+- **P0-活动结果写回 memory**：`apps/api/src/modules/participants/participant.service.ts` 在 `confirm-fulfillment` 后写入 `activityOutcomes`，`/participants/rebook-follow-up` 补充 `rebookTriggered`，并移除报名时的强正反馈向量写入
+- **P1-匹配确认通知卡**：`apps/api/src/modules/notifications/notification.controller.ts` 新增 `/notifications/pending-matches`，小程序 `pages/message/index.ts` 渲染“确认/取消”卡片并通过消息中心承接
+- **P1-post_activity 回流**：小程序 `pages/message/index.ts` 与 H5 `message-center-drawer.tsx` 点击 `post_activity` 通知后直接触发 AI 对话反馈 / 再约 prompt
+- **P1-群聊列表接口规范化**：新增 `GET /chat/activities?userId=...`（显式参数，禁止 `my-*` 路由语义），小程序消息页切换为标准接口
+- **P1-未读真实统计收口**：消息中心不再本地累加/清零，统一使用服务端统计；`participants.lastReadAt` 作为读游标，`GET /chat/activities` 返回每个群聊 `unreadCount` 与 `totalUnread`
+- **P1-消息中心聚合接口**：新增 `GET /notifications/message-center?userId=...`，一次返回系统通知、待确认匹配、通知未读与群聊未读，前端消息页改为单接口渲染
 
 **核心类型**：
 
@@ -2171,6 +2261,8 @@ type UserActionType =
   | 'expand_map'         // 展开地图
   | 'filter_activities'  // 筛选活动
   | 'find_partner'       // 找搭子
+  | 'confirm_match'      // 确认匹配成局
+  | 'cancel_match'       // 取消待确认匹配
   | 'select_preference'  // 选择偏好
   | 'skip_preference'    // 跳过偏好
   | 'retry'              // 重试
@@ -2503,6 +2595,22 @@ sequenceDiagram
     end
 ```
 
+### 6.16.6 报名成功首进讨论区 (v5.3 P0)
+
+报名成功后的讨论区进入链路由小程序共享 helper 统一处理：
+
+```typescript
+// apps/miniprogram/src/utils/join-flow.ts
+buildDiscussionEntryUrl({ activityId, title, source })
+// => /subpackages/activity/discussion/index?id=...&entry=join_success&title=...&source=...
+```
+
+**实现约束**：
+- 活动详情、半屏详情、地图探索快速报名、AI 推荐卡报名都必须走同一 helper
+- 讨论区收到 `entry=join_success` 时，仅展示轻量引导，不额外触发复杂 AI 调用
+- 首屏引导包括：加入成功标题、"先打个招呼吧"提示、2~3 条默认破冰话术
+- H5 保持浏览 / 邀请函 / 消息抽屉能力，不扩 H5 报名链路
+
 ---
 
 ## 6.17 ~~AI 海报技术实现~~ (v5.0 废弃)
@@ -2793,99 +2901,99 @@ function resolveThemeConfig(theme: string, themeConfig: ThemeConfig | null, acti
 - 协议类型来自 `apps/miniprogram/src/gen/genui-contract.ts`（由 `packages/genui-contract` 代码生成）
 - 请求层使用 Orval 生成函数（`apps/miniprogram/src/api/endpoints/ai/ai.ts` 的 `postAiChat`，GenUI payload）
 - Mutator 统一走 `apps/miniprogram/src/utils/wx-request.ts`，返回 `{ data, status, headers }`
-- 页面状态由 `apps/miniprogram/src/stores/chat.ts` 维护：`text/action` 输入 -> `/ai/chat`（GenUI payload） -> `turn.blocks` 渲染
+- 页面状态由 `apps/miniprogram/src/stores/chat.ts` 维护：`text/action` 输入 + `context.lat/lng` -> `/ai/chat`（GenUI payload） -> `turn.blocks` 渲染
 - `choice` block 被映射为 `widget_ask_preference`，在同一条 assistant message 中同时渲染文本与交互卡片
 
 说明：
 
 - `/ai/chat` + `stream=true` 为 H5 与小程序统一主链路，确保多端同构的 GenUI 实时渲染
+- Action 输入在网关层映射为 `ChatRequest.userAction`，避免按钮点击退化为文本意图识别
 - Orval 开发 target 使用 `127.0.0.1`（非 `localhost`），避免本机 IPv6 解析导致连接失败
 
 ### 7.1 Zustand Vanilla Store
 
 ```typescript
-// stores/home.ts - 首页对话状态
+// src/stores/chat.ts - 首页 Chat / GenUI 统一状态
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
 import { persist, createJSONStorage } from 'zustand/middleware'
 
-interface HomeMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  type: 'text' | 'widget_dashboard' | 'widget_launcher' | 'widget_action' | 'widget_draft' | 'widget_share' | 'widget_explore' | 'widget_error';
-  content: any;
-  activityId?: string;
-  createdAt: string;
+interface ChatState {
+  conversationId: string | null;
+  messages: UIMessage[];
+  status: 'idle' | 'submitted' | 'streaming';
+  streamingMessageId: string | null;
+  location: { lat: number; lng: number } | null;
 }
 
-interface HomeState {
-  messages: HomeMessage[];
-  isLoading: boolean;
-  hasMore: boolean;
-  cursor: string | null;
+interface ChatActions {
+  sendMessage: (text: string) => Promise<void>;
+  sendUserAction: (action: string, payload?: Record<string, unknown>) => Promise<void>;
+  setLocation: (location: { lat: number; lng: number } | null) => void;
+  stop: () => void;
+  resetConversation: () => void;
 }
 
-// 微信小程序存储适配器
 const wechatStorage = {
   getItem: (name: string) => wx.getStorageSync(name) || null,
   setItem: (name: string, value: string) => wx.setStorageSync(name, value),
   removeItem: (name: string) => wx.removeStorageSync(name),
 }
 
-export const useHomeStore = create<HomeState & HomeActions>()(
+export const useChatStore = create<ChatState & ChatActions>()(
   persist(
-    immer((set, get) => ({
+    immer(() => ({
+      conversationId: null,
       messages: [],
-      isLoading: false,
-      hasMore: true,
-      cursor: null,
-      // ... actions
+      status: 'idle',
+      streamingMessageId: null,
+      location: null,
     })),
     {
-      name: 'home-store',
+      name: 'chat-store',
       storage: createJSONStorage(() => wechatStorage),
       partialize: (state) => ({
+        conversationId: state.conversationId,
         messages: state.messages.slice(-50),
+        location: state.location,
       }),
     }
   )
 )
 ```
 
-### 6.2 页面绑定模式
+### 7.2 页面绑定模式
 
 ```typescript
 // pages/home/index.ts
-import { useHomeStore } from '../../stores/home'
+import { useChatStore } from '../../src/stores/chat'
 
 Page({
   data: {
-    messages: [] as any[],
-    isLoading: false,
+    messages: [] as UIMessage[],
+    status: 'idle' as const,
+    streamingMessageId: null as string | null,
   },
-  
+
   unsub: null as null | (() => void),
-  
+
   onLoad() {
-    const store = useHomeStore
-    
-    // 1. 初始化数据
+    const store = useChatStore
+
     const state = store.getState()
     this.setData({
       messages: state.messages,
-      isLoading: state.isLoading,
+      status: state.status,
+      streamingMessageId: state.streamingMessageId,
     })
-    
-    // 2. 订阅 Store 变化
+
     this.unsub = store.subscribe((state) => {
       this.setData({
         messages: state.messages,
-        isLoading: state.isLoading,
+        status: state.status,
+        streamingMessageId: state.streamingMessageId,
       })
     })
-    
-    // 3. 加载消息
-    store.getState().loadMessages()
   },
   
   onUnload() {
@@ -2896,7 +3004,7 @@ Page({
 })
 ```
 
-### 6.3 群聊轮询策略
+### 7.3 群聊轮询策略
 
 ```typescript
 // pages/chat/index.ts
@@ -2923,7 +3031,7 @@ Page({
 });
 ```
 
-### 6.4 自定义导航栏
+### 7.4 自定义导航栏
 
 ```typescript
 // components/custom-navbar/index.ts
@@ -3374,13 +3482,16 @@ bun run gen:api         # 生成 Orval SDK
 
 - **CP-9**: 未绑定手机号的用户不能发布/报名活动
 - **CP-10**: 用户不能报名自己创建的活动
-- **CP-11**: 未登录用户可以浏览对话、查看详情、探索附近
+- **CP-11**: 未登录用户可以浏览对话、查看详情、探索附近（Visitor-First 范围）
+- **CP-44**: 认证闸门顺序必须为“登录校验 → 手机号绑定校验 → 业务动作执行”，不得跳步或并行绕过
 
 ### 12.4 前端状态
 
 - **CP-12**: 页面栈长度为 1 时，返回按钮跳转首页
 - **CP-13**: 群聊页面 onHide 停止轮询，onShow 恢复轮询
 - **CP-14**: 未读消息 > 0 时，消息中心显示角标
+- **CP-32**: 消息中心未读统计必须来自服务端真源（通知 `GET /notifications/unread-count` + 群聊 `GET /chat/activities`），前端禁止本地累加/清零推导
+- **CP-33**: 消息中心首页数据必须支持单接口聚合读取（`GET /notifications/message-center`），避免多接口拼装导致统计时序不一致
 
 ### 12.5 Generative UI (v3.2 新增)
 
@@ -3501,7 +3612,7 @@ page {
 | 维度 | v3.3 | v3.9 |
 |------|------|------|
 | 会话结构 | 单表 conversations | 两层结构 conversations + conversation_messages |
-| 对话持久化 | 无自动保存 | streamChat onFinish 自动保存 |
+| 对话持久化 | 无自动保存 | `/ai/chat` 网关在保存历史阶段自动写入 conversation_messages |
 | activityId 关联 | 手动关联 | Tool 返回时自动关联 |
 | Widget 类型 | 8 种 | 9 种 (+widget_ask_preference) |
 | 会话管理 API | 无 | /ai/sessions (Admin 对话审计) |

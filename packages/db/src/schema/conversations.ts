@@ -116,8 +116,8 @@ export const conversationMessages = pgTable("conversation_messages", {
   // 关联：如果消息对应真实活动
   activityId: uuid("activity_id").references(() => activities.id),
 
-  // v4.7 语义搜索：向量字段 (智谱 embedding-3, 1024 维)
-  embedding: vector('embedding', { dimensions: 1024 }),
+  // v4.7 语义搜索：向量字段 (Qwen text-embedding-v4, 1536 维)
+  embedding: vector('embedding', { dimensions: 1536 }),
 
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [

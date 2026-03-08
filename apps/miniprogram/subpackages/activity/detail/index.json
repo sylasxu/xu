@@ -10,8 +10,6 @@
     "t-button": "tdesign-miniprogram/button/button",
     "t-loading": "tdesign-miniprogram/loading/loading",
     "t-popup": "tdesign-miniprogram/popup/popup",
-    "t-checkbox": "tdesign-miniprogram/checkbox/checkbox",
-    "t-action-sheet": "tdesign-miniprogram/action-sheet/action-sheet",
-    "reliability-badge": "/components/reliability-badge/index"
+    "t-action-sheet": "tdesign-miniprogram/action-sheet/action-sheet"
   }
 }

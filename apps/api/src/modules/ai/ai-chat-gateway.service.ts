@@ -10,10 +10,11 @@ import type {
 } from '@juchang/genui-contract';
 import {
   getConversationMessages,
-  getOrCreateCurrentConversation,
   handleChatStream,
   type ChatRequest,
 } from './ai.service';
+import { createThread } from './memory';
+import type { UserActionType } from './user-action';
 import {
   createChoiceBlock,
   createEntityCardBlock,
@@ -31,6 +32,22 @@ const ID_PREFIX = {
 } as const;
 
 const MAX_HISTORY_MESSAGES = 24;
+
+const KNOWN_LOCATION_CENTERS = [
+  { name: '南坪万达', lat: 29.53012, lng: 106.57221 },
+  { name: '观音桥', lat: 29.58567, lng: 106.52988 },
+  { name: '解放碑', lat: 29.55792, lng: 106.57709 },
+  { name: '南坪', lat: 29.52589, lng: 106.57024 },
+  { name: '江北嘴', lat: 29.58263, lng: 106.56653 },
+  { name: '杨家坪', lat: 29.52345, lng: 106.51879 },
+  { name: '大坪', lat: 29.54191, lng: 106.51934 },
+  { name: '沙坪坝', lat: 29.54142, lng: 106.45785 },
+] as const;
+
+const EXPLORE_TEXT_PATTERN = /(附近.*(局|活动|好玩的)|有什么(局|活动)|推荐|找个局|找局|看看.*局|约饭|吃饭|火锅|羽毛球|桌游|咖啡)/;
+const EXPLORE_FOLLOWUP_PATTERN = /(有没有|还有|那|换成|改成|最好|预算|今晚|明天|周末|八点|8点|不吃辣|别太闹|安静|AA|清淡|轻松)/;
+const CREATE_FROM_EXPLORE_PATTERN = /(我来组|我想自己组|我自己组|我来发|我自己发|帮我组一个|那就我来组|那我自己发)/;
+
 
 interface ViewerContext {
   id: string;
@@ -63,6 +80,16 @@ interface ToolInvocationState {
   input?: Record<string, unknown>;
   output?: unknown;
   errorText?: string;
+}
+
+interface ActionResultEvent {
+  success: boolean;
+  error?: string;
+  nextActions?: Array<{
+    label: string;
+    action: string;
+    params?: Record<string, unknown>;
+  }>;
 }
 
 interface ResolvedConversation {
@@ -219,6 +246,198 @@ function normalizeActionDisplayText(input: GenUIRequest['input']): string {
   return input.action.trim();
 }
 
+function parseLocationValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
+function parseRequestLocation(request: GenUIRequest): [number, number] | undefined {
+  const lat = parseLocationValue(request.context?.lat);
+  const lng = parseLocationValue(request.context?.lng);
+
+  if (lat === null || lng === null) {
+    return undefined;
+  }
+
+  return [lng, lat];
+}
+
+function findKnownLocationCenter(text: string): { name: string; lat: number; lng: number } | null {
+  for (const location of KNOWN_LOCATION_CENTERS) {
+    if (text.includes(location.name)) {
+      return { ...location };
+    }
+  }
+
+  return null;
+}
+
+function inferActivityTypeFromText(text: string): string | undefined {
+  if (/(火锅|约饭|吃饭|烧烤|咖啡|奶茶|清淡|不吃辣)/.test(text)) {
+    return 'food';
+  }
+
+  if (/(羽毛球|篮球|跑步|徒步|运动|打球)/.test(text)) {
+    return 'sports';
+  }
+
+  if (/(桌游|剧本杀|狼人杀|麻将)/.test(text)) {
+    return 'boardgame';
+  }
+
+  if (/(唱歌|KTV|电影|livehouse|酒吧)/i.test(text)) {
+    return 'entertainment';
+  }
+
+  return undefined;
+}
+
+function extractSearchContextFromHistory(historyMessages: ChatRequest['messages']): {
+  center: { name: string; lat: number; lng: number } | null;
+  activityType?: string;
+} {
+  let center: { name: string; lat: number; lng: number } | null = null;
+  let activityType: string | undefined;
+
+  for (const message of [...historyMessages].reverse()) {
+    const content = typeof message.content === 'string' ? message.content.trim() : '';
+    if (!content) {
+      continue;
+    }
+
+    if (!center) {
+      center = findKnownLocationCenter(content);
+    }
+
+    if (!activityType) {
+      activityType = inferActivityTypeFromText(content);
+    }
+
+    if (center && activityType) {
+      break;
+    }
+  }
+
+  return { center, activityType };
+}
+
+function buildCreatePromptFromExplore(params: {
+  locationName: string;
+  originalText: string;
+  activityType?: string;
+}): string {
+  const typeLabelMap: Record<string, string> = {
+    food: '约饭',
+    sports: '运动',
+    boardgame: '桌游',
+    entertainment: '娱乐',
+    other: '活动',
+  };
+
+  const parts = [
+    `我想在${params.locationName}自己发起一个新的线下${typeLabelMap[params.activityType || 'other'] || '活动'}。`,
+    params.originalText ? `当前诉求：${params.originalText}。` : '',
+    '先帮我判断要不要自己组，如果需要，再帮我整理成一个可发布的活动草稿。',
+  ];
+
+  return parts.filter(Boolean).join('');
+}
+
+function inferTextUserAction(
+  inputText: string,
+  historyMessages: ChatRequest['messages']
+): ChatRequest['userAction'] | undefined {
+  const normalized = inputText.trim();
+  if (!normalized) {
+    return undefined;
+  }
+
+  const currentCenter = findKnownLocationCenter(normalized);
+  const historyContext = extractSearchContextFromHistory(historyMessages);
+  const center = currentCenter || historyContext.center;
+  const activityType = inferActivityTypeFromText(normalized) || historyContext.activityType;
+
+  if (CREATE_FROM_EXPLORE_PATTERN.test(normalized) && center) {
+    return {
+      action: 'create_activity',
+      payload: {
+        description: buildCreatePromptFromExplore({
+          locationName: center.name,
+          originalText: normalized,
+          activityType,
+        }),
+        locationName: center.name,
+        ...(activityType ? { type: activityType } : {}),
+      },
+      source: 'text_inference',
+      originalText: normalized,
+    };
+  }
+
+  const shouldExplore = EXPLORE_TEXT_PATTERN.test(normalized)
+    || (!!center && EXPLORE_FOLLOWUP_PATTERN.test(normalized));
+
+  if (!shouldExplore || !center) {
+    return undefined;
+  }
+
+  return {
+    action: 'explore_nearby',
+    payload: {
+      locationName: center.name,
+      lat: center.lat,
+      lng: center.lng,
+      radiusKm: 5,
+      semanticQuery: normalized,
+      ...(activityType ? { type: activityType } : {}),
+    },
+    source: 'text_inference',
+    originalText: normalized,
+  };
+}
+
+function parseUserActionLocation(userAction: ChatRequest['userAction'] | undefined): [number, number] | undefined {
+  if (!userAction || !isRecord(userAction.payload)) {
+    return undefined;
+  }
+
+  const center = isRecord(userAction.payload.center) ? userAction.payload.center : null;
+  const lat = parseLocationValue(userAction.payload.lat) ?? parseLocationValue(center?.lat);
+  const lng = parseLocationValue(userAction.payload.lng) ?? parseLocationValue(center?.lng);
+
+  if (lat === null || lng === null) {
+    return undefined;
+  }
+
+  return [lng, lat];
+}
+
+function buildUserAction(
+  input: GenUIRequest['input'],
+  historyMessages: ChatRequest['messages']
+): ChatRequest['userAction'] | undefined {
+  if (input.type === 'action') {
+    return {
+      action: input.action as UserActionType,
+      payload: isRecord(input.params) ? input.params : {},
+      source: 'genui',
+      originalText: typeof input.displayText === 'string' ? input.displayText : undefined,
+    };
+  }
+
+  return inferTextUserAction(input.text, historyMessages);
+}
+
 function extractStoredMessageText(content: unknown): string {
   if (typeof content === 'string') {
     return content.trim();
@@ -308,18 +527,17 @@ async function resolveConversationContext(
     }
   }
 
-  const thread = await getOrCreateCurrentConversation(viewer.id);
-  const conversation = await getConversationMessages(thread.id);
+  const thread = await createThread(viewer.id);
 
   return {
     conversationId: thread.id,
-    historyMessages: toHistoryMessages(conversation.messages),
+    historyMessages: [],
     trace: {
       stage: 'conversation_resolved',
       detail: {
-        source: thread.isNew ? 'created' : 'reused_recent',
+        source: 'created',
         authenticated: true,
-        messageCount: conversation.messages.length,
+        messageCount: 0,
         conversationId: thread.id,
       },
     },
@@ -406,26 +624,42 @@ function normalizeChoiceOptions(
 
     const label = toStringValue(item.label);
     const rawValue = toStringValue(item.value, label);
+    const explicitAction = toStringValue(item.action);
     if (!label) {
       continue;
     }
 
+    const action = explicitAction || 'select_preference';
     const params: Record<string, unknown> = {
-      value: rawValue,
-      questionType,
+      ...(isRecord(item.params) ? item.params : {}),
     };
 
-    if (questionType === 'location') {
-      params.location = rawValue;
-    } else if (questionType === 'type') {
-      params.activityType = rawValue;
-    } else if (questionType === 'time') {
-      params.slot = rawValue;
+    if (params.value === undefined) {
+      params.value = rawValue;
+    }
+    if (params.selectedValue === undefined) {
+      params.selectedValue = rawValue;
+    }
+    if (params.selectedLabel === undefined) {
+      params.selectedLabel = label;
+    }
+    if (params.questionType === undefined) {
+      params.questionType = questionType;
+    }
+
+    if (action === 'select_preference') {
+      if (questionType === 'location' && params.location === undefined) {
+        params.location = rawValue;
+      } else if (questionType === 'type' && params.activityType === undefined) {
+        params.activityType = rawValue;
+      } else if (questionType === 'time' && params.slot === undefined) {
+        params.slot = rawValue;
+      }
     }
 
     normalized.push({
       label,
-      action: 'select_preference',
+      action,
       params,
     });
   }
@@ -750,6 +984,30 @@ function mapWidgetDataToBlock(params: {
     });
   }
 
+  if (widgetType === 'widget_success') {
+    const message = toStringValue(payload.message, '操作成功');
+    return createAlertBlock({
+      level: 'success',
+      message,
+      dedupeKey: 'widget_success',
+      traceRef,
+    });
+  }
+
+  if (widgetType === 'widget_draft') {
+    const fields = sanitizePrimitiveFields(payload);
+    if (Object.keys(fields).length === 0) {
+      return null;
+    }
+
+    return createEntityCardBlock({
+      title: '活动草稿',
+      fields,
+      dedupeKey: 'activity_draft',
+      traceRef,
+    });
+  }
+
   const title = widgetType.replace('widget_', '').replace(/_/g, ' ');
   const fields = sanitizePrimitiveFields(payload);
   if (Object.keys(fields).length === 0) {
@@ -764,6 +1022,91 @@ function mapWidgetDataToBlock(params: {
   });
 }
 
+function mapActionResultToCtaBlock(
+  payload: ActionResultEvent,
+  traceRef: string
+): GenUIBlock | null {
+  const nextActions = Array.isArray(payload.nextActions) ? payload.nextActions : [];
+  const items = nextActions
+    .filter((item): item is { label: string; action: string; params?: Record<string, unknown> } => {
+      if (!isRecord(item)) {
+        return false;
+      }
+      return typeof item.label === 'string' && typeof item.action === 'string';
+    })
+    .slice(0, 4)
+    .map((item) => ({
+      label: item.label.trim(),
+      action: item.action.trim(),
+      ...(isRecord(item.params) ? { params: item.params } : {}),
+    }))
+    .filter((item) => item.label && item.action);
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  return createCtaGroupBlock({
+    items,
+    dedupeKey: 'action_result_next_actions',
+    traceRef,
+  });
+}
+
+function inferResultOutcome(
+  request: GenUIRequest,
+  blocks: GenUIBlock[]
+): { outcome: string; confidence: 'high' | 'medium'; evidence: string } | null {
+  if (request.input.type === 'action') {
+    const action = request.input.action;
+    if (action === 'join_activity') {
+      return { outcome: 'joined', confidence: 'high', evidence: 'input.action=join_activity' };
+    }
+    if (action === 'publish_draft' || action === 'confirm_publish') {
+      return { outcome: 'published', confidence: 'high', evidence: 'input.action=' + action };
+    }
+    if (action === 'create_activity') {
+      return { outcome: 'activity_ready', confidence: 'high', evidence: 'input.action=create_activity' };
+    }
+    if (action === 'explore_nearby') {
+      return { outcome: 'explored', confidence: 'high', evidence: 'input.action=explore_nearby' };
+    }
+    if (action === 'confirm_match') {
+      return { outcome: 'matched', confidence: 'high', evidence: 'input.action=confirm_match' };
+    }
+    if (action === 'cancel_match') {
+      return { outcome: 'match_cancelled', confidence: 'high', evidence: 'input.action=cancel_match' };
+    }
+    if (action === 'find_partner' || action === 'select_preference' || action === 'skip_preference') {
+      return { outcome: 'partner_progress', confidence: 'medium', evidence: `input.action=${action}` };
+    }
+  }
+
+  for (const block of blocks) {
+    if (block.type === 'list') {
+      return { outcome: 'explored', confidence: 'medium', evidence: 'block.type=list' };
+    }
+
+    if (block.type === 'entity-card') {
+      if (block.dedupeKey === 'published_activity' || block.dedupeKey === 'share_payload') {
+        return { outcome: 'published', confidence: 'medium', evidence: `entity.dedupeKey=${block.dedupeKey}` };
+      }
+
+      if (isRecord(block.fields) && typeof block.fields.activityId === 'string') {
+        return { outcome: 'activity_ready', confidence: 'medium', evidence: 'entity.fields.activityId' };
+      }
+    }
+
+    if (block.type === 'choice') {
+      if (block.question.includes('匹配进度')) {
+        return { outcome: 'partner_progress', confidence: 'medium', evidence: 'choice.question=匹配进度' };
+      }
+    }
+  }
+
+  return null;
+}
+
 function buildBlocksFromDataStream(events: DataStreamEvent[]): {
   blocks: GenUIBlock[];
   traces: GenUITracePayload[];
@@ -771,6 +1114,7 @@ function buildBlocksFromDataStream(events: DataStreamEvent[]): {
   const traces: GenUITracePayload[] = [];
   const toolStates = new Map<string, ToolInvocationState>();
   const widgetDataEvents: Array<{ widgetType: string; payload: unknown }> = [];
+  const actionResultEvents: ActionResultEvent[] = [];
 
   let assistantText = '';
 
@@ -832,6 +1176,12 @@ function buildBlocksFromDataStream(events: DataStreamEvent[]): {
           widgetType,
           payload: event.data.payload,
         });
+      } else if (widgetType === 'action_result') {
+        actionResultEvents.push({
+          success: event.data.success === true,
+          ...(typeof event.data.error === 'string' ? { error: event.data.error } : {}),
+          ...(Array.isArray(event.data.nextActions) ? { nextActions: event.data.nextActions as ActionResultEvent['nextActions'] } : {}),
+        });
       }
       continue;
     }
@@ -877,6 +1227,13 @@ function buildBlocksFromDataStream(events: DataStreamEvent[]): {
 
     if (block) {
       pushBlock(blocks, block);
+    }
+  }
+
+  for (const actionResult of actionResultEvents) {
+    const actionCta = mapActionResultToCtaBlock(actionResult, 'action_result');
+    if (actionCta) {
+      pushBlock(blocks, actionCta);
     }
   }
 
@@ -1014,6 +1371,8 @@ export async function buildAiChatTurn(
   const viewer = options?.viewer ?? null;
   const conversation = await resolveConversationContext(request, viewer);
   const userText = normalizeActionDisplayText(request.input);
+  const userAction = buildUserAction(request.input, conversation.historyMessages);
+  const location = parseRequestLocation(request) || parseUserActionLocation(userAction);
 
   if (!userText) {
     throw new Error('输入内容不能为空');
@@ -1033,6 +1392,8 @@ export async function buildAiChatTurn(
     rateLimitUserId: viewer?.id ? viewer.id : `anon:${conversation.conversationId}`,
     conversationId: viewer?.id ? conversation.conversationId : undefined,
     source,
+    userAction,
+    location,
     trace: true,
   };
 
@@ -1075,6 +1436,18 @@ export async function buildAiChatTurn(
       },
     },
   ];
+
+  const outcome = inferResultOutcome(request, mapped.blocks);
+  if (outcome) {
+    traces.push({
+      stage: 'result_outcome',
+      detail: {
+        outcome: outcome.outcome,
+        confidence: outcome.confidence,
+        evidence: outcome.evidence,
+      },
+    });
+  }
 
   return {
     envelope,

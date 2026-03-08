@@ -32,7 +32,7 @@ function copyToClipboard(text: string) {
 
 export function ContentGenerate() {
   const [topic, setTopic] = useState('')
-  const [contentType, setContentType] = useState<ContentType>('activity_recruit')
+  const [contentType, setContentType] = useState<ContentType>('xiaohongshu')
   const [count, setCount] = useState('1')
   const [results, setResults] = useState<GeneratedNote[]>([])
 

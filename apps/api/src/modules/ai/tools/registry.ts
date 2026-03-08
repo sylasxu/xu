@@ -42,7 +42,7 @@ import {
  * 意图到 Tool 的默认映射配置
  */
 const INTENT_TOOL_MAP: Record<string, string[]> = {
-  create: ['createActivityDraft', 'getDraft', 'refineDraft', 'publishActivity'],
+  create: ['exploreNearby', 'askPreference', 'createActivityDraft', 'getDraft', 'refineDraft', 'publishActivity'],
   explore: ['exploreNearby', 'getActivityDetail', 'joinActivity', 'askPreference', 'createPartnerIntent'],
   manage: ['getMyActivities', 'cancelActivity', 'getActivityDetail'],
   partner: ['createPartnerIntent', 'getMyIntents', 'cancelIntent', 'confirmMatch', 'askPreference'],
@@ -55,7 +55,7 @@ const INTENT_TOOL_MAP: Record<string, string[]> = {
   share: ['getActivityDetail', 'getMyActivities'],
   join: ['exploreNearby', 'getActivityDetail', 'joinActivity'],
   show_activity: ['getMyActivities', 'getActivityDetail'],
-  unknown: ['createActivityDraft', 'exploreNearby', 'askPreference', 'createPartnerIntent'],
+  unknown: ['exploreNearby', 'askPreference', 'createPartnerIntent', 'createActivityDraft'],
 };
 
 /**
@@ -106,15 +106,17 @@ export async function getToolNamesByIntent(
   if (intent === 'create') {
     if (options.hasDraftContext) {
       toolNames = [
+        'getDraft',
         'refineDraft',
         'publishActivity',
-        'getDraft',
-        'createActivityDraft',
         'exploreNearby',
         'askPreference',
+        'createActivityDraft',
       ];
+    } else if (options.hasLocation) {
+      toolNames = ['exploreNearby', 'askPreference', 'createActivityDraft', 'getDraft'];
     } else {
-      toolNames = ['createActivityDraft', 'getDraft', 'askPreference', 'exploreNearby'];
+      toolNames = ['askPreference', 'exploreNearby', 'createActivityDraft', 'getDraft'];
     }
   }
 
@@ -140,7 +142,7 @@ export async function getToolNamesByIntent(
   // 未登录时，移除需要登录的工具
   if (options.isLoggedIn === false) {
     const loginRequiredTools = [
-      'createActivityDraft', 'publishActivity', 'joinActivity',
+      'createActivityDraft', 'getDraft', 'refineDraft', 'publishActivity', 'joinActivity',
       'cancelActivity', 'getMyActivities', 'createPartnerIntent',
       'confirmMatch', 'cancelIntent', 'getMyIntents',
     ];
@@ -170,6 +172,7 @@ export async function resolveToolsForIntent(
   const toolNames = await getToolNamesByIntent(intent, {
     hasDraftContext: options.hasDraftContext,
     hasLocation: Boolean(options.location),
+    isLoggedIn: Boolean(userId),
   });
 
   const tools: Record<string, any> = {};

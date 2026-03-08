@@ -5,7 +5,7 @@
  * 禁止使用 wx.request，所有请求通过 Orval SDK 发起。
  */
 
-import { postActivitiesByIdJoin } from '../api/endpoints/activities/activities';
+import { requestJoinActivity } from './join-flow'
 
 export type ActionState = 'idle' | 'loading' | 'success' | 'error';
 
@@ -52,16 +52,16 @@ export async function executeWidgetAction(
 ): Promise<ActionResult> {
   try {
     if (actionType === 'join') {
-      const activityId = params.activityId as string;
-      const res = await postActivitiesByIdJoin(activityId);
+      const activityId = params.activityId as string
+      const joinResult = await requestJoinActivity(activityId)
 
-      if (res.status === 200) {
+      if (joinResult.success) {
         return {
           state: 'success',
           error: null,
           resultPayload: {
             title: '报名成功',
-            summary: `你已成功报名「${(params.title as string) || '活动'}」`,
+            summary: `你已成功报名「${(params.title as string) || '活动'}」，接下来去讨论区打个招呼吧`,
             details: [
               { label: '活动', value: (params.title as string) || '' },
               { label: '时间', value: (params.startAt as string) || '' },
@@ -73,9 +73,9 @@ export async function executeWidgetAction(
               params: { activityId },
             },
           },
-        };
+        }
       }
-      return { state: 'error', error: '报名失败，请重试', resultPayload: undefined };
+      return { state: 'error', error: joinResult.msg, resultPayload: undefined }
     }
 
     // share: 由组件层调用 wx.shareAppMessage

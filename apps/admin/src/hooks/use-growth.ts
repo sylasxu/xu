@@ -12,19 +12,47 @@ interface GeneratePosterParams {
   style: 'minimal' | 'cyberpunk' | 'handwritten'
 }
 
+export interface PosterResult {
+  headline: string
+  subheadline: string
+  body: string
+  cta: string
+  hashtags: string[]
+}
+
 /**
  * 生成海报文案
  * 已迁移：使用 AI 领域的内容生成能力
  */
 export function useGeneratePoster() {
   return useMutation({
-    mutationFn: (params: GeneratePosterParams) =>
-      unwrap(api.ai['generate']['content'].post({
+    mutationFn: async (params: GeneratePosterParams): Promise<PosterResult> => {
+      const response = await unwrap(api.ai['generate']['content'].post({
         topic: params.text,
         contentType: 'poster',
         style: params.style,
         count: 1,
-      })),
+      }))
+
+      if (!response || !Array.isArray(response.items) || response.items.length === 0) {
+        return {
+          headline: '来一起玩吧',
+          subheadline: '帮你组个轻松局',
+          body: '',
+          cta: '感兴趣就来聊聊',
+          hashtags: [],
+        }
+      }
+
+      const first = response.items[0]
+      return {
+        headline: first?.title || '来一起玩吧',
+        subheadline: first?.coverImageHint || '帮你组个轻松局',
+        body: first?.body || '',
+        cta: first?.cta || '感兴趣就来聊聊',
+        hashtags: Array.isArray(first?.hashtags) ? first.hashtags : [],
+      }
+    },
     onError: (error: Error) => toast.error(`生成失败: ${error.message}`),
   })
 }

@@ -1,6 +1,27 @@
 // Dashboard Service - MVP 简化版：只保留 Admin 基础统计
 // 重构后：Dashboard 作为 BFF 聚合层，调用各领域服务
-import { db, users, activities, participants, eq, gte, desc, count, and, lte, lt, sql, inArray, not, partnerIntents, intentMatches, conversations } from '@juchang/db';
+import {
+  db,
+  users,
+  activities,
+  participants,
+  reports,
+  aiRequests,
+  aiSecurityEvents,
+  eq,
+  gte,
+  desc,
+  count,
+  and,
+  lt,
+  sql,
+  inArray,
+  not,
+  isNotNull,
+  partnerIntents,
+  intentMatches,
+  conversations,
+} from '@juchang/db';
 import type { 
   DashboardStats, 
   RecentActivity, 
@@ -107,34 +128,36 @@ export async function getActivityTypeDistribution(): Promise<ActivityTypeDistrib
 
 /**
  * 获取地理分布数据
- * MVP: 基于活动的 locationName 字段简单统计
+ * 基于真实活动地点聚合，按活动数降序返回 Top 区域
  */
 export async function getGeographicDistribution(): Promise<GeographicItem[]> {
   try {
-    // MVP: 返回基于城市的简单统计
-    // 由于当前数据主要在重庆，返回重庆各区的分布
-    const regions = ['重庆', '成都', '贵阳', '昆明', '其他'];
-    const result: GeographicItem[] = [];
-    
-    // 获取总用户数和活动数用于分配
-    const [totalUsers] = await db.select({ count: count() }).from(users);
-    const [totalActivities] = await db.select({ count: count() }).from(activities);
-    
-    const userCount = totalUsers?.count || 0;
-    const activityCount = totalActivities?.count || 0;
-    
-    // MVP: 按比例分配（重庆为主）
-    const ratios = [0.6, 0.2, 0.1, 0.05, 0.05];
-    
-    for (let i = 0; i < regions.length; i++) {
-      result.push({
-        name: regions[i],
-        users: Math.floor(userCount * ratios[i]),
-        activities: Math.floor(activityCount * ratios[i]),
-      });
-    }
-    
-    return result;
+    const regionExpr = sql<string>`
+      COALESCE(
+        NULLIF(${activities.locationName}, ''),
+        NULLIF(${activities.locationHint}, ''),
+        '未知地区'
+      )
+    `;
+
+    const rows = await db
+      .select({
+        name: regionExpr.as('name'),
+        users: sql<number>`COUNT(DISTINCT ${activities.creatorId})`.as('users'),
+        activities: sql<number>`COUNT(*)`.as('activities'),
+      })
+      .from(activities)
+      .where(not(eq(activities.status, 'draft')))
+      .groupBy(regionExpr);
+
+    return rows
+      .map((row) => ({
+        name: row.name || '未知地区',
+        users: Number(row.users || 0),
+        activities: Number(row.activities || 0),
+      }))
+      .sort((a, b) => b.activities - a.activities)
+      .slice(0, 10);
   } catch (error) {
     console.error('获取地理分布失败:', error);
     return [];
@@ -657,6 +680,7 @@ export async function getGodViewData(): Promise<GodViewData> {
     activeUsersResult,
     todayActivitiesResult,
     todayConversationsResult,
+    todayTokenUsageResult,
     // 北极星指标
     j2cRate,
     // AI 健康度 - 本周
@@ -664,6 +688,7 @@ export async function getGodViewData(): Promise<GodViewData> {
     thisWeekBadResult,
     thisWeekErrorResult,
     thisWeekEvaluatedResult,
+    thisWeekAvgLatencyResult,
     // AI 健康度 - 上周（趋势对比）
     lastWeekBadResult,
     lastWeekErrorResult,
@@ -689,6 +714,14 @@ export async function getGodViewData(): Promise<GodViewData> {
     db.select({ count: count() })
       .from(conversations)
       .where(gte(conversations.createdAt, today)),
+    // 今日 Token 用量（输入+输出）
+    db.select({
+      totalTokens: sql<number>`
+        COALESCE(SUM(${aiRequests.inputTokens} + ${aiRequests.outputTokens}), 0)
+      `.as('total_tokens'),
+    })
+      .from(aiRequests)
+      .where(gte(aiRequests.createdAt, today)),
     // J2C 转化率
     calculateJ2CRate(),
     // AI 健康度 - 本周数据
@@ -713,6 +746,11 @@ export async function getGodViewData(): Promise<GodViewData> {
         gte(conversations.createdAt, oneWeekAgo),
         not(eq(conversations.evaluationStatus, 'unreviewed'))
       )),
+    db.select({
+      avgLatencyMs: sql<number>`COALESCE(AVG(${aiRequests.latencyMs}), 0)`.as('avg_latency_ms'),
+    })
+      .from(aiRequests)
+      .where(gte(aiRequests.createdAt, oneWeekAgo)),
     // AI 健康度 - 上周数据
     db.select({ count: count() })
       .from(conversations)
@@ -748,10 +786,17 @@ export async function getGodViewData(): Promise<GodViewData> {
         gte(conversations.createdAt, yesterday),
         eq(conversations.hasError, true)
       )),
-    // 敏感词触发（暂时返回 0，需要 ai_security_events 表）
-    Promise.resolve([{ count: 0 }]),
-    // 待审核数（暂时返回 0，需要审核队列表）
-    Promise.resolve([{ count: 0 }]),
+    // 敏感词触发（24h）
+    db.select({ count: count() })
+      .from(aiSecurityEvents)
+      .where(and(
+        gte(aiSecurityEvents.createdAt, yesterday),
+        isNotNull(aiSecurityEvents.triggerWord),
+      )),
+    // 待审核举报（真实审核队列）
+    db.select({ count: count() })
+      .from(reports)
+      .where(eq(reports.status, 'pending')),
   ]);
 
   // 计算 AI 健康度指标
@@ -774,23 +819,24 @@ export async function getGodViewData(): Promise<GodViewData> {
   
   const badCaseTrend = badCaseRate - lastWeekBadRate;
   const toolErrorTrend = toolErrorRate - lastWeekErrorRate;
+  const avgResponseTime = Number(thisWeekAvgLatencyResult[0]?.avgLatencyMs || 0);
 
-  // Token 消耗估算（基于对话数，假设每次对话平均消耗 0.01 元）
+  // 今日 Token 总量（输入+输出）
   const todayConversations = Number(todayConversationsResult[0]?.count || 0);
-  const tokenCost = todayConversations * 0.01;
+  const tokenUsage = Number(todayTokenUsageResult[0]?.totalTokens || 0);
 
   return {
     realtime: {
       activeUsers: Number(activeUsersResult[0]?.count || 0),
       todayActivities: Number(todayActivitiesResult[0]?.count || 0),
-      tokenCost: Math.round(tokenCost * 100) / 100,
+      tokenUsage,
       totalConversations: todayConversations,
     },
     northStar: j2cRate,
     aiHealth: {
       badCaseRate: Math.round(badCaseRate * 10000) / 100, // 转为百分比
       toolErrorRate: Math.round(toolErrorRate * 10000) / 100,
-      avgResponseTime: 1200, // TODO: 从 metrics 表获取真实数据
+      avgResponseTime: Math.round(avgResponseTime),
       badCaseTrend: Math.round(badCaseTrend * 10000) / 100,
       toolErrorTrend: Math.round(toolErrorTrend * 10000) / 100,
     },

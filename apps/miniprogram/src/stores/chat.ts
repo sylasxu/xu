@@ -559,6 +559,8 @@ type ChatGatewayTurnsRequest = {
     locale?: string
     timezone?: string
     platformVersion?: string
+    lat?: number
+    lng?: number
   }
   stream?: boolean
   [key: string]: unknown
@@ -582,6 +584,7 @@ function buildChatGatewayTurnsRequest(
     locale: string
     timezone: string
     platformVersion: string
+    location?: { lat: number; lng: number } | null
   }
 ): ChatGatewayTurnsRequest {
   return {
@@ -592,6 +595,7 @@ function buildChatGatewayTurnsRequest(
       locale: context.locale,
       timezone: context.timezone,
       platformVersion: context.platformVersion,
+      ...(context.location ? { lat: context.location.lat, lng: context.location.lng } : {}),
     },
   }
 }
@@ -880,6 +884,7 @@ export const useChatStore = create<ChatState>()(
             locale: 'zh-CN',
             timezone: 'Asia/Shanghai',
             platformVersion: 'miniprogram-vnext',
+            location: state.location,
           }
         )
         chatRequest.stream = true
@@ -1289,6 +1294,7 @@ export const useChatStore = create<ChatState>()(
             locale: 'zh-CN',
             timezone: 'Asia/Shanghai',
             platformVersion: 'miniprogram-vnext',
+            location: state.location,
           }
         )
         chatRequest.stream = true

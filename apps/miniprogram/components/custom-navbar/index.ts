@@ -114,7 +114,7 @@ Component({
         fail: () => {
           // 如果 navigateTo 失败，尝试 switchTab
           wx.switchTab({
-            url: '/pages/my/index',
+            url: '/pages/profile/index',
           });
         },
       });

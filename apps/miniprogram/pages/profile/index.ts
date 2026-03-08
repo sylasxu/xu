@@ -80,29 +80,6 @@ Page({
   },
 
   /**
-   * 点击头像区域 - 编辑资料
-   * Requirements: 8.3
-   */
-  onHeaderTap() {
-    if (!this.data.isLoggedIn) {
-      // 未登录，显示登录提示
-      this.showLoginTip()
-      return
-    }
-    
-    // 已登录，跳转到资料编辑页
-    wx.navigateTo({
-      url: '/pages/my/info-edit/index',
-      fail: () => {
-        wx.showToast({
-          title: '功能开发中',
-          icon: 'none',
-        })
-      },
-    })
-  },
-
-  /**
    * 显示登录提示
    */
   showLoginTip() {

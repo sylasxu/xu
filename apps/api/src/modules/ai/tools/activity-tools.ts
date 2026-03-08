@@ -102,6 +102,241 @@ function generateShareUrl(activityId: string): string {
   return `https://juchang.app/activity/${activityId}`;
 }
 
+function buildLoginRequiredResult(action: string) {
+  return {
+    success: false as const,
+    error: `请先登录后再${action}`,
+  };
+}
+
+const DEFAULT_DRAFT_LOCATION: [number, number] = [106.52988, 29.58567];
+
+const ACTION_DRAFT_PRESETS: Record<CreateDraftParams['type'], {
+  title: string;
+  maxParticipants: number;
+  summary: string;
+  buildLocationHint: (locationName: string) => string;
+}> = {
+  food: {
+    title: '🍲 约饭局',
+    maxParticipants: 4,
+    summary: '想吃就来，边吃边认识新朋友。',
+    buildLocationHint: (locationName) => `${locationName}商圈，具体店名报名后群里确认`,
+  },
+  entertainment: {
+    title: '🎤 娱乐局',
+    maxParticipants: 6,
+    summary: '轻松玩一场，认识些聊得来的人。',
+    buildLocationHint: (locationName) => `${locationName}附近，具体地点报名后群里确认`,
+  },
+  sports: {
+    title: '🏃 运动局',
+    maxParticipants: 8,
+    summary: '来动一动，顺便认识同频搭子。',
+    buildLocationHint: (locationName) => `${locationName}附近场地，具体场馆报名后群里确认`,
+  },
+  boardgame: {
+    title: '🎲 桌游局',
+    maxParticipants: 6,
+    summary: '一起玩桌游，熟得会更快一点。',
+    buildLocationHint: (locationName) => `${locationName}桌游店，具体门店报名后群里确认`,
+  },
+  other: {
+    title: '✨ 活动局',
+    maxParticipants: 6,
+    summary: '先把局攒起来，再慢慢补细节。',
+    buildLocationHint: (locationName) => `${locationName}附近，具体地点报名后群里确认`,
+  },
+};
+
+function readPayloadText(payload: Record<string, unknown>, key: string): string {
+  const value = payload[key];
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeDraftType(rawType: unknown): CreateDraftParams['type'] {
+  const value = typeof rawType === 'string' ? rawType.trim().toLowerCase() : '';
+
+  if (['food', 'hotpot', 'drink', 'coffee'].includes(value)) {
+    return 'food';
+  }
+
+  if (['sports', 'badminton', 'basketball', 'football', 'running', 'hiking'].includes(value)) {
+    return 'sports';
+  }
+
+  if (['boardgame', 'mahjong'].includes(value)) {
+    return 'boardgame';
+  }
+
+  if (['entertainment', 'movie', 'ktv', 'game'].includes(value)) {
+    return 'entertainment';
+  }
+
+  return 'other';
+}
+
+function formatLocalDateTime(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+}
+
+function inferDraftStartAt(description: string, providedStartAt?: string): string {
+  if (providedStartAt) {
+    return providedStartAt;
+  }
+
+  const now = new Date();
+  const target = new Date(now);
+
+  if (/今晚|今晚上|今天晚上/.test(description)) {
+    target.setHours(20, 0, 0, 0);
+    if (target.getTime() <= now.getTime()) {
+      target.setDate(target.getDate() + 1);
+    }
+    return formatLocalDateTime(target);
+  }
+
+  if (/周末/.test(description)) {
+    target.setDate(target.getDate() + 1);
+    const offset = (6 - target.getDay() + 7) % 7 || 7;
+    target.setDate(target.getDate() + offset);
+    target.setHours(14, 0, 0, 0);
+    return formatLocalDateTime(target);
+  }
+
+  target.setDate(target.getDate() + 1);
+  target.setHours(14, 0, 0, 0);
+  return formatLocalDateTime(target);
+}
+
+function inferDraftLocation(payload: Record<string, unknown>): [number, number] {
+  const locationValue = payload.location;
+  if (Array.isArray(locationValue) && locationValue.length >= 2) {
+    const lng = Number(locationValue[0]);
+    const lat = Number(locationValue[1]);
+    if (Number.isFinite(lng) && Number.isFinite(lat)) {
+      return [lng, lat];
+    }
+  }
+
+  const embeddedLocation = payload._location;
+  const locationRecord = embeddedLocation && typeof embeddedLocation === 'object'
+    ? embeddedLocation as Record<string, unknown>
+    : payload;
+  const lng = Number(locationRecord.lng);
+  const lat = Number(locationRecord.lat);
+  if (Number.isFinite(lng) && Number.isFinite(lat)) {
+    return [lng, lat];
+  }
+
+  return DEFAULT_DRAFT_LOCATION;
+}
+
+function inferDraftTitle(type: CreateDraftParams['type'], description: string, providedTitle?: string): string {
+  if (providedTitle) {
+    return providedTitle;
+  }
+
+  const keywordPresets: Array<{ pattern: RegExp; title: string }> = [
+    { pattern: /羽毛球/, title: '🏸 羽毛球局' },
+    { pattern: /火锅/, title: '🍲 火锅局' },
+    { pattern: /桌游/, title: '🎲 桌游局' },
+    { pattern: /咖啡/, title: '☕ 咖啡局' },
+    { pattern: /电影/, title: '🎬 电影局' },
+    { pattern: /KTV|唱歌|k歌/i, title: '🎤 K歌局' },
+    { pattern: /徒步/, title: '🥾 徒步局' },
+  ];
+
+  for (const preset of keywordPresets) {
+    if (preset.pattern.test(description)) {
+      return preset.title;
+    }
+  }
+
+  return ACTION_DRAFT_PRESETS[type].title;
+}
+
+function inferDraftSummary(type: CreateDraftParams['type'], locationName: string, description: string): string {
+  if (/羽毛球/.test(description)) {
+    return `${locationName}约球搭子，新手老手都欢迎！`;
+  }
+
+  if (/火锅/.test(description)) {
+    return `${locationName}一起吃顿热乎的，边吃边聊。`;
+  }
+
+  return ACTION_DRAFT_PRESETS[type].summary;
+}
+
+export function buildCreateDraftParamsFromActionPayload(
+  payload: Record<string, unknown>
+): CreateDraftParams {
+  const description = readPayloadText(payload, 'description');
+  const type = normalizeDraftType(payload.type || payload.activityType);
+  const locationName = readPayloadText(payload, 'locationName')
+    || readPayloadText(payload, 'location')
+    || '观音桥';
+  const providedTitle = readPayloadText(payload, 'title');
+  const providedLocationHint = readPayloadText(payload, 'locationHint');
+  const providedStartAt = readPayloadText(payload, 'startAt');
+  const maxParticipants = Number(payload.maxParticipants);
+  const preset = ACTION_DRAFT_PRESETS[type];
+
+  return {
+    title: inferDraftTitle(type, description, providedTitle),
+    type,
+    locationName,
+    locationHint: providedLocationHint || preset.buildLocationHint(locationName),
+    location: inferDraftLocation(payload),
+    startAt: inferDraftStartAt(description, providedStartAt),
+    maxParticipants: Number.isFinite(maxParticipants) && maxParticipants >= 2 ? maxParticipants : preset.maxParticipants,
+    summary: inferDraftSummary(type, locationName, description),
+  };
+}
+
+export async function createActivityDraftRecord(userId: string, params: CreateDraftParams) {
+  try {
+    const { location, startAt, ...activityData } = params;
+
+    const themeName = ACTIVITY_TYPE_THEME_MAP[activityData.type] || 'minimal';
+    const themeConfig = PRESET_THEMES[themeName] || PRESET_THEMES.minimal;
+
+    const [newActivity] = await db
+      .insert(activities)
+      .values({
+        ...activityData,
+        creatorId: userId,
+        location: sql`ST_SetSRID(ST_MakePoint(${location[0]}, ${location[1]}), 4326)`,
+        startAt: new Date(startAt),
+        currentParticipants: 1,
+        status: 'draft',
+        theme: themeName,
+        themeConfig,
+      })
+      .returning({ id: activities.id });
+
+    await db
+      .insert(participants)
+      .values({ activityId: newActivity.id, userId, status: 'joined' });
+
+    return {
+      success: true as const,
+      activityId: newActivity.id,
+      draft: params,
+      message: '草稿已创建，可以在卡片上修改或直接发布',
+    };
+  } catch (error) {
+    console.error('[createActivityDraft] Error:', error);
+    return { success: false as const, error: '创建草稿失败，请再试一次' };
+  }
+}
+
 // ============ Tool 工厂函数 ============
 
 /**
@@ -114,49 +349,10 @@ export function createActivityDraftTool(userId: string | null) {
     
     execute: async (params: CreateDraftParams) => {
       if (!userId) {
-        return {
-          success: true as const,
-          activityId: 'test-' + Date.now(),
-          draft: params,
-          message: '草稿已创建（测试模式）',
-        };
+        return buildLoginRequiredResult('创建活动草稿');
       }
       
-      try {
-        const { location, startAt, ...activityData } = params;
-        
-        // v5.0: 根据活动类型自动分配主题
-        const themeName = ACTIVITY_TYPE_THEME_MAP[activityData.type] || 'minimal';
-        const themeConfig = PRESET_THEMES[themeName] || PRESET_THEMES.minimal;
-
-        const [newActivity] = await db
-          .insert(activities)
-          .values({
-            ...activityData,
-            creatorId: userId,
-            location: sql`ST_SetSRID(ST_MakePoint(${location[0]}, ${location[1]}), 4326)`,
-            startAt: new Date(startAt),
-            currentParticipants: 1,
-            status: 'draft',
-            theme: themeName,
-            themeConfig,
-          })
-          .returning({ id: activities.id });
-        
-        await db
-          .insert(participants)
-          .values({ activityId: newActivity.id, userId, status: 'joined' });
-        
-        return {
-          success: true as const,
-          activityId: newActivity.id,
-          draft: params,
-          message: '草稿已创建，可以在卡片上修改或直接发布',
-        };
-      } catch (error) {
-        console.error('[createActivityDraft] Error:', error);
-        return { success: false as const, error: '创建草稿失败，请再试一次' };
-      }
+      return createActivityDraftRecord(userId, params);
     },
   });
 }
@@ -171,20 +367,7 @@ export function getDraftTool(userId: string | null) {
     
     execute: async ({ activityId, title }: GetDraftParams) => {
       if (!userId) {
-        return {
-          success: true as const,
-          draft: {
-            activityId: 'sandbox-draft-id',
-            title: title || '🀄️ 观音桥麻将局',
-            type: 'boardgame',
-            locationName: '观音桥',
-            locationHint: '具体地点待定',
-            startAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-            maxParticipants: 4,
-            status: 'draft',
-          },
-          message: '已获取草稿信息（沙盒模式）',
-        };
+        return buildLoginRequiredResult('查看活动草稿');
       }
       
       try {
@@ -263,7 +446,7 @@ export function refineDraftTool(userId: string | null) {
     
     execute: async ({ activityId, updates, reason }: RefineDraftParams) => {
       if (!userId) {
-        return { success: true as const, activityId, updates, message: `已更新：${reason}（沙盒模式）` };
+        return buildLoginRequiredResult('修改活动草稿');
       }
       
       try {
@@ -321,6 +504,39 @@ export function refineDraftTool(userId: string | null) {
   });
 }
 
+export async function publishActivityRecord(userId: string, activityId: string) {
+  try {
+    const [existingActivity] = await db
+      .select({ id: activities.id, title: activities.title, creatorId: activities.creatorId, status: activities.status, startAt: activities.startAt })
+      .from(activities)
+      .where(eq(activities.id, activityId))
+      .limit(1);
+
+    if (!existingActivity) return { success: false as const, error: '找不到这个活动，可能已经被删除了' };
+    if (existingActivity.creatorId !== userId) return { success: false as const, error: '你没有权限发布这个活动' };
+    if (existingActivity.status !== 'draft') return { success: false as const, error: '这个活动已经发布过了' };
+    if (existingActivity.startAt < new Date()) return { success: false as const, error: '活动时间已过期，请修改时间后再发布' };
+
+    const quota = await checkAIQuota(userId);
+    if (!quota.hasQuota) return { success: false as const, error: '今天的 AI 额度用完了，明天再来吧～', quotaRemaining: 0 };
+
+    await db.update(activities).set({ status: 'active' }).where(eq(activities.id, activityId));
+    await consumeAIQuota(userId);
+
+    return {
+      success: true as const,
+      activityId,
+      title: existingActivity.title,
+      shareUrl: generateShareUrl(activityId),
+      message: '活动发布成功！快分享给朋友吧',
+      quotaRemaining: quota.remaining - 1,
+    };
+  } catch (error) {
+    console.error('[publishActivity] Error:', error);
+    return { success: false as const, error: '发布失败，请再试一次' };
+  }
+}
+
 /**
  * 发布活动 Tool
  */
@@ -331,39 +547,10 @@ export function publishActivityTool(userId: string | null) {
     
     execute: async ({ activityId }: PublishActivityParams) => {
       if (!userId) {
-        return { success: true as const, activityId, shareUrl: generateShareUrl(activityId), message: '活动发布成功！（沙盒模式）' };
+        return buildLoginRequiredResult('发布活动');
       }
       
-      try {
-        const [existingActivity] = await db
-          .select({ id: activities.id, title: activities.title, creatorId: activities.creatorId, status: activities.status, startAt: activities.startAt })
-          .from(activities)
-          .where(eq(activities.id, activityId))
-          .limit(1);
-        
-        if (!existingActivity) return { success: false as const, error: '找不到这个活动，可能已经被删除了' };
-        if (existingActivity.creatorId !== userId) return { success: false as const, error: '你没有权限发布这个活动' };
-        if (existingActivity.status !== 'draft') return { success: false as const, error: '这个活动已经发布过了' };
-        if (existingActivity.startAt < new Date()) return { success: false as const, error: '活动时间已过期，请修改时间后再发布' };
-        
-        const quota = await checkAIQuota(userId);
-        if (!quota.hasQuota) return { success: false as const, error: '今天的 AI 额度用完了，明天再来吧～', quotaRemaining: 0 };
-        
-        await db.update(activities).set({ status: 'active' }).where(eq(activities.id, activityId));
-        await consumeAIQuota(userId);
-        
-        return {
-          success: true as const,
-          activityId,
-          title: existingActivity.title,
-          shareUrl: generateShareUrl(activityId),
-          message: '活动发布成功！快分享给朋友吧',
-          quotaRemaining: quota.remaining - 1,
-        };
-      } catch (error) {
-        console.error('[publishActivity] Error:', error);
-        return { success: false as const, error: '发布失败，请再试一次' };
-      }
+      return publishActivityRecord(userId, activityId);
     },
   });
 }

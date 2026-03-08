@@ -63,15 +63,8 @@
             mode="aspectFill"
           />
           <view class="flex-1 min-w-0">
-            <view class="flex items-center gap-2 text-base font-medium text-gray-900 mb-1">
+            <view class="flex items-center gap-2 text-base font-medium text-gray-900">
               <text>{{item.nickname}}</text>
-              <view class="fast-pass-tag flex items-center gap-1 text-xs text-brand px-2 py-1 rounded-sm" wx:if="{{item.isFastPass}}">
-                <t-icon name="flash" size="24rpx" />
-                <text>Fast Pass</text>
-              </view>
-            </view>
-            <view class="text-xs text-gray-600">
-              <text>靠谱度 {{item.reliabilityRate}}%</text>
             </view>
           </view>
           <view class="text-sm px-3 py-1 rounded-sm flex-shrink-0 {{item.fulfilled ? 'status-fulfilled' : 'status-no-show'}}">
@@ -91,7 +84,7 @@
     <view class="bottom-bar px-4 py-3">
       <view class="flex items-center justify-center gap-1 text-xs text-warning mb-2" wx:if="{{noShowCount > 0}}">
         <t-icon name="info-circle" size="28rpx" />
-        <text>标记他人未到场将扣除你 1% 靠谱度</text>
+        <text>请确认未到场名单后再提交</text>
       </view>
       <t-button
         theme="primary"
@@ -110,7 +103,7 @@
   <t-dialog
     visible="{{showWarningDialog}}"
     title="标记未到场"
-    content="确定要将 {{currentParticipant.nickname}} 标记为未到场吗？\n\n注意：标记他人未到场将扣除你 1% 靠谱度"
+    content="确定要将 {{currentParticipant.nickname}} 标记为未到场吗？"
     confirm-btn="确定标记"
     cancel-btn="取消"
     bind:confirm="onConfirmNoShow"

@@ -33,7 +33,7 @@ export function useNotificationsList(filters: NotificationFilters) {
   return useQuery({
     queryKey: notificationKeys.list({ userId, page, limit, type }),
     queryFn: async () => {
-      const query: Record<string, unknown> = { userId, page, limit }
+      const query: { userId: string; page: number; limit: number; type?: string } = { userId, page, limit }
       if (type && type !== 'all') query.type = type
       const result = await unwrap(api.notifications.get({ query }))
       return result

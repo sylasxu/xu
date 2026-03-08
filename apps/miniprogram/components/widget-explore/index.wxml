@@ -144,7 +144,10 @@
 
     <!-- 空状态 -->
     <view wx:else class="explore-empty">
-      <text class="empty-text">附近暂无活动，要不你来发起第一个？</text>
+      <text class="empty-text">附近还没有合适的局</text>
+      <view class="empty-cta btn-pressable" bindtap="onCreateActivityTap">
+        <text>那我来发起一个</text>
+      </view>
     </view>
   </block>
 

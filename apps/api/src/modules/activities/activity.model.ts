@@ -169,6 +169,11 @@ const AdminActivitiesResponse = t.Object({
 const NearbyActivitiesQuery = t.Object({
   lat: t.Number({ description: '纬度' }),
   lng: t.Number({ description: '经度' }),
+  keyword: t.Optional(t.String({
+    minLength: 1,
+    maxLength: 50,
+    description: '关键词（按标题/地点名称/位置备注模糊匹配）',
+  })),
   type: t.Optional(t.Union([
     t.Literal('food'),
     t.Literal('entertainment'),

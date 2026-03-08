@@ -253,7 +253,7 @@ Component({
       wx.navigateTo({
         url: '/pages/profile/index',
         fail: () => {
-          wx.switchTab({ url: '/pages/my/index' });
+          wx.switchTab({ url: '/pages/profile/index' });
         },
       });
     },

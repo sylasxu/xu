@@ -17,9 +17,13 @@ import type {
 } from './activity.model';
 import { deductAiCreateQuota } from '../users/user.service';
 import { indexActivity, deleteIndex } from '../ai/rag';
-import { addInterestVector } from '../ai/memory';
 import { validateFields } from '../content-security';
-import { notifyJoin, notifyNewParticipant } from '../notifications/notification.service';
+import {
+  notifyJoin,
+  notifyNewParticipant,
+  notifyCompleted,
+  notifyCancelled,
+} from '../notifications/notification.service';
 
 // 群聊归档时间：活动开始后 24 小时
 const ARCHIVE_HOURS = 24;
@@ -62,6 +66,10 @@ function filterActivityTypes(values: string[]): ActivityType[] {
 function calculateIsArchived(startAt: Date): boolean {
   const archiveTime = new Date(startAt.getTime() + ARCHIVE_HOURS * 60 * 60 * 1000);
   return new Date() > archiveTime;
+}
+
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (match) => `\\${match}`);
 }
 
 /**
@@ -651,16 +659,51 @@ export async function updateActivityStatus(
     throw new Error('只有进行中的活动可以更新状态');
   }
 
-  // 更新活动状态
-  await db
-    .update(activities)
-    .set({
-      status,
-      updatedAt: new Date(),
-    })
-    .where(eq(activities.id, activityId));
+  const now = new Date();
+  const joinedParticipants = await db
+    .select({ userId: participants.userId })
+    .from(participants)
+    .where(and(
+      eq(participants.activityId, activityId),
+      eq(participants.status, 'joined'),
+    ));
 
-  // TODO: 发送通知给所有参与者
+  const systemMessage = status === 'completed'
+    ? `活动「${activity.title}」已确认成局，接下来记得确认到场情况。`
+    : `活动「${activity.title}」已取消。`;
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(activities)
+      .set({
+        status,
+        updatedAt: now,
+      })
+      .where(eq(activities.id, activityId));
+
+    await tx.insert(activityMessages).values({
+      activityId,
+      senderId: null,
+      messageType: 'system',
+      content: systemMessage,
+      createdAt: now,
+    });
+  });
+
+  const recipients = joinedParticipants
+    .map((item) => item.userId)
+    .filter((participantUserId) => participantUserId !== userId);
+
+  const notifier = status === 'completed' ? notifyCompleted : notifyCancelled;
+  const results = await Promise.allSettled(
+    recipients.map((participantUserId) => notifier(participantUserId, activityId, activity.title))
+  );
+
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      console.error(`[ActivityStatus] Failed to notify ${status}:`, result.reason);
+    }
+  }
 }
 
 /**
@@ -787,11 +830,6 @@ export async function joinActivity(activityId: string, userId: string): Promise<
       })
       .where(eq(users.id, userId));
 
-    // v4.5: 异步更新用户兴趣向量 (不阻塞主流程)
-    updateUserInterestVector(userId, activityId).catch(err => {
-      console.error('Failed to update interest vector:', err);
-    });
-
     return { id: existing.id };
   }
 
@@ -861,11 +899,6 @@ export async function joinActivity(activityId: string, userId: string): Promise<
   // v4.8: 动态消息卡片更新 — TODO: 待微信能力模块重构后接入
   // if (activity.groupOpenId && activity.dynamicMessageId) { ... }
 
-  // v4.5: 异步更新用户兴趣向量 (不阻塞主流程)
-  updateUserInterestVector(userId, activityId).catch(err => {
-    console.error('Failed to update interest vector:', err);
-  });
-
   // v4.8: 异步追踪关键词转化 (不阻塞主流程)
   import('../hot-keywords/hot-keywords.service').then(({ trackConversion }) => {
     trackConversion(userId).catch(err => {
@@ -876,33 +909,6 @@ export async function joinActivity(activityId: string, userId: string): Promise<
   return { id: participant.id };
 }
 
-/**
- * v4.5: 更新用户兴趣向量
- * 
- * 从活动提取 embedding 并保存到用户 workingMemory
- * 用于 MaxSim 个性化推荐
- */
-async function updateUserInterestVector(userId: string, activityId: string): Promise<void> {
-  // 1. 获取活动的 embedding
-  const [activity] = await db
-    .select({ embedding: activities.embedding })
-    .from(activities)
-    .where(eq(activities.id, activityId))
-    .limit(1);
-
-  // 2. 如果没有 embedding，静默跳过
-  if (!activity?.embedding) {
-    return;
-  }
-
-  // 3. 添加到用户兴趣向量
-  await addInterestVector(userId, {
-    activityId,
-    embedding: activity.embedding,
-    participatedAt: new Date(),
-    feedback: 'positive',
-  });
-}
 
 /**
  * v4.5: 更新活动信息
@@ -1059,7 +1065,7 @@ export async function quitActivity(activityId: string, userId: string): Promise<
 export async function getNearbyActivities(
   query: NearbyActivitiesQuery
 ): Promise<NearbyActivitiesResponse> {
-  const { lat, lng, type, radius = 5000, limit = 20 } = query;
+  const { lat, lng, type, keyword, radius = 5000, limit = 20 } = query;
 
   // 构建查询条件
   // 只查询 active 状态且未开始的活动
@@ -1067,6 +1073,11 @@ export async function getNearbyActivities(
 
   // 使用 PostGIS 进行地理空间查询
   // ST_DWithin 使用米为单位（geography 类型）
+  const normalizedKeyword = keyword?.trim();
+  const keywordPattern = normalizedKeyword
+    ? `%${escapeLikePattern(normalizedKeyword)}%`
+    : null;
+
   const nearbyActivities = await db
     .select({
       id: activities.id,
@@ -1101,6 +1112,14 @@ export async function getNearbyActivities(
           ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography,
           ${radius}
         )`,
+        // 可选的关键词过滤（标题/地点名/地点备注）
+        keywordPattern
+          ? sql`(
+              ${activities.title} ILIKE ${keywordPattern} ESCAPE '\\'
+              OR ${activities.locationName} ILIKE ${keywordPattern} ESCAPE '\\'
+              OR ${activities.locationHint} ILIKE ${keywordPattern} ESCAPE '\\'
+            )`
+          : sql`true`,
         // 可选的类型过滤
         type ? eq(activities.type, type) : sql`true`
       )

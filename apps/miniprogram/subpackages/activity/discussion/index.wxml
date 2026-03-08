@@ -48,8 +48,27 @@
       <text class="no-more">没有更多消息了</text>
     </view>
 
+    <view class="join-guide" wx:if="{{showJoinGuide}}">
+      <view class="join-guide__header">
+        <text class="join-guide__title">{{joinGuideTitle}}</text>
+        <text class="join-guide__hint">{{joinGuideHint}}</text>
+      </view>
+
+      <view class="join-guide__chips">
+        <view
+          wx:for="{{quickStarters}}"
+          wx:key="index"
+          class="join-guide__chip"
+          data-starter="{{item}}"
+          bindtap="onQuickStarterTap"
+        >
+          <text>{{item}}</text>
+        </view>
+      </view>
+    </view>
+
     <!-- 空状态 -->
-    <view class="empty-state" wx:if="{{messages.length === 0 && isConnected}}">
+    <view class="empty-state" wx:if="{{messages.length === 0 && isConnected && !showJoinGuide}}">
       <t-empty description="还没有消息，快来说点什么吧~" />
     </view>
 

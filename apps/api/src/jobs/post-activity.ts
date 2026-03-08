@@ -5,7 +5,7 @@
  * 执行频率：每 5 分钟
  */
 
-import { db, activities, eq, and, sql, toTimestamp } from '@juchang/db';
+import { db, activities, activityMessages, eq, and, sql, toTimestamp } from '@juchang/db';
 import { notifyPostActivity } from '../modules/notifications/notification.service';
 import { jobLogger } from '../lib/logger';
 
@@ -23,9 +23,19 @@ export async function processPostActivity(): Promise<void> {
 
   let completed = 0;
   for (const activity of expiredActivities) {
-    await db.update(activities)
-      .set({ status: 'completed', updatedAt: now })
-      .where(eq(activities.id, activity.id));
+    await db.transaction(async (tx) => {
+      await tx.update(activities)
+        .set({ status: 'completed', updatedAt: now })
+        .where(eq(activities.id, activity.id));
+
+      await tx.insert(activityMessages).values({
+        activityId: activity.id,
+        senderId: null,
+        messageType: 'system',
+        content: `活动「${activity.title}」已自动结束，来确认一下这局玩得怎么样。`,
+        createdAt: now,
+      });
+    });
 
     notifyPostActivity(activity.id, activity.title).catch((err: unknown) => {
       console.error(`Failed to notify post-activity for ${activity.id}:`, err);

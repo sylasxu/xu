@@ -10,8 +10,6 @@ import type {
   TrendsResponse, 
   ContentPerformanceQuery, 
   ContentPerformanceResponse,
-  MetricsQuery,
-  MetricsResponse,
 } from './analytics.model';
 import { intentDisplayNames } from '../ai/intent/definitions';
 import type { IntentType } from '../ai/intent/types';
@@ -242,42 +240,5 @@ export async function getContentPerformance(
     totalContents,
     totalWithPerformance,
     period: `${startDate || 'all'} to ${endDate || 'now'}`,
-  };
-}
-
-// ==========================================
-// 综合指标 (可扩展)
-// ==========================================
-
-/**
- * 获取综合业务指标
- * 聚合各领域的核心指标
- */
-export async function getMetrics(query: MetricsQuery): Promise<MetricsResponse> {
-  const { period = 30 } = query;
-  
-  // 这里可以集成各领域的统计
-  // 如用户增长、活动转化、AI 使用量等
-  
-  const metrics = [
-    {
-      name: '用户增长率',
-      value: 15.5,
-      benchmark: 'green' as const,
-      comparison: '较上月 +2.3%',
-      trend: 'up' as const,
-    },
-    {
-      name: '活动成局率',
-      value: 68.2,
-      benchmark: 'yellow' as const,
-      comparison: '较上月 -1.5%',
-      trend: 'down' as const,
-    },
-  ];
-
-  return {
-    metrics,
-    generatedAt: new Date().toISOString(),
   };
 }

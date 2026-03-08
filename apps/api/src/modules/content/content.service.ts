@@ -7,7 +7,6 @@ import { generateObject, jsonSchema } from 'ai';
 import { t } from 'elysia';
 import { toJsonSchema } from '@juchang/utils';
 import type { 
-  GenerateContentRequest, 
   ContentLibraryQuery, 
   ContentLibraryResponse,
   PerformanceUpdateRequest,

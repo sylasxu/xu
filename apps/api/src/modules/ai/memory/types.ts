@@ -49,12 +49,37 @@ export interface UserProfile {
 export interface InterestVector {
   /** 关联的活动 ID */
   activityId: string;
-  /** 1024 维向量 (智谱 embedding-3) */
+  /** 1536 维向量 (Qwen text-embedding-v4) */
   embedding: number[];
   /** 参与时间 */
   participatedAt: Date;
   /** 用户反馈 */
   feedback?: 'positive' | 'neutral' | 'negative';
+}
+
+/**
+ * 真实活动结果记忆
+ * 记录用户在活动后的真实履约结果，用于后续再约和推荐
+ */
+export interface ActivityOutcome {
+  /** 关联活动 ID */
+  activityId: string;
+  /** 活动标题 */
+  activityTitle: string;
+  /** 活动类型 */
+  activityType: string;
+  /** 地点 */
+  locationName: string;
+  /** 是否真实到场；未知时为 null */
+  attended: boolean | null;
+  /** 是否已触发再约 */
+  rebookTriggered: boolean;
+  /** 履约/复盘摘要 */
+  reviewSummary?: string | null;
+  /** 活动发生时间 */
+  happenedAt: Date;
+  /** 最后更新时间 */
+  updatedAt: Date;
 }
 
 /**
@@ -66,6 +91,8 @@ export interface EnhancedUserProfile extends UserProfile {
   version: 2;
   /** 最后更新时间 */
   lastUpdated: Date;
+  /** 最近真实活动结果 */
+  activityOutcomes?: ActivityOutcome[];
   /** 
    * 用户兴趣向量 (MaxSim 策略)
    * 最多存储 3 个最近满意活动的向量

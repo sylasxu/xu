@@ -1,12 +1,10 @@
 /**
  * 创建活动页面
- * Requirements: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 19.3, 19.4
- * - 实现表单字段（标题/描述/时间/地点/人数/费用等）
+ * Requirements: 7.1, 7.2, 7.4, 7.5, 19.3, 19.4
+ * - 实现表单字段（标题/描述/时间/地点/人数）
  * - 位置选择强制填写位置备注
- * - 隐私设置（模糊地理位置）
  * - 必填字段校验
  * - 调用创建活动API
- * - 推广选项（Boost/Pin+）
  * - 活动发布额度检查
  */
 import { postActivities } from '../../../src/api/endpoints/activities/activities';
@@ -16,9 +14,6 @@ import {
   consumeActivityCreateQuota,
   showActivityCreateQuotaExhaustedTip,
 } from '../../../src/services/quota';
-
-// TODO: 等后端实现交易相关 API 后启用
-// import { postTransactionsBoost, postTransactionsPinPlus } from '../../../src/api/endpoints/transactions/transactions';
 
 // 类型定义
 interface PickerOption {
@@ -39,26 +34,12 @@ interface ActivityForm {
   endAt: string;
   type: string;
   maxParticipants: number;
-  feeType: string;
-  estimatedCost: string;
-  joinMode: string;
-  genderRequirement: string;
-  minReliabilityRate: string;
-  isLocationBlurred: boolean;
 }
 
 interface PageData {
   form: ActivityForm;
-  enableBoost: boolean;
-  enablePinPlus: boolean;
-  boostPrice: number;
-  pinPlusPrice: number;
   activityTypes: PickerOption[];
-  feeTypes: PickerOption[];
-  joinModes: PickerOption[];
   showTypePicker: boolean;
-  showFeeTypePicker: boolean;
-  showJoinModePicker: boolean;
   showStartTimePicker: boolean;
   showEndTimePicker: boolean;
   isSubmitting: boolean;
@@ -79,36 +60,13 @@ interface PageOptions {
   aiText?: string;
 }
 
-interface WxPaymentParams {
-  timeStamp: string;
-  nonceStr: string;
-  package: string;
-  signType: 'MD5' | 'HMAC-SHA256' | 'RSA';
-  paySign: string;
-}
-
 // 活动类型选项
 const ACTIVITY_TYPES: PickerOption[] = [
   { label: '美食', value: 'food' },
   { label: '娱乐', value: 'entertainment' },
   { label: '运动', value: 'sports' },
-  { label: '学习', value: 'study' },
-  { label: '旅行', value: 'travel' },
+  { label: '桌游', value: 'boardgame' },
   { label: '其他', value: 'other' },
-];
-
-// 费用类型选项
-const FEE_TYPES: PickerOption[] = [
-  { label: '免费', value: 'free' },
-  { label: 'AA制', value: 'aa' },
-  { label: '固定费用', value: 'fixed' },
-  { label: '请客', value: 'treat' },
-];
-
-// 加入模式选项
-const JOIN_MODES: PickerOption[] = [
-  { label: '自动通过', value: 'auto' },
-  { label: '需要审批', value: 'approval' },
 ];
 
 Page<PageData, WechatMiniprogram.Page.CustomOption>({
@@ -127,29 +85,13 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
       endAt: '',
       type: '',
       maxParticipants: 10,
-      feeType: 'aa',
-      estimatedCost: '',
-      joinMode: 'approval',
-      genderRequirement: '',
-      minReliabilityRate: '',
-      isLocationBlurred: false, // 模糊地理位置 (Requirements: 7.3)
     },
-
-    // 增值服务 (Requirements: 7.6)
-    enableBoost: false,
-    enablePinPlus: false,
-    boostPrice: 3,
-    pinPlusPrice: 5,
 
     // 选项数据
     activityTypes: ACTIVITY_TYPES,
-    feeTypes: FEE_TYPES,
-    joinModes: JOIN_MODES,
 
     // 选择器状态
     showTypePicker: false,
-    showFeeTypePicker: false,
-    showJoinModePicker: false,
     showStartTimePicker: false,
     showEndTimePicker: false,
 
@@ -228,20 +170,8 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     this.setData({ 'form.locationHint': e.detail.value });
   },
 
-  onEstimatedCostInput(e: WechatMiniprogram.Input) {
-    this.setData({ 'form.estimatedCost': e.detail.value });
-  },
-
-  onMinReliabilityInput(e: WechatMiniprogram.Input) {
-    this.setData({ 'form.minReliabilityRate': e.detail.value });
-  },
-
   onParticipantsChange(e: WechatMiniprogram.CustomEvent<{ value: number }>) {
     this.setData({ 'form.maxParticipants': e.detail.value });
-  },
-
-  onLocationBlurredChange(e: WechatMiniprogram.CustomEvent<{ value: boolean }>) {
-    this.setData({ 'form.isLocationBlurred': e.detail.value });
   },
 
   // ==================== 选择器处理 ====================
@@ -260,38 +190,6 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
 
   onTypePickerCancel() {
     this.setData({ showTypePicker: false });
-  },
-
-  showFeeTypePicker() {
-    this.setData({ showFeeTypePicker: true });
-  },
-
-  onFeeTypeChange(e: WechatMiniprogram.CustomEvent<{ value: string[] }>) {
-    const { value } = e.detail;
-    this.setData({
-      'form.feeType': value[0],
-      showFeeTypePicker: false,
-    });
-  },
-
-  onFeeTypePickerCancel() {
-    this.setData({ showFeeTypePicker: false });
-  },
-
-  showJoinModePicker() {
-    this.setData({ showJoinModePicker: true });
-  },
-
-  onJoinModeChange(e: WechatMiniprogram.CustomEvent<{ value: string[] }>) {
-    const { value } = e.detail;
-    this.setData({
-      'form.joinMode': value[0],
-      showJoinModePicker: false,
-    });
-  },
-
-  onJoinModePickerCancel() {
-    this.setData({ showJoinModePicker: false });
   },
 
   // ==================== 时间选择 ====================
@@ -372,16 +270,6 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     this.setData({ 'form.images': images });
   },
 
-  // ==================== 增值服务 (Requirements: 7.6) ====================
-
-  onBoostChange(e: WechatMiniprogram.CustomEvent<{ value: boolean }>) {
-    this.setData({ enableBoost: e.detail.value });
-  },
-
-  onPinPlusChange(e: WechatMiniprogram.CustomEvent<{ value: boolean }>) {
-    this.setData({ enablePinPlus: e.detail.value });
-  },
-
   // ==================== 表单验证和提交 (Requirements: 7.4) ====================
 
   validateForm(): string[] {
@@ -430,17 +318,6 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
       }
     }
 
-    if (form.estimatedCost && (isNaN(Number(form.estimatedCost)) || parseFloat(form.estimatedCost) < 0)) {
-      errors.push('预估费用必须是有效的数字');
-    }
-
-    if (form.minReliabilityRate) {
-      const rate = parseInt(form.minReliabilityRate, 10);
-      if (isNaN(rate) || rate < 0 || rate > 100) {
-        errors.push('靠谱度门槛必须在0-100之间');
-      }
-    }
-
     return errors;
   },
 
@@ -461,7 +338,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
       return;
     }
 
-    const { form, enableBoost, enablePinPlus } = this.data;
+    const { form } = this.data;
 
     this.setData({ isSubmitting: true });
 
@@ -485,12 +362,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
 
       if (response.status === 200) {
         const activityId = (response.data as { id: string }).id;
-
-        if (enableBoost || enablePinPlus) {
-          this.handlePremiumServices(activityId, enableBoost, enablePinPlus);
-        } else {
-          this.showSuccessAndShare(activityId);
-        }
+        this.showSuccessAndShare(activityId);
       } else {
         throw new Error((response.data as { msg?: string })?.msg || '创建活动失败');
       }
@@ -503,29 +375,6 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     } finally {
       this.setData({ isSubmitting: false });
     }
-  },
-
-  async handlePremiumServices(activityId: string, _enableBoost: boolean, _enablePinPlus: boolean) {
-    // TODO: 等后端实现交易相关 API 后启用
-    // 目前直接显示成功
-    wx.showToast({ title: '增值服务暂未开放', icon: 'none' });
-    this.showSuccessAndShare(activityId);
-  },
-
-  callWxPay(paymentParams: WxPaymentParams): Promise<void> {
-    return new Promise((resolve, reject) => {
-      wx.requestPayment({
-        ...paymentParams,
-        success: () => resolve(),
-        fail: (err) => {
-          if (err.errMsg.includes('cancel')) {
-            resolve();
-          } else {
-            reject(err);
-          }
-        },
-      });
-    });
   },
 
   showSuccessAndShare(activityId: string) {
@@ -553,16 +402,6 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
   getTypeLabel(value: string): string {
     const type = ACTIVITY_TYPES.find((t) => t.value === value);
     return type ? type.label : '';
-  },
-
-  getFeeTypeLabel(value: string): string {
-    const type = FEE_TYPES.find((t) => t.value === value);
-    return type ? type.label : '';
-  },
-
-  getJoinModeLabel(value: string): string {
-    const mode = JOIN_MODES.find((m) => m.value === value);
-    return mode ? mode.label : '';
   },
 
   formatDateTime(dateStr: string): string {

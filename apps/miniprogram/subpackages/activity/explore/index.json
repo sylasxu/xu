@@ -4,6 +4,7 @@
     "filter-bar": "/components/filter-bar/index",
     "activity-list-item": "/components/activity-list-item/index",
     "activity-preview-sheet": "/components/activity-preview-sheet/index",
+    "auth-sheet": "/components/auth-sheet/index",
     "t-loading": "tdesign-miniprogram/loading/loading",
     "t-icon": "tdesign-miniprogram/icon/icon"
   },

@@ -1,6 +1,6 @@
 /**
  * Partner Matching - 找搭子追问流程
- * 
+ *
  * 当用户想找搭子但信息不完整时，结构化追问收集偏好
  * 状态持久化到 conversation_messages，刷新不丢失
  */
@@ -13,12 +13,23 @@ const logger = createLogger('partner-matching');
 
 // ============ 类型定义 ============
 
+export type PartnerActivityType = 'food' | 'entertainment' | 'sports' | 'boardgame' | 'other';
+export type PartnerTimeRange = 'tonight' | 'tomorrow' | 'weekend' | 'next_week';
+
+interface ParsedPartnerAnswer {
+  field: string;
+  value: string;
+  tags?: string[];
+}
+
 /**
  * 找搭子追问状态
  */
 export interface PartnerMatchingState {
   /** Workflow ID */
   workflowId: string;
+  /** 初始原话 */
+  rawInput: string;
   /** 状态 */
   status: 'collecting' | 'searching' | 'completed' | 'paused';
   /** 已收集的偏好 */
@@ -26,7 +37,8 @@ export interface PartnerMatchingState {
     activityType?: string;
     timeRange?: string;
     location?: string;
-    participants?: number;
+    participants?: string;
+    tags?: string[];
   };
   /** 缺失的必填项 */
   missingRequired: string[];
@@ -44,16 +56,28 @@ export interface PartnerMatchingState {
 export interface PartnerMatchingQuestion {
   field: string;
   question: string;
-  options: Array<{ label: string; value: string }>;
+  options: Array<{ label: string; value: string; tags?: string[] }>;
+}
+
+/**
+ * workflow 完成后可直接落 createPartnerIntent 的结构化参数
+ */
+export interface PartnerIntentDraftPayload {
+  rawInput: string;
+  activityType: PartnerActivityType;
+  locationHint: string;
+  timePreference?: string;
+  tags: string[];
 }
 
 /**
  * 存储格式 (保持 type 值不变以兼容已存储数据)
  */
 interface StoredPartnerMatchingState {
-  type: 'broker_state';  // 保持不变以兼容已存储数据
+  type: 'broker_state';
   state: {
     workflowId: string;
+    rawInput: string;
     status: string;
     collectedPreferences: Record<string, unknown>;
     missingRequired: string[];
@@ -65,14 +89,23 @@ interface StoredPartnerMatchingState {
 
 // ============ 配置 ============
 
-/**
- * 必填项
- */
 const REQUIRED_FIELDS = ['activityType', 'timeRange'];
 
-/**
- * 追问问题模板
- */
+const PARTNER_ACTIVITY_LABELS: Record<PartnerActivityType, string> = {
+  food: '美食',
+  entertainment: '娱乐',
+  sports: '运动',
+  boardgame: '桌游',
+  other: '其他',
+};
+
+const PARTNER_TIME_LABELS: Record<PartnerTimeRange, string> = {
+  tonight: '今晚',
+  tomorrow: '明天',
+  weekend: '周末',
+  next_week: '下周',
+};
+
 const QUESTION_TEMPLATES: Record<string, PartnerMatchingQuestion> = {
   activityType: {
     field: 'activityType',
@@ -82,7 +115,7 @@ const QUESTION_TEMPLATES: Record<string, PartnerMatchingQuestion> = {
       { label: '🎮 娱乐', value: 'entertainment' },
       { label: '⚽ 运动', value: 'sports' },
       { label: '🎲 桌游', value: 'boardgame' },
-      { label: '☕ 喝咖啡', value: 'coffee' },
+      { label: '☕ 喝咖啡', value: 'food', tags: ['Coffee'] },
     ],
   },
   timeRange: {
@@ -119,35 +152,27 @@ const QUESTION_TEMPLATES: Record<string, PartnerMatchingQuestion> = {
 
 // ============ 核心函数 ============
 
-/**
- * 检查是否需要开始找搭子追问流程
- */
 export function shouldStartPartnerMatching(
   intent: string,
   existingState: PartnerMatchingState | null
 ): boolean {
-  // 找搭子意图且没有进行中的 workflow
   if (intent === 'partner' && !existingState) {
     return true;
   }
-  // 有暂停的 workflow 需要恢复
   if (existingState?.status === 'paused') {
     return true;
   }
-  // 有收集中的 workflow 需要继续
   if (existingState?.status === 'collecting') {
     return true;
   }
   return false;
 }
 
-/**
- * 创建找搭子追问状态
- */
-export function createPartnerMatchingState(): PartnerMatchingState {
+export function createPartnerMatchingState(rawInput: string): PartnerMatchingState {
   const now = new Date();
   return {
     workflowId: randomUUID(),
+    rawInput,
     status: 'collecting',
     collectedPreferences: {},
     missingRequired: [...REQUIRED_FIELDS],
@@ -157,40 +182,42 @@ export function createPartnerMatchingState(): PartnerMatchingState {
   };
 }
 
-/**
- * 更新找搭子追问状态
- */
 export function updatePartnerMatchingState(
   state: PartnerMatchingState,
-  field: string,
-  value: string | number
+  answer: ParsedPartnerAnswer
 ): PartnerMatchingState {
+  const mergedTags = Array.from(new Set([
+    ...(state.collectedPreferences.tags || []),
+    ...(answer.tags || []),
+  ]));
+
+  const nextPreferences: PartnerMatchingState['collectedPreferences'] = {
+    ...state.collectedPreferences,
+    [answer.field]: answer.value,
+  };
+
+  if (mergedTags.length > 0) {
+    nextPreferences.tags = mergedTags;
+  }
+
   const newState: PartnerMatchingState = {
     ...state,
-    collectedPreferences: {
-      ...state.collectedPreferences,
-      [field]: value,
-    },
+    collectedPreferences: nextPreferences,
     round: state.round + 1,
     updatedAt: new Date(),
   };
-  
-  // 更新缺失的必填项
+
   newState.missingRequired = REQUIRED_FIELDS.filter(
-    f => !newState.collectedPreferences[f as keyof typeof newState.collectedPreferences]
+    field => !newState.collectedPreferences[field as keyof typeof newState.collectedPreferences]
   );
-  
-  // 检查是否收集完成
+
   if (newState.missingRequired.length === 0) {
     newState.status = 'searching';
   }
-  
+
   return newState;
 }
 
-/**
- * 暂停找搭子追问状态
- */
 export function pausePartnerMatchingState(state: PartnerMatchingState): PartnerMatchingState {
   return {
     ...state,
@@ -199,9 +226,6 @@ export function pausePartnerMatchingState(state: PartnerMatchingState): PartnerM
   };
 }
 
-/**
- * 完成找搭子追问状态
- */
 export function completePartnerMatchingState(state: PartnerMatchingState): PartnerMatchingState {
   return {
     ...state,
@@ -210,23 +234,15 @@ export function completePartnerMatchingState(state: PartnerMatchingState): Partn
   };
 }
 
-/**
- * 获取下一个追问问题
- */
 export function getNextQuestion(state: PartnerMatchingState): PartnerMatchingQuestion | null {
-  // 优先问必填项
   if (state.missingRequired.length > 0) {
     const field = state.missingRequired[0];
     return QUESTION_TEMPLATES[field] || null;
   }
-  
-  // 必填项收集完成，可以问可选项（但不强制）
+
   return null;
 }
 
-/**
- * 构建追问 Prompt
- */
 export function buildAskPrompt(state: PartnerMatchingState): string {
   const question = getNextQuestion(state);
   if (!question) {
@@ -235,47 +251,119 @@ export function buildAskPrompt(state: PartnerMatchingState): string {
   return question.question;
 }
 
-/**
- * 从用户消息中解析回答
- */
+export function looksLikePartnerAnswer(
+  message: string,
+  currentQuestion: PartnerMatchingQuestion | null
+): boolean {
+  if (!currentQuestion) return false;
+
+  const trimmed = message.trim();
+  if (!trimmed) return false;
+
+  const lowerMessage = trimmed.toLowerCase();
+  const cancelPatterns = ['算了', '不找了', '取消', '不要了', '换个'];
+  if (cancelPatterns.some(pattern => trimmed.includes(pattern))) {
+    return false;
+  }
+
+  for (const option of currentQuestion.options) {
+    if (lowerMessage.includes(option.label.toLowerCase()) || lowerMessage.includes(option.value.toLowerCase())) {
+      return true;
+    }
+  }
+
+  if (currentQuestion.field === 'activityType') {
+    return /(吃饭|火锅|烧烤|咖啡|喝|游戏|唱歌|ktv|运动|打球|篮球|羽毛球|桌游|狼人杀|剧本杀)/i.test(trimmed);
+  }
+
+  if (currentQuestion.field === 'timeRange') {
+    return /(今晚|今天|晚上|明天|明晚|周末|周六|周日|下周|八点|8点|九点|9点)/.test(trimmed);
+  }
+
+  if (currentQuestion.field === 'location') {
+    return /(观音桥|解放碑|南坪|沙坪坝|江北|杨家坪|大坪|附近)/.test(trimmed);
+  }
+
+  return trimmed.length <= 12 && !/[？?]/.test(trimmed);
+}
+
+export function inferPartnerMessageHints(message: string): {
+  location?: string;
+  tags?: string[];
+} {
+  const hints: { location?: string; tags?: string[] } = {};
+  const locations = ['观音桥', '解放碑', '南坪', '沙坪坝', '江北嘴', '杨家坪', '大坪'];
+  for (const location of locations) {
+    if (message.includes(location)) {
+      hints.location = location;
+      break;
+    }
+  }
+
+  const tags: string[] = [];
+  if (/(^|\b)aa(制)?(\b|$)/i.test(message)) {
+    tags.push('AA');
+  }
+  if (tags.length > 0) {
+    hints.tags = tags;
+  }
+
+  return hints;
+}
+
 export function parseUserAnswer(
   message: string,
   currentQuestion: PartnerMatchingQuestion | null
-): { field: string; value: string } | null {
+): ParsedPartnerAnswer | null {
   if (!currentQuestion) return null;
-  
+
   const lowerMessage = message.toLowerCase();
-  
-  // 尝试匹配选项
+
   for (const option of currentQuestion.options) {
-    if (lowerMessage.includes(option.label.toLowerCase()) || 
+    if (lowerMessage.includes(option.label.toLowerCase()) ||
         lowerMessage.includes(option.value.toLowerCase())) {
-      return { field: currentQuestion.field, value: option.value };
+      return { field: currentQuestion.field, value: option.value, tags: option.tags };
     }
   }
-  
-  // 特殊处理：活动类型
+
   if (currentQuestion.field === 'activityType') {
-    const typeMap: Record<string, string> = {
-      '吃饭': 'food', '吃': 'food', '饭': 'food', '火锅': 'food', '烧烤': 'food',
-      '游戏': 'entertainment', '玩': 'entertainment', '唱歌': 'entertainment', 'ktv': 'entertainment',
-      '运动': 'sports', '打球': 'sports', '篮球': 'sports', '羽毛球': 'sports',
-      '桌游': 'boardgame', '狼人杀': 'boardgame', '剧本杀': 'boardgame',
-      '咖啡': 'coffee', '喝': 'coffee',
+    const typeMap: Record<string, { value: string; tags?: string[] }> = {
+      '吃饭': { value: 'food' },
+      '吃': { value: 'food' },
+      '饭': { value: 'food' },
+      '火锅': { value: 'food' },
+      '烧烤': { value: 'food' },
+      '游戏': { value: 'entertainment' },
+      '玩': { value: 'entertainment' },
+      '唱歌': { value: 'entertainment' },
+      'ktv': { value: 'entertainment' },
+      '运动': { value: 'sports' },
+      '打球': { value: 'sports' },
+      '篮球': { value: 'sports' },
+      '羽毛球': { value: 'sports' },
+      '桌游': { value: 'boardgame' },
+      '狼人杀': { value: 'boardgame' },
+      '剧本杀': { value: 'boardgame' },
+      '咖啡': { value: 'food', tags: ['Coffee'] },
+      '喝': { value: 'food', tags: ['Coffee'] },
     };
-    for (const [keyword, value] of Object.entries(typeMap)) {
+    for (const [keyword, matched] of Object.entries(typeMap)) {
       if (lowerMessage.includes(keyword)) {
-        return { field: 'activityType', value };
+        return { field: 'activityType', value: matched.value, tags: matched.tags };
       }
     }
   }
-  
-  // 特殊处理：时间
+
   if (currentQuestion.field === 'timeRange') {
     const timeMap: Record<string, string> = {
-      '今晚': 'tonight', '今天': 'tonight', '晚上': 'tonight',
-      '明天': 'tomorrow', '明晚': 'tomorrow',
-      '周末': 'weekend', '周六': 'weekend', '周日': 'weekend',
+      '今晚': 'tonight',
+      '今天': 'tonight',
+      '晚上': 'tonight',
+      '明天': 'tomorrow',
+      '明晚': 'tomorrow',
+      '周末': 'weekend',
+      '周六': 'weekend',
+      '周日': 'weekend',
       '下周': 'next_week',
     };
     for (const [keyword, value] of Object.entries(timeMap)) {
@@ -284,40 +372,78 @@ export function parseUserAnswer(
       }
     }
   }
-  
-  // 特殊处理：地点
+
   if (currentQuestion.field === 'location') {
-    const locations = ['观音桥', '解放碑', '南坪', '沙坪坝', '江北', '杨家坪', '大坪'];
+  const locations = ['观音桥', '解放碑', '南坪', '沙坪坝', '江北嘴', '杨家坪', '大坪'];
     for (const loc of locations) {
       if (message.includes(loc)) {
         return { field: 'location', value: loc };
       }
     }
   }
-  
-  // 无法解析，返回原始消息作为值
-  return { field: currentQuestion.field, value: message };
+
+  return { field: currentQuestion.field, value: message.trim() || message };
 }
 
-/**
- * 检测用户是否切换话题
- */
+export function normalizePartnerActivityType(value: string | undefined): PartnerActivityType {
+  if (value === 'food' || value === 'entertainment' || value === 'sports' || value === 'boardgame' || value === 'other') {
+    return value;
+  }
+  if (value === 'coffee') {
+    return 'food';
+  }
+  return 'other';
+}
+
+export function getPartnerActivityTypeLabel(value: string | undefined): string {
+  return PARTNER_ACTIVITY_LABELS[normalizePartnerActivityType(value)] || '其他';
+}
+
+export function getPartnerTimeLabel(value: string | undefined): string {
+  if (!value) return '待定';
+  return PARTNER_TIME_LABELS[value as PartnerTimeRange] || value;
+}
+
+export function buildPartnerIntentPayload(
+  state: PartnerMatchingState,
+  fallbackLocationHint: string
+): PartnerIntentDraftPayload {
+  const normalizedType = normalizePartnerActivityType(state.collectedPreferences.activityType);
+  const timePreference = state.collectedPreferences.timeRange
+    ? getPartnerTimeLabel(state.collectedPreferences.timeRange)
+    : undefined;
+
+  const tags = Array.from(new Set([
+    ...(state.collectedPreferences.tags || []),
+    ...(state.rawInput.includes('咖啡') ? ['Coffee'] : []),
+  ]));
+
+  const rawInput = state.rawInput.trim() || [
+    timePreference ? `${timePreference}` : '',
+    state.collectedPreferences.location || fallbackLocationHint,
+    `${getPartnerActivityTypeLabel(normalizedType)}搭子`,
+  ].filter(Boolean).join(' ');
+
+  return {
+    rawInput,
+    activityType: normalizedType,
+    locationHint: state.collectedPreferences.location?.trim() || fallbackLocationHint,
+    ...(timePreference ? { timePreference } : {}),
+    tags,
+  };
+}
+
 export function isTopicSwitch(message: string, currentIntent: string): boolean {
-  // 如果意图不再是 partner，说明切换了话题
   if (currentIntent !== 'partner') {
     return true;
   }
-  
-  // 检测明确的取消意图
+
   const cancelPatterns = ['算了', '不找了', '取消', '不要了', '换个'];
-  return cancelPatterns.some(p => message.includes(p));
+  return cancelPatterns.some(pattern => message.includes(pattern));
 }
 
 // ============ 持久化 ============
 
-/**
- * 持久化找搭子追问状态到消息
- */
 export async function persistPartnerMatchingState(
   conversationId: string,
   userId: string,
@@ -325,9 +451,10 @@ export async function persistPartnerMatchingState(
 ): Promise<void> {
   try {
     const content: StoredPartnerMatchingState = {
-      type: 'broker_state',  // 保持不变以兼容已存储数据
+      type: 'broker_state',
       state: {
         workflowId: state.workflowId,
+        rawInput: state.rawInput,
         status: state.status,
         collectedPreferences: state.collectedPreferences,
         missingRequired: state.missingRequired,
@@ -336,7 +463,7 @@ export async function persistPartnerMatchingState(
         updatedAt: state.updatedAt.toISOString(),
       },
     };
-    
+
     await db.insert(conversationMessages).values({
       conversationId,
       userId,
@@ -344,16 +471,13 @@ export async function persistPartnerMatchingState(
       messageType: 'widget_ask_preference',
       content,
     });
-    
+
     logger.debug('Partner matching state persisted', { workflowId: state.workflowId, status: state.status });
   } catch (error) {
     logger.error('Failed to persist partner matching state', { error });
   }
 }
 
-/**
- * 从消息中恢复找搭子追问状态
- */
 export async function recoverPartnerMatchingState(
   conversationId: string
 ): Promise<PartnerMatchingState | null> {
@@ -363,26 +487,24 @@ export async function recoverPartnerMatchingState(
       orderBy: [desc(conversationMessages.createdAt)],
       limit: 20,
     });
-    
+
     for (const msg of messages) {
       const content = msg.content as StoredPartnerMatchingState | null;
       if (content?.type === 'broker_state' && content?.state) {
         const stored = content.state;
-        
-        // 检查是否过期（超过 30 分钟）
         const updatedAt = new Date(stored.updatedAt);
         if (Date.now() - updatedAt.getTime() > 30 * 60 * 1000) {
           logger.debug('Partner matching state expired', { workflowId: stored.workflowId });
           return null;
         }
-        
-        // 只恢复未完成的状态
+
         if (stored.status === 'completed') {
           return null;
         }
-        
+
         return {
           workflowId: stored.workflowId,
+          rawInput: stored.rawInput || '',
           status: stored.status as PartnerMatchingState['status'],
           collectedPreferences: stored.collectedPreferences as PartnerMatchingState['collectedPreferences'],
           missingRequired: stored.missingRequired,
@@ -392,7 +514,7 @@ export async function recoverPartnerMatchingState(
         };
       }
     }
-    
+
     return null;
   } catch (error) {
     logger.error('Failed to recover partner matching state', { error });
@@ -400,11 +522,6 @@ export async function recoverPartnerMatchingState(
   }
 }
 
-/**
- * 清除会话的找搭子追问状态
- */
 export async function clearPartnerMatchingState(conversationId: string): Promise<void> {
-  // 不实际删除，只是标记为完成
-  // 这样可以保留历史记录
   logger.debug('Partner matching state cleared', { conversationId });
 }

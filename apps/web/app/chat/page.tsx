@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowUp,
   ChevronRight,
-  Menu,
   MoreHorizontal,
   QrCode,
   Sparkles,
@@ -31,7 +30,9 @@ import {
   Suggestion,
   Suggestions,
 } from "@/components/ai-elements/suggestion";
+import { MessageCenterDrawer } from "@/components/chat/message-center-drawer";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { readClientToken } from "@/lib/client-auth";
 import { cn } from "@/lib/utils";
 import type {
   GenUIAlertBlock,
@@ -111,22 +112,6 @@ const TYPEWRITER_INTERVAL_MS = 18;
 
 function randomId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function readClientToken(): string | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  const tokenKeys = ["token", "authToken", "accessToken"];
-  for (const key of tokenKeys) {
-    const value = window.localStorage.getItem(key);
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-  }
-
-  return null;
 }
 
 function sleep(ms: number) {
@@ -343,15 +328,52 @@ export default function ChatPage() {
     bottomQuickActions: DEFAULT_BOTTOM_ACTIONS,
     profileHints: DEFAULT_PROFILE_HINTS,
   });
+  const [clientLocation, setClientLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const isDarkMode = false;
 
   const isSending = status === "submitted";
 
   useEffect(() => {
-    const controller = new AbortController();
+    if (typeof window === "undefined" || !("geolocation" in navigator)) {
+      return;
+    }
 
-    void fetch(`${API_BASE}/ai/welcome`, {
+    let cancelled = false;
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        if (cancelled) {
+          return;
+        }
+        setClientLocation({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        });
+      },
+      () => {
+        // silent fallback: no location context
+      },
+      {
+        enableHighAccuracy: false,
+        timeout: 4000,
+        maximumAge: 5 * 60 * 1000,
+      }
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const welcomeUrl = new URL(`${API_BASE}/ai/welcome`);
+    if (clientLocation) {
+      welcomeUrl.searchParams.set("lat", String(clientLocation.lat));
+      welcomeUrl.searchParams.set("lng", String(clientLocation.lng));
+    }
+
+    void fetch(welcomeUrl.toString(), {
       method: "GET",
       signal: controller.signal,
     })
@@ -377,7 +399,7 @@ export default function ChatPage() {
     return () => {
       controller.abort();
     };
-  }, []);
+  }, [clientLocation]);
 
   const sendTurn = useCallback(
     async (nextInput: GenUIInput, userDisplayText: string) => {
@@ -516,6 +538,12 @@ export default function ChatPage() {
               locale: "zh-CN",
               timezone: "Asia/Shanghai",
               platformVersion: "web-vnext",
+              ...(clientLocation
+                ? {
+                    lat: clientLocation.lat,
+                    lng: clientLocation.lng,
+                  }
+                : {}),
             },
             stream: true,
           }),
@@ -680,7 +708,7 @@ export default function ChatPage() {
         setStatus("ready");
       }
     },
-    [conversationId, isSending]
+    [clientLocation, conversationId, isSending]
   );
 
   const handleSubmit = useCallback(
@@ -797,15 +825,19 @@ export default function ChatPage() {
       <div className={cn("relative mx-auto flex h-[100dvh] w-full max-w-[430px] flex-col", isDarkMode ? "text-slate-100" : "text-slate-900")}>
         <header className="flex shrink-0 items-center justify-between px-3 pb-2 pt-3">
           <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              className={cn(
-                "inline-flex h-9 w-9 items-center justify-center rounded-full",
-                isDarkMode ? "text-[#dde2ff]" : "text-[#1d2151]"
-              )}
-            >
-              <Menu className="h-5 w-5" />
-            </button>
+            <MessageCenterDrawer
+              disabled={isSending}
+              isDarkMode={isDarkMode}
+              onSendPrompt={async (prompt, displayText) => {
+                await sendTurn(
+                  {
+                    type: "text",
+                    text: prompt,
+                  },
+                  displayText || prompt
+                );
+              }}
+            />
             <p className={cn("text-[18px] font-semibold tracking-tight", isDarkMode ? "text-[#f0f3ff]" : "text-[#111633]")}>聚场</p>
           </div>
 
@@ -930,7 +962,7 @@ export default function ChatPage() {
                               prompt
                             );
                           }}
-                          className="flex w-full items-start gap-2 rounded-2xl bg-white/86 px-3 py-2.5 text-left text-[14px] text-[#2a315e] shadow-[0_12px_24px_-20px_rgba(67,86,170,0.52)]"
+                          className="flex w-full items-end gap-2 rounded-2xl bg-white/86 px-3 py-2.5 text-left text-[14px] text-[#2a315e] shadow-[0_12px_24px_-20px_rgba(67,86,170,0.52)]"
                         >
                           <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[linear-gradient(140deg,#4e5dff_0%,#8658f8_100%)] text-[12px] font-semibold text-white">
                             #

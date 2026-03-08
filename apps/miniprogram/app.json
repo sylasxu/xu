@@ -29,11 +29,6 @@
       "pages": ["index", "about/index"]
     },
     {
-      "root": "subpackages/safety",
-      "name": "safety",
-      "pages": ["index"]
-    },
-    {
       "root": "subpackages/setting",
       "name": "setting-sub",
       "pages": ["preference/index"]
@@ -57,22 +52,6 @@
       "root": "pages/setting",
       "name": "setting",
       "pages": ["index"]
-    },
-    {
-      "root": "packageChatTool",
-      "name": "chatTool",
-      "pages": ["pages/activity-detail/index"],
-      "independent": true,
-      "componentFramework": "glass-easel",
-      "renderer": "skyline"
-    }
-  ],
-  "chatTools": [
-    {
-      "root": "packageChatTool",
-      "entryPagePath": "pages/activity-detail/index",
-      "desc": "群内快速组局",
-      "scopes": ["scope.userLocation"]
     }
   ],
   "window": {

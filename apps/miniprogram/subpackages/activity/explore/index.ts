@@ -10,11 +10,11 @@
  */
 
 import { getActivitiesNearby } from '../../../src/api/endpoints/activities/activities'
-import { postActivitiesByIdJoin } from '../../../src/api/endpoints/activities/activities'
 import { useUserStore } from '../../../src/stores/user'
 import { useAppStore } from '../../../src/stores/app'
 import type { ActivityNearbyResponseDataItem } from '../../../src/api/model'
 import type { ActivityType } from '../../../src/types/global'
+import { submitJoinAndOpenDiscussion, type JoinFlowPayload } from '../../../src/utils/join-flow'
 
 // 活动类型
 interface Activity {
@@ -317,6 +317,43 @@ Page({
     })
   },
 
+  findActivityById(activityId: string): Activity | null {
+    const selectedActivity = this.data.selectedActivity
+    if (selectedActivity?.id === activityId) {
+      return selectedActivity
+    }
+
+    return this.data.activities.find((item: Activity) => item.id === activityId) || null
+  },
+
+  async submitJoin(payload: JoinFlowPayload) {
+    const joinResult = await submitJoinAndOpenDiscussion(
+      {
+        ...payload,
+        source: payload.source || 'activity_explore',
+      },
+      {
+        onBeforeNavigate: () => {
+          this.setData({
+            showPreview: false,
+            selectedActivity: null,
+            isJoined: true,
+          })
+
+          this.loadNearbyActivities()
+        },
+      },
+    )
+
+    if (!joinResult.success) {
+      wx.showToast({
+        title: joinResult.msg || '报名失败',
+        icon: 'none',
+      })
+      return
+    }
+  },
+
   /**
    * 查看活动详情
    * Requirements: 18.6
@@ -336,51 +373,52 @@ Page({
    */
   async onJoin(e: WechatMiniprogram.CustomEvent<{ activityId: string }>) {
     const { activityId } = e.detail
-    
-    // 检查是否已绑定手机号
+    const activity = this.findActivityById(activityId)
+    if (!activity) {
+      wx.showToast({ title: '活动信息缺失', icon: 'none' })
+      return
+    }
+
     const userStore = useUserStore.getState()
     const user = userStore.user
-    
+
     if (!user?.phoneNumber) {
-      // 未绑定手机号，显示绑定弹窗
-      const appStore = useAppStore.getState()
-      appStore.showAuthSheet({
+      useAppStore.getState().showAuthSheet({
         type: 'join',
-        payload: { activityId },
+        payload: {
+          activityId: activity.id,
+          title: activity.title,
+          startAt: activity.startAt,
+          locationName: activity.locationName,
+          source: 'activity_explore',
+        },
       })
       return
     }
-    
-    try {
-      const response = await postActivitiesByIdJoin(activityId)
-      
-      if (response.status === 200) {
-        wx.showToast({
-          title: '报名成功',
-          icon: 'success',
-        })
-        
-        this.setData({
-          showPreview: false,
-          isJoined: true,
-        })
-        
-        // 刷新活动列表
-        this.loadNearbyActivities()
-      } else {
-        const errorData = response.data as { msg?: string } | undefined
-        wx.showToast({
-          title: errorData?.msg || '报名失败',
-          icon: 'none',
-        })
-      }
-    } catch (err) {
-      console.error('Join activity failed:', err)
-      wx.showToast({
-        title: '报名失败，请重试',
-        icon: 'none',
-      })
+
+    await this.submitJoin({
+      activityId: activity.id,
+      title: activity.title,
+      startAt: activity.startAt,
+      locationName: activity.locationName,
+      source: 'activity_explore',
+    })
+  },
+
+  onAuthSuccess() {
+    // Auth Sheet 内部已刷新用户信息，这里保持静默即可
+  },
+
+  async onPendingAction(e: WechatMiniprogram.CustomEvent<{ type: string; payload: JoinFlowPayload }>) {
+    const { type, payload } = e.detail
+    if (type !== 'join' || !payload?.activityId) {
+      return
     }
+
+    await this.submitJoin({
+      ...payload,
+      source: payload.source || 'auth_sheet',
+    })
   },
 
   /**

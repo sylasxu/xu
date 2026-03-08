@@ -106,12 +106,30 @@
 // ==================== 空状态 ====================
 
 .explore-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: @spacing-3;
   padding: @spacing-6 @spacing-4;
   text-align: center;
   
   .empty-text {
     font-size: @text-sm;
     color: var(--text-secondary, @text-secondary);
+  }
+
+  .empty-cta {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 240rpx;
+    height: 72rpx;
+    padding: 0 @spacing-4;
+    font-size: @text-sm;
+    font-weight: 500;
+    color: var(--color-brand, @color-brand);
+    background: var(--icon-bg-blue, rgba(91, 117, 251, 0.1));
+    border-radius: var(--radius-full, 999rpx);
   }
 }
 

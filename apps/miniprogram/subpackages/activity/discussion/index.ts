@@ -3,7 +3,45 @@
  * 基于 WebSocket 的实时通讯
  */
 import { useDiscussionStore, type DiscussionMessage } from '../../../src/stores/discussion'
+import { getJoinGuideTitle, getJoinQuickStarters } from '../../../src/utils/join-flow'
 import { useUserStore } from '../../../src/stores/user'
+
+interface DiscussionPageData {
+  activityId: string
+  messages: (DiscussionMessage & { formattedTime: string })[]
+  onlineCount: number
+  connectionStatus: string
+  isArchived: boolean
+  error: string | null
+  isLoadingMore: boolean
+  hasMore: boolean
+  inputValue: string
+  scrollToView: string
+  currentUserId: string
+  isConnected: boolean
+  showJoinGuide: boolean
+  joinGuideTitle: string
+  joinGuideHint: string
+  quickStarters: string[]
+}
+
+interface DiscussionPageOptions {
+  id?: string
+  entry?: string
+  title?: string
+}
+
+function decodeOption(value?: string): string {
+  if (!value) {
+    return ''
+  }
+
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
 
 // 格式化时间
 function formatTime(dateStr: string): string {
@@ -37,7 +75,7 @@ function formatTime(dateStr: string): string {
   return `${date.getMonth() + 1}/${date.getDate()} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`
 }
 
-Page({
+Page<DiscussionPageData, WechatMiniprogram.Page.CustomOption>({
   data: {
     activityId: '',
     messages: [] as (DiscussionMessage & { formattedTime: string })[],
@@ -51,18 +89,25 @@ Page({
     scrollToView: '',
     currentUserId: '',
     isConnected: false,
+    showJoinGuide: false,
+    joinGuideTitle: '',
+    joinGuideHint: '先打个招呼吧，大家更容易接住你。',
+    quickStarters: [],
   },
 
   // Store 订阅取消函数
   _unsubscribe: null as (() => void) | null,
 
-  onLoad(options: { id?: string }) {
+  onLoad(options: DiscussionPageOptions) {
     const activityId = options.id
     if (!activityId) {
       wx.showToast({ title: '活动ID缺失', icon: 'none' })
       setTimeout(() => wx.navigateBack(), 1500)
       return
     }
+
+    const isJoinSuccessEntry = options.entry === 'join_success'
+    const title = decodeOption(options.title)
 
     // 获取当前用户 ID
     const userStore = useUserStore.getState()
@@ -71,6 +116,9 @@ Page({
     this.setData({
       activityId,
       currentUserId,
+      showJoinGuide: isJoinSuccessEntry,
+      joinGuideTitle: isJoinSuccessEntry ? getJoinGuideTitle(title) : '',
+      quickStarters: isJoinSuccessEntry ? getJoinQuickStarters(title) : [],
     })
 
     // 订阅 store 变化
@@ -156,7 +204,7 @@ Page({
     if (!token) {
       wx.showToast({ title: '请先登录', icon: 'none' })
       setTimeout(() => {
-        wx.navigateTo({ url: '/pages/login/index' })
+        wx.navigateTo({ url: '/pages/login/login' })
       }, 1500)
       return
     }
@@ -196,6 +244,18 @@ Page({
     // 清空输入框
     this.setData({
       inputValue: '',
+      showJoinGuide: false,
+    })
+  },
+
+  onQuickStarterTap(e: WechatMiniprogram.TouchEvent) {
+    const starter = e.currentTarget.dataset.starter
+    if (!starter || typeof starter !== 'string') {
+      return
+    }
+
+    this.setData({
+      inputValue: starter,
     })
   },
 

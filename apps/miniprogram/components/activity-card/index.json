@@ -4,7 +4,6 @@
     "t-icon": "tdesign-miniprogram/icon/icon",
     "t-tag": "tdesign-miniprogram/tag/tag",
     "t-avatar": "tdesign-miniprogram/avatar/avatar",
-    "t-loading": "tdesign-miniprogram/loading/loading",
-    "reliability-badge": "../reliability-badge/index"
+    "t-loading": "tdesign-miniprogram/loading/loading"
   }
 }

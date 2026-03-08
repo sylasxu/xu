@@ -10,6 +10,8 @@ import { createLogger } from '../observability/logger';
 // 复用现有 Service 函数
 import { joinActivity, quitActivity, getActivityById } from '../../activities/activity.service';
 import { search } from '../rag';
+import { confirmMatch, cancelMatch } from '../tools/helpers/match';
+import { buildCreateDraftParamsFromActionPayload, createActivityDraftRecord, publishActivityRecord } from '../tools/activity-tools';
 
 const logger = createLogger('user-action');
 
@@ -59,6 +61,11 @@ const ACTION_HANDLERS: Record<UserActionType, {
     requiresAuth: true,
     description: '发布草稿',
   },
+  confirm_publish: {
+    handler: handlePublishDraft,
+    requiresAuth: true,
+    description: '确认发布',
+  },
   
   // 探索相关
   explore_nearby: {
@@ -82,6 +89,16 @@ const ACTION_HANDLERS: Record<UserActionType, {
     handler: handleFindPartner,
     requiresAuth: true,
     description: '找搭子',
+  },
+  confirm_match: {
+    handler: handleConfirmMatch,
+    requiresAuth: true,
+    description: '确认匹配',
+  },
+  cancel_match: {
+    handler: handleCancelMatch,
+    requiresAuth: true,
+    description: '取消匹配',
   },
   select_preference: {
     handler: handleSelectPreference,
@@ -188,6 +205,36 @@ export async function handleUserAction(
 // ============================================================================
 // Action Handlers
 // ============================================================================
+
+function resolveActionLocation(payload: Record<string, unknown>): { lat: number; lng: number } | null {
+  const embedded = payload._location;
+  if (embedded && typeof embedded === 'object') {
+    const record = embedded as Record<string, unknown>;
+    const lat = typeof record.lat === 'number' ? record.lat : null;
+    const lng = typeof record.lng === 'number' ? record.lng : null;
+    if (lat !== null && lng !== null) {
+      return { lat, lng };
+    }
+  }
+
+  const center = payload.center;
+  if (center && typeof center === 'object') {
+    const record = center as Record<string, unknown>;
+    const lat = typeof record.lat === 'number' ? record.lat : null;
+    const lng = typeof record.lng === 'number' ? record.lng : null;
+    if (lat !== null && lng !== null) {
+      return { lat, lng };
+    }
+  }
+
+  const lat = typeof payload.lat === 'number' ? payload.lat : null;
+  const lng = typeof payload.lng === 'number' ? payload.lng : null;
+  if (lat !== null && lng !== null) {
+    return { lat, lng };
+  }
+
+  return null;
+}
 
 async function handleJoinActivity(
   payload: Record<string, unknown>,
@@ -297,12 +344,26 @@ async function handleCreateActivity(
   if (!userId) {
     return { success: false, error: '请先登录', data: { requiresAuth: true } };
   }
-  
-  // 创建活动需要完整的草稿数据，回退到 LLM
+
+  const draftParams = buildCreateDraftParamsFromActionPayload(payload);
+  const createResult = await createActivityDraftRecord(userId, draftParams);
+
+  if (!createResult.success) {
+    return {
+      success: false,
+      error: createResult.error,
+    };
+  }
+
   return {
-    success: false,
-    fallbackToLLM: true,
-    fallbackText: payload.description as string || '创建活动',
+    success: true,
+    data: {
+      activityId: createResult.activityId,
+      draft: createResult.draft,
+      locationName: createResult.draft.locationName,
+      type: createResult.draft.type,
+      message: createResult.message,
+    },
   };
 }
 
@@ -335,14 +396,18 @@ async function handlePublishDraft(
   if (!activityId) {
     return { success: false, error: '缺少活动 ID' };
   }
+
+  const publishResult = await publishActivityRecord(userId, activityId);
+  if (!publishResult.success) {
+    return {
+      success: false,
+      error: publishResult.error,
+    };
+  }
   
-  // 发布由前端调用 API，这里返回确认
   return {
     success: true,
-    data: {
-      action: 'publish',
-      activityId,
-    },
+    data: publishResult,
   };
 }
 
@@ -350,8 +415,8 @@ async function handleExploreNearby(
   payload: Record<string, unknown>,
   userId: string | null
 ): Promise<ActionResult> {
-  const location = payload._location as { lat: number; lng: number } | undefined;
-  
+  const location = resolveActionLocation(payload);
+
   if (!location) {
     return { 
       success: false, 
@@ -359,15 +424,17 @@ async function handleExploreNearby(
       fallbackText: '探索附近的活动',
     };
   }
-  
+
   try {
-    // 调用现有的 RAG search 函数
     const locationName = (payload.locationName as string) || '附近';
     const radius = (payload.radiusKm as number) || 5;
     const type = payload.type as string | undefined;
-    
+    const semanticQuery = typeof payload.semanticQuery === 'string' && payload.semanticQuery.trim()
+      ? payload.semanticQuery.trim()
+      : `${locationName}附近的活动`;
+
     const scoredResults = await search({
-      semanticQuery: `${locationName}附近的活动`,
+      semanticQuery,
       filters: {
         location: {
           lat: location.lat,
@@ -380,12 +447,11 @@ async function handleExploreNearby(
       includeMatchReason: false,
       userId: userId ?? undefined,
     });
-    
-    // 转换结果格式
+
     const results = scoredResults.map(scored => {
       const { activity, score, distance } = scored;
       const loc = activity.location as unknown as { x: number; y: number } | null;
-      
+
       return {
         id: activity.id,
         title: activity.title,
@@ -400,16 +466,26 @@ async function handleExploreNearby(
         score,
       };
     });
-    
+
+    const title = results.length > 0
+      ? `为你找到${locationName}附近的 ${results.length} 个活动`
+      : `${locationName}附近暂时没有合适的活动`;
+
+    const message = results.length > 0
+      ? `先给你看看${locationName}附近的局，顺眼的话点一个就能继续。`
+      : `${locationName}附近暂时没有合适的局，我再给你几个下一步。`;
+
     return {
       success: true,
       data: {
+        locationName,
+        ...(type ? { type } : {}),
+        message,
         explore: {
           center: { lat: location.lat, lng: location.lng, name: locationName },
           results,
-          title: results.length > 0 
-            ? `为你找到${locationName}附近的 ${results.length} 个活动`
-            : `${locationName}附近暂时没有活动`,
+          title,
+          semanticQuery,
         },
       },
     };
@@ -463,12 +539,79 @@ async function handleFindPartner(
   };
 }
 
+async function handleConfirmMatch(
+  payload: Record<string, unknown>,
+  userId: string | null
+): Promise<ActionResult> {
+  if (!userId) {
+    return { success: false, error: '请先登录', data: { requiresAuth: true } };
+  }
+
+  const matchId = payload.matchId as string;
+  if (!matchId) {
+    return { success: false, error: '缺少匹配 ID' };
+  }
+
+  const result = await confirmMatch(matchId, userId);
+  if (!result.success) {
+    return { success: false, error: result.error || '确认失败，请稍后再试' };
+  }
+
+  return {
+    success: true,
+    data: {
+      matchId,
+      activityId: result.activityId,
+      message: '确认成功，已帮你把局组好，快去群聊里招呼大家～',
+    },
+  };
+}
+
+async function handleCancelMatch(
+  payload: Record<string, unknown>,
+  userId: string | null
+): Promise<ActionResult> {
+  if (!userId) {
+    return { success: false, error: '请先登录', data: { requiresAuth: true } };
+  }
+
+  const matchId = payload.matchId as string;
+  if (!matchId) {
+    return { success: false, error: '缺少匹配 ID' };
+  }
+
+  const result = await cancelMatch(matchId, userId);
+  if (!result.success) {
+    return { success: false, error: result.error || '取消失败，请稍后再试' };
+  }
+
+  return {
+    success: true,
+    data: {
+      matchId,
+      message: '已取消这次匹配，你可以继续找更合适的搭子',
+    },
+  };
+}
+
 async function handleSelectPreference(
   payload: Record<string, unknown>,
   _userId: string | null
 ): Promise<ActionResult> {
-  const selectedValue = payload.selectedValue as string;
-  const selectedLabel = payload.selectedLabel as string;
+  const selectedValue = (
+    (typeof payload.selectedValue === 'string' && payload.selectedValue.trim())
+      ? payload.selectedValue
+      : (typeof payload.value === 'string' && payload.value.trim())
+        ? payload.value
+        : ''
+  ) as string;
+  const selectedLabel = (
+    (typeof payload.selectedLabel === 'string' && payload.selectedLabel.trim())
+      ? payload.selectedLabel
+      : (typeof payload.label === 'string' && payload.label.trim())
+        ? payload.label
+        : ''
+  ) as string;
   
   // 选择偏好后，用选中的标签作为用户输入继续对话
   return {

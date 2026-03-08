@@ -12,19 +12,13 @@ export interface AppGlobalData {
 // 用户类型
 export interface User {
   id: string
-  wxOpenId: string
   phoneNumber: string | null
   nickname: string | null
   avatarUrl: string | null
-  bio: string | null
-  gender: 'male' | 'female' | 'unknown'
+  aiCreateQuotaToday: number
+  aiQuotaResetAt: string | null
   participationCount: number
-  fulfillmentCount: number
-  disputeCount: number
   activitiesCreatedCount: number
-  membershipType: 'free' | 'pro'
-  isRegistered: boolean
-  isBlocked: boolean
   createdAt: string
   updatedAt: string
 }
@@ -61,8 +55,6 @@ export interface LoginResponse {
 // 更新用户参数
 export interface UpdateUserParams {
   nickname?: string
-  bio?: string
-  gender?: 'male' | 'female' | 'unknown'
   avatarUrl?: string
 }
 

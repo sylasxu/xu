@@ -4,17 +4,10 @@
     "t-input": "tdesign-miniprogram/input/input",
     "t-textarea": "tdesign-miniprogram/textarea/textarea",
     "t-button": "tdesign-miniprogram/button/button",
-    "t-cell": "tdesign-miniprogram/cell/cell",
-    "t-cell-group": "tdesign-miniprogram/cell-group/cell-group",
     "t-icon": "tdesign-miniprogram/icon/icon",
-    "t-switch": "tdesign-miniprogram/switch/switch",
     "t-picker": "tdesign-miniprogram/picker/picker",
     "t-date-time-picker": "tdesign-miniprogram/date-time-picker/date-time-picker",
     "t-stepper": "tdesign-miniprogram/stepper/stepper",
-    "t-popup": "tdesign-miniprogram/popup/popup",
-    "t-checkbox": "tdesign-miniprogram/checkbox/checkbox",
-    "t-tag": "tdesign-miniprogram/tag/tag",
-    "t-loading": "tdesign-miniprogram/loading/loading",
     "t-upload": "tdesign-miniprogram/upload/upload"
   }
 }

@@ -58,6 +58,8 @@ const chatContextSchema = t.Optional(
       locale: t.Optional(t.String()),
       timezone: t.Optional(t.String()),
       platformVersion: t.Optional(t.String()),
+      lat: t.Optional(t.Number()),
+      lng: t.Optional(t.Number()),
     },
     { additionalProperties: true }
   )

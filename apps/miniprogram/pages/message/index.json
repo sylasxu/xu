@@ -3,7 +3,9 @@
     "custom-navbar": "/components/custom-navbar/index",
     "t-icon": "tdesign-miniprogram/icon/icon",
     "t-badge": "tdesign-miniprogram/badge/badge",
-    "t-button": "tdesign-miniprogram/button/button"
+    "t-button": "tdesign-miniprogram/button/button",
+    "t-popup": "tdesign-miniprogram/popup/popup",
+    "t-loading": "tdesign-miniprogram/loading/loading"
   },
   "navigationStyle": "custom",
   "disableScroll": true

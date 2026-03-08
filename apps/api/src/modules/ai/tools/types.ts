@@ -11,7 +11,7 @@ import type { WidgetFetchConfig, WidgetInteraction } from './widget-protocol';
  * Tool 上下文 - 传递给 Tool 执行函数的上下文信息
  */
 export interface ToolContext {
-  /** 用户 ID，null 表示未登录或测试模式 */
+  /** 用户 ID，null 表示未登录上下文 */
   userId: string | null;
   /** 会话 ID */
   threadId?: string | null;

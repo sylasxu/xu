@@ -61,6 +61,18 @@ export async function getOrCreateThread(
   return { id: conv.id, isNew: true };
 }
 
+export async function createThread(userId: string): Promise<{ id: string }> {
+  const [conv] = await db
+    .insert(conversations)
+    .values({
+      userId,
+      messageCount: 0,
+    })
+    .returning({ id: conversations.id });
+
+  return { id: conv.id };
+}
+
 /**
  * 获取会话信息
  */

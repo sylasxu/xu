@@ -116,7 +116,7 @@ const IntentMetrics = t.Object({
 const RealtimeOverview = t.Object({
   activeUsers: t.Number(),        // 今日活跃用户
   todayActivities: t.Number(),    // 今日成局数
-  tokenCost: t.Number(),          // 今日 Token 消耗（元）
+  tokenUsage: t.Number(),         // 今日 Token 用量（输入+输出）
   totalConversations: t.Number(), // 今日对话数
 });
 

@@ -27,6 +27,25 @@ export interface AiConfigHistory {
   updatedBy: string | null
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function toAiConfigItem(value: unknown): AiConfigItem | null {
+  if (!isRecord(value)) return null
+  if (typeof value.configKey !== 'string' || !('configValue' in value)) {
+    return null
+  }
+
+  return {
+    configKey: value.configKey,
+    configValue: value.configValue,
+    description: typeof value.description === 'string' ? value.description : null,
+    version: typeof value.version === 'number' ? value.version : 0,
+    updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : '',
+  }
+}
+
 // 获取所有配置（按 category 分组）
 export function useAiConfigs() {
   return useQuery({
@@ -40,7 +59,10 @@ export function useAiConfigs() {
 export function useAiConfigDetail(configKey: string) {
   return useQuery({
     queryKey: aiConfigKeys.detail(configKey),
-    queryFn: () => unwrap(api.ai.configs({ configKey }).get()),
+    queryFn: async () => {
+      const result = await unwrap(api.ai.configs({ configKey }).get())
+      return toAiConfigItem(result)
+    },
     enabled: !!configKey,
     staleTime: 30_000,
   })

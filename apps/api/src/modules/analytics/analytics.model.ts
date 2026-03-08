@@ -89,31 +89,6 @@ const ContentPerformanceResponseSchema = t.Object({
 });
 
 // ==========================================
-// 综合指标 Schema
-// ==========================================
-
-// 综合指标查询参数
-const MetricsQuerySchema = t.Object({
-  names: t.Optional(t.String({ description: '指标名称，逗号分隔' })),
-  period: t.Optional(t.Number({ minimum: 1, maximum: 365, default: 30, description: '时间范围（天）' })),
-});
-
-// 单个指标
-const MetricItemSchema = t.Object({
-  name: t.String(),
-  value: t.Number(),
-  benchmark: t.Union([t.Literal('green'), t.Literal('yellow'), t.Literal('red')]),
-  comparison: t.Optional(t.String()),
-  trend: t.Optional(t.Union([t.Literal('up'), t.Literal('down'), t.Literal('stable')])),
-});
-
-// 综合指标响应
-const MetricsResponseSchema = t.Object({
-  metrics: t.Array(MetricItemSchema),
-  generatedAt: t.String(),
-});
-
-// ==========================================
 // 通用响应 Schema
 // ==========================================
 
@@ -134,9 +109,6 @@ export const analyticsModel = new Elysia({ name: 'analyticsModel' })
     // 内容效果
     'analytics.contentPerformanceQuery': ContentPerformanceQuerySchema,
     'analytics.contentPerformanceResponse': ContentPerformanceResponseSchema,
-    // 综合指标
-    'analytics.metricsQuery': MetricsQuerySchema,
-    'analytics.metricsResponse': MetricsResponseSchema,
     // 错误
     'analytics.error': ErrorResponseSchema,
   });
@@ -154,9 +126,5 @@ export type ContentPerformanceQuery = Static<typeof ContentPerformanceQuerySchem
 export type ContentTypeAggregation = Static<typeof ContentTypeAggregationSchema>;
 export type TopContentItem = Static<typeof TopContentItemSchema>;
 export type ContentPerformanceResponse = Static<typeof ContentPerformanceResponseSchema>;
-
-export type MetricsQuery = Static<typeof MetricsQuerySchema>;
-export type MetricItem = Static<typeof MetricItemSchema>;
-export type MetricsResponse = Static<typeof MetricsResponseSchema>;
 
 export type ErrorResponse = Static<typeof ErrorResponseSchema>;

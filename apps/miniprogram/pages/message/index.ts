@@ -1,35 +1,40 @@
 /**
- * 消息中心页面
- * Requirements: 8.1, 8.2, 8.3, 8.4, 8.5
- * - 显示系统通知区域和群聊列表区域
- * - 申请通知、履约通知、申诉按钮
- * - 未读消息角标
+ * 消息中心页面（结果导向版）
+ * - 接入真实通知 API
+ * - 增加待确认匹配卡（确认/取消）
+ * - post_activity 点击后分流到复盘 / 再约
  */
-// TODO: 等后端实现以下 API 后替换
-// - GET /chat/my-chats (获取用户参与的群聊列表)
-// - POST /participants/dispute (申诉未到场标记)
 
-// ==================== 类型定义 ====================
+import {
+  getNotificationsMessageCenter,
+  postNotificationsByIdRead,
+  postNotificationsPendingMatchesByIdCancel,
+  postNotificationsPendingMatchesByIdConfirm,
+} from '../../src/api/endpoints/notifications/notifications';
+import type {
+  NotificationMessageCenterResponsePendingMatchesItem,
+  NotificationMessageCenterResponseSystemNotificationsItemsItemType,
+} from '../../src/api/model';
+import { useUserStore } from '../../src/stores/user';
+import { useChatStore } from '../../src/stores/chat';
+import { postActivityRebookFollowUp } from '../../src/services/activity-outcome';
+import { getPendingMatchDetail, type PendingMatchDetailResponse } from '../../src/services/pending-match';
 
-/** 系统通知类型 */
-type NotificationType = 'join_request' | 'join_approved' | 'join_rejected' | 'fulfillment' | 'no_show' | 'dispute';
+type NotificationType = NotificationMessageCenterResponseSystemNotificationsItemsItemType | 'match_pending';
 
-/** 系统通知 */
 interface SystemNotification {
   id: string;
   type: NotificationType;
   title: string;
   content: string;
   activityId: string;
-  activityTitle: string;
-  participantId?: string;
   read: boolean;
   createdAt: string;
-  /** 是否可申诉（仅 no_show 类型） */
-  canDispute?: boolean;
+  source: 'system' | 'match';
+  matchId?: string;
+  isTempOrganizer?: boolean;
 }
 
-/** 群聊项 */
 interface ChatItem {
   activityId: string;
   activityTitle: string;
@@ -41,25 +46,54 @@ interface ChatItem {
   participantCount: number;
 }
 
-/** 消息页面数据 */
-interface MessagePageData {
-  /** 系统通知列表 */
-  notifications: SystemNotification[];
-  /** 群聊列表 */
-  chatList: ChatItem[];
-  /** 加载状态 */
-  loading: boolean;
-  /** 通知区域是否展开 */
-  notificationExpanded: boolean;
-  /** 未读通知数量 */
-  unreadNotificationCount: number;
-  /** 未读消息总数 */
-  totalUnreadCount: number;
-  /** 是否正在申诉 */
-  isDisputing: boolean;
+interface PendingMatchDetailMemberView {
+  userId: string;
+  nickname: string;
+  nicknameInitial: string;
+  avatarUrl: string;
+  isTempOrganizer: boolean;
+  locationHint: string;
+  timePreference: string;
+  tags: string[];
+  intentSummary: string;
 }
 
-/** WebSocket 消息类型 */
+interface PendingMatchDetailView {
+  id: string;
+  activityType: string;
+  typeName: string;
+  matchScore: number;
+  commonTags: string[];
+  locationHint: string;
+  confirmDeadline: string;
+  confirmDeadlineText: string;
+  isTempOrganizer: boolean;
+  organizerUserId: string;
+  organizerDisplayName: string;
+  nextActionOwner: 'self' | 'organizer';
+  nextActionText: string;
+  members: PendingMatchDetailMemberView[];
+  icebreaker: {
+    content: string;
+    createdAt: string;
+    createdAtText: string;
+  } | null;
+}
+
+interface MessagePageData {
+  notifications: SystemNotification[];
+  chatList: ChatItem[];
+  loading: boolean;
+  notificationExpanded: boolean;
+  unreadNotificationCount: number;
+  totalUnreadCount: number;
+  pendingMatchActionId: string;
+  showMatchDetail: boolean;
+  matchDetailLoading: boolean;
+  matchDetailError: string;
+  selectedMatchDetail: PendingMatchDetailView | null;
+}
+
 interface SocketMessage {
   type: 'message' | 'notification';
   data: {
@@ -70,11 +104,9 @@ interface SocketMessage {
       senderId: string;
       createdAt: string;
     };
-    notification?: SystemNotification;
   };
 }
 
-// 获取 App 实例
 const getAppInstance = () => {
   return getApp<{
     globalData: {
@@ -84,6 +116,20 @@ const getAppInstance = () => {
   }>();
 };
 
+function toStringValue(value: unknown, fallback = ''): string {
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  return fallback;
+}
+
+function normalizeNotificationActivityTitle(title: string): string {
+  return title.replace(/^活动后反馈[：:\s]*/g, '').trim();
+}
+
 Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
   data: {
     notifications: [],
@@ -92,7 +138,11 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     notificationExpanded: true,
     unreadNotificationCount: 0,
     totalUnreadCount: 0,
-    isDisputing: false,
+    pendingMatchActionId: '',
+    showMatchDetail: false,
+    matchDetailLoading: false,
+    matchDetailError: '',
+    selectedMatchDetail: null,
   },
 
   onLoad() {
@@ -101,46 +151,33 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
   },
 
   onShow() {
-    // 更新 TabBar 选中状态
     if (typeof this.getTabBar === 'function' && this.getTabBar()) {
       this.getTabBar().setData({ value: 'message' });
     }
-    // 刷新数据
     this.loadData();
   },
 
   onPullDownRefresh() {
-    this.loadData().then(() => {
+    this.loadData().finally(() => {
       wx.stopPullDownRefresh();
     });
   },
-
-  // ==================== 数据加载 ====================
 
   async loadData(): Promise<void> {
     this.setData({ loading: true });
 
     try {
-      // 并行加载通知和群聊
-      const [notificationsResult, chatsResult] = await Promise.all([
-        this.loadNotifications(),
-        this.loadChatList(),
-      ]);
-
-      const unreadNotificationCount = notificationsResult.filter((n: SystemNotification) => !n.read).length;
-      const unreadChatCount = chatsResult.reduce((sum: number, chat: ChatItem) => sum + chat.unreadCount, 0);
-      const totalUnreadCount = unreadNotificationCount + unreadChatCount;
+      const messageCenterData = await this.loadMessageCenterData();
 
       this.setData({
-        notifications: notificationsResult,
-        chatList: chatsResult,
-        unreadNotificationCount,
-        totalUnreadCount,
+        notifications: messageCenterData.notifications,
+        chatList: messageCenterData.chatList,
+        unreadNotificationCount: messageCenterData.unreadNotificationCount,
+        totalUnreadCount: messageCenterData.totalUnreadCount,
         loading: false,
       });
 
-      // 更新 TabBar 角标 (Requirements: 8.5)
-      getAppInstance().setUnreadNum?.(totalUnreadCount);
+      getAppInstance().setUnreadNum?.(messageCenterData.totalUnreadCount);
     } catch (error) {
       console.error('加载消息数据失败', error);
       this.setData({ loading: false });
@@ -148,55 +185,213 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     }
   },
 
-  /** 加载系统通知 (Requirements: 8.1, 8.2, 8.3) */
-  async loadNotifications(): Promise<SystemNotification[]> {
-    // TODO: 替换为真实 API 调用
-    // 目前使用模拟数据，等后端实现通知 API 后替换
-    return [
-      {
-        id: '1',
-        type: 'join_request',
-        title: '新的报名申请',
-        content: '小明 申请加入你的「周末羽毛球」活动',
-        activityId: 'act_001',
-        activityTitle: '周末羽毛球',
-        participantId: 'user_001',
-        read: false,
-        createdAt: new Date().toISOString(),
-      },
-      {
-        id: '2',
-        type: 'no_show',
-        title: '履约提醒',
-        content: '你在「周五桌游局」被标记为未到场',
-        activityId: 'act_002',
-        activityTitle: '周五桌游局',
-        participantId: 'part_001',
-        read: false,
-        createdAt: new Date(Date.now() - 3600000).toISOString(),
-        canDispute: true,
-      },
-    ];
+  getCurrentUserId(): string {
+    return useUserStore.getState().user?.id || '';
   },
 
-  /** 加载群聊列表 (Requirements: 8.4) */
-  async loadChatList(): Promise<ChatItem[]> {
-    // TODO: 等后端实现 GET /chat/my-chats API 后替换
-    // 目前使用模拟数据
-    return [
-      {
-        activityId: 'act_001',
-        activityTitle: '周末羽毛球',
-        lastMessage: '明天见！',
-        lastMessageTime: new Date().toISOString(),
-        unreadCount: 2,
-        isArchived: false,
-        participantCount: 4,
-      },
-    ];
+  async loadMessageCenterData(): Promise<{
+    notifications: SystemNotification[];
+    chatList: ChatItem[];
+    unreadNotificationCount: number;
+    totalUnreadCount: number;
+  }> {
+    const userId = this.getCurrentUserId();
+    if (!userId) {
+      return {
+        notifications: [],
+        chatList: [],
+        unreadNotificationCount: 0,
+        totalUnreadCount: 0,
+      };
+    }
+
+    const response = await getNotificationsMessageCenter({
+      userId,
+      notificationPage: 1,
+      notificationLimit: 20,
+      chatPage: 1,
+      chatLimit: 20,
+    });
+    if (response.status !== 200) {
+      throw new Error(response.data.msg || '消息中心加载失败');
+    }
+
+    const systemNotifications = response.data.systemNotifications.items.map((item) => {
+      const createdAtRaw = toStringValue(item.createdAt);
+      return {
+        id: item.id,
+        type: item.type,
+        title: item.title,
+        content: item.content || this.getNotificationFallbackContent(item.type),
+        activityId: item.activityId || '',
+        read: !!item.isRead,
+        createdAt: this.formatTime(createdAtRaw),
+        source: 'system' as const,
+      };
+    });
+    const pendingMatches = response.data.pendingMatches.map((item) => this.mapPendingMatchToNotification(item));
+
+    const chatList = response.data.chatActivities.items.map((item) => {
+      const lastMessageTime = toStringValue(item.lastMessageTime);
+      return {
+        activityId: item.activityId,
+        activityTitle: item.activityTitle,
+        activityImage: item.activityImage || '',
+        lastMessage: item.lastMessage || '还没人说话，发句开场吧',
+        lastMessageTime: lastMessageTime ? this.formatTime(lastMessageTime) : '',
+        unreadCount: item.unreadCount || 0,
+        isArchived: !!item.isArchived,
+        participantCount: item.participantCount || 0,
+      } satisfies ChatItem;
+    });
+
+    return {
+      notifications: [...pendingMatches, ...systemNotifications],
+      chatList,
+      unreadNotificationCount: response.data.unreadNotificationCount || 0,
+      totalUnreadCount: response.data.totalUnread || 0,
+    };
   },
 
-  // ==================== WebSocket ====================
+  mapPendingMatchToNotification(item: NotificationMessageCenterResponsePendingMatchesItem): SystemNotification {
+    const commonTags = item.commonTags.slice(0, 3).join('、');
+    const scoreText = `匹配度 ${item.matchScore}%`;
+    const tagText = commonTags ? `，共同偏好：${commonTags}` : '';
+    const deadlineText = this.formatTime(item.confirmDeadline);
+    const content = item.isTempOrganizer
+      ? `${scoreText}，地点：${item.locationHint}${tagText}。请在 ${deadlineText} 前确认是否成局。`
+      : `${scoreText}，地点：${item.locationHint}${tagText}。已提醒召集人确认，先去聊聊吧。`;
+
+    return {
+      id: `match_${item.id}`,
+      type: 'match_pending',
+      title: `找到合拍搭子（${item.typeName}）`,
+      content,
+      activityId: '',
+      read: false,
+      createdAt: this.formatTime(item.confirmDeadline),
+      source: 'match',
+      matchId: item.id,
+      isTempOrganizer: item.isTempOrganizer,
+    };
+  },
+
+  getNotificationFallbackContent(type: NotificationMessageCenterResponseSystemNotificationsItemsItemType): string {
+    const map: Record<NotificationMessageCenterResponseSystemNotificationsItemsItemType, string> = {
+      join: '有新成员加入你的活动',
+      quit: '有成员退出了活动',
+      activity_start: '活动即将开始，记得准时到场',
+      completed: '活动已完成，欢迎继续组局',
+      cancelled: '活动已取消',
+      new_participant: '活动有新人加入，快去打个招呼',
+      post_activity: '活动结束了，来聊聊这次体验',
+      activity_reminder: '活动提醒已送达',
+    };
+    return map[type] || '你有一条新通知';
+  },
+
+
+  mapPendingMatchDetail(detail: PendingMatchDetailResponse): PendingMatchDetailView {
+    return {
+      id: detail.id,
+      activityType: detail.activityType,
+      typeName: detail.typeName,
+      matchScore: detail.matchScore,
+      commonTags: detail.commonTags,
+      locationHint: detail.locationHint,
+      confirmDeadline: detail.confirmDeadline,
+      confirmDeadlineText: this.formatTime(detail.confirmDeadline),
+      isTempOrganizer: detail.isTempOrganizer,
+      organizerUserId: detail.organizerUserId,
+      organizerDisplayName: detail.organizerNickname || '召集人',
+      nextActionOwner: detail.nextActionOwner,
+      nextActionText: detail.nextActionText,
+      members: detail.members.map((member) => {
+        const nickname = member.nickname || (member.isTempOrganizer ? '召集人' : '匹配成员');
+        return {
+          userId: member.userId,
+          nickname,
+          nicknameInitial: nickname.slice(0, 1),
+          avatarUrl: member.avatarUrl || '',
+          isTempOrganizer: member.isTempOrganizer,
+          locationHint: member.locationHint,
+          timePreference: member.timePreference || '时间待沟通',
+          tags: member.tags || [],
+          intentSummary: member.intentSummary,
+        };
+      }),
+      icebreaker: detail.icebreaker
+        ? {
+            content: detail.icebreaker.content,
+            createdAt: detail.icebreaker.createdAt,
+            createdAtText: this.formatTime(detail.icebreaker.createdAt),
+          }
+        : null,
+    };
+  },
+
+  async openPendingMatchDetail(matchId: string) {
+    const userId = this.getCurrentUserId();
+    if (!userId || !matchId) {
+      return;
+    }
+
+    this.setData({
+      showMatchDetail: true,
+      matchDetailLoading: true,
+      matchDetailError: '',
+      selectedMatchDetail: null,
+    });
+
+    try {
+      const response = await getPendingMatchDetail(matchId, userId);
+      if (response.status !== 200) {
+        const errorData = response.data as { msg?: string };
+        throw new Error(errorData.msg || '加载匹配详情失败');
+      }
+
+      this.setData({
+        selectedMatchDetail: this.mapPendingMatchDetail(response.data as PendingMatchDetailResponse),
+        matchDetailLoading: false,
+      });
+    } catch (error) {
+      console.error('加载待确认匹配详情失败', error);
+      this.setData({
+        matchDetailLoading: false,
+        matchDetailError: error instanceof Error ? error.message : '加载详情失败，请稍后再试',
+      });
+    }
+  },
+
+  closeMatchDetail() {
+    this.setData({
+      showMatchDetail: false,
+      matchDetailLoading: false,
+      matchDetailError: '',
+      selectedMatchDetail: null,
+    });
+  },
+
+  onMatchDetailVisibleChange() {
+    this.closeMatchDetail();
+  },
+
+  noop() {},
+
+  async recordRebookFollowUp(activityId: string) {
+    if (!activityId) {
+      return;
+    }
+
+    try {
+      const response = await postActivityRebookFollowUp(activityId);
+      if (response.status !== 200) {
+        console.warn('记录再约意愿失败', response.data);
+      }
+    } catch (error) {
+      console.error('记录再约意愿失败', error);
+    }
+  },
 
   setupWebSocket() {
     const socket = getAppInstance().globalData?.socket;
@@ -205,11 +400,8 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     socket.onMessage((result) => {
       try {
         const data = JSON.parse(result.data as string) as SocketMessage;
-
-        if (data.type === 'message' && data.data.activityId) {
+        if (data.type === 'message' && data.data.activityId && data.data.message) {
           this.handleNewMessage(data.data.activityId, data.data.message);
-        } else if (data.type === 'notification' && data.data.notification) {
-          this.handleNewNotification(data.data.notification);
         }
       } catch (error) {
         console.error('解析 WebSocket 消息失败', error);
@@ -217,182 +409,181 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     });
   },
 
-  handleNewMessage(activityId: string, message?: { content: string; createdAt: string }) {
-    if (!message) return;
-
-    const chatList = [...this.data.chatList];
-    const chatIndex = chatList.findIndex((c) => c.activityId === activityId);
-
-    if (chatIndex >= 0) {
-      const chat = chatList[chatIndex];
-      chat.lastMessage = message.content;
-      chat.lastMessageTime = message.createdAt;
-      chat.unreadCount += 1;
-
-      // 将有新消息的群聊移到顶部
-      chatList.splice(chatIndex, 1);
-      chatList.unshift(chat);
-
-      const totalUnreadCount = this.data.unreadNotificationCount + chatList.reduce((sum, c) => sum + c.unreadCount, 0);
-
-      this.setData({ chatList, totalUnreadCount });
-      getAppInstance().setUnreadNum?.(totalUnreadCount);
-    }
-  },
-
-  handleNewNotification(notification: SystemNotification) {
-    const notifications = [notification, ...this.data.notifications];
-    const unreadNotificationCount = notifications.filter((n) => !n.read).length;
-    const unreadChatCount = this.data.chatList.reduce((sum, c) => sum + c.unreadCount, 0);
-    const totalUnreadCount = unreadNotificationCount + unreadChatCount;
-
-    this.setData({
-      notifications,
-      unreadNotificationCount,
-      totalUnreadCount,
+  handleNewMessage(_activityId: string, _message: { content: string; createdAt: string }) {
+    // 不做本地累加，统一回源服务端真实统计
+    this.loadData().catch((error: unknown) => {
+      console.error('刷新消息统计失败', error);
     });
-    getAppInstance().setUnreadNum?.(totalUnreadCount);
   },
 
-  // ==================== 事件处理 ====================
-
-  /** 切换通知区域展开/收起 */
   toggleNotificationExpand() {
-    this.setData({
-      notificationExpanded: !this.data.notificationExpanded,
-    });
+    this.setData({ notificationExpanded: !this.data.notificationExpanded });
   },
 
-  /** 点击通知项 */
-  onNotificationTap(e: WechatMiniprogram.TouchEvent) {
-    const { id, type, activityId, participantId } = e.currentTarget.dataset as {
+  async onNotificationTap(e: WechatMiniprogram.TouchEvent) {
+    const { id, type, activityId, source, isTempOrganizer, matchId } = e.currentTarget.dataset as {
       id: string;
       type: NotificationType;
-      activityId: string;
-      participantId?: string;
+      activityId?: string;
+      source: 'system' | 'match';
+      isTempOrganizer?: boolean | string;
+      matchId?: string;
     };
+    const canConfirm = isTempOrganizer === true || isTempOrganizer === 'true';
 
-    // 标记为已读
-    this.markNotificationRead(id);
+    if (source === 'system' && id) {
+      await this.markNotificationRead(id, type !== 'post_activity');
+    }
 
-    // 根据通知类型跳转
-    switch (type) {
-      case 'join_request':
-        // 跳转到活动详情页的申请列表
-        wx.navigateTo({
-          url: `/subpackages/activity/detail/index?id=${activityId}&tab=requests`,
+    if (type === 'post_activity') {
+      const title = this.data.notifications.find((item) => item.id === id)?.title || '';
+      this.promptPostActivityAction(activityId || '', title);
+      return;
+    }
+
+    if (type === 'match_pending') {
+      if (!matchId) {
+        wx.showToast({
+          title: canConfirm ? '直接点右侧按钮确认或取消' : '已提醒召集人确认，确认后会自动成局',
+          icon: 'none',
         });
-        break;
-      case 'join_approved':
-      case 'join_rejected':
-      case 'fulfillment':
-        // 跳转到活动详情页
-        wx.navigateTo({
-          url: `/subpackages/activity/detail/index?id=${activityId}`,
-        });
-        break;
-      case 'no_show':
-        // 显示申诉选项
-        this.showDisputeConfirm(activityId, participantId || '');
-        break;
-      default:
-        break;
+        return;
+      }
+
+      await this.openPendingMatchDetail(matchId);
+      return;
+    }
+
+    if (activityId) {
+      wx.navigateTo({
+        url: `/subpackages/activity/detail/index?id=${activityId}`,
+      });
     }
   },
 
-  markNotificationRead(notificationId: string) {
-    const notifications = this.data.notifications.map((n) => (n.id === notificationId ? { ...n, read: true } : n));
-    const unreadNotificationCount = notifications.filter((n) => !n.read).length;
-    const unreadChatCount = this.data.chatList.reduce((sum, c) => sum + c.unreadCount, 0);
-    const totalUnreadCount = unreadNotificationCount + unreadChatCount;
-
-    this.setData({
-      notifications,
-      unreadNotificationCount,
-      totalUnreadCount,
-    });
-    getAppInstance().setUnreadNum?.(totalUnreadCount);
+  async markNotificationRead(notificationId: string, shouldReload = true) {
+    try {
+      const response = await postNotificationsByIdRead(notificationId);
+      if (response.status !== 200) {
+        throw new Error(response.data.msg || '标记已读失败');
+      }
+      if (shouldReload) {
+        await this.loadData();
+      }
+    } catch (error) {
+      console.error('标记通知已读失败', error);
+    }
   },
 
-  /** 申诉按钮点击 (Requirements: 8.3, 11.1, 11.2) */
-  onDisputeTap(e: WechatMiniprogram.TouchEvent) {
-    const { activityId, participantId } = e.currentTarget.dataset as {
-      activityId: string;
-      participantId: string;
-    };
+  async onMatchConfirmTap(e: WechatMiniprogram.TouchEvent) {
+    const { matchId } = e.currentTarget.dataset as { matchId: string };
+    if (!matchId || this.data.pendingMatchActionId) {
+      return;
+    }
 
-    // 阻止事件冒泡 - 微信小程序使用 catchtap 而非 stopPropagation
-    // e.stopPropagation?.();
+    this.setData({ pendingMatchActionId: matchId });
 
-    this.showDisputeConfirm(activityId, participantId);
+    try {
+      const response = await postNotificationsPendingMatchesByIdConfirm(matchId);
+      if (response.status !== 200) {
+        throw new Error(response.data.msg || '确认失败，请稍后再试');
+      }
+
+      wx.showToast({ title: response.data.msg || '确认成功', icon: 'none' });
+      this.closeMatchDetail();
+      await this.loadData();
+
+      if (response.data.activityId) {
+        wx.navigateTo({
+          url: `/subpackages/activity/detail/index?id=${response.data.activityId}`,
+        });
+      }
+    } catch (error) {
+      console.error('确认待处理匹配失败', error);
+      wx.showToast({
+        title: error instanceof Error ? error.message : '确认失败，请稍后再试',
+        icon: 'none',
+      });
+    } finally {
+      this.setData({ pendingMatchActionId: '' });
+    }
   },
 
-  showDisputeConfirm(activityId: string, participantId: string) {
-    wx.showModal({
-      title: '申诉确认',
-      content: '确定要申诉"未到场"标记吗？申诉后状态将变为"争议中"，系统将暂不扣除你的靠谱度。',
-      confirmText: '我到场了',
-      confirmColor: '#FF6B35',
-      success: (res) => {
-        if (res.confirm) {
-          this.submitDispute(activityId, participantId);
+  async onMatchCancelTap(e: WechatMiniprogram.TouchEvent) {
+    const { matchId } = e.currentTarget.dataset as { matchId: string };
+    if (!matchId || this.data.pendingMatchActionId) {
+      return;
+    }
+
+    this.setData({ pendingMatchActionId: matchId });
+
+    try {
+      const response = await postNotificationsPendingMatchesByIdCancel(matchId);
+      if (response.status !== 200) {
+        throw new Error(response.data.msg || '取消失败，请稍后再试');
+      }
+
+      wx.showToast({ title: response.data.msg || '已取消匹配', icon: 'none' });
+      this.closeMatchDetail();
+      await this.loadData();
+    } catch (error) {
+      console.error('取消待处理匹配失败', error);
+      wx.showToast({
+        title: error instanceof Error ? error.message : '取消失败，请稍后再试',
+        icon: 'none',
+      });
+    } finally {
+      this.setData({ pendingMatchActionId: '' });
+    }
+  },
+
+  promptPostActivityAction(activityId: string, title: string) {
+    wx.showActionSheet({
+      itemList: ['先做复盘', '去再约'],
+      success: ({ tapIndex }) => {
+        if (tapIndex === 0) {
+          this.startFeedbackReview(activityId, title);
+          return;
+        }
+        if (tapIndex === 1) {
+          void this.startRebookFromNotification(activityId, title);
         }
       },
     });
   },
 
-  async submitDispute(activityId: string, participantId: string) {
-    if (this.data.isDisputing) return;
+  startFeedbackReview(activityId: string, title: string) {
+    const activityTitle = normalizeNotificationActivityTitle(title);
+    const activityHint = activityTitle ? `「${activityTitle}」` : '这场活动';
+    const activityRef = activityId ? `（activityId: ${activityId}）` : '';
+    const prompt = `我刚结束${activityHint}${activityRef}，帮我先做一份复盘：亮点、槽点、下次优化和一句可直接发群里的总结。`;
 
-    this.setData({ isDisputing: true });
-
-    try {
-      // TODO: 等后端实现 POST /participants/dispute API 后替换
-      // 目前模拟成功响应
-      console.log('申诉请求:', { activityId, participantId });
-      
-      // 模拟网络延迟
-      await new Promise((resolve) => setTimeout(resolve, 500));
-
-      wx.showToast({ title: '申诉已提交', icon: 'success' });
-
-      // 更新通知状态
-      const notifications = this.data.notifications.map((n) =>
-        n.activityId === activityId && n.type === 'no_show' ? { ...n, canDispute: false, read: true } : n
-      );
-      this.setData({ notifications });
-    } catch (error) {
-      console.error('申诉失败', error);
-      wx.showToast({
-        title: (error as Error).message || '申诉失败',
-        icon: 'none',
-      });
-    } finally {
-      this.setData({ isDisputing: false });
-    }
+    this.openHomeWithPrompt(prompt);
   },
 
-  /** 点击群聊项 (Requirements: 8.4) */
+  async startRebookFromNotification(activityId: string, title: string) {
+    await this.recordRebookFollowUp(activityId);
+
+    const activityTitle = normalizeNotificationActivityTitle(title);
+    const activityHint = activityTitle ? `「${activityTitle}」` : '这场活动';
+    const activityRef = activityId ? `（activityId: ${activityId}）` : '';
+    const prompt = `基于我刚结束的${activityHint}${activityRef}，帮我快速再约一场：延续合适的人、给个新时间建议，并直接生成一段可发送的招呼文案。`;
+
+    this.openHomeWithPrompt(prompt);
+  },
+
+  openHomeWithPrompt(prompt: string) {
+    useChatStore.getState().sendMessage(prompt);
+    wx.switchTab({ url: '/pages/home/index' });
+  },
+
   onChatTap(e: WechatMiniprogram.TouchEvent) {
     const { activityId } = e.currentTarget.dataset as { activityId: string };
-
-    // 清除该群聊的未读数
-    const chatList = this.data.chatList.map((c) => (c.activityId === activityId ? { ...c, unreadCount: 0 } : c));
-    const unreadChatCount = chatList.reduce((sum, c) => sum + c.unreadCount, 0);
-    const totalUnreadCount = this.data.unreadNotificationCount + unreadChatCount;
-
-    this.setData({ chatList, totalUnreadCount });
-    getAppInstance().setUnreadNum?.(totalUnreadCount);
-
-    // 跳转到群聊页面
     wx.navigateTo({
       url: `/pages/chat/index?activityId=${activityId}`,
     });
   },
 
-  // ==================== 辅助方法 ====================
-
-  /** 返回上一页 */
   goBack() {
     const pages = getCurrentPages();
     if (pages.length > 1) {
@@ -402,46 +593,32 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     }
   },
 
-  /** 格式化时间 */
   formatTime(dateStr: string): string {
     if (!dateStr) return '';
-
     const date = new Date(dateStr);
+    if (Number.isNaN(date.getTime())) {
+      return dateStr;
+    }
+
     const now = new Date();
     const diff = now.getTime() - date.getTime();
 
-    // 1分钟内
-    if (diff < 60000) {
+    if (diff < 60 * 1000) {
       return '刚刚';
     }
-    // 1小时内
-    if (diff < 3600000) {
-      return `${Math.floor(diff / 60000)}分钟前`;
+    if (diff < 60 * 60 * 1000) {
+      return `${Math.floor(diff / (60 * 1000))}分钟前`;
     }
-    // 今天
     if (date.toDateString() === now.toDateString()) {
       return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
     }
-    // 昨天
+
     const yesterday = new Date(now);
     yesterday.setDate(yesterday.getDate() - 1);
     if (date.toDateString() === yesterday.toDateString()) {
       return '昨天';
     }
-    // 更早
-    return `${date.getMonth() + 1}/${date.getDate()}`;
-  },
 
-  /** 获取通知图标 */
-  getNotificationIcon(type: NotificationType): string {
-    const icons: Record<NotificationType, string> = {
-      join_request: 'user-add',
-      join_approved: 'check-circle',
-      join_rejected: 'close-circle',
-      fulfillment: 'calendar',
-      no_show: 'error-circle',
-      dispute: 'info-circle',
-    };
-    return icons[type] || 'notification';
+    return `${date.getMonth() + 1}/${date.getDate()}`;
   },
 });

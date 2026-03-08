@@ -16,19 +16,9 @@
     return month + '月' + day + '日 ' + weekDay + ' ' + timeStr;
   }
   
-  function getFeeTypeText(feeType) {
-    var map = { free: '免费', aa: 'AA制', fixed: '固定费用', treat: '请客' };
-    return map[feeType] || feeType || '';
-  }
-  
   function getActivityTypeText(type) {
-    var map = { food: '美食', entertainment: '娱乐', sports: '运动', study: '学习', travel: '旅行', other: '其他' };
+    var map = { food: '美食', entertainment: '娱乐', sports: '运动', boardgame: '桌游', other: '其他' };
     return map[type] || type || '';
-  }
-  
-  function calculateReliability(user) {
-    if (!user || !user.participationCount || user.participationCount === 0) return -1;
-    return Math.round((user.fulfillmentCount / user.participationCount) * 100);
   }
   
   function getStatusText(status) {
@@ -36,18 +26,14 @@
     return map[status] || '';
   }
   
-  function getDisplayAddress(activity, participantStatus, isCreator) {
+  function getDisplayAddress(activity) {
     if (!activity) return '';
-    if (isCreator || participantStatus === 'approved') return activity.address || activity.locationName || '';
-    if (activity.isLocationBlurred) return activity.locationHint || '位置待定';
-    return activity.address || activity.locationName || '';
+    return activity.address || activity.locationName || activity.locationHint || '';
   }
   
   module.exports = {
     formatTime: formatTime,
-    getFeeTypeText: getFeeTypeText,
     getActivityTypeText: getActivityTypeText,
-    calculateReliability: calculateReliability,
     getStatusText: getStatusText,
     getDisplayAddress: getDisplayAddress
   };
@@ -93,16 +79,6 @@
         <text class="mt-2 text-sm text-gray-300">暂无图片</text>
       </view>
       
-      <!-- 增值服务标签 -->
-      <view class="absolute top-3 left-3 flex gap-2">
-        <view wx:if="{{activity.isPinPlus}}" class="service-tag pinplus flex items-center gap-1 px-2 py-1 rounded-sm text-xs text-white">
-          <t-icon name="star-filled" size="24rpx" />
-          <text>Pin+</text>
-        </view>
-        <view wx:if="{{activity.isBoosted}}" class="service-tag boost px-2 py-1 rounded-sm text-xs text-white">
-          <text>🔥急招</text>
-        </view>
-      </view>
     </view>
     
     <!-- 活动基本信息 -->
@@ -139,11 +115,8 @@
         <t-icon name="location" size="36rpx" color="#FF6B35" />
         <view class="flex-1 ml-3">
           <text class="block text-xs text-gray-400 mb-1">活动地点</text>
-          <text class="block text-base font-medium text-gray-900">{{utils.getDisplayAddress(activity, participantStatus, isCreator)}}</text>
-          <text wx:if="{{activity.isLocationBlurred && !isCreator && participantStatus !== 'approved'}}" 
-                class="block text-xs text-brand mt-1">报名通过后可查看详细地址</text>
-          <text wx:if="{{activity.locationHint && (isCreator || participantStatus === 'approved')}}" 
-                class="block text-xs text-brand mt-1">{{activity.locationHint}}</text>
+          <text class="block text-base font-medium text-gray-900">{{utils.getDisplayAddress(activity)}}</text>
+          <text wx:if="{{activity.locationHint}}" class="block text-xs text-brand mt-1">{{activity.locationHint}}</text>
         </view>
       </view>
       
@@ -159,30 +132,25 @@
         </view>
       </view>
       
-      <!-- 费用 -->
-      <view class="info-row flex items-start py-3">
-        <t-icon name="money-circle" size="36rpx" color="#FF6B35" />
-        <view class="flex-1 ml-3">
-          <text class="block text-xs text-gray-400 mb-1">费用</text>
-          <text class="block text-base font-medium text-gray-900">{{utils.getFeeTypeText(activity.feeType)}}</text>
-          <text wx:if="{{activity.estimatedCost}}" class="block text-sm text-gray-600 mt-1">约¥{{activity.estimatedCost}}</text>
-        </view>
-      </view>
-      
-      <!-- 靠谱度门槛 -->
-      <view wx:if="{{activity.minReliabilityRate}}" class="info-row flex items-start py-3">
-        <t-icon name="secured" size="36rpx" color="#FF6B35" />
-        <view class="flex-1 ml-3">
-          <text class="block text-xs text-gray-400 mb-1">靠谱度要求</text>
-          <text class="block text-base font-medium text-gray-900">≥{{activity.minReliabilityRate}}%</text>
-        </view>
-      </view>
     </view>
     
     <!-- 活动描述 -->
     <view wx:if="{{activity.description}}" class="bg-white p-4 mb-2">
       <text class="block text-lg font-semibold text-gray-900 mb-3">活动详情</text>
       <text class="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap">{{activity.description}}</text>
+    </view>
+
+    <!-- 快捷操作 -->
+    <view class="bg-white p-4 mb-2">
+      <text class="block text-lg font-semibold text-gray-900 mb-3">快捷操作</text>
+      <view class="flex gap-3">
+        <button class="flex-1 h-88 bg-gray-100 text-sm text-gray-700 rounded-full" bindtap="onCopyActivityText">
+          📋 复制文案
+        </button>
+        <button class="flex-1 h-88 bg-brand-light text-sm text-brand rounded-full" bindtap="onCloneActivity">
+          👯‍♂️ 找类似的局
+        </button>
+      </view>
     </view>
     
     <!-- 发起人信息 -->
@@ -192,13 +160,12 @@
         <t-avatar image="{{activity.creator.avatarUrl}}" size="96rpx" icon="user" />
         <view class="flex-1 ml-3 min-w-0">
           <text class="block text-base font-medium text-gray-900 mb-1">{{activity.creator.nickname || '匿名用户'}}</text>
-          <view class="flex items-center text-xs text-gray-400">
-            <text>组织 {{activity.creator.organizationCount || 0}} 场</text>
-            <text class="mx-2 text-gray-200">|</text>
-            <text>参与 {{activity.creator.participationCount || 0}} 场</text>
-          </view>
+        <view class="flex items-center text-xs text-gray-400">
+          <text>组织 {{activity.creator.organizationCount || 0}} 场</text>
+          <text class="mx-2 text-gray-200">|</text>
+          <text>参与 {{activity.creator.participationCount || 0}} 场</text>
         </view>
-        <reliability-badge rate="{{utils.calculateReliability(activity.creator)}}" show-label="{{true}}" />
+      </view>
         <t-icon name="chevron-right" size="32rpx" color="#D1D5DB" />
       </view>
     </view>
@@ -296,21 +263,11 @@
                     maxlength="200" />
         </view>
         
-        <view wx:if="{{isHotActivity}}" class="fastpass-group p-3 rounded-md">
-          <view class="flex items-center mb-2">
-            <t-checkbox value="{{useFastPass}}" bind:change="onFastPassChange" />
-            <text class="flex-1 text-sm font-medium text-gray-900 ml-2">优先入场券 (Fast Pass)</text>
-            <text class="text-lg font-semibold text-brand">¥{{fastPassPrice}}</text>
-          </view>
-          <text class="block text-xs text-gray-400 leading-normal ml-6">热门活动，使用Fast Pass可让你的申请在审批列表中置顶显示</text>
-        </view>
       </view>
       
       <view class="flex gap-3 p-4 border-t border-gray-100">
         <t-button theme="light" size="large" class="flex-1" bindtap="onCloseJoinDialog">取消</t-button>
-        <t-button theme="primary" size="large" class="flex-1" loading="{{isJoining}}" bindtap="onConfirmJoin">
-          {{useFastPass ? '支付¥' + fastPassPrice + '并报名' : '确认报名'}}
-        </t-button>
+        <t-button theme="primary" size="large" class="flex-1" loading="{{isJoining}}" bindtap="onConfirmJoin">确认报名</t-button>
       </view>
     </view>
   </t-popup>

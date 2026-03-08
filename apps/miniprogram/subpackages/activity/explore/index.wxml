@@ -99,4 +99,9 @@
     bindviewdetail="onViewDetail"
     bindjoin="onJoin"
   />
+
+  <auth-sheet
+    bind:success="onAuthSuccess"
+    bind:pendingaction="onPendingAction"
+  />
 </view>

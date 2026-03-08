@@ -2,7 +2,7 @@
 import { Elysia, t } from 'elysia';
 import { basePlugins, verifyAuth } from '../../setup';
 import { chatModel, ChatMessageResponseSchema, type ErrorResponse } from './chat.model';
-import { getMessages, sendMessage } from './chat.service';
+import { getChatActivities, getMessages, sendMessage } from './chat.service';
 import { handleWsUpgrade, handleWsMessage, handleWsClose, startHeartbeatChecker } from './chat.ws';
 import { createReport } from '../reports/report.service';
 import type { ReportReason } from '../reports/report.model';
@@ -13,6 +13,55 @@ startHeartbeatChecker(10000);
 export const chatController = new Elysia({ prefix: '/chat' })
   .use(basePlugins)
   .use(chatModel)
+
+  // 获取用户活动群聊列表（显式 userId）
+  .get(
+    '/activities',
+    async ({ query, set, jwt, headers }) => {
+      const user = await verifyAuth(jwt, headers);
+      if (!user) {
+        set.status = 401;
+        return {
+          code: 401,
+          msg: '未授权',
+        } satisfies ErrorResponse;
+      }
+
+      const { userId } = query;
+      if (!userId) {
+        set.status = 400;
+        return {
+          code: 400,
+          msg: '缺少 userId 参数',
+        } satisfies ErrorResponse;
+      }
+
+      if (user.role !== 'admin' && user.id !== userId) {
+        set.status = 403;
+        return {
+          code: 403,
+          msg: '无权限访问该用户群聊',
+        } satisfies ErrorResponse;
+      }
+
+      const result = await getChatActivities(userId, query);
+      return result;
+    },
+    {
+      detail: {
+        tags: ['Chat'],
+        summary: '获取活动群聊列表',
+        description: '按 userId 获取用户参与的活动群聊列表，包含最近消息预览和人数信息。',
+      },
+      query: 'chat.activitiesQuery',
+      response: {
+        200: 'chat.activitiesResponse',
+        400: 'chat.error',
+        401: 'chat.error',
+        403: 'chat.error',
+      },
+    }
+  )
 
   // 获取消息列表（轮询）
   .get(

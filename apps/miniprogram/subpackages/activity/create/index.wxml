@@ -11,22 +11,6 @@
     return '请选择';
   }
   
-  function getFeeTypeLabel(value, types) {
-    if (!value || !types) return 'AA制';
-    for (var i = 0; i < types.length; i++) {
-      if (types[i].value === value) return types[i].label;
-    }
-    return 'AA制';
-  }
-  
-  function getJoinModeLabel(value, modes) {
-    if (!value || !modes) return '需要审批';
-    for (var i = 0; i < modes.length; i++) {
-      if (modes[i].value === value) return modes[i].label;
-    }
-    return '需要审批';
-  }
-  
   function formatDateTime(dateStr) {
     if (!dateStr) return '请选择';
     var date = getDate(dateStr);
@@ -41,8 +25,6 @@
   
   module.exports = {
     getTypeLabel: getTypeLabel,
-    getFeeTypeLabel: getFeeTypeLabel,
-    getJoinModeLabel: getJoinModeLabel,
     formatDateTime: formatDateTime
   };
 </wxs>
@@ -159,14 +141,6 @@
         <view class="text-xs text-gray-400 mt-1">帮助参与者更容易找到你</view>
       </view>
       
-      <!-- 模糊位置开关 -->
-      <view wx:if="{{form.latitude}}" class="flex items-center justify-between pt-3 mt-2 border-t border-gray-100">
-        <view class="flex-1 mr-3">
-          <view class="text-sm font-medium text-gray-900 mb-1">模糊地理位置</view>
-          <view class="text-xs text-gray-400">开启后，未通过审批的用户只能看到大致位置</view>
-        </view>
-        <t-switch value="{{form.isLocationBlurred}}" bind:change="onLocationBlurredChange" />
-      </view>
     </view>
     
     <!-- 活动设置 -->
@@ -186,83 +160,6 @@
           bind:change="onParticipantsChange"
         />
       </view>
-      
-      <!-- 费用类型 -->
-      <view class="mb-3" bindtap="showFeeTypePicker">
-        <view class="block text-sm font-medium text-gray-900 mb-2">费用类型</view>
-        <view class="flex items-center justify-between p-3 bg-gray-100 rounded-md text-sm text-gray-900">
-          <text>{{utils.getFeeTypeLabel(form.feeType, feeTypes)}}</text>
-          <t-icon name="chevron-right" size="40rpx" color="#D1D5DB" />
-        </view>
-      </view>
-      
-      <!-- 预估费用 -->
-      <view wx:if="{{form.feeType !== 'free'}}" class="mb-3">
-        <view class="block text-sm font-medium text-gray-900 mb-2">预估费用</view>
-        <t-input
-          placeholder="请输入预估费用（元）"
-          value="{{form.estimatedCost}}"
-          type="digit"
-          bindinput="onEstimatedCostInput"
-        />
-      </view>
-      
-      <!-- 加入模式 -->
-      <view class="mb-3" bindtap="showJoinModePicker">
-        <view class="block text-sm font-medium text-gray-900 mb-2">加入方式</view>
-        <view class="flex items-center justify-between p-3 bg-gray-100 rounded-md text-sm text-gray-900">
-          <text>{{utils.getJoinModeLabel(form.joinMode, joinModes)}}</text>
-          <t-icon name="chevron-right" size="40rpx" color="#D1D5DB" />
-        </view>
-      </view>
-      
-      <!-- 靠谱度门槛 -->
-      <view>
-        <view class="block text-sm font-medium text-gray-900 mb-2">靠谱度门槛</view>
-        <t-input
-          placeholder="不限制请留空（0-100）"
-          value="{{form.minReliabilityRate}}"
-          type="number"
-          bindinput="onMinReliabilityInput"
-        />
-        <view class="text-xs text-gray-400 mt-1">设置后，靠谱度低于此值的用户无法报名</view>
-      </view>
-    </view>
-    
-    <!-- 增值服务 -->
-    <view class="bg-white mb-3 p-4">
-      <view class="flex items-center justify-between text-lg font-semibold text-gray-900 mb-3 pb-2 border-b border-gray-100">
-        <text>推广服务</text>
-        <t-tag size="small" variant="light" theme="warning">可选</t-tag>
-      </view>
-      
-      <!-- Boost服务 -->
-      <view class="premium-item p-3 rounded-md mb-2">
-        <view class="flex items-start">
-          <t-checkbox value="{{enableBoost}}" bind:change="onBoostChange" />
-          <view class="flex-1 ml-2">
-            <view class="flex items-center justify-between mb-1">
-              <text class="text-base font-medium text-gray-900">🔥 Boost 强力召唤</text>
-              <text class="text-lg font-semibold text-brand">¥{{boostPrice}}</text>
-            </view>
-            <text class="text-xs text-gray-400 leading-normal">向周围3km内用户发送推送通知，快速招人</text>
-          </view>
-        </view>
-      </view>
-      
-      <!-- Pin+服务 -->
-      <view class="premium-item p-3 rounded-md">
-        <view class="flex items-start">
-          <t-checkbox value="{{enablePinPlus}}" bind:change="onPinPlusChange" />
-          <view class="flex-1 ml-2">
-            <view class="flex items-center justify-between mb-1">
-              <text class="text-base font-medium text-gray-900">⭐ Pin+ 黄金置顶</text>
-              <text class="text-lg font-semibold text-brand">¥{{pinPlusPrice}}</text>
-            </view>
-            <text class="text-xs text-gray-400 leading-normal">地图Pin变大变金色，持续24小时，更显眼</text>
-          </view>
-        </view>
-      </view>
     </view>
     
     <!-- 底部占位 -->
@@ -271,10 +168,6 @@
   
   <!-- 底部提交栏 -->
   <view class="bottom-bar px-4 py-3">
-    <view wx:if="{{enableBoost || enablePinPlus}}" class="flex items-center justify-end mb-2">
-      <text class="text-sm text-gray-600">增值服务：</text>
-      <text class="text-lg font-semibold text-brand ml-1">¥{{(enableBoost ? boostPrice : 0) + (enablePinPlus ? pinPlusPrice : 0)}}</text>
-    </view>
     <t-button
       theme="primary"
       size="large"
@@ -298,30 +191,6 @@
     bind:cancel="onTypePickerCancel"
   >
     <t-picker-item options="{{activityTypes}}" />
-  </t-picker>
-  
-  <t-picker
-    visible="{{showFeeTypePicker}}"
-    value="{{[form.feeType]}}"
-    title="选择费用类型"
-    cancelBtn="取消"
-    confirmBtn="确定"
-    bind:change="onFeeTypeChange"
-    bind:cancel="onFeeTypePickerCancel"
-  >
-    <t-picker-item options="{{feeTypes}}" />
-  </t-picker>
-  
-  <t-picker
-    visible="{{showJoinModePicker}}"
-    value="{{[form.joinMode]}}"
-    title="选择加入方式"
-    cancelBtn="取消"
-    confirmBtn="确定"
-    bind:change="onJoinModeChange"
-    bind:cancel="onJoinModePickerCancel"
-  >
-    <t-picker-item options="{{joinModes}}" />
   </t-picker>
   
   <t-date-time-picker

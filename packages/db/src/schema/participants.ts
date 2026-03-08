@@ -22,6 +22,7 @@ export const participants = pgTable("participants", {
   status: participantStatusEnum("status").default("joined").notNull(),
   
   joinedAt: timestamp("joined_at").defaultNow(),
+  lastReadAt: timestamp("last_read_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow(),
 }, (t) => [
   unique("unique_participant").on(t.activityId, t.userId),

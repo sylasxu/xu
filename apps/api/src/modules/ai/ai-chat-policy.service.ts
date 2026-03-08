@@ -1,4 +1,3 @@
-import { randomUUID } from 'crypto';
 import type {
   GenUIBlock,
   GenUIChoiceOption,
@@ -8,10 +7,8 @@ import type {
 } from '@juchang/genui-contract';
 import {
   createChoiceBlock,
-  createEntityCardBlock,
   createCtaGroupBlock,
   createAlertBlock,
-  pushBlock,
 } from './shared/genui-blocks';
 
 interface ViewerContext {
@@ -26,12 +23,37 @@ interface ApplyAiChatTurnPolicyParams {
   traces: GenUITracePayload[];
 }
 
+const AUTH_REQUIRED_ACTIONS = new Set([
+  'join_activity',
+  'cancel_join',
+  'create_activity',
+  'edit_draft',
+  'publish_draft',
+  'confirm_publish',
+  'find_partner',
+  'confirm_match',
+  'cancel_match',
+]);
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
 function toStringValue(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
+}
+
+function getAuthRequiredMessage(action: string): string {
+  if (action.includes('publish') || action.includes('create') || action === 'edit_draft') {
+    return '这个操作会创建或修改活动，先登录后我再继续帮你完成。';
+  }
+  if (action.includes('match') || action === 'find_partner') {
+    return '这个操作会影响你的搭子匹配结果，先登录后再继续。';
+  }
+  if (action.includes('join') || action.includes('cancel_join')) {
+    return '报名相关操作需要绑定你的账号，先登录再继续。';
+  }
+  return '这个操作需要先登录，登录后我会接着帮你处理。';
 }
 
 function isEmptyStructuredResponse(blocks: GenUIBlock[]): boolean {
@@ -162,34 +184,43 @@ function buildFallbackBlocksForInput(
 
   if (action === 'confirm_publish') {
     if (isAuthenticated) {
-      const title = toStringValue(params.title, '活动草稿');
-      const locationName = toStringValue(params.locationName, toStringValue(params.location, '待定地点'));
-      const locationHint = toStringValue(params.locationHint);
+      const title = toStringValue(params.title, '这个活动');
+      const activityType = toStringValue(params.activityType, toStringValue(params.type, '活动'));
+      const location = toStringValue(params.locationName, toStringValue(params.location, '待定地点'));
       const startAt = toStringValue(params.startAt, toStringValue(params.slot, '待定时间'));
-      const activityId = `activity_${randomUUID().slice(0, 8)}`;
 
       return [
         createAlertBlock({
-          level: 'success',
-          message: '已确认发布，正在为你生成活动卡片。',
+          level: 'info',
+          message: '收到，我先帮你生成草稿，再一步确认发布，不会直接伪造发布结果。',
           dedupeKey: 'fallback_confirm_publish',
           traceRef: 'fallback_wizard',
         }),
-        createEntityCardBlock({
-          title,
-          fields: {
-            activityId,
-            title,
-            type: toStringValue(params.type, toStringValue(params.activityType, '活动')),
-            startAt,
-            locationName,
-            ...(locationHint ? { locationHint } : {}),
-            maxParticipants: params.maxParticipants,
-            currentParticipants: params.currentParticipants,
-            status: 'published',
-          },
-          dedupeKey: 'fallback_publish_entity',
+        createCtaGroupBlock({
+          dedupeKey: 'fallback_confirm_publish_retry',
           traceRef: 'fallback_wizard',
+          items: [
+            {
+              label: '继续生成草稿',
+              action: 'create_activity',
+              params: {
+                title,
+                activityType,
+                location,
+                startAt,
+                maxParticipants: params.maxParticipants,
+                description: `${title}，地点${location}，时间${startAt}，类型${activityType}`,
+              },
+            },
+            {
+              label: '先看看附近同类局',
+              action: 'explore_nearby',
+              params: {
+                location,
+                activityType,
+              },
+            },
+          ],
         }),
       ];
     }
@@ -240,41 +271,24 @@ export function applyAiChatTurnPolicies(
 
   const unauthenticatedActionName =
     !params.viewer && params.request.input.type === 'action' ? params.request.input.action : '';
-  const isUnauthenticatedPublishAction = /publish/i.test(unauthenticatedActionName);
-  if (isUnauthenticatedPublishAction) {
-    const sanitizedBlocks = nextBlocks.filter((block) => {
-      const dedupeKey = block.dedupeKey || '';
-      if (dedupeKey.includes('tool_publishActivity')) {
-        return false;
-      }
-
-      if (block.type === 'entity-card') {
-        const fields = isRecord(block.fields) ? block.fields : {};
-        const activityId = toStringValue(fields.activityId);
-        if (activityId && !activityId.startsWith('draft_')) {
-          return false;
-        }
-      }
-
-      return true;
-    });
-
-    pushBlock(
-      sanitizedBlocks,
+  const isUnauthenticatedWriteAction = AUTH_REQUIRED_ACTIONS.has(unauthenticatedActionName);
+  if (isUnauthenticatedWriteAction) {
+    nextBlocks.splice(
+      0,
+      nextBlocks.length,
       createAlertBlock({
         level: 'warning',
-        message: '发布前请先登录，这样才能真正创建并分享活动。',
-        dedupeKey: 'publish_auth_required',
+        message: getAuthRequiredMessage(unauthenticatedActionName),
+        dedupeKey: 'auth_required_for_action',
         traceRef: 'auth_guard',
       })
     );
 
-    nextBlocks.splice(0, nextBlocks.length, ...sanitizedBlocks);
     nextTraces.push({
       stage: 'auth_guard_applied',
       detail: {
         action: unauthenticatedActionName,
-        reason: 'unauthenticated_publish',
+        reason: 'unauthenticated_write_action',
       },
     });
   }

@@ -32,6 +32,22 @@ interface WxPhoneResponse {
   errmsg?: string;
 }
 
+let hasWarnedLoginMock = false;
+let hasWarnedPhoneMock = false;
+
+function isFlagEnabled(flag?: string): boolean {
+  if (!flag) return false;
+  return ['1', 'true', 'yes', 'on'].includes(flag.toLowerCase());
+}
+
+function isWxLoginMockEnabled(): boolean {
+  return isFlagEnabled(process.env.WECHAT_AUTH_MOCK_LOGIN);
+}
+
+function isWxPhoneMockEnabled(): boolean {
+  return isFlagEnabled(process.env.WECHAT_AUTH_MOCK_PHONE);
+}
+
 /**
  * 微信登录 (MVP 简化版)
  * - 移除复杂的会员逻辑
@@ -198,15 +214,22 @@ export async function bindPhone(userId: string, params: BindPhoneRequest) {
 async function getWxOpenId(code: string): Promise<WxLoginResponse> {
   const WECHAT_APP_ID = process.env.WECHAT_APP_ID;
   const WECHAT_APP_SECRET = process.env.WECHAT_APP_SECRET;
-  const isDev = process.env.NODE_ENV === 'development';
 
-  // 开发环境：跳过微信验证，直接返回测试用户
-  if (isDev || !WECHAT_APP_ID || !WECHAT_APP_SECRET) {
-    console.warn('[Auth] 开发环境：跳过微信验证，使用模拟数据');
+  if (isWxLoginMockEnabled()) {
+    if (!hasWarnedLoginMock) {
+      console.warn('[Auth] WECHAT_AUTH_MOCK_LOGIN 已启用，微信登录将使用模拟 openid');
+      hasWarnedLoginMock = true;
+    }
     return {
-      openid: `wx_dev_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      session_key: 'mock_session_key_dev'
+      openid: process.env.WECHAT_AUTH_MOCK_OPENID || 'wx_mock_openid',
+      session_key: process.env.WECHAT_AUTH_MOCK_SESSION_KEY || 'mock_session_key',
     };
+  }
+
+  if (!WECHAT_APP_ID || !WECHAT_APP_SECRET) {
+    throw new Error(
+      '微信登录配置缺失，请设置 WECHAT_APP_ID / WECHAT_APP_SECRET，或显式开启 WECHAT_AUTH_MOCK_LOGIN'
+    );
   }
 
   try {
@@ -232,18 +255,25 @@ async function getWxOpenId(code: string): Promise<WxLoginResponse> {
  * 重构：复用 content-security 模块的 Token 管理
  */
 async function getWxPhoneNumber(code: string): Promise<WxPhoneResponse> {
-  const isDev = process.env.NODE_ENV === 'development';
-
-  // 开发环境：跳过微信解密，直接返回测试手机号
-  if (isDev) {
-    console.warn('[Auth] 开发环境：跳过微信解密，使用测试手机号');
+  if (isWxPhoneMockEnabled()) {
+    if (!hasWarnedPhoneMock) {
+      console.warn('[Auth] WECHAT_AUTH_MOCK_PHONE 已启用，手机号绑定将使用模拟手机号');
+      hasWarnedPhoneMock = true;
+    }
+    const mockPhoneNumber = process.env.WECHAT_AUTH_MOCK_PHONE_NUMBER || '13800138000';
     return {
       phone_info: {
-        phoneNumber: '13800138000',
-        purePhoneNumber: '13800138000',
+        phoneNumber: mockPhoneNumber,
+        purePhoneNumber: mockPhoneNumber,
         countryCode: '86',
-      }
+      },
     };
+  }
+
+  if (!process.env.WECHAT_APP_ID || !process.env.WECHAT_APP_SECRET) {
+    throw new Error(
+      '微信手机号配置缺失，请设置 WECHAT_APP_ID / WECHAT_APP_SECRET，或显式开启 WECHAT_AUTH_MOCK_PHONE'
+    );
   }
 
   try {
@@ -270,7 +300,6 @@ async function getWxPhoneNumber(code: string): Promise<WxPhoneResponse> {
     throw new Error('获取手机号失败');
   }
 }
-
 
 /**
  * 验证 JWT Token（用于 WebSocket 等无法使用 Elysia jwt 装饰器的场景）

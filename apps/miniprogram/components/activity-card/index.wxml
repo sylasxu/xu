@@ -17,19 +17,11 @@
     var day = date.getDate();
     return month + '月' + day + '日 ' + timeStr;
   }
-  function getFeeTypeText(feeType) {
-    var map = { free: '免费', aa: 'AA制', fixed: '固定费用', treat: '请客' };
-    return map[feeType] || feeType || '';
-  }
   function getActivityTypeText(type) {
-    var map = { food: '美食', entertainment: '娱乐', sports: '运动', study: '学习', travel: '旅行', other: '其他' };
+    var map = { food: '美食', entertainment: '娱乐', sports: '运动', boardgame: '桌游', other: '其他' };
     return map[type] || type || '';
   }
-  function calculateReliability(creator) {
-    if (!creator || !creator.participationCount || creator.participationCount === 0) return -1;
-    return Math.round((creator.fulfillmentCount / creator.participationCount) * 100);
-  }
-  module.exports = { formatTime: formatTime, getFeeTypeText: getFeeTypeText, getActivityTypeText: getActivityTypeText, calculateReliability: calculateReliability };
+  module.exports = { formatTime: formatTime, getActivityTypeText: getActivityTypeText };
 </wxs>
 
 <!-- 弹窗模式 -->
@@ -63,7 +55,6 @@
         <text class="flex-1 text-lg font-semibold text-gray-900 line-clamp-2">{{activityDetail.title || activity.title}}</text>
         <view class="flex gap-1 ml-2 flex-shrink-0">
           <t-tag wx:if="{{activityDetail.type}}" size="small" variant="light" theme="primary">{{utils.getActivityTypeText(activityDetail.type)}}</t-tag>
-          <t-tag wx:if="{{activityDetail.isPinPlus}}" size="small" variant="light" theme="warning">Pin+</t-tag>
         </view>
       </view>
       
@@ -79,22 +70,16 @@
         <text class="ml-1 text-sm text-gray-600">{{activityDetail.locationName || activity.locationHint || '位置待定'}}</text>
       </view>
       
-      <!-- 人数和费用 -->
+      <!-- 人数 -->
       <view class="flex items-center mb-2">
         <t-icon name="user" size="28rpx" color="#666" />
         <text class="ml-1 text-sm text-gray-600">{{activityDetail.currentParticipants || 0}}/{{activityDetail.maxParticipants || '?'}}人</text>
-        <view class="w-px h-3 bg-gray-200 mx-2"></view>
-        <text class="text-sm text-brand">{{utils.getFeeTypeText(activityDetail.feeType)}}</text>
-        <text wx:if="{{activityDetail.estimatedCost}}" class="text-sm text-gray-400 ml-1">约¥{{activityDetail.estimatedCost}}</text>
       </view>
       
       <!-- 发起人信息 -->
       <view wx:if="{{activityDetail.creator}}" class="flex items-center mt-3 pt-3 border-t" catchtap="onCreatorTap">
         <t-avatar image="{{activityDetail.creator.avatarUrl}}" size="48rpx" icon="user" />
         <text class="ml-2 text-sm text-gray-900">{{activityDetail.creator.nickname || '匿名用户'}}</text>
-        <view class="ml-auto">
-          <reliability-badge rate="{{utils.calculateReliability(activityDetail.creator)}}" show-label="{{true}}" />
-        </view>
       </view>
     </view>
     
@@ -112,8 +97,6 @@
     <view class="flex-1 min-w-0">
       <view class="flex items-center gap-1 mb-1">
         <text class="text-base font-medium text-gray-900 truncate" style="max-width: 400rpx;">{{activity.title}}</text>
-        <t-tag wx:if="{{activity.isBoosted}}" size="small" variant="light" theme="danger">🔥急招</t-tag>
-        <t-tag wx:if="{{activity.isPinPlus}}" size="small" variant="light" theme="warning">Pin+</t-tag>
       </view>
       <view class="flex items-center">
         <t-icon name="location" size="24rpx" color="#999" />

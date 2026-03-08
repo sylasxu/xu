@@ -2,6 +2,8 @@
  * 搜索页面
  * 搜索活动，支持历史记录和热门搜索
  */
+import { getActivitiesNearby } from '../../src/api/endpoints/activities/activities';
+import type { ActivityNearbyItem } from '../../src/api/model';
 
 const STORAGE_KEY_HISTORY = 'search_history';
 const MAX_HISTORY_COUNT = 10;
@@ -130,37 +132,30 @@ Page<SearchPageData, WechatMiniprogram.Page.CustomOption>({
     keyword: string,
     location: { latitude: number; longitude: number }
   ): Promise<SearchResult[]> {
-    // TODO: 对接真实 API
-    // const { getActivitiesNearby } = await import('@/api/endpoints/activities');
-    // return getActivitiesNearby({ ...location, keyword });
-
-    // 临时返回模拟数据
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve([
-          {
-            id: '1',
-            title: `${keyword}聚会`,
-            type: 'food',
-            locationName: '观音桥步行街',
-            startAt: '2024-12-22 19:00',
-            currentParticipants: 3,
-            maxParticipants: 6,
-            distance: 1200,
-          },
-          {
-            id: '2',
-            title: `周末${keyword}局`,
-            type: 'entertainment',
-            locationName: '解放碑',
-            startAt: '2024-12-23 14:00',
-            currentParticipants: 2,
-            maxParticipants: 4,
-            distance: 2500,
-          },
-        ]);
-      }, 500);
+    const response = await getActivitiesNearby({
+      lat: location.latitude,
+      lng: location.longitude,
+      keyword,
+      radius: 5000,
+      limit: 20,
     });
+
+    if (response.status !== 200) {
+      const errorMessage = (response.data as { msg?: string })?.msg || '搜索附近活动失败';
+      throw new Error(errorMessage);
+    }
+
+    const items = (response.data.data || []) as ActivityNearbyItem[];
+    return items.map((item) => ({
+      id: item.id,
+      title: item.title,
+      type: item.type,
+      locationName: item.locationName,
+      startAt: this.formatDateTime(item.startAt),
+      currentParticipants: item.currentParticipants,
+      maxParticipants: item.maxParticipants,
+      distance: item.distance,
+    }));
   },
 
   /**
@@ -246,5 +241,15 @@ Page<SearchPageData, WechatMiniprogram.Page.CustomOption>({
       return `${meters}m`;
     }
     return `${(meters / 1000).toFixed(1)}km`;
+  },
+
+  formatDateTime(dateStr: string): string {
+    const date = new Date(dateStr);
+    const year = date.getFullYear();
+    const month = `${date.getMonth() + 1}`.padStart(2, '0');
+    const day = `${date.getDate()}`.padStart(2, '0');
+    const hours = `${date.getHours()}`.padStart(2, '0');
+    const minutes = `${date.getMinutes()}`.padStart(2, '0');
+    return `${year}-${month}-${day} ${hours}:${minutes}`;
   },
 });

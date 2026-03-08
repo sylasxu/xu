@@ -16,6 +16,7 @@ import { getWelcomeCard, getUserLocation, type WelcomeResponse, type QuickItem }
 import type { ShareActivityData, SendEventDetail } from '../../src/types/global'
 import { getHotKeywords } from '../../src/api/endpoints/hot-keywords/hot-keywords'
 import type { HotKeywordsListResponseItemsItem } from '../../src/api/model'
+import { submitJoinAndOpenDiscussion, type JoinFlowPayload } from '../../src/utils/join-flow'
 
 const DEFAULT_COMPOSER_PLACEHOLDER = '你想找什么活动？'
 
@@ -42,6 +43,10 @@ interface PageData {
   hotKeywords: HotKeywordsListResponseItemsItem[]
 }
 
+interface HomePageOptions {
+  prefill?: string;
+}
+
 Page<PageData, WechatMiniprogram.Page.CustomOption>({
   data: {
     messages: [],
@@ -63,13 +68,14 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
   unsubscribeUser: null as (() => void) | null,
   userLocation: null as { lat: number; lng: number } | null,
 
-  onLoad() {
+  onLoad(options: HomePageOptions) {
     this.subscribeChatStore()
     this.subscribeAppStore()
     this.subscribeUserStore()
     this.initChat()
     this.loadUserInfo()
     this.loadHotKeywords()
+    this.applyPrefillPrompt(options.prefill)
   },
 
   onShow() {
@@ -289,11 +295,31 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
 
   onDashboardPromptTap(e: WechatMiniprogram.CustomEvent<{ prompt: string }>) {
     const { prompt } = e.detail
-    const aiDock = this.selectComponent('#aiDock')
-    if (aiDock) {
+    const aiDock = this.selectComponent('#aiDock') as unknown as { setValue?: (value: string) => void } | null
+    if (aiDock?.setValue) {
       aiDock.setValue(prompt)
     }
     this.onSend({ detail: { text: prompt } } as WechatMiniprogram.CustomEvent<SendEventDetail>)
+  },
+
+  applyPrefillPrompt(prefill?: string) {
+    if (!prefill) return
+
+    let prompt = prefill
+    try {
+      prompt = decodeURIComponent(prefill)
+    } catch {
+      prompt = prefill
+    }
+    prompt = prompt.trim()
+    if (!prompt) return
+
+    wx.nextTick(() => {
+      const aiDock = this.selectComponent('#aiDock') as unknown as { setValue?: (value: string) => void } | null
+      if (aiDock?.setValue) {
+        aiDock.setValue(prompt)
+      }
+    })
   },
 
   /**
@@ -362,8 +388,41 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     this.loadUserInfo()
   },
 
-  onPendingAction(e: WechatMiniprogram.CustomEvent<{ type: string; payload: any }>) {
+  async onPendingAction(e: WechatMiniprogram.CustomEvent<{ type: string; payload: any }>) {
     const { type, payload } = e.detail
+
+    if (type === 'join' && payload?.activityId) {
+      const joinPayload = payload as JoinFlowPayload
+      const title = typeof joinPayload.title === 'string' && joinPayload.title.trim()
+        ? joinPayload.title.trim()
+        : '活动'
+
+      const joinResult = await submitJoinAndOpenDiscussion(
+        {
+          ...joinPayload,
+          source: joinPayload.source || 'auth_sheet',
+        },
+        {
+          onBeforeNavigate: () => {
+            useChatStore.getState().appendActionResult(
+              'join',
+              { activityId: joinPayload.activityId, title },
+              true,
+              `你已成功报名「${title}」，一起去讨论区打个招呼吧`,
+            )
+          },
+        },
+      )
+
+      if (!joinResult.success) {
+        wx.showToast({
+          title: joinResult.msg || '报名失败，请重试',
+          icon: 'none',
+        })
+      }
+      return
+    }
+
     if (type !== 'publish' || !payload?.draft) {
       return
     }

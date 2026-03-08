@@ -28,6 +28,34 @@ const MessageListQuery = t.Object({
   limit: t.Optional(t.Number({ minimum: 1, maximum: 100, default: 50, description: '获取数量' })),
 });
 
+// 聊天活动列表查询参数（显式 userId）
+const ChatActivitiesQuery = t.Object({
+  userId: t.String({ format: 'uuid', description: '目标用户ID（普通用户仅可传本人）' }),
+  page: t.Optional(t.Number({ minimum: 1, default: 1 })),
+  limit: t.Optional(t.Number({ minimum: 1, maximum: 50, default: 20 })),
+});
+
+// 聊天活动项
+const ChatActivityItemSchema = t.Object({
+  activityId: t.String({ format: 'uuid' }),
+  activityTitle: t.String(),
+  activityImage: t.Union([t.String(), t.Null()]),
+  lastMessage: t.Union([t.String(), t.Null()]),
+  lastMessageTime: t.Union([t.String(), t.Null()]),
+  unreadCount: t.Number(),
+  isArchived: t.Boolean(),
+  participantCount: t.Number(),
+});
+
+// 聊天活动列表响应
+const ChatActivitiesResponse = t.Object({
+  items: t.Array(ChatActivityItemSchema),
+  total: t.Number(),
+  page: t.Number(),
+  totalPages: t.Number(),
+  totalUnread: t.Number({ description: '群聊未读总数（服务端统计）' }),
+});
+
 // 发送消息请求
 const SendMessageRequest = t.Object({
   content: t.String({ minLength: 1, maxLength: 2000, description: '消息内容' }),
@@ -102,6 +130,9 @@ export const chatModel = new Elysia({ name: 'chatModel' })
   .model({
     'chat.messageResponse': ChatMessageResponseSchema,
     'chat.messageListQuery': MessageListQuery,
+    'chat.activitiesQuery': ChatActivitiesQuery,
+    'chat.activityItem': ChatActivityItemSchema,
+    'chat.activitiesResponse': ChatActivitiesResponse,
     'chat.sendMessageRequest': SendMessageRequest,
     'chat.sendMessageResponse': SendMessageResponse,
     'chat.activityIdParams': ActivityIdParams,
@@ -114,6 +145,9 @@ export const chatModel = new Elysia({ name: 'chatModel' })
 // 导出 TS 类型
 export type ChatMessageResponse = Static<typeof ChatMessageResponseSchema>;
 export type MessageListQuery = Static<typeof MessageListQuery>;
+export type ChatActivitiesQuery = Static<typeof ChatActivitiesQuery>;
+export type ChatActivityItem = Static<typeof ChatActivityItemSchema>;
+export type ChatActivitiesResponse = Static<typeof ChatActivitiesResponse>;
 export type SendMessageRequest = Static<typeof SendMessageRequest>;
 export type SendMessageResponse = Static<typeof SendMessageResponse>;
 export type ActivityIdParams = Static<typeof ActivityIdParams>;

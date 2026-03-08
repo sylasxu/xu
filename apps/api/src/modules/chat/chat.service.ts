@@ -1,9 +1,21 @@
 // Chat Service - 群聊消息业务逻辑 (v3.3 使用 activityMessages)
-import { db, activityMessages, activities, participants, users, eq, and, gt } from '@juchang/db';
-import type { ChatMessageResponse, MessageListQuery, SendMessageRequest } from './chat.model';
+import { db, activityMessages, activities, participants, users, eq, and, gt, count, desc, inArray, sql } from '@juchang/db';
+import type {
+  ChatActivitiesQuery,
+  ChatActivitiesResponse,
+  ChatActivityItem,
+  ChatMessageResponse,
+  MessageListQuery,
+  SendMessageRequest,
+} from './chat.model';
 
 // 群聊归档时间：活动开始后 24 小时
 const ARCHIVE_HOURS = 24;
+
+function calculateIsArchived(startAt: Date): boolean {
+  const archiveTime = new Date(startAt.getTime() + ARCHIVE_HOURS * 60 * 60 * 1000);
+  return new Date() > archiveTime;
+}
 
 /**
  * 检查活动群聊是否已归档
@@ -19,8 +31,7 @@ async function checkIsArchived(activityId: string): Promise<boolean> {
     return true; // 活动不存在视为已归档
   }
 
-  const archiveTime = new Date(activity.startAt.getTime() + ARCHIVE_HOURS * 60 * 60 * 1000);
-  return new Date() > archiveTime;
+  return calculateIsArchived(activity.startAt);
 }
 
 /**
@@ -40,6 +51,128 @@ async function checkIsParticipant(activityId: string, userId: string): Promise<b
     .limit(1);
 
   return !!participant;
+}
+
+/**
+ * 获取用户相关活动群聊列表（显式 userId）
+ */
+export async function getChatActivities(
+  userId: string,
+  query: ChatActivitiesQuery
+): Promise<ChatActivitiesResponse> {
+  const page = query.page || 1;
+  const limit = query.limit || 20;
+  const offset = (page - 1) * limit;
+
+  const [baseRows, totalResult] = await Promise.all([
+    db
+      .select({
+        activityId: activities.id,
+        activityTitle: activities.title,
+        startAt: activities.startAt,
+        participantLastReadAt: participants.lastReadAt,
+        creatorAvatarUrl: users.avatarUrl,
+      })
+      .from(participants)
+      .innerJoin(activities, eq(participants.activityId, activities.id))
+      .leftJoin(users, eq(activities.creatorId, users.id))
+      .where(and(
+        eq(participants.userId, userId),
+        eq(participants.status, 'joined')
+      ))
+      .orderBy(desc(activities.startAt))
+      .limit(limit)
+      .offset(offset),
+    db
+      .select({ count: count() })
+      .from(participants)
+      .where(and(
+        eq(participants.userId, userId),
+        eq(participants.status, 'joined')
+      )),
+  ]);
+
+  const total = totalResult[0]?.count || 0;
+  const totalPages = Math.ceil(total / limit);
+  if (baseRows.length === 0) {
+    return { items: [], total, page, totalPages, totalUnread: 0 };
+  }
+
+  const activityIds = baseRows.map((item) => item.activityId);
+
+  const participantCountRows = await db
+    .select({
+      activityId: participants.activityId,
+      participantCount: count(),
+    })
+    .from(participants)
+    .where(and(
+      inArray(participants.activityId, activityIds),
+      eq(participants.status, 'joined')
+    ))
+    .groupBy(participants.activityId);
+
+  const participantCountMap = new Map<string, number>(
+    participantCountRows.map((row) => [row.activityId, row.participantCount])
+  );
+
+  const latestMessageRows = await Promise.all(
+    baseRows.map(async (row) => {
+      const [latestMessage] = await db
+        .select({
+          content: activityMessages.content,
+          createdAt: activityMessages.createdAt,
+        })
+        .from(activityMessages)
+        .where(eq(activityMessages.activityId, row.activityId))
+        .orderBy(desc(activityMessages.createdAt))
+        .limit(1);
+
+      const [unreadResult] = await db
+        .select({ unreadCount: count() })
+        .from(activityMessages)
+        .where(and(
+          eq(activityMessages.activityId, row.activityId),
+          gt(activityMessages.createdAt, row.participantLastReadAt),
+          sql`${activityMessages.senderId} IS NULL OR ${activityMessages.senderId} <> ${userId}`
+        ));
+
+      return {
+        activityId: row.activityId,
+        lastMessage: latestMessage?.content || null,
+        lastMessageTime: latestMessage?.createdAt?.toISOString() || null,
+        unreadCount: unreadResult?.unreadCount || 0,
+      };
+    })
+  );
+
+  const latestMessageMap = new Map<
+    string,
+    { lastMessage: string | null; lastMessageTime: string | null; unreadCount: number }
+  >(latestMessageRows.map((item) => [item.activityId, {
+    lastMessage: item.lastMessage,
+    lastMessageTime: item.lastMessageTime,
+    unreadCount: item.unreadCount,
+  }]));
+
+  let totalUnread = 0;
+  const items: ChatActivityItem[] = baseRows.map((row) => {
+    const latest = latestMessageMap.get(row.activityId);
+    const unreadCount = latest?.unreadCount || 0;
+    totalUnread += unreadCount;
+    return {
+      activityId: row.activityId,
+      activityTitle: row.activityTitle,
+      activityImage: row.creatorAvatarUrl || null,
+      lastMessage: latest?.lastMessage || null,
+      lastMessageTime: latest?.lastMessageTime || null,
+      unreadCount,
+      isArchived: calculateIsArchived(row.startAt),
+      participantCount: participantCountMap.get(row.activityId) || 0,
+    };
+  });
+
+  return { items, total, page, totalPages, totalUnread };
 }
 
 /**
@@ -106,6 +239,23 @@ export async function getMessages(
     content: m.content,
     createdAt: m.createdAt.toISOString(),
   }));
+
+  const latestMessageCreatedAt = messageList.length > 0
+    ? messageList[messageList.length - 1].createdAt
+    : null;
+  if (latestMessageCreatedAt) {
+    await db
+      .update(participants)
+      .set({
+        lastReadAt: latestMessageCreatedAt,
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(participants.activityId, activityId),
+        eq(participants.userId, userId),
+        eq(participants.status, 'joined')
+      ));
+  }
 
   return { messages, isArchived };
 }

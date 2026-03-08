@@ -66,18 +66,6 @@
     >
       微信快速登录
     </t-button>
-    
-    <t-button 
-      wx:if="{{isPhoneNumber}}"
-      theme="light" 
-      size="large" 
-      block 
-      disabled="{{!isSubmit}}" 
-      bindtap="loginWithCode"
-      class="mt-2"
-    >
-      手机号验证登录
-    </t-button>
   </view>
 
   <!-- 忘记密码 -->

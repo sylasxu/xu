@@ -40,6 +40,7 @@ const WIDGET_TRANSFORMS: Record<string, WidgetTransformFn> = {
         name: exploreData?.locationName || '附近',
       },
       title: exploreData?.title || '',
+      semanticQuery: typeof exploreData?.semanticQuery === 'string' ? exploreData.semanticQuery : '',
       fetchConfig: isRecord(toolOutput.fetchConfig) ? toolOutput.fetchConfig : null,
       interaction: isRecord(toolOutput.interaction) ? toolOutput.interaction : null,
       preview: isRecord(toolOutput.preview) ? toolOutput.preview : null,

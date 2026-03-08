@@ -297,17 +297,21 @@ export async function search(params: HybridSearchParams): Promise<ScoredActivity
     created_at: Date;
     updated_at: Date;
     embedding: number[] | null;
+    lng: number;
+    lat: number;
     similarity: number;
     distance?: number;
   }>(sql`
     SELECT 
-      a.*,
-      (1 - (a.embedding <=> ${vectorStr}::vector)) as similarity
+      activities.*,
+      ST_X(activities.location::geometry) as lng,
+      ST_Y(activities.location::geometry) as lat,
+      (1 - (activities.embedding <=> ${vectorStr}::vector)) as similarity
       ${filters.location ? sql`, ST_Distance(
-        a.location::geography,
+        activities.location::geography,
         ST_SetSRID(ST_MakePoint(${filters.location.lng}, ${filters.location.lat}), 4326)::geography
       ) as distance` : sql``}
-    FROM activities a
+    FROM activities
     WHERE ${sql.join(baseConditions, sql` AND `)}
     ORDER BY similarity DESC
     LIMIT ${limit * 2}
@@ -483,15 +487,19 @@ async function searchByLocationOnly(
     created_at: Date;
     updated_at: Date;
     embedding: number[] | null;
+    lng: number;
+    lat: number;
     distance: number;
   }>(sql`
     SELECT 
-      a.*,
+      activities.*,
+      ST_X(activities.location::geometry) as lng,
+      ST_Y(activities.location::geometry) as lat,
       ST_Distance(
-        a.location::geography,
+        activities.location::geography,
         ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography
       ) as distance
-    FROM activities a
+    FROM activities
     WHERE ${sql.join(baseConditions, sql` AND `)}
     ORDER BY distance ASC
     LIMIT ${limit}
@@ -519,7 +527,9 @@ function mapRowToActivity(row: any): Activity {
     creatorId: row.creator_id,
     title: row.title,
     description: row.description,
-    location: row.location,
+    location: typeof row.lng === 'number' && typeof row.lat === 'number'
+      ? { x: row.lng, y: row.lat }
+      : row.location,
     locationName: row.location_name,
     address: row.address,
     locationHint: row.location_hint,

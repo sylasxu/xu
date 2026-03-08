@@ -27,6 +27,7 @@ import type { ProcessorLogEntry } from '@juchang/db';
 import { type ClassifyResult } from './intent';
 import { getOrCreateThread, saveMessage, clearUserThreads, deleteThread } from './memory';
 import { resolveToolsForIntent, getToolWidgetType, getToolDisplayName } from './tools';
+import { createPartnerIntent } from './tools/partner-tools';
 import { getSystemPrompt, type PromptContext, type ActivityDraftForPrompt } from './prompts';
 import { getModelByIntent } from './models/router';
 // Guardrails
@@ -66,7 +67,12 @@ import {
   updatePartnerMatchingState,
   getNextQuestion,
   parseUserAnswer,
+  looksLikePartnerAnswer,
+  inferPartnerMessageHints,
   persistPartnerMatchingState,
+  buildPartnerIntentPayload,
+  getPartnerActivityTypeLabel,
+  getPartnerTimeLabel,
   type PartnerMatchingState,
 } from './workflow/partner-matching';
 // User Action — A2UI (Action-to-UI: 结构化用户操作直接映射为 UI 响应)
@@ -183,7 +189,31 @@ export async function consumeAIQuota(userId: string): Promise<boolean> {
 export async function handleChatStream(request: ChatRequest): Promise<Response> {
   return runWithTrace(async () => {
   const { messages, userId, rateLimitUserId, conversationId, location, source, draftContext, trace, modelParams, userAction } = request;
+  let effectiveMessages = messages;
   const startTime = Date.now();
+  const latestMessage = messages[messages.length - 1];
+  const currentInputText = typeof latestMessage?.content === 'string'
+    ? latestMessage.content
+    : latestMessage?.parts?.find((part): part is { type: 'text'; text: string } => part.type === 'text')?.text
+      || userAction?.originalText
+      || '';
+
+  if (userId && userAction?.source === 'text_inference') {
+    const partnerThreadId = conversationId || (await getOrCreateThread(userId)).id;
+    const partnerMatchingState = await recoverPartnerMatchingState(partnerThreadId);
+    if (partnerMatchingState) {
+      const currentQuestion = getNextQuestion(partnerMatchingState);
+      if (looksLikePartnerAnswer(currentInputText, currentQuestion)) {
+        return handlePartnerMatchingFlow(
+          request,
+          partnerMatchingState,
+          partnerThreadId,
+          currentInputText,
+          { intent: 'partner', confidence: 1, method: 'p1' }
+        );
+      }
+    }
+  }
 
   // 0. A2UI: 检查是否为结构化 userAction（跳过 LLM 意图识别）
   if (userAction) {
@@ -201,13 +231,22 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
     
     // 如果 action 处理成功且不需要回退到 LLM
     if (actionResult.success && !actionResult.fallbackToLLM) {
-      return createActionResponse(actionResult, trace);
+      await saveUserActionConversation({
+        conversationId,
+        userId,
+        userMessage: typeof messages[messages.length - 1]?.content === 'string'
+          ? (messages[messages.length - 1]!.content || '')
+          : '',
+        userAction,
+        result: actionResult,
+      });
+      return createActionResponse(actionResult, trace, userAction);
     }
     
     // 如果需要回退到 LLM，使用 fallbackText 作为用户消息
     if (actionResult.fallbackToLLM && actionResult.fallbackText) {
       // 修改最后一条消息为 fallbackText
-      const modifiedMessages = [...messages];
+      const modifiedMessages = [...effectiveMessages];
       if (modifiedMessages.length > 0) {
         const lastMsg = modifiedMessages[modifiedMessages.length - 1];
         if (lastMsg.role === 'user') {
@@ -217,6 +256,7 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
           }
         }
       }
+      effectiveMessages = modifiedMessages;
       // 继续正常的 LLM 流程
     }
     
@@ -227,7 +267,7 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
   }
 
   // 0.1 提取最后一条用户消息（用于护栏检查）
-  const conversationHistory = messages.map(m => ({
+  const conversationHistory = effectiveMessages.map(m => ({
     role: m.role,
     content: (m.parts?.find((p): p is { type: 'text'; text: string } => p.type === 'text')?.text)
       || (m as unknown as { content?: string })?.content
@@ -355,12 +395,19 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
   logger.info('Intent classified', { intent: intentResult.intent, method: intentResult.method });
 
   // 5. Partner Matching 检查（找搭子追问流程）
-  if (intentResult.intent === 'partner' && userId) {
-    const thread = await getOrCreateThread(userId);
-    const partnerMatchingState = await recoverPartnerMatchingState(thread.id);
+  if (userId) {
+    const partnerThreadId = conversationId || (await getOrCreateThread(userId)).id;
+    const partnerMatchingState = await recoverPartnerMatchingState(partnerThreadId);
 
-    if (shouldStartPartnerMatching('partner', partnerMatchingState)) {
-      return handlePartnerMatchingFlow(request, partnerMatchingState, thread.id, sanitizedInput, intentResult);
+    if (partnerMatchingState) {
+      const currentQuestion = getNextQuestion(partnerMatchingState);
+      if (looksLikePartnerAnswer(sanitizedInput, currentQuestion)) {
+        return handlePartnerMatchingFlow(request, partnerMatchingState, partnerThreadId, sanitizedInput, intentResult);
+      }
+    }
+
+    if (intentResult.intent === 'partner' && shouldStartPartnerMatching('partner', partnerMatchingState)) {
+      return handlePartnerMatchingFlow(request, partnerMatchingState, partnerThreadId, sanitizedInput, intentResult);
     }
   }
 
@@ -380,7 +427,7 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
   // 8. 使用管线处理后的 systemPrompt（已包含 user-profile + semantic-recall + token-limit）
   const systemPrompt = preLLMContext.systemPrompt;
 
-  const uiMessages: UIMessage[] = messages.map((m, i) => ({
+  const uiMessages: UIMessage[] = effectiveMessages.map((m, i) => ({
     id: `msg-${i}`,
     role: m.role,
     content: (m as any).content || '',
@@ -634,6 +681,66 @@ function createDirectResponse(text: string, trace?: boolean): Response {
   return createUIMessageStreamResponse({ stream });
 }
 
+function resolveActionMessage(
+  result: import('./user-action').ActionResult,
+  data: Record<string, unknown> | undefined
+): string {
+  return (
+    typeof data?.message === 'string' && data.message.trim()
+      ? data.message.trim()
+      : data?.action === 'navigate'
+        ? '已为你打开详情入口'
+        : data?.action === 'share'
+          ? '准备分享给朋友吧～'
+          : data?.action === 'publish'
+            ? '草稿已准备好，确认后就能发出去'
+            : result.success
+              ? '操作成功！'
+              : '操作失败，请稍后再试'
+  );
+}
+
+async function saveUserActionConversation(params: {
+  conversationId?: string;
+  userId: string | null;
+  userMessage: string;
+  userAction?: UserAction;
+  result: import('./user-action').ActionResult;
+}): Promise<void> {
+  const { conversationId, userId, userMessage, userAction, result } = params;
+  if (!conversationId || !userId) {
+    return;
+  }
+
+  const data = (result.data && typeof result.data === 'object')
+    ? result.data as Record<string, unknown>
+    : undefined;
+  const actionMessage = resolveActionMessage(result, data);
+
+  await saveMessage({
+    conversationId,
+    userId,
+    role: 'user',
+    messageType: 'text',
+    content: {
+      text: userMessage,
+      ...(userAction ? { action: userAction.action, source: userAction.source || 'a2ui' } : {}),
+    },
+  });
+
+  await saveMessage({
+    conversationId,
+    userId,
+    role: 'assistant',
+    messageType: 'text',
+    content: {
+      text: actionMessage,
+      ...(userAction ? { action: userAction.action } : {}),
+    },
+    ...(typeof data?.activityId === 'string' ? { activityId: data.activityId } : {}),
+  });
+}
+
 /**
  * 创建关键词匹配响应 (P0 层)
  * 直接返回预设响应，无需 LLM 处理
@@ -734,7 +841,30 @@ async function createKeywordResponse(
  * 创建 UserAction 响应 (A2UI)
  * 直接返回 action 执行结果，不经过 LLM
  */
-function createActionResponse(result: import('./user-action').ActionResult, trace?: boolean): Response {
+function createActionResponse(
+  result: import('./user-action').ActionResult,
+  trace?: boolean,
+  userAction?: UserAction
+): Response {
+  const data = (result.data && typeof result.data === 'object')
+    ? result.data as Record<string, unknown>
+    : undefined;
+  const actionType = userAction?.action;
+  const actionMessage = (
+    typeof data?.message === 'string' && data.message.trim()
+      ? data.message.trim()
+      : data?.action === 'navigate'
+        ? '已为你打开详情入口'
+        : data?.action === 'share'
+          ? '准备分享给朋友吧～'
+          : data?.action === 'publish'
+            ? '草稿已准备好，确认后就能发出去'
+            : result.success
+              ? '操作成功！'
+              : '操作失败，请稍后再试'
+  );
+  const nextActions = buildActionNextActions(actionType, data);
+
   const stream = createUIMessageStream({
     execute: ({ writer }) => {
       // 返回 action 结果作为 data
@@ -745,17 +875,59 @@ function createActionResponse(result: import('./user-action').ActionResult, trac
           success: result.success,
           data: result.data,
           error: result.error,
+          nextActions,
         },
       });
+
+      if (Array.isArray(data?.explore)) {
+        writer.write({
+          type: 'data' as any,
+          data: {
+            type: 'widget_explore',
+            payload: {
+              results: data.explore,
+              title: '帮你找到这些局，点一个就能继续',
+            },
+          },
+        });
+      } else if (
+        data?.explore &&
+        typeof data.explore === 'object'
+      ) {
+        writer.write({
+          type: 'data' as any,
+          data: {
+            type: 'widget_explore',
+            payload: data.explore,
+          },
+        });
+      }
+
+      if (data?.draft && typeof data.draft === 'object') {
+        writer.write({
+          type: 'data' as any,
+          data: {
+            type: 'widget_draft',
+            payload: {
+              ...(typeof data.activityId === 'string' ? { activityId: data.activityId } : {}),
+              ...(data.draft as Record<string, unknown>),
+            },
+          },
+        });
+
+        if (typeof data.message === 'string' && data.message.trim()) {
+          writer.write({
+            type: 'data' as any,
+            data: {
+              type: 'widget_success',
+              payload: { message: data.message.trim() },
+            },
+          });
+        }
+      }
       
-      // 如果有导航指令，返回文本提示
-      const data = result.data as Record<string, unknown> | undefined;
-      if (data?.action === 'navigate') {
-        writer.write({ type: 'text-delta', delta: '正在跳转...', id: randomUUID() });
-      } else if (data?.action === 'share') {
-        writer.write({ type: 'text-delta', delta: '准备分享...', id: randomUUID() });
-      } else if (result.success) {
-        writer.write({ type: 'text-delta', delta: '操作成功！', id: randomUUID() });
+      if (actionMessage) {
+        writer.write({ type: 'text-delta', delta: actionMessage, id: randomUUID() });
       }
       
       if (trace) {
@@ -783,6 +955,231 @@ function createActionResponse(result: import('./user-action').ActionResult, trac
     },
   });
   return createUIMessageStreamResponse({ stream });
+}
+
+function getDraftActivityTypeLabel(type: string): string {
+  switch (type) {
+    case 'boardgame':
+      return '桌游';
+    case 'sports':
+      return '运动';
+    case 'food':
+      return '美食';
+    case 'entertainment':
+      return '娱乐';
+    default:
+      return '其他';
+  }
+}
+
+function buildDraftActionPayload(data: Record<string, unknown> | undefined): Record<string, unknown> | null {
+  const draft = data?.draft && typeof data.draft === 'object'
+    ? data.draft as Record<string, unknown>
+    : null;
+
+  if (!draft) {
+    return null;
+  }
+
+  const location = Array.isArray(draft.location) ? draft.location : [];
+  const lng = typeof location[0] === 'number'
+    ? location[0]
+    : typeof data?.lng === 'number'
+      ? data.lng
+      : 106.52988;
+  const lat = typeof location[1] === 'number'
+    ? location[1]
+    : typeof data?.lat === 'number'
+      ? data.lat
+      : 29.58567;
+  const draftType = typeof draft.type === 'string' && draft.type.trim() ? draft.type.trim() : 'other';
+  const locationName = typeof draft.locationName === 'string' && draft.locationName.trim()
+    ? draft.locationName.trim()
+    : '观音桥';
+
+  return {
+    ...(typeof data?.activityId === 'string' ? { activityId: data.activityId } : {}),
+    title: typeof draft.title === 'string' && draft.title.trim() ? draft.title.trim() : '活动草稿',
+    type: draftType,
+    activityType: getDraftActivityTypeLabel(draftType),
+    startAt: typeof draft.startAt === 'string' && draft.startAt.trim() ? draft.startAt.trim() : '',
+    locationName,
+    locationHint: typeof draft.locationHint === 'string' && draft.locationHint.trim()
+      ? draft.locationHint.trim()
+      : locationName + '附近',
+    maxParticipants: typeof draft.maxParticipants === 'number' ? draft.maxParticipants : 6,
+    currentParticipants: typeof draft.currentParticipants === 'number' ? draft.currentParticipants : 1,
+    lat,
+    lng,
+  };
+}
+
+function buildActionNextActions(
+  actionType: UserAction['action'] | undefined,
+  data: Record<string, unknown> | undefined
+): Array<{ label: string; action: string; params?: Record<string, unknown> }> {
+  const activityId = typeof data?.activityId === 'string' ? data.activityId : undefined;
+  const locationName = typeof data?.locationName === 'string' ? data.locationName : undefined;
+  const exploreType = typeof data?.type === 'string' ? data.type : undefined;
+  const explorePayload = data?.explore && typeof data.explore === 'object'
+    ? data.explore as Record<string, unknown>
+    : null;
+  const exploreCenter = explorePayload?.center && typeof explorePayload.center === 'object'
+    ? explorePayload.center as Record<string, unknown>
+    : null;
+  const exploreLocationName = typeof exploreCenter?.name === 'string'
+    ? exploreCenter.name
+    : locationName;
+  const exploreResults = Array.isArray(explorePayload?.results) ? explorePayload.results : [];
+  const exploreSemanticQuery = typeof explorePayload?.semanticQuery === 'string'
+    ? explorePayload.semanticQuery
+    : undefined;
+
+  switch (actionType) {
+    case 'join_activity': {
+      const items: Array<{ label: string; action: string; params?: Record<string, unknown> }> = [];
+      if (activityId) {
+        items.push({
+          label: '看看活动详情',
+          action: 'view_activity',
+          params: { activityId },
+        });
+      }
+      items.push({
+        label: '继续找附近的局',
+        action: 'explore_nearby',
+        params: {
+          ...(locationName ? { locationName } : {}),
+        },
+      });
+      return items;
+    }
+    case 'create_activity': {
+      const draftActionPayload = buildDraftActionPayload(data);
+      if (!draftActionPayload) {
+        return [];
+      }
+
+      return [
+        {
+          label: '确认发布',
+          action: 'confirm_publish',
+          params: draftActionPayload,
+        },
+        {
+          label: '改下地点',
+          action: 'edit_draft',
+          params: draftActionPayload,
+        },
+        {
+          label: '改下时间',
+          action: 'edit_draft',
+          params: draftActionPayload,
+        },
+        {
+          label: '改下人数设置',
+          action: 'edit_draft',
+          params: draftActionPayload,
+        },
+      ];
+    }
+    case 'publish_draft':
+    case 'confirm_publish': {
+      const items: Array<{ label: string; action: string; params?: Record<string, unknown> }> = [];
+      if (activityId) {
+        items.push({
+          label: '去分享这个局',
+          action: 'share_activity',
+          params: { activityId },
+        });
+      }
+      items.push({
+        label: '再看看附近活动',
+        action: 'explore_nearby',
+      });
+      return items;
+    }
+    case 'explore_nearby':
+      if (exploreResults.length === 0) {
+        const promptParts = [
+          exploreLocationName ? `附近还没有合适的局，我想在${exploreLocationName}发起一个新的线下活动。` : '附近还没有合适的局，我想自己发起一个新的线下活动。',
+          exploreSemanticQuery ? `需求参考：${exploreSemanticQuery}。` : '',
+          '先帮我判断要不要自己组，如果需要，再帮我整理成一个可发布的活动草稿。',
+        ];
+
+        return [
+          {
+            label: '那我自己组一个',
+            action: 'create_activity',
+            params: {
+              description: promptParts.filter((item) => item).join(''),
+              ...(exploreLocationName ? { locationName: exploreLocationName } : {}),
+              ...(exploreType ? { type: exploreType } : {}),
+            },
+          },
+          {
+            label: '帮我找同类搭子',
+            action: 'find_partner',
+            ...(exploreType ? { params: { type: exploreType } } : {}),
+          },
+          {
+            label: '换个关键词重搜',
+            action: 'quick_prompt',
+            params: { prompt: '换个类型再帮我找找' },
+          },
+        ];
+      }
+
+      return [
+        {
+          label: '帮我找同类搭子',
+          action: 'find_partner',
+          ...(exploreType ? { params: { type: exploreType } } : {}),
+        },
+        {
+          label: '换个关键词重搜',
+          action: 'quick_prompt',
+          params: { prompt: '换个类型再帮我找找' },
+        },
+      ];
+    case 'cancel_join':
+      return [
+        {
+          label: '重新找个局',
+          action: 'explore_nearby',
+        },
+      ];
+    case 'confirm_match': {
+      const items: Array<{ label: string; action: string; params?: Record<string, unknown> }> = [];
+      if (activityId) {
+        items.push({
+          label: '进入新局详情',
+          action: 'view_activity',
+          params: { activityId },
+        });
+      }
+      items.push({
+        label: '去群里招呼大家',
+        action: 'quick_prompt',
+        params: { prompt: '我已经确认匹配了，帮我写一句开场招呼' },
+      });
+      return items;
+    }
+    case 'cancel_match':
+      return [
+        {
+          label: '继续找搭子',
+          action: 'find_partner',
+        },
+        {
+          label: '改一下我的偏好',
+          action: 'quick_prompt',
+          params: { prompt: '我想调整找搭子的偏好' },
+        },
+      ];
+    default:
+      return [];
+  }
 }
 
 function handleChitchat(trace: boolean | undefined, _intent: ClassifyResult): Response {
@@ -816,75 +1213,150 @@ async function handlePartnerMatchingFlow(
   userMessage: string,
   _intentResult: ClassifyResult
 ): Promise<Response> {
-  const { userId, trace } = request;
+  const { userId, trace, location } = request;
+  const userLocation = location ? { lat: location[1], lng: location[0] } : null;
 
-  // 创建或恢复状态
-  let state = existingState || createPartnerMatchingState();
+  let state = existingState || createPartnerMatchingState(userMessage);
 
-  // 如果有现有状态，尝试解析用户回答
   if (existingState) {
     const currentQuestion = getNextQuestion(existingState);
     const answer = parseUserAnswer(userMessage, currentQuestion);
 
     if (answer) {
-      state = updatePartnerMatchingState(state, answer.field, answer.value);
+      state = updatePartnerMatchingState(state, answer);
+      const messageHints = inferPartnerMessageHints(userMessage);
+      if (messageHints.location || (messageHints.tags && messageHints.tags.length > 0)) {
+        state = {
+          ...state,
+          collectedPreferences: {
+            ...state.collectedPreferences,
+            ...(messageHints.location && !state.collectedPreferences.location
+              ? { location: messageHints.location }
+              : {}),
+            ...(messageHints.tags && messageHints.tags.length > 0
+              ? { tags: Array.from(new Set([...(state.collectedPreferences.tags || []), ...messageHints.tags])) }
+              : {}),
+          },
+        };
+      }
       logger.debug('Partner matching state updated', { field: answer.field, value: answer.value });
     }
   }
 
-  // 获取下一个问题
   const nextQuestion = getNextQuestion(state);
 
-  // 如果没有更多问题，信息收集完成
   if (!nextQuestion) {
-    // 持久化完成状态
+    const completedState: PartnerMatchingState = {
+      ...state,
+      status: 'completed',
+      updatedAt: new Date(),
+    };
+
+    const fallbackLocationHint = completedState.collectedPreferences.location?.trim()
+      || (userLocation ? await reverseGeocode(userLocation.lat, userLocation.lng) : '附近');
+    const partnerIntentParams = buildPartnerIntentPayload(completedState, fallbackLocationHint);
+    const partnerResult = await createPartnerIntent(userId, userLocation, partnerIntentParams);
+
+    logger.info('Partner workflow completed', {
+      userId,
+      activityType: partnerIntentParams.activityType,
+      matchFound: partnerResult.success ? partnerResult.matchFound : false,
+      success: partnerResult.success,
+    });
+
     if (userId) {
-      await persistPartnerMatchingState(threadId, userId, { ...state, status: 'completed' });
+      await persistPartnerMatchingState(threadId, userId, completedState);
     }
 
-    // 返回确认消息，让 LLM 调用 createPartnerIntent
-    const confirmText = `📋 需求确认：
-- 🎯 活动类型：${state.collectedPreferences.activityType || '待定'}
-- ⏰ 时间：${state.collectedPreferences.timeRange || '待定'}
-${state.collectedPreferences.location ? `- 📍 地点：${state.collectedPreferences.location}` : ''}
+    const summaryLines = [
+      '📋 需求确认：',
+      `- 🎯 活动类型：${getPartnerActivityTypeLabel(partnerIntentParams.activityType)}`,
+      `- ⏰ 时间：${partnerIntentParams.timePreference || getPartnerTimeLabel(completedState.collectedPreferences.timeRange)}`,
+      `- 📍 地点：${partnerIntentParams.locationHint}`,
+    ];
 
-正在帮你寻找匹配的搭子... 有消息第一时间叫你 🔔`;
+    const statusText = partnerResult.success
+      ? partnerResult.matchFound
+        ? '🎉 已经给你拉到一组待确认搭子，等临时召集人点头就能成局。'
+        : '已帮你进入匹配池，有合适的人我会第一时间叫你。'
+      : partnerResult.error;
+
+    const confirmText = `${summaryLines.join('\n')}\n\n${statusText}`;
+    const traceToolCalls = [{ name: 'createPartnerIntent', input: partnerIntentParams, output: partnerResult }];
+
+    const exploreParams: Record<string, unknown> = {
+      locationName: partnerIntentParams.locationHint,
+      type: partnerIntentParams.activityType,
+    };
+
+    const widgetOptions = partnerResult.success
+      ? [
+          {
+            label: '看看附近同类局',
+            value: 'explore_similar',
+            action: 'explore_nearby',
+            params: exploreParams,
+          },
+          partnerResult.matchFound
+            ? {
+                label: '看看我的搭子进展',
+                value: 'review_partner_status',
+                action: 'quick_prompt',
+                params: { prompt: '看看我的搭子进度' },
+              }
+            : {
+                label: '继续补充偏好',
+                value: 'refine_preference',
+                action: 'quick_prompt',
+                params: { prompt: '我想再补充一下偏好' },
+              },
+        ]
+      : [];
+
+    const widgetQuestion = partnerResult.success && partnerResult.matchFound
+      ? '匹配进度 2/2：已经帮你凑到一组人，接下来你想做什么？'
+      : '匹配进度 2/2：已进入匹配池，接下来你想做什么？';
 
     const stream = createUIMessageStream({
       execute: ({ writer }) => {
         writer.write({ type: 'text-delta', delta: confirmText, id: randomUUID() });
-        // 返回 Widget 数据让前端显示
-        writer.write({
-          type: 'data' as any,
-          data: {
-            type: 'widget_ask_preference',
-            payload: {
-              status: 'completed',
-              preferences: state.collectedPreferences,
+
+        if (widgetOptions.length > 0) {
+          writer.write({
+            type: 'data' as any,
+            data: {
+              type: 'widget_ask_preference',
+              payload: {
+                status: 'completed',
+                preferences: completedState.collectedPreferences,
+                questionType: 'result',
+                question: widgetQuestion,
+                options: widgetOptions,
+              },
             },
-          },
-        });
+          });
+        }
+
         if (trace) {
           const now = new Date().toISOString();
           writer.write({ type: 'data-trace-start' as any, data: { requestId: randomUUID(), startedAt: now, intent: 'partner', intentMethod: 'partner_matching' }, transient: true });
-          writer.write({ type: 'data-trace-end' as any, data: { completedAt: now, status: 'completed', output: { text: confirmText, toolCalls: [] } }, transient: true });
+          writer.write({ type: 'data-trace-end' as any, data: { completedAt: now, status: 'completed', output: { text: confirmText, toolCalls: traceToolCalls } }, transient: true });
         }
       },
     });
     return createUIMessageStreamResponse({ stream });
   }
 
-  // 持久化当前状态
   if (userId) {
     await persistPartnerMatchingState(threadId, userId, state);
   }
 
-  // 返回追问
-  const questionText = nextQuestion.question;
+  const requiredTotal = 2;
+  const requiredCollected = requiredTotal - state.missingRequired.length;
+  const questionText = `匹配进度 ${requiredCollected}/${requiredTotal}：${nextQuestion.question}`;
   const stream = createUIMessageStream({
     execute: ({ writer }) => {
       writer.write({ type: 'text-delta', delta: questionText, id: randomUUID() });
-      // 返回 Widget 数据让前端渲染选项按钮
       writer.write({
         type: 'data' as any,
         data: {
@@ -1759,7 +2231,7 @@ function resolveWelcomePeriod(hour: number): WelcomeGreetingPeriod {
 function renderTemplate(template: string, vars: Record<string, string>): string {
   let output = template;
   for (const [key, value] of Object.entries(vars)) {
-    output = output.replaceAll(`{${key}}`, value);
+    output = output.split(`{${key}}`).join(value);
   }
   return output;
 }

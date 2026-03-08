@@ -58,13 +58,15 @@
             data-id="{{item.id}}"
             data-type="{{item.type}}"
             data-activity-id="{{item.activityId}}"
-            data-participant-id="{{item.participantId}}"
+            data-source="{{item.source}}"
+            data-match-id="{{item.matchId}}"
+            data-is-temp-organizer="{{item.isTempOrganizer}}"
             bind:tap="onNotificationTap"
           >
             <!-- 图标 -->
             <view class="notification-icon notification-icon--{{item.type}}">
               <t-icon
-                name="{{item.type === 'join_request' ? 'user-add' : item.type === 'no_show' ? 'error-circle' : 'notification'}}"
+                name="{{item.type === 'join' || item.type === 'new_participant' || item.type === 'match_pending' ? 'user-add' : item.type === 'completed' ? 'check-circle' : item.type === 'cancelled' ? 'close-circle' : item.type === 'post_activity' ? 'chat' : item.type === 'activity_start' || item.type === 'activity_reminder' ? 'time' : item.type === 'quit' ? 'error-circle' : 'notification'}}"
                 size="40rpx"
               />
             </view>
@@ -76,15 +78,33 @@
             </view>
             <!-- 操作 -->
             <view
-              wx:if="{{item.type === 'no_show' && item.canDispute}}"
-              class="notification-action"
-              data-activity-id="{{item.activityId}}"
-              data-participant-id="{{item.participantId}}"
-              catch:tap="onDisputeTap"
+              wx:if="{{item.type === 'match_pending' && item.isTempOrganizer}}"
+              class="notification-action-group"
             >
-              <t-button size="extra-small" theme="primary" variant="outline">
-                我到场了
+              <t-button
+                size="small"
+                theme="primary"
+                loading="{{pendingMatchActionId === item.matchId}}"
+                data-match-id="{{item.matchId}}"
+                catch:tap="onMatchConfirmTap"
+              >
+                确认成局
               </t-button>
+              <t-button
+                size="small"
+                variant="outline"
+                loading="{{pendingMatchActionId === item.matchId}}"
+                data-match-id="{{item.matchId}}"
+                catch:tap="onMatchCancelTap"
+              >
+                暂不成局
+              </t-button>
+            </view>
+            <view wx:elif="{{item.type === 'post_activity'}}" class="notification-tag">
+              复盘 / 再约
+            </view>
+            <view wx:elif="{{item.type === 'match_pending' && !item.isTempOrganizer}}" class="notification-tag">
+              等召集人确认
             </view>
             <view wx:else class="notification-arrow">
               <t-icon name="chevron-right" size="36rpx" color="#9CA3AF" />
@@ -156,4 +176,136 @@
       </view>
     </view>
   </scroll-view>
+  <t-popup
+    visible="{{showMatchDetail}}"
+    placement="bottom"
+    bind:visible-change="onMatchDetailVisibleChange"
+  >
+    <view class="match-detail-sheet" catchtouchmove="noop">
+      <view class="match-detail-sheet__header">
+        <view>
+          <text class="match-detail-sheet__title">{{selectedMatchDetail ? '待确认搭子详情' : '搭子详情'}}</text>
+          <text class="match-detail-sheet__subtitle">把当前状态、下一步和破冰建议讲清楚</text>
+        </view>
+        <view class="match-detail-sheet__close" bind:tap="closeMatchDetail">
+          <t-icon name="close" size="36rpx" color="#9CA3AF" />
+        </view>
+      </view>
+
+      <view wx:if="{{matchDetailLoading}}" class="match-detail-sheet__loading">
+        <t-loading theme="circular" size="48rpx" text="正在整理匹配详情..." />
+      </view>
+
+      <view wx:elif="{{matchDetailError}}" class="match-detail-sheet__empty">
+        <text class="match-detail-sheet__empty-title">详情暂时没拉下来</text>
+        <text class="match-detail-sheet__empty-desc">{{matchDetailError}}</text>
+        <t-button size="small" theme="primary" bind:tap="closeMatchDetail">知道了</t-button>
+      </view>
+
+      <scroll-view wx:elif="{{selectedMatchDetail}}" class="match-detail-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+        <view class="match-detail-card">
+          <view class="match-detail-card__header">
+            <view>
+              <text class="match-detail-card__title">{{selectedMatchDetail.typeName}} 搭子</text>
+              <text class="match-detail-card__desc">匹配度 {{selectedMatchDetail.matchScore}}%</text>
+            </view>
+            <view class="match-detail-badge {{selectedMatchDetail.isTempOrganizer ? 'match-detail-badge--primary' : ''}}">
+              <text>{{selectedMatchDetail.isTempOrganizer ? '现在你来拍板' : '等召集人确认'}}</text>
+            </view>
+          </view>
+
+          <view class="match-detail-meta">
+            <view class="match-detail-pill">
+              <t-icon name="location" size="28rpx" color="#5B75FB" />
+              <text>{{selectedMatchDetail.locationHint}}</text>
+            </view>
+            <view class="match-detail-pill">
+              <t-icon name="time" size="28rpx" color="#F59E0B" />
+              <text>{{selectedMatchDetail.confirmDeadlineText}} 前确认</text>
+            </view>
+            <view class="match-detail-pill">
+              <t-icon name="user" size="28rpx" color="#10B981" />
+              <text>召集人：{{selectedMatchDetail.organizerDisplayName}}</text>
+            </view>
+          </view>
+
+          <view wx:if="{{selectedMatchDetail.commonTags.length > 0}}" class="match-detail-tags">
+            <view wx:for="{{selectedMatchDetail.commonTags}}" wx:key="*this" class="match-detail-tag">
+              <text>{{item}}</text>
+            </view>
+          </view>
+        </view>
+
+        <view class="match-detail-section">
+          <text class="match-detail-section__title">现在是什么状态</text>
+          <text class="match-detail-section__text">{{selectedMatchDetail.nextActionText}}</text>
+        </view>
+
+        <view wx:if="{{selectedMatchDetail.icebreaker}}" class="match-detail-section">
+          <view class="match-detail-section__head">
+            <text class="match-detail-section__title">系统破冰建议</text>
+            <text class="match-detail-section__time">{{selectedMatchDetail.icebreaker.createdAtText}}</text>
+          </view>
+          <view class="match-detail-icebreaker">
+            <text>{{selectedMatchDetail.icebreaker.content}}</text>
+          </view>
+        </view>
+
+        <view class="match-detail-section">
+          <text class="match-detail-section__title">匹配成员</text>
+          <view class="match-detail-members">
+            <view wx:for="{{selectedMatchDetail.members}}" wx:key="userId" class="match-detail-member">
+              <view class="match-detail-member__header">
+                <view class="match-detail-member__identity">
+                  <image wx:if="{{item.avatarUrl}}" src="{{item.avatarUrl}}" mode="aspectFill" class="match-detail-member__avatar" />
+                  <view wx:else class="match-detail-member__avatar match-detail-member__avatar--placeholder">
+                    <text>{{item.nicknameInitial}}</text>
+                  </view>
+                  <view>
+                    <view class="match-detail-member__name-row">
+                      <text class="match-detail-member__name">{{item.nickname}}</text>
+                      <view wx:if="{{item.isTempOrganizer}}" class="match-detail-member__badge">
+                        <text>召集人</text>
+                      </view>
+                    </view>
+                    <text class="match-detail-member__meta">{{item.locationHint}} · {{item.timePreference}}</text>
+                  </view>
+                </view>
+              </view>
+              <text class="match-detail-member__summary">{{item.intentSummary}}</text>
+              <view wx:if="{{item.tags.length > 0}}" class="match-detail-member__tags">
+                <view wx:for="{{item.tags}}" wx:key="*this" class="match-detail-member__tag">
+                  <text>{{item}}</text>
+                </view>
+              </view>
+            </view>
+          </view>
+        </view>
+
+        <view class="match-detail-actions">
+          <t-button
+            wx:if="{{selectedMatchDetail.isTempOrganizer}}"
+            theme="primary"
+            loading="{{pendingMatchActionId === selectedMatchDetail.id}}"
+            data-match-id="{{selectedMatchDetail.id}}"
+            catch:tap="onMatchConfirmTap"
+          >
+            确认成局
+          </t-button>
+          <t-button
+            wx:if="{{selectedMatchDetail.isTempOrganizer}}"
+            variant="outline"
+            loading="{{pendingMatchActionId === selectedMatchDetail.id}}"
+            data-match-id="{{selectedMatchDetail.id}}"
+            catch:tap="onMatchCancelTap"
+          >
+            暂不成局
+          </t-button>
+          <t-button wx:if="{{!selectedMatchDetail.isTempOrganizer}}" variant="outline" bind:tap="closeMatchDetail">
+            我知道了
+          </t-button>
+        </view>
+      </scroll-view>
+    </view>
+  </t-popup>
 </view>

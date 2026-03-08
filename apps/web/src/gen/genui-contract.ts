@@ -22,6 +22,8 @@ export interface GenUIRequestContext {
   locale?: string;
   timezone?: string;
   platformVersion?: string;
+  lat?: number;
+  lng?: number;
 }
 
 export interface GenUITextInput {

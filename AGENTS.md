@@ -41,7 +41,9 @@ inclusion: always
 错误：前端需要字段 → 反向修改 DB Schema ❌
 ```
 
-**新增字段流程**：PRD → TAD → DB Schema → `bun run db:generate` → `bun run db:migrate` → API → 前端
+**新增字段流程**：PRD → TAD → DB Schema → `bun run db:push` → API → 前端
+
+> 需要保留迁移历史时，再补 `bun run db:generate` / `bun run db:migrate`；日常本地联调默认以 `db:push` 同步 Schema。
 
 ---
 
@@ -49,7 +51,7 @@ inclusion: always
 
 ### @juchang/db (数据源)
 - **Tech**: Drizzle ORM (PostgreSQL + PostGIS + pgvector) + `drizzle-typebox`
-- **13 张核心表**: users, activities, participants, conversations, conversation_messages, activity_messages, notifications, partner_intents, intent_matches, match_messages, ai_requests, ai_tool_calls, ai_eval_samples
+- **21 张表**：13 张核心业务表 + 8 张运营/安全/配置支撑表（以 `packages/db/src/schema` 为准）
 - **Schema 规范**:
   ```typescript
   export const users = pgTable("users", { ... });
@@ -60,7 +62,7 @@ inclusion: always
 
 ### apps/api (业务网关)
 - **Tech**: ElysiaJS + TypeBox
-- **15 个模块**: auth, users, activities, chat, ai, participants, notifications, reports, content-security, feedbacks, transactions, upload, wechat, ...
+- **15 个模块**：auth, users, activities, participants, chat, ai, hot-keywords, dashboard, analytics, content, growth, notifications, reports, content-security, wechat
 - **AI 模块结构 (v4.6)**:
   - `ai.service.ts` - 核心入口
   - `processors/` - Processor 纯函数 (input-guard, user-profile, semantic-recall, token-limit, save-history, extract-preferences)
@@ -124,6 +126,13 @@ myProcessor.processorName = 'my-processor';
 - **禁止**: `wx.request` (使用 Orval SDK)
 
 ---
+
+## 🔁 当前主流程规则 (v5.3)
+
+- **Visitor-First + Action-Gated Auth**：浏览、欢迎卡、附近探索可先体验；报名、发布、找搭子确认等写入动作统一先登录 + 绑定手机号
+- **`/ai/chat` 统一协议**：请求体固定为 `conversationId? + input + context + stream?`，禁止继续使用旧 `messages[]` / `scene` 风格请求
+- **报名成功统一链路**：活动详情、半屏详情、地图探索、AI 推荐卡报名成功后，统一走 `join_success -> discussion -> quick starters`
+- **真实结果驱动 Memory**：`join` 只算轻信号；强反馈来自 `confirm-fulfillment`、`rebook-follow-up` 等真实社交结果
 
 ## 🚫 Schema 派生规则
 
@@ -189,7 +198,8 @@ export function myTool(userId: string | null) {
 ```bash
 bun install          # 安装依赖
 bun run dev          # 启动服务
-bun run db:migrate   # 执行迁移
+bun run db:push      # 同步 Schema 到数据库
+bun run db:migrate   # 需要保留迁移历史时执行
 bun run gen:api      # 生成 Orval SDK
 bunx <package>       # 执行包命令
 ```

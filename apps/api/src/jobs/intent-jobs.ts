@@ -6,8 +6,9 @@
  * 2. 过期匹配处理 - 每 10 分钟检查过期匹配，尝试重新分配或标记过期
  */
 
-import { db, partnerIntents, intentMatches, eq, and, lt, not, sql } from '@juchang/db';
+import { db, partnerIntents, intentMatches, eq, and, lt, not, inArray } from '@juchang/db';
 import { jobLogger } from '../lib/logger';
+import { notifyTempOrganizerReassigned } from '../modules/notifications/notification.service';
 
 /**
  * 过期意向处理
@@ -47,6 +48,8 @@ export async function handleExpiredMatches(): Promise<void> {
       tempOrganizerId: intentMatches.tempOrganizerId,
       intentIds: intentMatches.intentIds,
       userIds: intentMatches.userIds,
+      activityType: intentMatches.activityType,
+      centerLocationHint: intentMatches.centerLocationHint,
     })
     .from(intentMatches)
     .where(and(
@@ -63,7 +66,9 @@ export async function handleExpiredMatches(): Promise<void> {
       match.id, 
       match.tempOrganizerId,
       match.intentIds,
-      match.userIds
+      match.userIds,
+      match.activityType,
+      match.centerLocationHint,
     );
     
     if (reassigned) {
@@ -93,7 +98,9 @@ async function reassignTempOrganizer(
   matchId: string, 
   currentOrganizerId: string,
   intentIds: string[],
-  _userIds: string[]
+  _userIds: string[],
+  activityType: string,
+  centerLocationHint: string,
 ): Promise<boolean> {
   // 查找其他成员的意向（排除当前 Temp_Organizer）
   const otherIntents = await db
@@ -104,7 +111,7 @@ async function reassignTempOrganizer(
     })
     .from(partnerIntents)
     .where(and(
-      sql`${partnerIntents.id} = ANY(${intentIds})`,
+      inArray(partnerIntents.id, intentIds),
       not(eq(partnerIntents.userId, currentOrganizerId)),
       eq(partnerIntents.status, 'active') // 只选择意向还活跃的成员
     ))
@@ -133,7 +140,12 @@ async function reassignTempOrganizer(
     })
     .where(eq(intentMatches.id, matchId));
   
-  // TODO: 发送通知给新的 Temp_Organizer
+  notifyTempOrganizerReassigned(newOrganizer.userId, activityType, centerLocationHint).catch((err) => {
+    console.error('Temp_Organizer 重分配通知发送失败', {
+      matchId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  });
   
   return true;
 }
@@ -153,7 +165,7 @@ async function restoreIntentsFromExpiredMatch(intentIds: string[]): Promise<void
       status: partnerIntents.status,
     })
     .from(partnerIntents)
-    .where(sql`${partnerIntents.id} = ANY(${intentIds})`);
+    .where(inArray(partnerIntents.id, intentIds));
   
   // 恢复还没过期且不是 cancelled 的意向
   const toRestore = intents
@@ -167,6 +179,6 @@ async function restoreIntentsFromExpiredMatch(intentIds: string[]): Promise<void
         status: 'active',
         updatedAt: now,
       })
-      .where(sql`${partnerIntents.id} = ANY(${toRestore})`);
+      .where(inArray(partnerIntents.id, toRestore));
   }
 }

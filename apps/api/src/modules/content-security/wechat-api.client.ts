@@ -57,6 +57,13 @@ export interface ContentCheckResult {
 
 let cachedToken: string | null = null;
 let tokenExpiresAt: number = 0;
+let hasWarnedMissingCredentials = false;
+
+function isMockModeEnabled(): boolean {
+  const flag = process.env.WECHAT_MSG_SEC_CHECK_MOCK ?? process.env.WECHAT_CONTENT_SECURITY_MOCK;
+  if (!flag) return false;
+  return ['1', 'true', 'yes', 'on'].includes(flag.toLowerCase());
+}
 
 /**
  * 获取微信 Access Token（带缓存）
@@ -115,19 +122,25 @@ export async function msgSecCheck(
   openid: string,
   scene: 1 | 2 | 3 | 4 = 4
 ): Promise<ContentCheckResult> {
-  // 开发环境 Mock
-  const isDev = process.env.NODE_ENV === 'development';
-  if (isDev) {
-    console.warn('[WeChatAPI] 开发环境：跳过微信内容检测');
-    // 模拟：包含特定词时返回 risky
-    const mockRiskyWords = ['test_violation', '违规测试'];
-    const isRisky = mockRiskyWords.some(w => content.includes(w));
-    
+  // 仅在显式开启时才走 Mock，避免默认假数据掩盖真实问题。
+  if (isMockModeEnabled()) {
+    console.warn('[WeChatAPI] WECHAT_MSG_SEC_CHECK_MOCK 已启用，内容审核按通过处理');
     return {
-      pass: !isRisky,
-      suggest: isRisky ? 'risky' : 'pass',
-      label: isRisky ? 20001 : 100,
-      keyword: isRisky ? mockRiskyWords.find(w => content.includes(w)) : undefined,
+      pass: true,
+      suggest: 'pass',
+      label: 100,
+    };
+  }
+
+  const hasWechatCredentials = Boolean(process.env.WECHAT_APP_ID && process.env.WECHAT_APP_SECRET);
+  if (!hasWechatCredentials) {
+    if (!hasWarnedMissingCredentials) {
+      console.warn('[WeChatAPI] 缺少 WECHAT_APP_ID / WECHAT_APP_SECRET，内容审核接口降级为放行');
+      hasWarnedMissingCredentials = true;
+    }
+    return {
+      pass: true,
+      suggest: 'pass',
     };
   }
   

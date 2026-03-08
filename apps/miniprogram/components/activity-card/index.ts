@@ -9,12 +9,9 @@ interface Activity {
   title?: string;
   latitude?: number;
   longitude?: number;
-  isBoosted?: boolean;
-  isPinPlus?: boolean;
   locationHint?: string;
   activityType?: string;
   startAt?: string;
-  feeType?: string;
   status?: string;
 }
 
@@ -29,15 +26,11 @@ interface ActivityDetail {
   locationHint?: string;
   maxParticipants?: number;
   currentParticipants?: number;
-  feeType?: string;
-  estimatedCost?: number;
   type?: string;
   creator?: {
     id: string;
     nickname?: string;
     avatarUrl?: string;
-    participationCount?: number;
-    fulfillmentCount?: number;
   };
 }
 
@@ -53,19 +46,11 @@ interface ComponentProperties {
   showDistance: boolean;
 }
 
-const FEE_TYPE_MAP: Record<string, string> = {
-  free: '免费',
-  aa: 'AA制',
-  fixed: '固定费用',
-  treat: '请客',
-};
-
 const ACTIVITY_TYPE_MAP: Record<string, string> = {
   food: '美食',
   entertainment: '娱乐',
   sports: '运动',
-  study: '学习',
-  travel: '旅行',
+  boardgame: '桌游',
   other: '其他',
 };
 
@@ -145,8 +130,7 @@ Component({
       });
     },
 
-    onCreatorTap(e: WechatMiniprogram.TouchEvent) {
-      // 阻止事件冒泡
+    onCreatorTap() {
       const { activityDetail } = this.data;
       if (activityDetail?.creator) {
         this.triggerEvent('creatortap', {
@@ -174,23 +158,6 @@ Component({
       const month = date.getMonth() + 1;
       const day = date.getDate();
       return `${month}月${day}日 ${timeStr}`;
-    },
-
-    calculateReliability(creator: ActivityDetail['creator']): number {
-      if (!creator || !creator.participationCount) return -1;
-      return Math.round(((creator.fulfillmentCount || 0) / creator.participationCount) * 100);
-    },
-
-    getReliabilityLabel(rate: number): string {
-      if (rate === -1) return '🆕 新用户';
-      if (rate === 100) return '⭐⭐⭐ 非常靠谱';
-      if (rate >= 80) return '⭐⭐ 靠谱';
-      if (rate >= 60) return '⭐ 一般';
-      return '待提升';
-    },
-
-    getFeeTypeText(feeType: string): string {
-      return FEE_TYPE_MAP[feeType] || feeType;
     },
 
     getActivityTypeText(type: string): string {

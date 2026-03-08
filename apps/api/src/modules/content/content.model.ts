@@ -2,7 +2,6 @@
 // 从 Growth/content 迁移内容库管理能力
 
 import { Elysia, t, type Static } from 'elysia';
-import { selectContentNoteSchema } from '@juchang/db';
 
 /**
  * Content Model Plugin
@@ -12,15 +11,6 @@ import { selectContentNoteSchema } from '@juchang/db';
 // ==========================================
 // 内容库 Schema (从 Growth/content 迁移)
 // ==========================================
-
-// 内容笔记基础（从 DB 派生）
-const ContentNoteBase = t.Composite([
-  t.Pick(selectContentNoteSchema, [
-    'id', 'topic', 'contentType', 'title', 'body', 'hashtags',
-    'coverImageHint', 'views', 'likes', 'collects', 'comments', 'newFollowers',
-    'batchId', 'createdAt', 'updatedAt',
-  ]),
-]);
 
 // 内容笔记响应
 const ContentNoteResponse = t.Object({

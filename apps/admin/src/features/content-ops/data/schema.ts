@@ -1,10 +1,9 @@
 // 内容运营 - 前端类型定义
 
 export const CONTENT_TYPE_OPTIONS = [
-  { value: 'activity_recruit', label: '活动招募' },
-  { value: 'buddy_story', label: '搭子故事' },
-  { value: 'local_guide', label: '本地攻略' },
-  { value: 'product_seed', label: '产品种草' },
+  { value: 'xiaohongshu', label: '小红书' },
+  { value: 'weibo', label: '微博' },
+  { value: 'zhihu', label: '知乎' },
 ] as const
 
 export type ContentType = (typeof CONTENT_TYPE_OPTIONS)[number]['value']

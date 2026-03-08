@@ -8,7 +8,7 @@
  */
 
 import { db, users, eq } from '@juchang/db';
-import type { UserProfile } from './types';
+import type { ActivityOutcome, UserProfile } from './types';
 import type { PreferenceExtraction, PreferenceCategory, PreferenceSentiment } from './extractor';
 import { calculatePreferenceScore } from './temporal-decay';
 
@@ -35,6 +35,7 @@ export interface EnhancedUserProfile {
   preferences: EnhancedPreference[];
   frequentLocations: string[];
   lastUpdated: Date;
+  activityOutcomes?: ActivityOutcome[];
 }
 
 /**
@@ -53,6 +54,17 @@ interface StoredEnhancedProfile {
   }>;
   frequentLocations: string[];
   lastUpdated: string;
+  activityOutcomes?: Array<{
+    activityId: string;
+    activityTitle: string;
+    activityType: string;
+    locationName: string;
+    attended: boolean | null;
+    rebookTriggered: boolean;
+    reviewSummary?: string | null;
+    happenedAt: string;
+    updatedAt: string;
+  }>;
 }
 
 /**
@@ -73,6 +85,7 @@ export const EMPTY_ENHANCED_PROFILE: EnhancedUserProfile = {
   preferences: [],
   frequentLocations: [],
   lastUpdated: new Date(),
+  activityOutcomes: [],
 };
 
 /**
@@ -354,6 +367,11 @@ export function parseEnhancedProfile(content: string | null): EnhancedUserProfil
       })),
       frequentLocations: stored.frequentLocations,
       lastUpdated: new Date(stored.lastUpdated),
+      activityOutcomes: stored.activityOutcomes?.map((outcome) => ({
+        ...outcome,
+        happenedAt: new Date(outcome.happenedAt),
+        updatedAt: new Date(outcome.updatedAt),
+      })) || [],
     };
   } catch {
     // 解析失败，尝试作为 Markdown 解析
@@ -373,6 +391,11 @@ export function serializeEnhancedProfile(profile: EnhancedUserProfile): string {
     })),
     frequentLocations: profile.frequentLocations,
     lastUpdated: profile.lastUpdated.toISOString(),
+    activityOutcomes: profile.activityOutcomes?.map((outcome) => ({
+      ...outcome,
+      happenedAt: outcome.happenedAt.toISOString(),
+      updatedAt: outcome.updatedAt.toISOString(),
+    })),
   };
   return JSON.stringify(stored);
 }
@@ -413,6 +436,7 @@ export function convertToEnhancedProfile(oldProfile: UserProfile): EnhancedUserP
     preferences,
     frequentLocations: oldProfile.frequentLocations,
     lastUpdated: now,
+    activityOutcomes: [],
   };
 }
 
@@ -495,7 +519,12 @@ export function extractionToEnhancedPreferences(
  * 排除综合分数为 0（超过 90 天）的偏好。
  */
 export function buildProfilePrompt(profile: EnhancedUserProfile): string {
-  if (profile.preferences.length === 0 && profile.frequentLocations.length === 0) {
+  const recentOutcomes = (profile.activityOutcomes || [])
+    .slice()
+    .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())
+    .slice(0, 3);
+
+  if (profile.preferences.length === 0 && profile.frequentLocations.length === 0 && recentOutcomes.length === 0) {
     return '';
   }
 
@@ -545,6 +574,17 @@ export function buildProfilePrompt(profile: EnhancedUserProfile): string {
     lines.push(`- ${profile.frequentLocations.slice(0, 3).join('、')}`);
     lines.push('');
   }
+
+  if (recentOutcomes.length > 0) {
+    lines.push('## 最近真实社交结果');
+    for (const outcome of recentOutcomes) {
+      const attendedText = outcome.attended === true ? '真实到场' : outcome.attended === false ? '未到场' : '到场待确认';
+      const rebookText = outcome.rebookTriggered ? '已主动再约' : '暂未再约';
+      const summaryText = outcome.reviewSummary?.trim() ? `，${outcome.reviewSummary.trim()}` : '';
+      lines.push(`- ${outcome.activityTitle}（${outcome.activityType} · ${outcome.locationName}）：${attendedText}，${rebookText}${summaryText}`);
+    }
+    lines.push('');
+  }
   
   lines.push('</user_profile>');
   lines.push('');
@@ -552,6 +592,7 @@ export function buildProfilePrompt(profile: EnhancedUserProfile): string {
   lines.push('- 如果用户有饮食禁忌（如不吃辣），推荐餐厅时要特别提醒');
   lines.push('- 如果用户有常去地点，优先推荐该区域的活动');
   lines.push('- 根据用户喜好推荐相关类型的活动');
+  lines.push('- 遇到复盘、再约或活动推荐时，优先参考最近真实社交结果，而不是只看聊天表述');
   
   return lines.join('\n');
 }
@@ -631,6 +672,7 @@ export async function updateEnhancedUserProfile(
     preferences: mergeEnhancedPreferences(existing.preferences, newPrefs),
     frequentLocations: mergeArrayUnique(existing.frequentLocations, extraction.frequentLocations).slice(0, 5),
     lastUpdated: new Date(),
+    activityOutcomes: existing.activityOutcomes || [],
   };
   
   await saveEnhancedUserProfile(userId, merged);
@@ -718,6 +760,85 @@ export async function clearInterestVectors(userId: string): Promise<void> {
   });
 }
 
+export interface ActivityOutcomeMemoryInput {
+  activityId: string;
+  activityTitle: string;
+  activityType: string;
+  locationName: string;
+  attended: boolean | null;
+  rebookTriggered?: boolean;
+  reviewSummary?: string | null;
+  happenedAt: Date;
+  updatedAt?: Date;
+}
+
+function mergeActivityOutcome(
+  existing: ActivityOutcome | undefined,
+  input: ActivityOutcomeMemoryInput,
+): ActivityOutcome {
+  return {
+    activityId: input.activityId,
+    activityTitle: input.activityTitle || existing?.activityTitle || '',
+    activityType: input.activityType || existing?.activityType || 'other',
+    locationName: input.locationName || existing?.locationName || '',
+    attended: input.attended ?? existing?.attended ?? null,
+    rebookTriggered: input.rebookTriggered ?? existing?.rebookTriggered ?? false,
+    reviewSummary: input.reviewSummary ?? existing?.reviewSummary ?? null,
+    happenedAt: input.happenedAt || existing?.happenedAt || new Date(),
+    updatedAt: input.updatedAt || new Date(),
+  };
+}
+
+function sortActivityOutcomes(outcomes: ActivityOutcome[]): ActivityOutcome[] {
+  return outcomes
+    .slice()
+    .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())
+    .slice(0, 10);
+}
+
+export async function upsertActivityOutcomeMemory(
+  userId: string,
+  input: ActivityOutcomeMemoryInput,
+): Promise<void> {
+  const profile = await getEnhancedUserProfileWithVectors(userId);
+  const existingOutcomes = profile.activityOutcomes || [];
+  const existing = existingOutcomes.find((item) => item.activityId === input.activityId);
+  const merged = mergeActivityOutcome(existing, input);
+  const nextOutcomes = sortActivityOutcomes([
+    merged,
+    ...existingOutcomes.filter((item) => item.activityId !== input.activityId),
+  ]);
+
+  await saveEnhancedUserProfileWithVectors(userId, {
+    ...profile,
+    activityOutcomes: nextOutcomes,
+    lastUpdated: new Date(),
+  });
+}
+
+export async function markActivityOutcomeRebookTriggered(
+  userId: string,
+  input: Omit<ActivityOutcomeMemoryInput, 'rebookTriggered' | 'attended'> & {
+    attended?: boolean | null;
+    reviewSummary?: string | null;
+  },
+): Promise<void> {
+  const profile = await getEnhancedUserProfileWithVectors(userId);
+  const existing = (profile.activityOutcomes || []).find((item) => item.activityId === input.activityId);
+
+  await upsertActivityOutcomeMemory(userId, {
+    activityId: input.activityId,
+    activityTitle: input.activityTitle,
+    activityType: input.activityType,
+    locationName: input.locationName,
+    attended: input.attended ?? existing?.attended ?? null,
+    rebookTriggered: true,
+    reviewSummary: input.reviewSummary ?? existing?.reviewSummary ?? null,
+    happenedAt: input.happenedAt,
+    updatedAt: new Date(),
+  });
+}
+
 /**
  * 计算 MaxSim 分数
  * 
@@ -792,6 +913,17 @@ interface StoredEnhancedProfileWithVectors {
     participatedAt: string;
     feedback?: 'positive' | 'neutral' | 'negative';
   }>;
+  activityOutcomes?: Array<{
+    activityId: string;
+    activityTitle: string;
+    activityType: string;
+    locationName: string;
+    attended: boolean | null;
+    rebookTriggered: boolean;
+    reviewSummary?: string | null;
+    happenedAt: string;
+    updatedAt: string;
+  }>;
 }
 
 /**
@@ -828,6 +960,7 @@ function parseEnhancedProfileWithVectors(content: string | null): EnhancedUserPr
       version: 2,
       lastUpdated: new Date(),
       interestVectors: [],
+      activityOutcomes: [],
     };
   }
 
@@ -841,6 +974,7 @@ function parseEnhancedProfileWithVectors(content: string | null): EnhancedUserPr
         version: 2,
         lastUpdated: new Date(),
         interestVectors: [],
+        activityOutcomes: [],
       };
     }
     
@@ -855,6 +989,11 @@ function parseEnhancedProfileWithVectors(content: string | null): EnhancedUserPr
         ...v,
         participatedAt: new Date(v.participatedAt),
       })) || [],
+      activityOutcomes: stored.activityOutcomes?.map((outcome) => ({
+        ...outcome,
+        happenedAt: new Date(outcome.happenedAt),
+        updatedAt: new Date(outcome.updatedAt),
+      })) || [],
     };
   } catch {
     // 解析失败，尝试作为 Markdown 解析
@@ -864,6 +1003,7 @@ function parseEnhancedProfileWithVectors(content: string | null): EnhancedUserPr
       version: 2,
       lastUpdated: new Date(),
       interestVectors: [],
+      activityOutcomes: [],
     };
   }
 }
@@ -888,6 +1028,11 @@ function serializeEnhancedProfileWithVectors(profile: EnhancedUserProfileWithVec
       embedding: v.embedding,
       participatedAt: v.participatedAt.toISOString(),
       feedback: v.feedback,
+    })),
+    activityOutcomes: profile.activityOutcomes?.map((outcome) => ({
+      ...outcome,
+      happenedAt: outcome.happenedAt.toISOString(),
+      updatedAt: outcome.updatedAt.toISOString(),
     })),
   };
   return JSON.stringify(stored);

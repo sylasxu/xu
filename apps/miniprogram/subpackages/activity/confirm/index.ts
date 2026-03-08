@@ -6,27 +6,26 @@
  * - 标记未到场警告提示
  * - 调用履约确认API
  */
-import { getParticipantsActivityById } from '../../../src/api/endpoints/participants/participants';
+import {
+  getParticipantsActivityById,
+  postParticipantsConfirmFulfillment,
+} from '../../../src/api/endpoints/participants/participants';
 import { getActivitiesById } from '../../../src/api/endpoints/activities/activities';
 import type { GetParticipantsActivityById200Item } from '../../../src/api/model';
-
-// TODO: 等后端实现 POST /participants/confirm-fulfillment API 后替换
+import { useChatStore } from '../../../src/stores/chat';
+import { postActivityRebookFollowUp } from '../../../src/services/activity-outcome';
 
 // ==================== 类型定义 ====================
 
 /** 参与者信息 */
 interface Participant {
   id: string;
-  oderId: string;
   userId: string;
   nickname: string;
   avatarUrl: string;
-  reliabilityRate: number;
   status: string;
   /** 是否已到场（用于UI选择） */
   fulfilled: boolean;
-  /** 是否是 Fast Pass 用户 */
-  isFastPass: boolean;
 }
 
 /** 活动信息 */
@@ -40,6 +39,14 @@ interface ActivityInfo {
 }
 
 /** 页面数据 */
+interface FulfillmentResult {
+  activityId: string;
+  attendedCount: number;
+  noShowCount: number;
+  totalSubmitted: number;
+  msg: string;
+}
+
 interface PageData {
   /** 活动 ID */
   activityId: string;
@@ -146,19 +153,15 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
       const response = await getParticipantsActivityById(this.data.activityId);
       if (response.status === 200 && Array.isArray(response.data)) {
         const participants = response.data as GetParticipantsActivityById200Item[];
-        // 只显示已通过审批的参与者
         return participants
           .filter((p) => p.status === 'joined')
           .map((p) => ({
             id: p.id,
-            oderId: p.id,
             userId: p.userId,
             nickname: p.user?.nickname || '未知用户',
             avatarUrl: p.user?.avatarUrl || '',
-            reliabilityRate: 0, // TODO: 后端需要添加 reliabilityRate 字段
             status: p.status,
-            fulfilled: true, // 默认全选已到场 (Requirements: 10.2)
-            isFastPass: false, // TODO: 后端需要添加 isFastPass 字段
+            fulfilled: true,
           }));
       }
       return [];
@@ -177,14 +180,12 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
 
     if (!participant) return;
 
-    // 如果要标记为未到场，显示警告 (Requirements: 10.3)
     if (participant.fulfilled) {
       this.setData({
         showWarningDialog: true,
         currentParticipant: participant,
       });
     } else {
-      // 恢复为已到场
       this.updateParticipantStatus(index, true);
     }
   },
@@ -234,15 +235,14 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
 
   /** 提交履约确认 (Requirements: 10.4) */
   async onSubmit() {
-    const { activityId, participants, submitting, noShowCount } = this.data;
+    const { submitting, noShowCount } = this.data;
 
     if (submitting) return;
 
-    // 如果有未到场的人，再次确认
     if (noShowCount > 0) {
       wx.showModal({
         title: '确认提交',
-        content: `您标记了 ${noShowCount} 人未到场，确认提交吗？\n\n注意：标记他人未到场将扣除你 1% 靠谱度`,
+        content: `您标记了 ${noShowCount} 人未到场，确认提交吗？`,
         confirmText: '确认提交',
         confirmColor: '#FF6B35',
         success: (res) => {
@@ -262,33 +262,112 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     this.setData({ submitting: true });
 
     try {
-      // TODO: 等后端实现 POST /participants/confirm-fulfillment API 后替换
-      // 目前模拟成功响应
       const fulfillmentData = participants.map((p) => ({
         userId: p.userId,
         fulfilled: p.fulfilled,
       }));
 
-      console.log('履约确认数据:', { activityId, participants: fulfillmentData });
+      const response = await postParticipantsConfirmFulfillment({
+        activityId,
+        participants: fulfillmentData,
+      });
 
-      // 模拟网络延迟
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      if (response.status !== 200) {
+        throw new Error((response.data as { msg?: string })?.msg || '提交失败');
+      }
 
-      wx.showToast({ title: '确认成功', icon: 'success' });
-
-      // 延迟返回
-      setTimeout(() => {
-        wx.navigateBack();
-      }, 1500);
+      const result = response.data as FulfillmentResult;
+      this.setData({ submitting: false });
+      this.handleFulfillmentSuccess(result);
     } catch (error) {
       console.error('提交履约确认失败', error);
       wx.showToast({
         title: (error as Error).message || '提交失败',
         icon: 'none',
       });
-    } finally {
       this.setData({ submitting: false });
     }
+  },
+
+  handleFulfillmentSuccess(result: FulfillmentResult) {
+    const summary = this.buildFulfillmentSummary(result.attendedCount, result.noShowCount);
+
+    wx.showModal({
+      title: '履约确认已完成',
+      content: summary,
+      confirmText: '去再约',
+      cancelText: '回详情',
+      confirmColor: '#FF6B35',
+      success: (modalRes) => {
+        if (modalRes.confirm) {
+          this.openRebookFlow(result.attendedCount, result.noShowCount);
+          return;
+        }
+
+        this.goBackToActivityDetail();
+      },
+      fail: () => {
+        this.goBackToActivityDetail();
+      },
+    });
+  },
+
+  async openRebookFlow(attendedCount: number, noShowCount: number) {
+    const { activityId } = this.data;
+
+    if (activityId) {
+      try {
+        const response = await postActivityRebookFollowUp(activityId);
+        if (response.status !== 200) {
+          console.warn('记录再约意愿失败', response.data);
+        }
+      } catch (error) {
+        console.error('记录再约意愿失败', error);
+      }
+    }
+
+    const prompt = this.buildRebookPrompt(attendedCount, noShowCount);
+    useChatStore.getState().sendMessage(prompt);
+    wx.switchTab({ url: '/pages/home/index' });
+  },
+
+  goBackToActivityDetail() {
+    const pages = getCurrentPages();
+    if (pages.length > 1) {
+      wx.navigateBack();
+      return;
+    }
+
+    wx.switchTab({ url: '/pages/home/index' });
+  },
+
+  buildFulfillmentSummary(attendedCount: number, noShowCount: number): string {
+    if (noShowCount > 0) {
+      return `到场 ${attendedCount} 人，未到场 ${noShowCount} 人。现在可以顺手再约一次，避免这拨人散掉。`;
+    }
+
+    return `这局的人基本都到齐了。现在继续再约，最容易把关系续上。`;
+  },
+
+  buildRebookPrompt(attendedCount: number, noShowCount: number): string {
+    const { activity, participants } = this.data;
+    const title = activity?.title || '这场活动';
+    const locationName = activity?.locationName || '附近';
+    const timeText = activity?.startAt ? this.formatDateTime(activity.startAt) : '最近';
+    const attendedNames = participants
+      .filter((item) => item.fulfilled)
+      .map((item) => item.nickname)
+      .filter((name) => Boolean(name))
+      .slice(0, 6);
+
+    const segments = [
+      `刚结束一场活动「${title}」，地点在${locationName}，时间是${timeText}。`,
+      `这次到场 ${attendedCount} 人，未到场 ${noShowCount} 人。`,
+      attendedNames.length > 0 ? `到场的人有：${attendedNames.join('、')}。` : '',
+      '我想趁热再约这拨人。先帮我看看附近有没有合适的现成同类局；如果没有，再帮我生成一个更容易成局的活动草稿。',
+    ];
+
+    return segments.filter((segment) => segment).join('');
   },
 
   // ==================== 辅助方法 ====================
@@ -302,10 +381,5 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     const hours = date.getHours().toString().padStart(2, '0');
     const minutes = date.getMinutes().toString().padStart(2, '0');
     return `${month}月${day}日 ${hours}:${minutes}`;
-  },
-
-  /** 格式化靠谱度 */
-  formatReliability(rate: number): string {
-    return `${Math.round(rate)}%`;
   },
 });

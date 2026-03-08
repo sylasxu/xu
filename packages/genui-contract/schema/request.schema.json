@@ -43,7 +43,9 @@
         },
         "locale": { "type": "string" },
         "timezone": { "type": "string" },
-        "platformVersion": { "type": "string" }
+        "platformVersion": { "type": "string" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" }
       },
       "additionalProperties": true
     }

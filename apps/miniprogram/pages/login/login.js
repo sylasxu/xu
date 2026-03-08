@@ -180,16 +180,5 @@ Page({
         }
       })
     })
-  },
-
-  // 验证码登录（保留原有逻辑）
-  async loginWithCode() {
-    if (!this.data.isPhoneNumber || !this.data.isCheck) {
-      return
-    }
-
-    wx.navigateTo({
-      url: `/pages/loginCode/loginCode?phoneNumber=${this.data.phoneNumber}`,
-    });
   }
 });

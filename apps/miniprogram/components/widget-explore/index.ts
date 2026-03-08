@@ -9,9 +9,12 @@
  */
 
 import { useChatStore } from '../../src/stores/chat';
+import { useAppStore } from '../../src/stores/app';
+import { useUserStore } from '../../src/stores/user';
 import { fetchWidgetData } from '../../src/utils/widget-fetcher';
 import type { FetchState } from '../../src/utils/widget-fetcher';
 import type { ActionState, WidgetAction } from '../../src/utils/widget-actions';
+import { submitJoinAndOpenDiscussion, type JoinFlowPayload } from '../../src/utils/join-flow';
 
 // 探索结果类型
 interface ExploreResult {
@@ -64,6 +67,7 @@ interface WidgetExploreProperties {
   results?: ExploreResult[];
   center?: CenterPoint;
   title?: string;
+  semanticQuery?: string;
   fetchConfig?: FetchConfig;
   interaction?: Interaction;
   preview?: PreviewData;
@@ -82,6 +86,7 @@ Component({
       value: { lat: 29.5647, lng: 106.5507, name: '观音桥' } as CenterPoint,
     },
     title: { type: String, value: '' },
+    semanticQuery: { type: String, value: '' },
     // 引用模式新增
     fetchConfig: { type: Object, value: undefined },
     interaction: { type: Object, value: undefined },
@@ -231,6 +236,64 @@ Component({
       return map[actionType] || actionType;
     },
 
+    async submitJoinFromWidget(payload: JoinFlowPayload, stateKey?: string) {
+      const currentUser = useUserStore.getState().user;
+
+      if (!currentUser?.phoneNumber) {
+        if (stateKey) {
+          this.setData({ [`actionStates.${stateKey}`]: 'idle' });
+        }
+
+        useAppStore.getState().showAuthSheet({
+          type: 'join',
+          payload: {
+            ...payload,
+            source: payload.source || 'widget_explore',
+          },
+        });
+        return;
+      }
+
+      const resolvedPayload = {
+        ...payload,
+        source: payload.source || 'widget_explore',
+      };
+
+      const joinResult = await submitJoinAndOpenDiscussion(resolvedPayload, {
+        onBeforeNavigate: () => {
+          if (stateKey) {
+            this.setData({ [`actionStates.${stateKey}`]: 'success' });
+          }
+
+          const title = payload.title || '活动';
+          useChatStore.getState().appendActionResult(
+            'join',
+            { activityId: payload.activityId, title },
+            true,
+            `你已成功报名「${title}」，一起去讨论区打个招呼吧`,
+          );
+        },
+      });
+
+      if (!joinResult.success) {
+        if (stateKey) {
+          this.setData({ [`actionStates.${stateKey}`]: 'idle' });
+        }
+
+        wx.showToast({
+          title: joinResult.msg || '报名失败，请重试',
+          icon: 'none',
+        });
+        return;
+      }
+
+      if (stateKey) {
+        setTimeout(() => {
+          this.setData({ [`actionStates.${stateKey}`]: 'idle' });
+        }, 900);
+      }
+    },
+
     onActionTap(e: WechatMiniprogram.TouchEvent) {
       const { actiontype, activityid, activitytitle, startat, locationname, actionparams } =
         e.currentTarget.dataset;
@@ -241,6 +304,16 @@ Component({
       if (currentState === 'loading' || currentState === 'success') return;
 
       wx.vibrateShort({ type: 'light' });
+
+      const payload: Record<string, unknown> = {
+        activityId: activityid,
+        title: activitytitle,
+        startAt: startat,
+        locationName: locationname,
+      };
+      if (actionparams && typeof actionparams === 'object') {
+        Object.assign(payload, actionparams as Record<string, unknown>);
+      }
 
       // 特殊处理：share 由组件层处理
       if (actiontype === 'share') {
@@ -254,18 +327,15 @@ Component({
         return;
       }
 
+      if (actiontype === 'join') {
+        this.setData({ [`actionStates.${stateKey}`]: 'loading' });
+        void this.submitJoinFromWidget(payload as unknown as JoinFlowPayload, stateKey);
+        return;
+      }
+
       // 通用操作：统一走 turns action
       this.setData({ [`actionStates.${stateKey}`]: 'loading' });
       const chatStore = useChatStore.getState();
-      const payload: Record<string, unknown> = {
-        activityId: activityid,
-        title: activitytitle,
-        startAt: startat,
-        locationName: locationname,
-      };
-      if (actionparams && typeof actionparams === 'object') {
-        Object.assign(payload, actionparams as Record<string, unknown>);
-      }
 
       chatStore.sendAction({
         action: this.toTurnsAction(actiontype),
@@ -287,12 +357,33 @@ Component({
 
       wx.vibrateShort({ type: 'light' });
 
-      const chatStore = useChatStore.getState();
-      chatStore.sendAction({
-        action: 'join_activity',
-        payload: { activityId: id },
+      void this.submitJoinFromWidget({
+        activityId: id,
+        title,
         source: 'widget_explore',
-        originalText: `报名「${title}」`,
+      });
+    },
+
+    onCreateActivityTap() {
+      const props = this.properties as unknown as WidgetExploreProperties;
+      const center = props.center || { lat: 29.5647, lng: 106.5507, name: '附近' };
+      const semanticQuery = typeof props.semanticQuery === 'string' ? props.semanticQuery.trim() : '';
+      const promptParts = [
+        `附近还没有合适的局，我想在${center.name || '附近'}发起一个新的线下活动。`,
+        semanticQuery ? `需求参考：${semanticQuery}。` : '',
+        '先帮我判断要不要自己组，如果需要，再帮我整理成一个可发布的活动草稿。',
+      ];
+      const prompt = promptParts.filter((item) => item).join('');
+
+      useChatStore.getState().sendAction({
+        action: 'create_activity',
+        payload: {
+          description: prompt,
+          locationName: center.name || '附近',
+          semanticQuery,
+        },
+        source: 'widget_explore',
+        originalText: prompt,
       });
     },
 

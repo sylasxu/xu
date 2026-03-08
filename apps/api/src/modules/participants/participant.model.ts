@@ -28,6 +28,39 @@ export const ParticipantInfoSchema = t.Object({
   ]),
 });
 
+// 履约确认条目
+const FulfillmentParticipantSchema = t.Object({
+  userId: t.String({ format: 'uuid', description: '参与者用户 ID' }),
+  fulfilled: t.Boolean({ description: '是否到场' }),
+});
+
+// 发起人提交履约确认请求
+const ConfirmFulfillmentRequest = t.Object({
+  activityId: t.String({ format: 'uuid', description: '活动 ID' }),
+  participants: t.Array(FulfillmentParticipantSchema, {
+    minItems: 1,
+    description: '参与者履约确认结果',
+  }),
+});
+
+// 履约确认响应
+const ConfirmFulfillmentResponse = t.Object({
+  activityId: t.String(),
+  attendedCount: t.Number({ description: '到场人数（不含发起人）' }),
+  noShowCount: t.Number({ description: '未到场人数' }),
+  totalSubmitted: t.Number({ description: '提交确认的参与者总数' }),
+  msg: t.String(),
+});
+
+const RebookFollowUpRequest = t.Object({
+  activityId: t.String({ format: 'uuid', description: '活动 ID' }),
+});
+
+const ActionResponse = t.Object({
+  code: t.Number(),
+  msg: t.String(),
+});
+
 // 路径参数
 const IdParams = t.Object({
   id: t.String({ format: 'uuid', description: '活动ID' }),
@@ -43,11 +76,21 @@ const ErrorResponse = t.Object({
 export const participantModel = new Elysia({ name: 'participantModel' })
   .model({
     'participant.info': ParticipantInfoSchema,
+    'participant.fulfillmentParticipant': FulfillmentParticipantSchema,
+    'participant.confirmFulfillmentRequest': ConfirmFulfillmentRequest,
+    'participant.confirmFulfillmentResponse': ConfirmFulfillmentResponse,
+    'participant.rebookFollowUpRequest': RebookFollowUpRequest,
+    'participant.actionResponse': ActionResponse,
     'participant.idParams': IdParams,
     'participant.error': ErrorResponse,
   });
 
 // 导出 TS 类型
 export type ParticipantInfo = Static<typeof ParticipantInfoSchema>;
+export type FulfillmentParticipant = Static<typeof FulfillmentParticipantSchema>;
+export type ConfirmFulfillmentRequest = Static<typeof ConfirmFulfillmentRequest>;
+export type ConfirmFulfillmentResponse = Static<typeof ConfirmFulfillmentResponse>;
+export type RebookFollowUpRequest = Static<typeof RebookFollowUpRequest>;
+export type ActionResponse = Static<typeof ActionResponse>;
 export type IdParams = Static<typeof IdParams>;
 export type ErrorResponse = Static<typeof ErrorResponse>;

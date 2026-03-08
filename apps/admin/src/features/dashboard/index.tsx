@@ -96,10 +96,10 @@ export function Dashboard() {
             </CardContent>
           </Card>
 
-          {/* Token 消耗 */}
+          {/* Token 用量 */}
           <Card>
             <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
-              <CardTitle className='text-sm font-medium'>Token 消耗</CardTitle>
+              <CardTitle className='text-sm font-medium'>Token 用量</CardTitle>
               <Coins className='text-muted-foreground h-4 w-4' />
             </CardHeader>
             <CardContent>
@@ -107,11 +107,11 @@ export function Dashboard() {
                 <Skeleton className="h-8 w-20" />
               ) : (
                 <div className='text-2xl font-bold'>
-                  ¥{data?.realtime.tokenCost?.toFixed(2) || '0.00'}
+                  {Math.round(data?.realtime.tokenUsage || 0).toLocaleString()}
                 </div>
               )}
               <p className='text-xs text-muted-foreground'>
-                {data?.realtime.totalConversations || 0} 次对话
+                {data?.realtime.totalConversations || 0} 次对话 · tokens
               </p>
             </CardContent>
           </Card>

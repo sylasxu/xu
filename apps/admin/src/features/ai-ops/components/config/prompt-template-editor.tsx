@@ -24,6 +24,20 @@ interface Props {
   onSelectConfig: (key: string | null) => void
 }
 
+function getConfigVersion(configValue: unknown): string {
+  if (!configValue || typeof configValue !== 'object') {
+    return '未知'
+  }
+
+  const metadata = (configValue as { metadata?: unknown }).metadata
+  if (!metadata || typeof metadata !== 'object') {
+    return '未知'
+  }
+
+  const version = (metadata as { version?: unknown }).version
+  return typeof version === 'string' && version.trim() ? version : '未知'
+}
+
 export function PromptTemplateEditor({ onSelectConfig }: Props) {
   const { data, isLoading } = useAiConfigDetail(CONFIG_KEY)
   const updateConfig = useUpdateAiConfig()
@@ -167,7 +181,7 @@ export function PromptTemplateEditor({ onSelectConfig }: Props) {
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
           <span>{template.length} 字符</span>
           <span>{(template.match(/\{\{\w+\}\}/g) || []).length} 个变量</span>
-          {data?.configValue && <span>版本 {(data.configValue as { metadata?: { version?: string } })?.metadata?.version ?? '未知'}</span>}
+          {data && <span>版本 {getConfigVersion(data.configValue)}</span>}
         </div>
       </CardContent>
     </Card>

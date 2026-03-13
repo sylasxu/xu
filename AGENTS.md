@@ -248,7 +248,7 @@ bunx <package>       # 执行包命令
 - 支持按 `activityId` 查询关联的对话历史
 
 **AI 模型配置 (v4.6)**:
-- **主力**: Qwen3 (qwen-flash 闲聊 / qwen-plus 推理 / qwen-max Agent)
+- **主力**: Qwen3 (qwen-flash 闲聊 / qwen-plus 推理 / qwen3-max Agent)
 - **备选**: DeepSeek (deepseek-chat)
 - **Embedding**: Qwen text-embedding-v4 (1536 维)
 - **Rerank**: qwen3-rerank

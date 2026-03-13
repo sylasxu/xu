@@ -34,6 +34,7 @@
       "inputs": [
         "orval.config.ts",
         "orval.config.js",
+        "scripts/export-openapi.ts",
         "../api/src/**/*.ts",
         "../api/src/**/*.js"
       ]

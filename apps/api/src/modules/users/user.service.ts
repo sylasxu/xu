@@ -11,6 +11,22 @@ import type {
   UserStatsQuery,
 } from './user.model';
 
+type UserQuotaExecutor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function getQuotaSourceUser(id: string, executor: UserQuotaExecutor = db) {
+  const [user] = await executor
+    .select({
+      id: users.id,
+      aiCreateQuotaToday: users.aiCreateQuotaToday,
+      aiQuotaResetAt: users.aiQuotaResetAt,
+    })
+    .from(users)
+    .where(eq(users.id, id))
+    .limit(1);
+
+  return user ?? null;
+}
+
 /**
  * 根据 ID 获取用户详情
  */
@@ -94,6 +110,9 @@ export async function updateUser(
   if (data.avatarUrl !== undefined) {
     updateData.avatarUrl = data.avatarUrl;
   }
+  if (data.workingMemory !== undefined) {
+    updateData.workingMemory = data.workingMemory;
+  }
 
   await db
     .update(users)
@@ -122,8 +141,8 @@ export async function deleteUser(id: string): Promise<boolean> {
 /**
  * 获取用户今日额度
  */
-export async function getQuota(id: string): Promise<QuotaResponse | null> {
-  const user = await getUserById(id);
+export async function getQuota(id: string, executor: UserQuotaExecutor = db): Promise<QuotaResponse | null> {
+  const user = await getQuotaSourceUser(id, executor);
   if (!user) return null;
 
   // 检查是否需要重置额度（跨天重置）
@@ -139,7 +158,7 @@ export async function getQuota(id: string): Promise<QuotaResponse | null> {
     resetAt = today.toISOString();
     
     // 更新数据库
-    await db
+    await executor
       .update(users)
       .set({
         aiCreateQuotaToday: 3,
@@ -159,13 +178,13 @@ export async function getQuota(id: string): Promise<QuotaResponse | null> {
  * 扣减 AI 创建额度
  * 返回 true 表示扣减成功，false 表示额度不足
  */
-export async function deductAiCreateQuota(id: string): Promise<boolean> {
-  const quota = await getQuota(id);
+export async function deductAiCreateQuota(id: string, executor: UserQuotaExecutor = db): Promise<boolean> {
+  const quota = await getQuota(id, executor);
   if (!quota || quota.aiCreateQuota <= 0) {
     return false;
   }
 
-  await db
+  await executor
     .update(users)
     .set({
       aiCreateQuotaToday: quota.aiCreateQuota - 1,
@@ -327,4 +346,3 @@ export async function getUserStats(query: UserStatsQuery): Promise<UserOverviewS
   }
   return getUserOverviewStats();
 }
-

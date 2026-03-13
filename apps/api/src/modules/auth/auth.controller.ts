@@ -1,9 +1,9 @@
 // Auth Controller - 认证相关接口 (MVP 简化版)
 // 只保留 /auth/login 和 /auth/bindPhone
 import { Elysia } from 'elysia';
-import { basePlugins, verifyAuth } from '../../setup';
+import { AuthError, basePlugins, verifyAdmin, verifyAuth } from '../../setup';
 import { authModel, type ErrorResponse } from './auth.model';
-import { wxLogin, bindPhone, adminPhoneLogin } from './auth.service';
+import { wxLogin, bindPhone, adminPhoneLogin, bootstrapTestUsers } from './auth.service';
 
 export const authController = new Elysia({ prefix: '/auth' })
   .use(basePlugins)
@@ -93,6 +93,71 @@ export const authController = new Elysia({ prefix: '/auth' })
       response: {
         200: 'auth.adminLoginResponse',
         400: 'auth.error',
+      },
+    }
+  )
+
+  .post(
+    '/admin/bootstrap-test-users',
+    async ({ body, jwt, headers, set }) => {
+      try {
+        await verifyAdmin(jwt, headers);
+      } catch (error) {
+        if (error instanceof AuthError) {
+          set.status = error.status;
+          return {
+            code: error.status,
+            msg: error.message,
+          } satisfies ErrorResponse;
+        }
+
+        set.status = 500;
+        return {
+          code: 500,
+          msg: '管理员鉴权失败',
+        } satisfies ErrorResponse;
+      }
+
+      try {
+        const bootstrappedUsers = await bootstrapTestUsers(body);
+
+        const usersWithTokens = await Promise.all(
+          bootstrappedUsers.map(async ({ user, isNewUser }) => ({
+            user,
+            isNewUser,
+            token: await jwt.sign({
+              id: user.id,
+              wxOpenId: user.wxOpenId,
+              role: 'user',
+            }),
+          }))
+        );
+
+        return {
+          users: usersWithTokens,
+          msg: `已准备好 ${usersWithTokens.length} 个可直接联调的测试账号`,
+        };
+      } catch (error: any) {
+        console.error('批量创建测试账号失败:', error);
+        set.status = 400;
+        return {
+          code: 400,
+          msg: error.message || '批量创建测试账号失败',
+        } satisfies ErrorResponse;
+      }
+    },
+    {
+      detail: {
+        tags: ['Auth'],
+        summary: 'Admin 一键准备测试账号',
+        description: '使用管理员手机号 + 超级验证码，批量准备最多 5 个已绑手机号的测试账号，用于业务联调。',
+      },
+      body: 'auth.bootstrapTestUsers',
+      response: {
+        200: 'auth.bootstrapTestUsersResponse',
+        400: 'auth.error',
+        401: 'auth.error',
+        403: 'auth.error',
       },
     }
   )

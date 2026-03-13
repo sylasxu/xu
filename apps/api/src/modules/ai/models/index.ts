@@ -1,7 +1,7 @@
 /**
  * Models Module - 模型抽象层
  * 
- * 只支持 DeepSeek（主力）+ 智谱（备选 Embedding）
+ * 只支持 Qwen + DeepSeek 的统一模型访问
  * 
  * 使用示例：
  * ```typescript
@@ -13,7 +13,7 @@
  * // 获取指定模型
  * const reasoner = getChatModel('deepseek-reasoner');
  * 
- * // 获取 Embedding（使用智谱）
+ * // 获取 Embedding（使用 Qwen）
  * const embeddings = await getEmbeddings(['text1', 'text2']);
  * 
  * // 带重试执行
@@ -59,4 +59,4 @@ export {
 
 // Adapters
 export { deepseekProvider, getDeepSeekChat, getDeepSeekReasoner } from './adapters/deepseek';
-export { zhipuProvider, getZhipuEmbeddings, getZhipuEmbedding } from './adapters/zhipu';
+export { runText, runObject, runStream } from './runtime';

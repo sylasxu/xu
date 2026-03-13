@@ -7,7 +7,6 @@
  * 数据保存到 users.workingMemory 字段
  */
 import { useUserStore } from '../../../src/stores/user';
-import { wxRequest } from '../../../src/utils/wx-request';
 
 // 偏好选项类型
 interface PreferenceOption {
@@ -32,6 +31,25 @@ interface PageData {
   // 加载状态
   isLoading: boolean;
   isSaving: boolean;
+}
+
+function parseWorkingMemory(rawValue?: string | null): {
+  preferences?: Array<{ category: string; value: string; sentiment: string }>;
+  frequentLocations?: string[];
+} | null {
+  if (!rawValue) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(rawValue) as {
+      preferences?: Array<{ category: string; value: string; sentiment: string }>;
+      frequentLocations?: string[];
+    };
+  } catch (error) {
+    console.error('解析 workingMemory 失败:', error);
+    return null;
+  }
 }
 
 Page<PageData, WechatMiniprogram.Page.CustomOption>({
@@ -83,10 +101,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     }
 
     // 从 workingMemory 中提取偏好
-    const workingMemory = (user as any).workingMemory as {
-      preferences?: Array<{ category: string; value: string; sentiment: string }>;
-      frequentLocations?: string[];
-    } | null;
+    const workingMemory = parseWorkingMemory(user.workingMemory);
 
     if (workingMemory) {
       const { activityTypes, timePreferences, frequentLocations, socialPreferences } = this.data;
@@ -284,13 +299,9 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
       };
 
       // 调用 API 更新用户信息
-      await wxRequest(`/users/${user.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ workingMemory }),
+      await userStore.updateProfile({
+        workingMemory: JSON.stringify(workingMemory),
       });
-
-      // 刷新用户信息
-      await userStore.refreshUserInfo();
 
       wx.showToast({ title: '保存成功', icon: 'success' });
       

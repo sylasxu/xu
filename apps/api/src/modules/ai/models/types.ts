@@ -2,7 +2,7 @@
  * Models Module Types - 模型抽象层类型定义
  * 
  * 架构设计：
- * - Chat: DeepSeek (主力) + 智谱 (备选)
+ * - Chat: Qwen (主力) + DeepSeek (备选)
  * - Embedding: Qwen text-embedding-v4 (主力)
  * - 未来扩展: Doubao, OpenAI 等
  */
@@ -12,7 +12,7 @@ import type { LanguageModel } from 'ai';
 /**
  * 模型提供商名称
  */
-export type ModelProviderName = 'deepseek' | 'zhipu' | 'qwen' | 'doubao' | 'openai';
+export type ModelProviderName = 'deepseek' | 'qwen' | 'doubao' | 'openai';
 
 /**
  * 模型用途
@@ -216,9 +216,6 @@ export const MODEL_IDS = {
   DEEPSEEK_CHAT: 'deepseek-chat',
   DEEPSEEK_REASONER: 'deepseek-reasoner',
 
-  // 智谱 - 备选 Chat
-  ZHIPU_GLM4: 'glm-4-flash',
-  ZHIPU_GLM4_PLUS: 'glm-4-plus',
 
   // Qwen3 - 分层 Chat (v4.6 新增，使用 OpenAI 兼容接口)
   // 官方文档: https://help.aliyun.com/zh/model-studio/getting-started/models
@@ -234,8 +231,6 @@ export const MODEL_IDS = {
   // Qwen - 主力 Embedding
   QWEN_EMBEDDING: 'text-embedding-v4',
 
-  // 智谱 - 备选 Embedding (已弃用)
-  ZHIPU_EMBEDDING: 'embedding-3',
 
   // ==========================================
   // Rerank 模型 (v4.6 新增)
@@ -251,7 +246,7 @@ export const ACTIVE_MODELS = {
   /** Chat 主力模型 (日常对话) */
   CHAT_PRIMARY: MODEL_IDS.QWEN_FLASH,
   /** Chat 备选模型 */
-  CHAT_FALLBACK: MODEL_IDS.ZHIPU_GLM4,
+  CHAT_FALLBACK: MODEL_IDS.DEEPSEEK_CHAT,
   /** 深度思考模型 (找搭子/复杂匹配) */
   REASONING: MODEL_IDS.QWEN_PLUS,
   /** Agent 模型 (Tool Calling/Generative UI) */
@@ -270,7 +265,5 @@ export const ACTIVE_MODELS = {
 export const EMBEDDING_DIMENSIONS = {
   /** Qwen text-embedding-v4 */
   QWEN: 1536,
-  /** 智谱 embedding-3 (已弃用) */
-  ZHIPU: 1024,
 } as const;
 

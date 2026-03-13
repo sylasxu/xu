@@ -177,7 +177,7 @@ interface WidgetChunk {
 │  ┌─────────────────────────────────▼─────────────────────────────────┐    │
 │  │                         模型路由层                                   │    │
 │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌───────────┐ │    │
-│  │  │ qwen-flash  │  │ qwen-plus   │  │ qwen-max    │  │ deepseek  │ │    │
+│  │  │ qwen-flash  │  │ qwen-plus   │  │ qwen3-max   │  │ deepseek  │ │    │
 │  │  │ (极速闲聊)   │  │ (深度思考)   │  │ (Tool Call)│  │ (备选)    │ │    │
 │  │  └─────────────┘  └─────────────┘  └─────────────┘  └───────────┘ │    │
 │  └───────────────────────────────────────────────────────────────────┘    │
@@ -345,7 +345,7 @@ function getModelByIntent(intent: 'chat' | 'reasoning' | 'agent' | 'vision') {
   switch (intent) {
     case 'chat':      return qwen('qwen-flash');     // 极速闲聊
     case 'reasoning': return qwen('qwen-plus');      // 深度思考
-    case 'agent':     return qwen('qwen-max');       // Tool Calling
+    case 'agent':     return qwen('qwen3-max');      // Tool Calling
     case 'vision':    return qwen('qwen-vl-max');    // 视觉理解
   }
 }

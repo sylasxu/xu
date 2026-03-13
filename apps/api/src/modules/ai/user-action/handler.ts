@@ -11,7 +11,9 @@ import { createLogger } from '../observability/logger';
 import { joinActivity, quitActivity, getActivityById } from '../../activities/activity.service';
 import { search } from '../rag';
 import { confirmMatch, cancelMatch } from '../tools/helpers/match';
-import { buildCreateDraftParamsFromActionPayload, createActivityDraftRecord, publishActivityRecord } from '../tools/activity-tools';
+import { buildCreateDraftParamsFromActionPayload, createActivityDraftRecord, publishActivityRecord, updateActivityDraftRecord } from '../tools/activity-tools';
+import { createPartnerIntent } from '../tools/partner-tools';
+import { buildPartnerIntentFormPayload, createPartnerMatchingState, getPartnerTimeLabel, normalizePartnerActivityType } from '../workflow/partner-matching';
 
 const logger = createLogger('user-action');
 
@@ -56,6 +58,11 @@ const ACTION_HANDLERS: Record<UserActionType, {
     requiresAuth: true,
     description: '编辑草稿',
   },
+  save_draft_settings: {
+    handler: handleSaveDraftSettings,
+    requiresAuth: true,
+    description: '保存草稿设置',
+  },
   publish_draft: {
     handler: handlePublishDraft,
     requiresAuth: true,
@@ -73,6 +80,11 @@ const ACTION_HANDLERS: Record<UserActionType, {
     requiresAuth: false,
     description: '探索附近',
   },
+  ask_preference: {
+    handler: handleAskPreference,
+    requiresAuth: false,
+    description: '追问偏好',
+  },
   expand_map: {
     handler: handleExpandMap,
     requiresAuth: false,
@@ -89,6 +101,11 @@ const ACTION_HANDLERS: Record<UserActionType, {
     handler: handleFindPartner,
     requiresAuth: true,
     description: '找搭子',
+  },
+  submit_partner_intent_form: {
+    handler: handleSubmitPartnerIntentForm,
+    requiresAuth: true,
+    description: '提交找搭子表单',
   },
   confirm_match: {
     handler: handleConfirmMatch,
@@ -236,6 +253,200 @@ function resolveActionLocation(payload: Record<string, unknown>): { lat: number;
   return null;
 }
 
+const DRAFT_LOCATION_OPTIONS = [
+  { label: '观音桥', value: '观音桥', lat: 29.58567, lng: 106.52988 },
+  { label: '解放碑', value: '解放碑', lat: 29.55792, lng: 106.57709 },
+  { label: '南坪', value: '南坪', lat: 29.52589, lng: 106.57024 },
+  { label: '江北嘴', value: '江北嘴', lat: 29.58263, lng: 106.56653 },
+];
+
+const DRAFT_SLOT_OPTIONS = [
+  { label: '今晚 19:00', value: 'tonight_19_00' },
+  { label: '今晚 20:00', value: 'tonight_20_00' },
+  { label: '明晚 19:00', value: 'tomorrow_19_00' },
+  { label: '明晚 20:00', value: 'tomorrow_20_00' },
+  { label: '周末 14:00', value: 'weekend_14_00' },
+  { label: '周末 20:00', value: 'weekend_20_00' },
+];
+
+const DRAFT_PARTICIPANT_OPTIONS = [4, 6, 8, 10].map((value) => ({
+  label: `${value} 人`,
+  value: String(value),
+}));
+
+function toTextValue(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value.trim() : fallback;
+}
+
+function toNumericValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
+function inferDraftSlotFromStartAt(startAt: string): string {
+  const date = startAt ? new Date(startAt) : null;
+  if (!date || Number.isNaN(date.getTime())) {
+    return 'tomorrow_20_00';
+  }
+
+  const now = new Date();
+  const dayDiff = Math.round((date.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+  const hour = date.getHours();
+  const isWeekend = [0, 6].includes(date.getDay());
+
+  if (isWeekend) {
+    return hour >= 18 ? 'weekend_20_00' : 'weekend_14_00';
+  }
+
+  if (dayDiff <= 0) {
+    return hour <= 19 ? 'tonight_19_00' : 'tonight_20_00';
+  }
+
+  return hour <= 19 ? 'tomorrow_19_00' : 'tomorrow_20_00';
+}
+
+function resolveDraftStartAtFromSlot(slot: string, fallbackStartAt?: string): string {
+  if (!slot) {
+    return fallbackStartAt || '';
+  }
+
+  const now = new Date();
+  const target = new Date(now);
+
+  switch (slot) {
+    case 'tonight_19_00':
+      target.setHours(19, 0, 0, 0);
+      if (target.getTime() <= now.getTime()) {
+        target.setDate(target.getDate() + 1);
+      }
+      break;
+    case 'tonight_20_00':
+      target.setHours(20, 0, 0, 0);
+      if (target.getTime() <= now.getTime()) {
+        target.setDate(target.getDate() + 1);
+      }
+      break;
+    case 'tomorrow_19_00':
+      target.setDate(target.getDate() + 1);
+      target.setHours(19, 0, 0, 0);
+      break;
+    case 'tomorrow_20_00':
+      target.setDate(target.getDate() + 1);
+      target.setHours(20, 0, 0, 0);
+      break;
+    case 'weekend_14_00':
+    case 'weekend_20_00': {
+      const day = target.getDay();
+      const offset = day === 6 ? 0 : (6 - day + 7) % 7 || 7;
+      target.setDate(target.getDate() + offset);
+      target.setHours(slot === 'weekend_20_00' ? 20 : 14, 0, 0, 0);
+      break;
+    }
+    default:
+      return fallbackStartAt || '';
+  }
+
+  return target.toISOString();
+}
+
+function resolveDraftLocationByName(locationName: string): { lat: number; lng: number } | null {
+  const matched = DRAFT_LOCATION_OPTIONS.find((item) => item.value === locationName);
+  if (!matched) {
+    return null;
+  }
+
+  return { lat: matched.lat, lng: matched.lng };
+}
+
+function buildDraftSettingsFormPayload(payload: Record<string, unknown>) {
+  const field = toTextValue(payload.field);
+  const locationName = toTextValue(payload.locationName, '观音桥');
+  const slot = toTextValue(payload.slot) || inferDraftSlotFromStartAt(toTextValue(payload.startAt));
+  const maxParticipants = toNumericValue(payload.maxParticipants);
+
+  const initialValues: Record<string, unknown> = {
+    activityId: toTextValue(payload.activityId),
+    title: toTextValue(payload.title, '活动草稿'),
+    type: toTextValue(payload.type, 'other'),
+    locationName,
+    locationHint: toTextValue(payload.locationHint, `${locationName}附近`),
+    slot,
+    maxParticipants: String(maxParticipants && maxParticipants >= 2 ? maxParticipants : 6),
+    startAt: toTextValue(payload.startAt),
+    lat: toNumericValue(payload.lat) ?? 29.58567,
+    lng: toNumericValue(payload.lng) ?? 106.52988,
+    field,
+  };
+
+  const allFields = [
+    {
+      name: 'locationName',
+      label: '在哪儿组局',
+      type: 'single-select',
+      required: true,
+      options: DRAFT_LOCATION_OPTIONS.map(({ label, value }) => ({ label, value })),
+    },
+    {
+      name: 'locationHint',
+      label: '碰头说明',
+      type: 'textarea',
+      placeholder: '比如地铁口见、商场几楼、先到先占位',
+      maxLength: 60,
+    },
+    {
+      name: 'slot',
+      label: '什么时候开始',
+      type: 'single-select',
+      required: true,
+      options: DRAFT_SLOT_OPTIONS,
+    },
+    {
+      name: 'maxParticipants',
+      label: '想约几个人',
+      type: 'single-select',
+      required: true,
+      options: DRAFT_PARTICIPANT_OPTIONS,
+    },
+  ];
+
+  const fields = field === 'location'
+    ? allFields.filter((item) => item.name === 'locationName' || item.name === 'locationHint')
+    : field === 'time'
+      ? allFields.filter((item) => item.name === 'slot')
+      : field === 'participants'
+        ? allFields.filter((item) => item.name === 'maxParticipants')
+        : allFields;
+
+  const title = field === 'location'
+    ? '改下地点'
+    : field === 'time'
+      ? '改下时间'
+      : field === 'participants'
+        ? '改下人数设置'
+        : '调整活动草稿';
+
+  return {
+    title,
+    schema: {
+      formType: 'draft_settings',
+      submitAction: 'save_draft_settings',
+      submitLabel: '保存草稿设置',
+      fields,
+    },
+    initialValues,
+  };
+}
+
 async function handleJoinActivity(
   payload: Record<string, unknown>,
   userId: string | null
@@ -371,16 +582,98 @@ async function handleEditDraft(
   payload: Record<string, unknown>,
   _userId: string | null
 ): Promise<ActionResult> {
-  const activityId = payload.activityId as string;
-  const field = payload.field as string;
-  
-  // 编辑草稿需要 LLM 理解修改意图
+  const activityId = toTextValue(payload.activityId);
+  if (!activityId) {
+    return { success: false, error: '缺少活动 ID' };
+  }
+
+  const formPayload = buildDraftSettingsFormPayload(payload);
+
   return {
-    success: false,
-    fallbackToLLM: true,
-    fallbackText: field 
-      ? `修改活动的${field}` 
-      : `编辑活动 ${activityId}`,
+    success: true,
+    data: {
+      activityId,
+      message: '改一下草稿设置，确认后我就帮你更新。',
+      draftSettingsForm: formPayload,
+    },
+  };
+}
+
+async function handleSaveDraftSettings(
+  payload: Record<string, unknown>,
+  userId: string | null
+): Promise<ActionResult> {
+  if (!userId) {
+    return { success: false, error: '请先登录', data: { requiresAuth: true } };
+  }
+
+  const activityId = toTextValue(payload.activityId);
+  if (!activityId) {
+    return { success: false, error: '缺少活动 ID' };
+  }
+
+  const locationName = toTextValue(payload.locationName);
+  const locationHint = toTextValue(payload.locationHint);
+  const slot = toTextValue(payload.slot);
+  const fallbackStartAt = toTextValue(payload.startAt);
+  const startAt = slot
+    ? resolveDraftStartAtFromSlot(slot, fallbackStartAt)
+    : fallbackStartAt;
+  const maxParticipants = toNumericValue(payload.maxParticipants);
+  const directLocation = resolveActionLocation(payload);
+  const presetLocation = locationName ? resolveDraftLocationByName(locationName) : null;
+  const resolvedLocation = directLocation || presetLocation;
+
+  const updates: {
+    locationName?: string;
+    locationHint?: string;
+    location?: [number, number];
+    startAt?: string;
+    maxParticipants?: number;
+  } = {};
+
+  if (locationName) {
+    updates.locationName = locationName;
+  }
+
+  if (locationHint) {
+    updates.locationHint = locationHint;
+  } else if (locationName) {
+    updates.locationHint = `${locationName}附近`;
+  }
+
+  if (resolvedLocation) {
+    updates.location = [resolvedLocation.lng, resolvedLocation.lat];
+  }
+
+  if (startAt) {
+    updates.startAt = startAt;
+  }
+
+  if (maxParticipants !== null && maxParticipants >= 2) {
+    updates.maxParticipants = maxParticipants;
+  }
+
+  const changedLabels: string[] = [];
+  if (updates.locationName || updates.locationHint || updates.location) changedLabels.push('地点');
+  if (updates.startAt) changedLabels.push('时间');
+  if (typeof updates.maxParticipants === 'number') changedLabels.push('人数');
+  const reason = changedLabels.length > 0 ? `已更新${changedLabels.join('、')}` : '已更新草稿设置';
+
+  const updateResult = await updateActivityDraftRecord(userId, activityId, updates, reason);
+  if (!updateResult.success) {
+    return { success: false, error: updateResult.error };
+  }
+
+  return {
+    success: true,
+    data: {
+      activityId: updateResult.activityId,
+      draft: updateResult.draft,
+      locationName: updateResult.draft.locationName,
+      type: updateResult.draft.type,
+      message: updateResult.message,
+    },
   };
 }
 
@@ -408,6 +701,33 @@ async function handlePublishDraft(
   return {
     success: true,
     data: publishResult,
+  };
+}
+
+async function handleAskPreference(
+  payload: Record<string, unknown>,
+  _userId: string | null
+): Promise<ActionResult> {
+  const question = typeof payload.question === 'string' && payload.question.trim()
+    ? payload.question.trim()
+    : '想先看哪个区域的活动？';
+
+  const questionType = typeof payload.questionType === 'string' && payload.questionType.trim()
+    ? payload.questionType.trim()
+    : 'location';
+
+  const options = Array.isArray(payload.options) ? payload.options : [];
+
+  return {
+    success: true,
+    data: {
+      message: question,
+      askPreference: {
+        questionType,
+        question,
+        options,
+      },
+    },
   };
 }
 
@@ -528,14 +848,101 @@ async function handleFindPartner(
   if (!userId) {
     return { success: false, error: '请先登录', data: { requiresAuth: true } };
   }
-  
-  // 找搭子需要进入多轮对话流程
+
+  const rawInput = typeof payload.rawInput === 'string' && payload.rawInput.trim()
+    ? payload.rawInput.trim()
+    : typeof payload.prompt === 'string' && payload.prompt.trim()
+      ? payload.prompt.trim()
+      : '帮我找找有没有同意向的人';
+
+  const state = createPartnerMatchingState(rawInput);
+  const formPayload = buildPartnerIntentFormPayload({
+    state,
+    rawInput,
+    defaultActivityType: typeof payload.type === 'string' ? payload.type : undefined,
+    defaultLocation: typeof payload.locationName === 'string' ? payload.locationName : undefined,
+    fallbackLocationHint: typeof payload.locationName === 'string' && payload.locationName.trim()
+      ? payload.locationName.trim()
+      : '附近',
+  });
+
   return {
-    success: false,
-    fallbackToLLM: true,
-    fallbackText: payload.type 
-      ? `找${payload.type}搭子`
-      : '找搭子',
+    success: true,
+    data: {
+      message: '填一下偏好，我帮你找找有没有同意向的人。',
+      locationName: typeof formPayload.initialValues.location === 'string' ? formPayload.initialValues.location : undefined,
+      type: typeof formPayload.initialValues.activityType === 'string' ? formPayload.initialValues.activityType : undefined,
+      partnerIntentForm: formPayload,
+    },
+  };
+}
+
+async function handleSubmitPartnerIntentForm(
+  payload: Record<string, unknown>,
+  userId: string | null
+): Promise<ActionResult> {
+  if (!userId) {
+    return { success: false, error: '请先登录', data: { requiresAuth: true } };
+  }
+
+  const location = resolveActionLocation(payload);
+  if (!location) {
+    return { success: false, error: '需要先获取你的位置，才能帮你匹配附近搭子' };
+  }
+
+  const activityType = normalizePartnerActivityType(typeof payload.activityType === 'string' ? payload.activityType : undefined);
+  const timeRange = typeof payload.timeRange === 'string' ? payload.timeRange.trim() : '';
+  const locationHint = typeof payload.location === 'string' && payload.location.trim()
+    ? payload.location.trim()
+    : typeof payload.locationName === 'string' && payload.locationName.trim()
+      ? payload.locationName.trim()
+      : '附近';
+  const budgetTypeRaw = typeof payload.budgetType === 'string' ? payload.budgetType.trim() : '';
+  const note = typeof payload.note === 'string' ? payload.note.trim() : '';
+  const formTags = Array.isArray(payload.tags)
+    ? payload.tags.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean)
+    : [];
+  const normalizedTags = Array.from(new Set(formTags.filter((tag) => tag !== 'NoPreference')));
+  const timePreference = timeRange ? getPartnerTimeLabel(timeRange) : undefined;
+  const budgetType = budgetTypeRaw === 'AA' || budgetTypeRaw === 'Treat' || budgetTypeRaw === 'Free'
+    ? budgetTypeRaw
+    : undefined;
+  const rawInputParts = [
+    typeof payload.rawInput === 'string' ? payload.rawInput.trim() : '',
+    timePreference || '',
+    locationHint,
+    note,
+  ].filter(Boolean);
+
+  if (!timePreference) {
+    return { success: false, error: '还差一个时间偏好，填完我就能帮你发起匹配' };
+  }
+
+  const partnerResult = await createPartnerIntent(userId, location, {
+    rawInput: Array.from(new Set(rawInputParts)).join('，'),
+    activityType,
+    locationHint,
+    timePreference,
+    tags: normalizedTags,
+    ...(budgetType ? { budgetType } : {}),
+    ...(note ? { poiPreference: note } : {}),
+  });
+
+  if (!partnerResult.success) {
+    return { success: false, error: partnerResult.error };
+  }
+
+  return {
+    success: true,
+    data: {
+      activityType,
+      type: activityType,
+      locationName: locationHint,
+      intentId: partnerResult.intentId,
+      matchFound: partnerResult.matchFound,
+      matchId: partnerResult.matchId,
+      message: partnerResult.message,
+    },
   };
 }
 

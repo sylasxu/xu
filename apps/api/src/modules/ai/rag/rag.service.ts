@@ -14,6 +14,7 @@ import { indexActivity, indexActivities, search } from './search';
 import { generateEmbedding } from './utils';
 import { getInterestVectors, calculateMaxSim } from '../memory/working';
 import { createLogger } from '../observability/logger';
+import { ACTIVE_MODELS, EMBEDDING_DIMENSIONS } from '../models/types';
 
 const logger = createLogger('ai-rag-service');
 
@@ -67,8 +68,8 @@ export async function getRagStats(): Promise<RagStats> {
     totalActivities: total,
     indexedActivities: indexed,
     coverageRate: total > 0 ? Math.round((indexed / total) * 100) : 0,
-    embeddingModel: 'embedding-3',
-    embeddingDimensions: 1024,
+    embeddingModel: ACTIVE_MODELS.EMBEDDING_PRIMARY,
+    embeddingDimensions: EMBEDDING_DIMENSIONS.QWEN,
     lastIndexedAt: lastIndexed?.updatedAt?.toISOString() || null,
     unindexedActivities: unindexed.map(a => ({
       id: a.id,

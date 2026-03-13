@@ -54,13 +54,13 @@ export function UsersDialogs() {
         />
       )}
 
-      {/* AI 额度调整弹窗 */}
+      {/* 创建活动额度调整弹窗 */}
       <Dialog open={open === 'quota'} onOpenChange={handleQuotaClose}>
         <DialogContent className='sm:max-w-[400px]'>
           <DialogHeader>
-            <DialogTitle>调整 AI 额度</DialogTitle>
+            <DialogTitle>调整创建活动额度</DialogTitle>
             <DialogDescription>
-              为「{currentRow?.nickname || '未设置昵称'}」设置新的 AI 创建额度
+              为「{currentRow?.nickname || '未设置昵称'}」设置新的创建活动额度
             </DialogDescription>
           </DialogHeader>
           <div className='grid gap-4 py-4'>

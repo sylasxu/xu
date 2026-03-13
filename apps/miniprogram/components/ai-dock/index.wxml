@@ -8,12 +8,12 @@
   - 输入框 + 快捷按钮
 -->
 <view 
-  class="ai-dock {{isFocused ? 'focused' : ''}} {{disabled ? 'disabled' : ''}}"
+  class="ai-dock {{showAssistHint ? 'expanded' : ''}} {{disabled ? 'disabled' : ''}}"
   style="bottom: calc({{bottomOffset}}rpx + env(safe-area-inset-bottom));"
 >
   <view class="dock-main-row">
     <!-- 快捷按钮区域 -->
-    <view class="dock-actions" wx:if="{{!isFocused && !inputValue}}">
+    <view class="dock-actions" wx:if="{{!inputValue}}">
       <!-- 粘贴按钮 -->
       <view 
         class="action-btn btn-pressable" 
@@ -61,14 +61,7 @@
     </view>
   </view>
   
-  <view class="dock-secondary-row" wx:if="{{isFocused}}">
-    <view class="consultant-chip">
-      <t-icon name="task" size="30rpx" />
-      <text class="consultant-text">未选择咨询人</text>
-    </view>
-    <view class="profile-link btn-pressable" bindtap="onViewProfileTap">
-      <text class="profile-text">查看档案</text>
-      <t-icon name="chevron-right" size="28rpx" />
-    </view>
+  <view class="dock-secondary-row" wx:if="{{showAssistHint}}">
+    <text class="dock-hint">可补充时间、地点、人数</text>
   </view>
 </view>

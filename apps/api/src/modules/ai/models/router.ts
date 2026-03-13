@@ -4,7 +4,7 @@
  * 提供统一的模型访问接口，支持降级和意图路由
  * 
  * 策略 (v4.6):
- * - 主力 Chat: Qwen (qwen-flash 闲聊 / qwen-plus 推理 / qwen-max Agent)
+ * - 主力 Chat: Qwen (qwen-flash 闲聊 / qwen-plus 推理 / qwen3-max Agent)
  * - 备选 Chat: DeepSeek (deepseek-chat)
  * - Embedding: Qwen text-embedding-v4
  * - Rerank: qwen3-rerank
@@ -107,7 +107,7 @@ export function getDefaultChatModel(): LanguageModel {
 const DEFAULT_INTENT_MAP: Record<string, string> = {
   chat: ACTIVE_MODELS.CHAT_PRIMARY,       // qwen-flash
   reasoning: ACTIVE_MODELS.REASONING,     // qwen-plus
-  agent: ACTIVE_MODELS.AGENT,             // qwen-max
+  agent: ACTIVE_MODELS.AGENT,             // qwen3-max
   vision: ACTIVE_MODELS.VISION,           // qwen-vl-max
 };
 
@@ -117,7 +117,7 @@ const DEFAULT_INTENT_MAP: Record<string, string> = {
  * 通过 getConfigValue 动态读取意图→模型映射，支持后台切换：
  * - chat: qwen-flash (极速闲聊)
  * - reasoning: qwen-plus (深度思考，找搭子/复杂匹配)
- * - agent: qwen-max (精准 Tool Calling)
+ * - agent: qwen3-max (精准 Tool Calling)
  * - vision: qwen-vl-max (视觉理解)
  */
 export async function getModelByIntent(intent: 'chat' | 'reasoning' | 'agent' | 'vision'): Promise<LanguageModel> {
@@ -223,7 +223,7 @@ export async function checkProviderHealth(
 /**
  * 检查所有提供商健康状态
  * 
- * v4.6: 检查实际使用的 qwen + deepseek（替换已弃用的 zhipu）
+ * v4.6: 检查当前实际使用的 qwen + deepseek
  */
 export async function checkAllProvidersHealth(): Promise<Partial<Record<ModelProviderName, boolean>>> {
   const results = await Promise.all([

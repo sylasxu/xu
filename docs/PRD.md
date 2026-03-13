@@ -1322,7 +1322,8 @@ AI 创建活动时，根据活动类型自动分配预设主题：
 | Widget_Draft | 意图解析卡片 | AI 识别为"创建意图" |
 | Widget_Share | 创建成功卡片 | 活动发布成功 |
 | **Widget_Explore** | **探索卡片** | **AI 识别为"探索意图"** |
-| Widget_AskPreference | 偏好追问卡片 | 信息不足需追问 |
+| Widget_AskPreference | 单步偏好追问卡片 | 只缺 1 个关键信息时 |
+| GenUI_Form | 结构化表单卡片 | 需要一次收集多项偏好时 |
 | Widget_Launcher | 组局发射台 | 查询我的活动 |
 | Widget_Action | 快捷操作卡片 | 快捷入口点击 |
 | Widget_Error | 错误提示卡片 | AI 解析失败 |
@@ -1583,7 +1584,7 @@ P2: 兜底引导 (Fallback Guidance)
 |---------|---------|-------------|------|
 | "明晚观音桥打麻将，3缺1" | Create（创建） | Widget_Draft | 明确的组局意图 |
 | "周六下午踢球，解放碑" | Create（创建） | Widget_Draft | 包含时间、地点、活动类型 |
-| "想找人打球，谁组我就去" | Partner（找搭子） | Widget_AskPreference | 参与意图，非发起 |
+| "想找人打球，谁组我就去" | Partner（找搭子） | GenUI_Form（PartnerIntent） | 参与意图，非发起；优先结构化收集偏好 |
 | "观音桥附近有什么好玩的活动" | Explore（探索） | Widget_Explore | 探索附近活动 |
 | "推荐一下附近的局" | Explore（探索） | Widget_Explore | 模糊探索需求 |
 | "这周末想放松一下" | Explore（探索） | Widget_Explore + AI 推荐 | 情绪化表达 |
@@ -2520,7 +2521,7 @@ wx.updateShareMenu({
 |--------|--------|
 | "解析失败，请检查输入格式。" | "抱歉，我没理解你的意思，试试换个说法？" |
 | "网络请求超时，错误码 504。" | "网络有点慢，再试一次？" |
-| "今日配额已耗尽。" | "今天的 AI 额度用完了，明天再来吧～" |
+| "今日配额已耗尽。" | "今天的创建活动额度用完了，明天再来吧～" |
 | "用户认证失败。" | "需要先绑定手机号才能继续哦" |
 
 ### 14.5 空状态文案 (v3.4 优化)
@@ -2539,7 +2540,7 @@ wx.updateShareMenu({
 | AI 正在生成 | "收到，小聚正在整理你的安排..." |
 | AI 生成完毕 | "卡片做好了！看看这样安排行不行？" |
 | 发布成功 | "搞定！活动已发布，快分享给朋友吧。" |
-| 额度用完 | "今天的 AI 额度用完了，明天再来吧～" |
+| 额度用完 | "今天的创建活动额度用完了，明天再来吧～" |
 | 网络错误 | "网络有点慢，再试一次？" |
 | 解析失败 | "抱歉，我没理解你的意思，试试换个说法？" |
 
@@ -2709,7 +2710,7 @@ J2C 转化率 = 先参局后组局的用户数 / 历史总参与者数
 - **AI Playground** (v5.1 增强)：Mastra 风格的全屏 AI 调试面板
   - 全屏 Flow Graph 画布：7 层分层布局预渲染完整管线（Input → Input Guard/P0 Match → P1 Intent → User Profile/Semantic Recall/Token Limit → LLM → Tool(s) → Output）
   - 灰度优先视觉：pending 灰色虚线、running 蓝色脉冲、success 边框加深、error 红色、skipped 半透明
-  - 三合一 Drawer（480px Sheet）：对话视图（useChat + Tool 结果卡片 + 欢迎状态）、配置视图（Mock 身份/位置 + Qwen3 模型选择 + Temperature/MaxTokens + Trace 开关）、节点详情视图（按节点类型渲染调试信息）
+  - 三合一 Drawer（480px Sheet）：对话视图（useChat + Tool 结果卡片 + 欢迎状态）、配置视图（Mock 身份/位置 + Qwen 模型选项 + Temperature/MaxTokens + Trace 开关）、节点详情视图（按节点类型渲染调试信息）
   - 处理器瀑布图 (v5.1 新增)：以瀑布图形式展示每个处理器的名称、执行时间条形图、输入/输出摘要，点击打开详情 Drawer
   - 处理器参数配置 (v5.1 新增)：在节点详情 Drawer 中为可配置处理器展示参数表单（semantic-recall 相似度阈值/top-K/rerank 开关、token-limit 最大 Token 数、intent-classify P1→P2 升级阈值等），修改后通过配置 API 实时保存
   - Tool Calls 时间线 (v5.1 新增)：以时间线形式展示每个 Tool 的名称、输入参数、返回结果和执行耗时
@@ -2721,7 +2722,7 @@ J2C 转化率 = 先参局后组局的用户数 / 历史总参与者数
   - 会话回放 (v5.1 新增)：选择历史会话按时间顺序逐条回放消息，展示每条消息对应的 Trace 数据
   - 实时状态流转：SSE trace 数据驱动节点依次亮起，P0 命中时后续节点标记为 skipped
   - 多轮追踪：轮次选择器切换查看不同轮次的 trace 状态
-  - 会话统计浮层：模型名称、轮次数、Token 消耗、耗时、费用估算（Qwen3 定价，v5.1 增加预估成本字段）
+  - 会话统计浮层：模型名称、轮次数、Token 消耗、耗时、成本粗估（按 Qwen 成本系数粗估，v5.1 增加预估成本字段）
 
 **J2C 转化率 SQL**：
 ```sql
@@ -2788,7 +2789,7 @@ LEFT JOIN Creators c ON j.user_id = c.creator_id;
 
 **系统响应**：
 1. Agent 识别到找搭子意图
-2. 启动结构化追问（Widget_AskPreference）
+2. 渲染正文下方的结构化意向表单（GenUI Form）
 3. 用户补充偏好信息
 4. 创建意向，存入意向池
 5. 用户关闭 App，系统后台持续匹配
@@ -2884,9 +2885,9 @@ Temp_Organizer 确认成局 → 自动创建活动
 ```
 用户: "想吃火锅，谁组我就去"
   ↓
-Agent 识别到找搭子意图，启动结构化追问
+Agent 识别到找搭子意图，正文下方渲染结构化意向表单
   ↓
-用户: "1A 2A 3AD" (今晚/AA/不喝酒+没特殊要求)
+用户: 在表单里选中"今晚 / AA / 不喝酒"，或直接自然语言补充
   ↓
 Agent 调用 createPartnerIntent
   ↓
@@ -2903,16 +2904,18 @@ Agent 调用 createPartnerIntent
 双方确认 → Temp_Organizer 创建活动
 ```
 
-### 19.6 结构化追问 (Widget_AskPreference)
+### 19.6 结构化意向表单 (GenUI Form)
 
 ```
-好的，帮你找火锅搭子！🍲 请确认：
+好的，帮你找火锅搭子！🍲
 
-1. ⏰ 时间？ A: 今晚  B: 明天  C: 周末
-2. 💰 费用？ A: AA制  B: 有人请客也行
-3. 🎯 要求？ A: 不喝酒  B: 安静点  C: 女生友好  D: 没有
+正文下方直接出现一张表单卡：
+- ⏰ 时间：今晚 / 明天 / 周末
+- 💰 费用：AA制 / 有人请客也行 / 都可以
+- 🎯 要求：不喝酒 / 安静点 / 女生友好 / 没有特别要求
+- 📝 补充说明：可选填写
 
-回复：**1A 2A 3AD**
+用户可以直接点选，也可以继续用自然语言补充。
 ```
 
 ### 19.7 生命周期
@@ -2961,7 +2964,7 @@ pending → confirmed (Temp_Organizer 确认，转为 Activity)
 |------|--------|------|
 | 创建 | 想/约/组/找人 | exploreNearby → createActivityDraft |
 | 探索 | 附近/推荐/有什么 | Widget_Explore |
-| **找搭子** | **谁组我就去/懒得组局/想参加** | **识别意图 → 结构化追问 → createPartnerIntent** |
+| **找搭子** | **谁组我就去/懒得组局/想参加** | **识别意图 → 结构化表单/轻量追问 → createPartnerIntent** |
 | 查询 | 我的活动 | getMyActivities |
 
 ---
@@ -3112,7 +3115,8 @@ AI 检测活动内容风险：
 | **Partner_Matching** | **找搭子能力，Agent 自然识别找搭子意图并帮用户匹配 (v4.0)** |
 | **Partner_Intent** | **搭子意向，用户想参加某类活动的意愿表达 (v4.0)** |
 | **Temp_Organizer** | **临时召集人，匹配成功后负责确认并转为活动的用户 (v4.0)** |
-| **Widget_AskPreference** | **多轮对话偏好询问卡片，找搭子的结构化追问 (v4.0)** |
+| **Widget_AskPreference** | **单步偏好追问卡片，适合补 1 个缺失槽位 (v4.0)** |
+| **GenUI_Form** | **正文下方的结构化表单卡片，适合一次收集多项偏好 (v5.3)** |
 | **Global_Keywords** | **全局关键词，P0 层热词库，直接返回预设内容无需 NLP (v4.8)** |
 | **Hot_Chips** | **热词胶囊，输入框上方的可点击关键词按钮 (v4.8)** |
 | **Digital_Ascension** | **数字飞升，通过直播间和命令码实现流量入口的战略 (v4.8)** |

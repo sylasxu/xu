@@ -36,7 +36,7 @@ export function AiConfig() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">AI 配置管理</h1>
-          <p className="text-muted-foreground">管理意图分类、记忆系统、模型路由和处理器管线的运行时配置</p>
+          <p className="text-muted-foreground">管理意图分类、记忆系统、Qwen/DeepSeek 路由和处理器管线的运行时配置</p>
         </div>
         <Button variant="outline" size="sm" onClick={() => refetch()}>
           <RefreshCw className="h-4 w-4 mr-2" />

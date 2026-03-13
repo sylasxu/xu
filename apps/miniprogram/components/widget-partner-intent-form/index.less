@@ -1,0 +1,133 @@
+@import '/styles/tokens.less';
+
+.widget-partner-intent-form {
+  padding: @spacing-4;
+  margin: @spacing-2 0;
+}
+
+.header {
+  margin-bottom: @spacing-4;
+}
+
+.title {
+  display: block;
+  font-size: @text-lg;
+  font-weight: 600;
+  color: var(--text-main, @text-main);
+  line-height: 1.4;
+}
+
+.subtitle {
+  display: block;
+  margin-top: @spacing-1;
+  font-size: @text-sm;
+  color: var(--text-secondary, @text-secondary);
+  line-height: 1.5;
+}
+
+.field-block {
+  margin-bottom: @spacing-4;
+}
+
+.field-head {
+  display: flex;
+  align-items: center;
+  gap: @spacing-2;
+  margin-bottom: @spacing-2;
+}
+
+.field-label {
+  font-size: @text-sm;
+  font-weight: 600;
+  color: var(--text-main, @text-main);
+}
+
+.field-required {
+  padding: 4rpx 12rpx;
+  border-radius: @rounded-full;
+  background: rgba(91, 117, 251, 0.12);
+  font-size: @text-xs;
+  color: @color-primary;
+}
+
+.options-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: @spacing-2;
+}
+
+.option-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: @spacing-2 @spacing-4;
+  background: var(--bg-card, #FFFFFF);
+  border: 2rpx solid rgba(91, 117, 251, 0.12);
+  border-radius: @rounded-full;
+  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.05);
+}
+
+.option-chip__text {
+  font-size: @text-sm;
+  color: var(--text-main, @text-main);
+  line-height: 1.4;
+}
+
+.option-chip--selected {
+  border-color: rgba(91, 117, 251, 0.36);
+  background: linear-gradient(135deg, rgba(91, 117, 251, 0.14) 0%, rgba(134, 143, 255, 0.1) 100%);
+}
+
+.option-chip__text--selected {
+  color: @color-primary;
+  font-weight: 600;
+}
+
+.option-chip--disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.textarea-wrap {
+  background: rgba(255, 255, 255, 0.72);
+  border: 2rpx solid rgba(91, 117, 251, 0.12);
+  border-radius: @rounded-lg;
+  padding: @spacing-3;
+}
+
+.textarea {
+  width: 100%;
+  min-height: 120rpx;
+  font-size: @text-sm;
+  color: var(--text-main, @text-main);
+  line-height: 1.6;
+}
+
+.submit-wrap {
+  margin-top: @spacing-2;
+}
+
+.submit-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: @spacing-3 @spacing-4;
+  border-radius: @rounded-full;
+  background: linear-gradient(135deg, #5B75FB 0%, #7C4DFF 100%);
+  box-shadow: 0 8rpx 20rpx rgba(91, 117, 251, 0.18);
+}
+
+.submit-btn__text {
+  font-size: @text-base;
+  font-weight: 600;
+  color: #FFFFFF;
+}
+
+.submit-btn--disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.widget--disabled {
+  opacity: 0.78;
+}

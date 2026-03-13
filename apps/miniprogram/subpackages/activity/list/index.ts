@@ -5,6 +5,7 @@
  */
 import { getActivitiesUserByUserId } from '../../../src/api/endpoints/activities/activities';
 import type { ActivityMyActivitiesResponseDataItem } from '../../../src/api/model';
+import { useUserStore } from '../../../src/stores/user';
 
 type ListType = 'created' | 'joined' | 'archived';
 
@@ -81,8 +82,8 @@ Page({
 
     try {
       const { type } = this.data;
-      const cachedUserInfo = wx.getStorageSync('userInfo') as { id?: string } | null;
-      const userId = cachedUserInfo?.id || '';
+      const userStore = useUserStore.getState();
+      const userId = userStore.user?.id || '';
       if (!userId) {
         throw new Error('缺少用户ID，请重新登录');
       }

@@ -345,7 +345,7 @@ export type TraceEvent = TraceStartEvent | TraceStepEvent | TraceEndEvent
 /** 模型参数 */
 export interface ModelParams {
   /** 模型名称 */
-  model: 'qwen-flash' | 'qwen-plus' | 'qwen-max'
+  model: 'qwen-flash' | 'qwen-plus' | 'qwen3-max'
   /** Temperature (0-2) */
   temperature: number
   /** 最大输出 Token 数 (256-8192) */
@@ -367,15 +367,15 @@ export interface SessionStats {
   totalTokens: number
   /** 累计耗时 (ms) */
   totalDuration: number
-  /** 费用估算 (USD) */
+  /** 成本粗估 (USD) */
   estimatedCost: number
 }
 
-/** Qwen3 定价 (USD per token) */
+/** Qwen 成本粗估系数 (USD per token) */
 export const QWEN_PRICE: Record<string, { input: number; output: number }> = {
-  'qwen-flash': { input: 0.0 / 1_000_000, output: 0.0 / 1_000_000 },  // 免费
+  'qwen-flash': { input: 0.0 / 1_000_000, output: 0.0 / 1_000_000 },
   'qwen-plus': { input: 0.8 / 1_000_000, output: 2.0 / 1_000_000 },
-  'qwen-max': { input: 2.0 / 1_000_000, output: 6.0 / 1_000_000 },
+  'qwen3-max': { input: 2.0 / 1_000_000, output: 6.0 / 1_000_000 },
 }
 
 /** 计算会话统计 */
@@ -401,7 +401,7 @@ export function calculateSessionStats(traces: ExecutionTrace[], model: string = 
     }
   }
 
-  // 计算费用（根据当前模型定价）
+  // 计算成本粗估（根据当前模型系数）
   const price = QWEN_PRICE[model] || QWEN_PRICE['qwen-flash']
   const estimatedCost = 
     inputTokens * price.input + 

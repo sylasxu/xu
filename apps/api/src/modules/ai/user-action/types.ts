@@ -29,14 +29,17 @@ export type UserActionType =
   // 创建相关
   | 'create_activity'         // 创建活动（从 widget_draft 确认）
   | 'edit_draft'              // 编辑草稿
+  | 'save_draft_settings'     // 保存草稿设置表单
   | 'publish_draft'           // 发布草稿
   | 'confirm_publish'         // 确认并发布草稿
   // 探索相关
   | 'explore_nearby'          // 探索附近
+  | 'ask_preference'          // 主动追问偏好/位置
   | 'expand_map'              // 展开地图
   | 'filter_activities'       // 筛选活动
   // 找搭子相关
   | 'find_partner'            // 找搭子
+  | 'submit_partner_intent_form' // 提交找搭子表单
   | 'confirm_match'           // 确认匹配成局
   | 'cancel_match'            // 取消待确认匹配
   | 'select_preference'       // 选择偏好（多轮对话）

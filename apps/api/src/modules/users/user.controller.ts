@@ -1,6 +1,6 @@
 // User Controller - 用户管理接口 (纯 RESTful)
 import { Elysia, t } from 'elysia';
-import { basePlugins, verifyAdmin, AuthError } from '../../setup';
+import { basePlugins, verifyAdmin, verifySelfOrAdmin, AuthError } from '../../setup';
 import { 
   userModel, 
   UserResponseSchema,
@@ -24,21 +24,21 @@ import { getEnhancedUserProfile } from '../ai/memory/working';
 export const userController = new Elysia({ prefix: '/users' })
   .use(basePlugins)
   .use(userModel)
-  .onBeforeHandle(async ({ jwt, headers, set }) => {
-    try {
-      await verifyAdmin(jwt, headers);
-    } catch (error) {
-      if (error instanceof AuthError) {
-        set.status = error.status;
-        return { code: error.status, msg: error.message };
-      }
-    }
-  })
 
   // 获取用户统计
   .get(
     '/stats',
-    async ({ query }) => {
+    async ({ query, jwt, headers, set }) => {
+      try {
+        await verifyAdmin(jwt, headers);
+      } catch (error) {
+        if (error instanceof AuthError) {
+          set.status = error.status;
+          return { code: error.status, msg: error.message };
+        }
+        set.status = 500;
+        return { code: 500, msg: '鉴权失败' };
+      }
       return await getUserStats(query);
     },
     {
@@ -50,6 +50,9 @@ export const userController = new Elysia({ prefix: '/users' })
       query: 'user.statsQuery',
       response: {
         200: t.Union([UserOverviewStatsSchema, UserGrowthResponseSchema]),
+        401: 'user.error',
+        403: 'user.error',
+        500: 'user.error',
       },
     }
   )
@@ -57,7 +60,17 @@ export const userController = new Elysia({ prefix: '/users' })
   // 获取用户列表 (分页、搜索)
   .get(
     '/',
-    async ({ query }) => {
+    async ({ query, jwt, headers, set }) => {
+      try {
+        await verifyAdmin(jwt, headers);
+      } catch (error) {
+        if (error instanceof AuthError) {
+          set.status = error.status;
+          return { code: error.status, msg: error.message };
+        }
+        set.status = 500;
+        return { code: 500, msg: '鉴权失败' };
+      }
       return await getUserList(query);
     },
     {
@@ -69,6 +82,9 @@ export const userController = new Elysia({ prefix: '/users' })
       query: 'user.listQuery',
       response: {
         200: UserListResponseSchema,
+        401: 'user.error',
+        403: 'user.error',
+        500: 'user.error',
       },
     }
   )
@@ -76,7 +92,18 @@ export const userController = new Elysia({ prefix: '/users' })
   // 获取用户详情
   .get(
     '/:id',
-    async ({ params, set }) => {
+    async ({ params, set, jwt, headers }) => {
+      try {
+        await verifySelfOrAdmin(jwt, headers, params.id);
+      } catch (error) {
+        if (error instanceof AuthError) {
+          set.status = error.status;
+          return { code: error.status, msg: error.message } satisfies ErrorResponse;
+        }
+        set.status = 500;
+        return { code: 500, msg: '鉴权失败' } satisfies ErrorResponse;
+      }
+
       const user = await getUserById(params.id);
       if (!user) {
         set.status = 404;
@@ -92,7 +119,10 @@ export const userController = new Elysia({ prefix: '/users' })
       },
       response: {
         200: UserResponseSchema,
+        401: 'user.error',
+        403: 'user.error',
         404: 'user.error',
+        500: 'user.error',
       },
     }
   )
@@ -100,7 +130,18 @@ export const userController = new Elysia({ prefix: '/users' })
   // 更新用户信息
   .put(
     '/:id',
-    async ({ params, body, set }) => {
+    async ({ params, body, set, jwt, headers }) => {
+      try {
+        await verifySelfOrAdmin(jwt, headers, params.id);
+      } catch (error) {
+        if (error instanceof AuthError) {
+          set.status = error.status;
+          return { code: error.status, msg: error.message } satisfies ErrorResponse;
+        }
+        set.status = 500;
+        return { code: 500, msg: '鉴权失败' } satisfies ErrorResponse;
+      }
+
       const updated = await updateUser(params.id, body);
       if (!updated) {
         set.status = 404;
@@ -117,6 +158,8 @@ export const userController = new Elysia({ prefix: '/users' })
       body: 'user.updateRequest',
       response: {
         200: UserResponseSchema,
+        401: 'user.error',
+        403: 'user.error',
         404: 'user.error',
       },
     }
@@ -125,7 +168,18 @@ export const userController = new Elysia({ prefix: '/users' })
   // 删除用户
   .delete(
     '/:id',
-    async ({ params, set }) => {
+    async ({ params, set, jwt, headers }) => {
+      try {
+        await verifyAdmin(jwt, headers);
+      } catch (error) {
+        if (error instanceof AuthError) {
+          set.status = error.status;
+          return { code: error.status, msg: error.message } satisfies ErrorResponse;
+        }
+        set.status = 500;
+        return { code: 500, msg: '鉴权失败' } satisfies ErrorResponse;
+      }
+
       const deleted = await deleteUser(params.id);
       if (!deleted) {
         set.status = 404;
@@ -141,7 +195,10 @@ export const userController = new Elysia({ prefix: '/users' })
       },
       response: {
         200: 'user.success',
+        401: 'user.error',
+        403: 'user.error',
         404: 'user.error',
+        500: 'user.error',
       },
     }
   )
@@ -149,7 +206,18 @@ export const userController = new Elysia({ prefix: '/users' })
   // 获取用户额度
   .get(
     '/:id/quota',
-    async ({ params, set }) => {
+    async ({ params, set, jwt, headers }) => {
+      try {
+        await verifySelfOrAdmin(jwt, headers, params.id);
+      } catch (error) {
+        if (error instanceof AuthError) {
+          set.status = error.status;
+          return { code: error.status, msg: error.message } satisfies ErrorResponse;
+        }
+        set.status = 500;
+        return { code: 500, msg: '鉴权失败' } satisfies ErrorResponse;
+      }
+
       const quota = await getQuota(params.id);
       if (!quota) {
         set.status = 404;
@@ -161,11 +229,14 @@ export const userController = new Elysia({ prefix: '/users' })
       detail: {
         tags: ['Users'],
         summary: '获取用户额度',
-        description: '获取指定用户今日剩余的 AI 创建额度',
+        description: '获取指定用户今日剩余的创建活动额度',
       },
       response: {
         200: 'user.quotaResponse',
+        401: 'user.error',
+        403: 'user.error',
         404: 'user.error',
+        500: 'user.error',
       },
     }
   )
@@ -173,7 +244,18 @@ export const userController = new Elysia({ prefix: '/users' })
   // 设置用户额度（Admin 用）
   .put(
     '/:id/quota',
-    async ({ params, body, set }) => {
+    async ({ params, body, set, jwt, headers }) => {
+      try {
+        await verifyAdmin(jwt, headers);
+      } catch (error) {
+        if (error instanceof AuthError) {
+          set.status = error.status;
+          return { code: error.status, msg: error.message } satisfies ErrorResponse;
+        }
+        set.status = 500;
+        return { code: 500, msg: '鉴权失败' } satisfies ErrorResponse;
+      }
+
       const updated = await setUserQuota(params.id, body.quota);
       if (!updated) {
         set.status = 404;
@@ -185,7 +267,7 @@ export const userController = new Elysia({ prefix: '/users' })
       detail: {
         tags: ['Users'],
         summary: '设置用户额度',
-        description: '设置指定用户的 AI 创建额度（Admin 用）。设置为 999 表示无限额度。',
+        description: '设置指定用户的创建活动额度（Admin 用）。设置为 999 表示无限额度。',
       },
       body: t.Object({
         quota: t.Number({ minimum: 0, maximum: 999, description: '新的额度值，999 表示无限' }),
@@ -196,7 +278,10 @@ export const userController = new Elysia({ prefix: '/users' })
           msg: t.String(),
           quota: t.Number(),
         }),
+        401: 'user.error',
+        403: 'user.error',
         404: 'user.error',
+        500: 'user.error',
       },
     }
   )
@@ -204,7 +289,18 @@ export const userController = new Elysia({ prefix: '/users' })
   // 批量设置用户额度（Admin 用）
   .post(
     '/quota/batch',
-    async ({ body }) => {
+    async ({ body, jwt, headers, set }) => {
+      try {
+        await verifyAdmin(jwt, headers);
+      } catch (error) {
+        if (error instanceof AuthError) {
+          set.status = error.status;
+          return { code: error.status, msg: error.message } satisfies ErrorResponse;
+        }
+        set.status = 500;
+        return { code: 500, msg: '鉴权失败' } satisfies ErrorResponse;
+      }
+
       const result = await setUserQuotaBatch(body.userIds, body.quota);
       return { success: true as const, msg: '批量设置额度成功', count: result.updatedCount };
     },
@@ -212,7 +308,7 @@ export const userController = new Elysia({ prefix: '/users' })
       detail: {
         tags: ['Users'],
         summary: '批量设置用户额度',
-        description: '批量设置多个用户的 AI 创建额度（Admin 用）。',
+        description: '批量设置多个用户的创建活动额度（Admin 用）。',
       },
       body: t.Object({
         userIds: t.Array(t.String(), { description: '用户 ID 列表' }),
@@ -224,6 +320,9 @@ export const userController = new Elysia({ prefix: '/users' })
           msg: t.String(),
           count: t.Number(),
         }),
+        401: 'user.error',
+        403: 'user.error',
+        500: 'user.error',
       },
     }
   )
@@ -231,7 +330,18 @@ export const userController = new Elysia({ prefix: '/users' })
   // 获取用户 AI 画像
   .get(
     '/:id/ai-profile',
-    async ({ params, set }) => {
+    async ({ params, set, jwt, headers }) => {
+      try {
+        await verifyAdmin(jwt, headers);
+      } catch (error) {
+        if (error instanceof AuthError) {
+          set.status = error.status;
+          return { code: error.status, msg: error.message } satisfies ErrorResponse;
+        }
+        set.status = 500;
+        return { code: 500, msg: '鉴权失败' } satisfies ErrorResponse;
+      }
+
       const user = await getUserById(params.id);
       if (!user) {
         set.status = 404;

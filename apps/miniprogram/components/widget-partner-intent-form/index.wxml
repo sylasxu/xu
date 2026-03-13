@@ -1,0 +1,45 @@
+<view class="widget-partner-intent-form halo-card {{(disabled || isSubmitting) ? 'widget--disabled' : ''}}">
+  <view class="header">
+    <text class="title">{{title}}</text>
+    <text class="subtitle">填一下偏好，我帮你找同意向的人</text>
+  </view>
+
+  <view wx:for="{{renderFields}}" wx:key="name" class="field-block">
+    <view class="field-head">
+      <text class="field-label">{{item.label}}</text>
+      <text wx:if="{{item.required}}" class="field-required">必填</text>
+    </view>
+
+    <view wx:if="{{item.type === 'textarea'}}" class="textarea-wrap">
+      <textarea
+        class="textarea"
+        maxlength="{{item.maxLength || 80}}"
+        placeholder="{{item.placeholder}}"
+        value="{{item.value}}"
+        data-field="{{item.name}}"
+        bindinput="onTextInput"
+        auto-height
+      />
+    </view>
+
+    <view wx:else class="options-wrap">
+      <view
+        wx:for="{{item.options}}"
+        wx:key="value"
+        class="option-chip {{option.selected ? 'option-chip--selected' : ''}} {{(disabled || isSubmitting) ? 'option-chip--disabled' : ''}}"
+        data-field="{{item.name}}"
+        data-value="{{option.value}}"
+        data-multi="{{item.type === 'multi-select'}}"
+        bindtap="onSelectOption"
+      >
+        <text class="option-chip__text {{option.selected ? 'option-chip__text--selected' : ''}}">{{option.label}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="submit-wrap">
+    <view class="submit-btn {{(disabled || isSubmitting) ? 'submit-btn--disabled' : ''}}" bindtap="onSubmit">
+      <text class="submit-btn__text">{{isSubmitting ? '正在提交...' : submitLabel}}</text>
+    </view>
+  </view>
+</view>

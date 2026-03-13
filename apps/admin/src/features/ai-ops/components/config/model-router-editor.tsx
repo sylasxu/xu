@@ -103,7 +103,7 @@ export function ModelRouterEditor({ onSelectConfig }: Props) {
         <div className="flex items-center justify-between rounded-lg border p-3">
           <div>
             <p className="text-sm font-medium">启用降级策略</p>
-            <p className="text-xs text-muted-foreground">主模型失败时自动切换到备选模型</p>
+            <p className="text-xs text-muted-foreground">当前建议：Qwen 主力，失败时自动切到 DeepSeek</p>
           </div>
           <Switch checked={config.enableFallback} onCheckedChange={(v) => setConfig({ ...config, enableFallback: v })} />
         </div>

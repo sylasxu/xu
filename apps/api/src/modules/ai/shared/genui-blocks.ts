@@ -58,6 +58,25 @@ export function createCtaGroupBlock(params: {
   };
 }
 
+export function createFormBlock(params: {
+  title?: string;
+  schema: Record<string, unknown>;
+  initialValues?: Record<string, unknown>;
+  dedupeKey: string;
+  traceRef: string;
+}): GenUIBlock {
+  return {
+    blockId: createBlockId(),
+    type: 'form',
+    ...(params.title ? { title: params.title } : {}),
+    schema: params.schema,
+    ...(params.initialValues ? { initialValues: params.initialValues } : {}),
+    dedupeKey: params.dedupeKey,
+    replacePolicy: 'replace',
+    meta: { traceRef: params.traceRef },
+  };
+}
+
 export function createAlertBlock(params: {
   level: GenUIAlertBlock['level'];
   message: string;

@@ -118,7 +118,7 @@
         {{isExpired ? '时间已过期，请修改' : '确认发布'}}
       </t-button>
       <view class="text-center text-xs text-gray-400 mt-3">
-        发布后将消耗 1 次 AI 创建额度
+        发布后将消耗 1 次创建活动额度
       </view>
     </view>
   </view>

@@ -9,11 +9,11 @@ import { customType } from 'drizzle-orm/pg-core';
  * pgvector 的 vector 类型
  * 用于存储高维向量，支持相似度搜索
  * 
- * @param dimensions - 向量维度 (如 1024 对应智谱 embedding-3)
+ * @param dimensions - 向量维度 (如 1536 对应 Qwen text-embedding-v4)
  * 
  * @example
  * ```typescript
- * embedding: vector('embedding', { dimensions: 1024 }),
+ * embedding: vector('embedding', { dimensions: 1536 }),
  * ```
  */
 export const vector = customType<{

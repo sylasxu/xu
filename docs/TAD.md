@@ -202,7 +202,7 @@
 
 | 表 | 说明 | 核心字段 |
 |---|------|---------|
-| `users` | 用户表 | wxOpenId, phoneNumber, nickname, avatarUrl, aiCreateQuotaToday, workingMemory |
+| `users` | 用户表 | wxOpenId, phoneNumber, nickname, avatarUrl, aiCreateQuotaToday（创建活动额度）, workingMemory |
 | `activities` | 活动表 | title, location, locationName, locationHint, startAt, type, status, embedding, theme, themeConfig |
 | `participants` | 参与者表 | activityId, userId, status, joinedAt, lastReadAt |
 | `conversations` | AI 会话表 | userId, title, messageCount, lastMessageAt |
@@ -341,7 +341,7 @@ export const users = pgTable("users", {
   phoneNumber: varchar("phone_number", { length: 20 }),
   nickname: varchar("nickname", { length: 50 }),
   avatarUrl: varchar("avatar_url", { length: 500 }),
-  aiCreateQuotaToday: integer("ai_create_quota_today").default(3).notNull(),
+  aiCreateQuotaToday: integer("ai_create_quota_today").default(3).notNull(), // 每日创建活动额度
   aiQuotaResetAt: timestamp("ai_quota_reset_at"),
   activitiesCreatedCount: integer("activities_created_count").default(0).notNull(),
   participationCount: integer("participation_count").default(0).notNull(),
@@ -604,7 +604,7 @@ POST /auth/bindPhone      // 绑定手机号
 GET  /users               // 获取用户列表 (分页、搜索)
 GET  /users/:id           // 获取用户详情
 PUT  /users/:id           // 更新用户信息
-GET  /users/:id/quota     // 获取用户额度
+GET  /users/:id/quota     // 获取用户创建活动额度
 GET  /users/stats         // 获取用户统计 (概览/增长趋势) (v5.1 新增)// Activities
 POST /activities          // 创建活动 (从 draft 变 active)
 GET  /activities/:id      // 获取活动详情
@@ -791,7 +791,7 @@ interface PosterResult {
 ```
 
 **实现原理**：
-- 使用 DeepSeek 生成小红书风格文案
+- 使用 Qwen 生成小红书风格文案
 - 支持从活动描述提取关键信息
 - 自动生成话题标签和 Emoji
 - Admin 后台可复制文案，手动截图发布
@@ -953,7 +953,7 @@ type SSEEvent =
 |------|------|------|------|
 | 意向过期 | `jobs/intent-expiry.ts` | 每 5 分钟 | 将超过 24h 的 partner_intents 标记为 expired |
 | 匹配过期 | `jobs/match-expiry.ts` | 每 5 分钟 | 将超过 6h 的 intent_matches 标记为 expired |
-| 额度重置 | `jobs/quota-reset.ts` | 每 5 分钟 | 重置用户每日 AI 创建额度 |
+| 额度重置 | `jobs/quota-reset.ts` | 每 5 分钟 | 重置用户每日创建活动额度 |
 | **Post-Activity 自动完成** | `jobs/post-activity.ts` | 每 5 分钟 | **v5.0 新增**：startAt + 2h 后自动将 active → completed，推送 `post_activity` 反馈通知 |
 | **活动前提醒** | `jobs/activity-reminder.ts` | 每 5 分钟 | **v5.0 新增**：startAt - 1h 时向所有参与者发送 `activity_reminder` 提醒通知 |
 
@@ -1810,13 +1810,13 @@ if (maxSim > 0.5) {
 
 ### 6.7 模型路由 (Model Router) - v4.8 升级
 
-**支持的模型 (v4.8 Qwen3 全家桶)**：
+**支持的模型 (v4.8 Qwen + DeepSeek 路由)**：
 
 | 提供商 | 模型 | 用途 |
 |--------|------|------|
 | **Qwen** | `qwen-flash` | **主力 Chat** (极速闲聊) |
 | **Qwen** | `qwen-plus` | **深度思考** (找搭子/复杂匹配) |
-| **Qwen** | `qwen-max` | **Agent** (Tool Calling/Generative UI) |
+| **Qwen** | `qwen3-max` | **Agent** (Tool Calling/Generative UI) |
 | **Qwen** | `qwen-vl-max` | 视觉理解 |
 | **Qwen** | `text-embedding-v4` | 文本向量化 (1536 维) |
 | **Qwen** | `qwen3-rerank` | 检索重排序 |
@@ -1830,7 +1830,7 @@ export function getModelByIntent(intent: 'chat' | 'reasoning' | 'agent' | 'visio
   switch (intent) {
     case 'chat':      return qwen('qwen-flash');     // 极速闲聊
     case 'reasoning': return qwen('qwen-plus');      // 深度思考
-    case 'agent':     return qwen('qwen-max');       // Tool Calling
+    case 'agent':     return qwen('qwen3-max');      // Tool Calling
     case 'vision':    return qwen('qwen-vl-max');    // 视觉理解
   }
 }
@@ -3336,14 +3336,15 @@ PlaygroundLayout (全屏容器)
 - Token Limit：截断状态、原始/截断后长度、Token 限制值
 - LLM：模型名（实际 modelId）、输入/输出/总 Token、生成速度（前端计算）、System Prompt（可展开）
 - Tool：工具名（中英文映射）、输入/输出 JSON 查看器、Widget 类型
-- Output：AI 回复全文、Tool 调用列表、总耗时、总 Token、费用估算
+- Output：AI 回复全文、Tool 调用列表、总耗时、总 Token、成本粗估
 - Error：红色高亮错误信息
 
-**模型配置**（v4.8 更新为 Qwen3）：
-- 模型选择：qwen-flash（免费）/ qwen-plus / qwen-max
+**模型配置**（Admin 调试视图）：
+- 模型选择：qwen-flash / qwen-plus / qwen3-max（用于调试视图参数与成本粗估）
 - 默认模型：qwen-flash
-- 费用计算：`QWEN_PRICE` 定价表（qwen-flash 免费，qwen-plus ¥0.8/2.0 per M tokens，qwen-max ¥2.0/6.0 per M tokens）
+- 成本粗估：`QWEN_PRICE` 系数表（调试视图按 qwen-flash / qwen-plus / qwen3-max 进行粗估）
 - Temperature（0-2）、MaxTokens（256-8192）
+- 说明：当前主聊天链路仍由 `getModelByIntent()` 按意图路由；Agent 实际运行模型为 `qwen3-max`
 
 **技术实现**：
 - 前端：@xyflow/react (ReactFlow) + @ai-sdk/react (useChat) + shadcn/ui
@@ -3364,7 +3365,7 @@ PlaygroundLayout (全屏容器)
 |------|---------|------|
 | Input | `source`, `userId` | 请求来源和用户 ID |
 | Input Guard | `triggeredRules` | 触发的规则名称列表 |
-| LLM | `model` = 实际 modelId | 从硬编码 'qwen' 改为 qwen-flash/qwen-plus/qwen-max |
+| LLM | `model` = 实际 modelId | 从硬编码 'qwen' 改为 qwen-flash/qwen-plus/qwen3-max |
 | Semantic Recall | `query`, `resultCount`, `topScore` | 搜索查询、结果数、最高相似度 |
 | Tool | `toolDisplayName` | 中文工具名称 |
 | Output（新增步骤） | `text`, `toolCallCount` | AI 回复全文和 Tool 调用数量 |

@@ -17,6 +17,11 @@ let _debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 // 防抖延迟时间 (ms) - Requirements: 5.8
 const _DEBOUNCE_DELAY = 800;
+const _EXPAND_THRESHOLD = 10;
+
+function shouldShowAssistHint(value: string): boolean {
+  return value.trim().length > _EXPAND_THRESHOLD;
+}
 
 Component({
   options: {
@@ -43,6 +48,7 @@ Component({
     keyboardHeight: 0,
     bottomOffset: 32, // 默认底部偏移 32rpx
     safeAreaBottom: 0,
+    showAssistHint: false,
   },
 
   lifetimes: {
@@ -123,6 +129,7 @@ Component({
       this.setData({
         inputValue: value,
         canSend: Boolean(value.trim()),
+        showAssistHint: shouldShowAssistHint(value),
       });
 
       // 清除之前的防抖定时器
@@ -162,6 +169,7 @@ Component({
       this.setData({
         inputValue: '',
         canSend: false,
+        showAssistHint: false,
       });
     },
 
@@ -186,6 +194,7 @@ Component({
             this.setData({
               inputValue: res.data,
               canSend: Boolean(res.data.trim()),
+              showAssistHint: shouldShowAssistHint(res.data),
             });
             this.triggerEvent('paste', { text: res.data });
             
@@ -216,6 +225,7 @@ Component({
       this.setData({
         inputValue: '',
         canSend: false,
+        showAssistHint: false,
       });
       
       if (_debounceTimer) {
@@ -231,6 +241,7 @@ Component({
       this.setData({
         inputValue: value,
         canSend: Boolean(value.trim()),
+        showAssistHint: shouldShowAssistHint(value),
       });
     },
 
@@ -242,20 +253,10 @@ Component({
         inputValue: '',
         canSend: false,
         isFocused: true,
+        showAssistHint: false,
       });
     },
 
-    /**
-     * 查看档案（聚焦态第二行入口）
-     */
-    onViewProfileTap() {
-      wx.vibrateShort({ type: 'light' });
-      wx.navigateTo({
-        url: '/pages/profile/index',
-        fail: () => {
-          wx.switchTab({ url: '/pages/profile/index' });
-        },
-      });
-    },
+
   },
 });

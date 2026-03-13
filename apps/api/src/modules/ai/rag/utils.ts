@@ -31,21 +31,35 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+type DateInput = Date | string | number | null | undefined;
+
+function ensureDate(date: DateInput): Date {
+  const normalized = date instanceof Date ? date : new Date(date ?? '');
+
+  if (Number.isNaN(normalized.getTime())) {
+    throw new Error('活动开始时间无效，无法生成语义索引');
+  }
+
+  return normalized;
+}
+
 // ============ 日期格式化 ============
 
 /**
  * 获取星期几 (周一-周日)
  */
-export function getDayOfWeek(date: Date): DayOfWeek {
+export function getDayOfWeek(date: DateInput): DayOfWeek {
+  const normalizedDate = ensureDate(date);
   const days: DayOfWeek[] = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-  return days[date.getDay()];
+  return days[normalizedDate.getDay()];
 }
 
 /**
  * 获取时间段 (早上/下午/晚上/深夜)
  */
-export function getTimeOfDay(date: Date): TimeOfDay {
-  const hour = date.getHours();
+export function getTimeOfDay(date: DateInput): TimeOfDay {
+  const normalizedDate = ensureDate(date);
+  const hour = normalizedDate.getHours();
   if (hour >= 5 && hour < 12) return '早上';
   if (hour >= 12 && hour < 18) return '下午';
   if (hour >= 18 && hour < 23) return '晚上';
@@ -56,8 +70,9 @@ export function getTimeOfDay(date: Date): TimeOfDay {
  * 格式化时间为人类可读格式
  * @example "周五 晚上"
  */
-export function formatHumanReadableTime(date: Date): string {
-  return `${getDayOfWeek(date)} ${getTimeOfDay(date)}`;
+export function formatHumanReadableTime(date: DateInput): string {
+  const normalizedDate = ensureDate(date);
+  return `${getDayOfWeek(normalizedDate)} ${getTimeOfDay(normalizedDate)}`;
 }
 
 // ============ 氛围推断 ============
@@ -169,8 +184,9 @@ export function inferVibe(activity: Pick<Activity, 'type' | 'description'>): Act
  * ```
  */
 export function enrichActivityText(activity: Activity): string {
-  const dayOfWeek = getDayOfWeek(activity.startAt);
-  const timeOfDay = getTimeOfDay(activity.startAt);
+  const startAt = ensureDate(activity.startAt as Date | string);
+  const dayOfWeek = getDayOfWeek(startAt);
+  const timeOfDay = getTimeOfDay(startAt);
   const impliedVibe = inferVibe(activity);
   
   // 活动可能没有 tags 字段（MVP 精简版移除了）

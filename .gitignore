@@ -205,6 +205,7 @@ __MACOSX/
 # Orval 生成的 API 文件 (可以重新生成，不需要提交)
 apps/miniprogram/src/api/endpoints/
 apps/miniprogram/src/api/model/
+apps/miniprogram/.openapi/
 
 # 测试文件
 **/*.test.js

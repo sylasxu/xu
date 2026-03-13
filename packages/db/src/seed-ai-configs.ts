@@ -3,6 +3,7 @@ import * as dotenv from 'dotenv';
 
 import { db } from './db';
 import { aiConfigs } from './schema';
+import { systemTemplateConfigSeed } from './ai-config-seeds/system-template';
 
 dotenv.config({ path: '../../.env' });
 
@@ -50,6 +51,12 @@ const welcomeUiConfig = {
 };
 
 const aiConfigSeeds = [
+  {
+    configKey: 'prompts.system_template',
+    configValue: systemTemplateConfigSeed,
+    category: 'prompts',
+    description: 'AI System Prompt 模板（运行时必需配置）',
+  },
   {
     configKey: 'welcome.copy',
     configValue: welcomeCopyConfig,

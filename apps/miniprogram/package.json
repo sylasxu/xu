@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "echo '请在微信开发者工具中打开此目录'",
     "build": "echo '小程序构建通过微信开发者工具完成'",
-    "gen:api": "orval --config orval.config.ts",
+    "gen:api": "bun ../../scripts/export-openapi.ts .openapi/openapi.json && ./node_modules/.bin/orval --config orval.config.ts",
     "type-check": "tsc --noEmit",
     "test": "echo \"Error: no test specified\" && exit 1",
     "lint": "bunx eslint ./ --no-eslintrc -c ./.eslintrc.js",

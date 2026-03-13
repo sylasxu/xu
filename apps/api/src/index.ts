@@ -1,12 +1,12 @@
 // Elysia API Server Entry
 import { config } from 'dotenv';
-import { resolve } from 'path';
+import { fileURLToPath } from 'url';
 
 // 加载根目录的 .env 文件
-config({ path: resolve(process.cwd(), '../../.env') });
+config({ path: fileURLToPath(new URL('../../../.env', import.meta.url)) });
 
 import { Elysia } from 'elysia';
-import { basePlugins } from './setup';
+import { AuthError, basePlugins, verifyAdmin } from './setup';
 import { openapi } from '@elysiajs/openapi';
 
 // 导入 Logger
@@ -29,63 +29,109 @@ import { hotKeywordsController } from './modules/hot-keywords/hot-keywords.contr
 import { configController } from './modules/ai/config/config.controller';
 import { analyticsController } from './modules/analytics/analytics.controller';
 import { contentController } from './modules/content/content.controller';
+import { ensureSystemPromptConfigured } from './modules/ai/prompts';
 
 // 导入定时任务调度器
 import { startScheduler, stopScheduler, getJobStatuses } from './jobs';
 
-// 打印启动 Banner
-printBanner('聚场 API', '1.0.0');
+type JobsStatusSuccessResponse = {
+  jobs: ReturnType<typeof getJobStatuses>;
+  timestamp: string;
+};
 
-// 创建 Elysia 应用
-const app = new Elysia()
-  .use(loggerPlugin)  // 最先注册日志插件
+type JobsStatusErrorResponse = {
+  code: number;
+  msg: string;
+};
+
+const openApiPlugin = openapi({
+  documentation: {
+    info: {
+      title: '聚场 API',
+      version: '1.0.0',
+      description: 'LBS-based P2P social platform API - MVP Version',
+    },
+    tags: [
+      { name: 'Auth', description: '认证相关' },
+      { name: 'Users', description: '用户管理' },
+      { name: 'Activities', description: '活动管理' },
+      { name: 'AI', description: 'AI 功能' },
+      { name: 'Participants', description: '参与者管理' },
+      { name: 'Chat', description: '群聊消息' },
+      { name: 'Dashboard', description: '仪表板数据' },
+      { name: 'Notifications', description: '通知系统' },
+      { name: 'Reports', description: '内容审核' },
+      { name: 'Hot Keywords', description: '全局关键词' },
+      { name: 'Hot Keywords - Admin', description: '全局关键词管理' },
+      { name: 'Analytics', description: '数据分析' },
+      { name: 'Content', description: '内容运营' },
+    ],
+  },
+  scalar: {
+    defaultOpenAllTags: true,
+    expandAllResponses: true,
+    hideClientButton: true,
+    showSidebar: true,
+    showToolbar: 'localhost',
+    operationTitleSource: 'summary',
+    theme: 'default',
+    persistAuth: false,
+    layout: 'modern',
+    hideModels: false,
+    documentDownloadType: 'both',
+    hideTestRequestButton: false,
+    showDeveloperTools: 'never',
+    hideSearch: false,
+    showOperationId: false,
+    hideDarkModeToggle: false,
+    withDefaultFonts: true,
+    expandAllModelSections: false,
+    orderSchemaPropertiesBy: 'alpha',
+    orderRequiredPropertiesFirst: true,
+  },
+});
+
+async function getJobsStatusHandler(
+  context: any
+): Promise<JobsStatusSuccessResponse | JobsStatusErrorResponse> {
+  const { jwt, headers, set } = context;
+
+  if (process.env.NODE_ENV !== 'production') {
+    return {
+      jobs: getJobStatuses(),
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  try {
+    await verifyAdmin(jwt, headers);
+    return {
+      jobs: getJobStatuses(),
+      timestamp: new Date().toISOString(),
+    };
+  } catch (error) {
+    if (error instanceof AuthError) {
+      set.status = error.status;
+      return {
+        code: error.status,
+        msg: error.message,
+      };
+    }
+
+    set.status = 500;
+    return {
+      code: 500,
+      msg: '获取任务状态失败',
+    };
+  }
+}
+
+const appWithBase = new Elysia()
+  .use(loggerPlugin)
   .use(basePlugins)
-  .use(openapi({
-    documentation: {
-      info: {
-        title: '聚场 API',
-        version: '1.0.0',
-        description: 'LBS-based P2P social platform API - MVP Version',
-      },
-      tags: [
-        { name: 'Auth', description: '认证相关' },
-        { name: 'Users', description: '用户管理' },
-        { name: 'Activities', description: '活动管理' },
-        { name: 'AI', description: 'AI 功能' },
-        { name: 'Participants', description: '参与者管理' },
-        { name: 'Chat', description: '群聊消息' },
-        { name: 'Dashboard', description: '仪表板数据' },
-        { name: 'Notifications', description: '通知系统' },
-        { name: 'Reports', description: '内容审核' },
-        { name: 'Hot Keywords', description: '全局关键词' },
-        { name: 'Hot Keywords - Admin', description: '全局关键词管理' },
-        { name: 'Analytics', description: '数据分析' },
-        { name: 'Content', description: '内容运营' },
-      ],
-    },
-    scalar: {
-      defaultOpenAllTags: true,
-      expandAllResponses: true,
-      hideClientButton: true,
-      showSidebar: true,
-      showToolbar: 'localhost',
-      operationTitleSource: 'summary',
-      theme: 'default',
-      persistAuth: false,
-      layout: 'modern',
-      hideModels: false,
-      documentDownloadType: 'both',
-      hideTestRequestButton: false,
-      showDeveloperTools: "never",
-      hideSearch: false,
-      showOperationId: false,
-      hideDarkModeToggle: false,
-      withDefaultFonts: true,
-      expandAllModelSections: false,
-      orderSchemaPropertiesBy: 'alpha',
-      orderRequiredPropertiesFirst: true,
-    },
-  }))
+  .use(openApiPlugin);
+
+const appWithControllers = appWithBase
   // 核心业务模块
   .use(authController)
   .use(userController)
@@ -102,43 +148,58 @@ const app = new Elysia()
   .use(hotKeywordsController)
   .use(configController)
   .use(analyticsController)
-  .use(contentController)
+  .use(contentController);
+
+const runtimeApp = (appWithControllers as unknown as Elysia)
   // 健康检查
   .get('/', () => 'Hello Juchang API')
   .get('/health', () => ({ status: 'ok', timestamp: new Date().toISOString() }))
   // 定时任务状态查询（仅供调试）
-  .get('/jobs/status', () => ({
-    jobs: getJobStatuses(),
-    timestamp: new Date().toISOString(),
-  }));
+  .get('/jobs/status', getJobsStatusHandler);
 
-// 启动服务器
-const port = Number(process.env.API_PORT || 3000);
-const host = process.env.API_HOST || '0.0.0.0'; // 默认监听所有网卡，支持局域网访问
+// 创建 Elysia 应用
+export const app = runtimeApp as unknown as Elysia;
 
-app.listen({ port, hostname: host }, () => {
-  // 打印路由列表
-  printRoutes(app);
+if (import.meta.main) {
+  // 打印启动 Banner
+  printBanner('聚场 API', '1.0.0');
 
-  // 打印启动信息
-  printStartupInfo(port, '/openapi');
+  // 启动服务器
+  const port = Number(process.env.API_PORT || 3000);
+  const host = process.env.API_HOST || '0.0.0.0'; // 默认监听所有网卡，支持局域网访问
 
-  // 启动定时任务调度器
-  startScheduler();
-});
+  try {
+    await ensureSystemPromptConfigured();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误';
+    console.error(`❌ AI 启动校验失败: ${message}`);
+    process.exit(1);
+  }
 
-// 优雅关闭
-process.on('SIGINT', () => {
-  console.log('\n正在关闭服务器...');
-  stopScheduler();
-  process.exit(0);
-});
+  app.listen({ port, hostname: host }, () => {
+    // 打印路由列表
+    printRoutes(app);
 
-process.on('SIGTERM', () => {
-  console.log('\n正在关闭服务器...');
-  stopScheduler();
-  process.exit(0);
-});
+    // 打印启动信息
+    printStartupInfo(port, '/openapi');
+
+    // 启动定时任务调度器
+    startScheduler();
+  });
+
+  // 优雅关闭
+  process.on('SIGINT', () => {
+    console.log('\n正在关闭服务器...');
+    stopScheduler();
+    process.exit(0);
+  });
+
+  process.on('SIGTERM', () => {
+    console.log('\n正在关闭服务器...');
+    stopScheduler();
+    process.exit(0);
+  });
+}
 
 // 导出类型给 Eden Treaty
-export type App = typeof app;
+export type App = typeof appWithControllers;

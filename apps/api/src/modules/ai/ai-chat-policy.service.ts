@@ -28,9 +28,11 @@ const AUTH_REQUIRED_ACTIONS = new Set([
   'cancel_join',
   'create_activity',
   'edit_draft',
+  'save_draft_settings',
   'publish_draft',
   'confirm_publish',
   'find_partner',
+  'submit_partner_intent_form',
   'confirm_match',
   'cancel_match',
 ]);
@@ -44,7 +46,7 @@ function toStringValue(value: unknown, fallback = ''): string {
 }
 
 function getAuthRequiredMessage(action: string): string {
-  if (action.includes('publish') || action.includes('create') || action === 'edit_draft') {
+  if (action.includes('publish') || action.includes('create') || action === 'edit_draft' || action === 'save_draft_settings') {
     return '这个操作会创建或修改活动，先登录后我再继续帮你完成。';
   }
   if (action.includes('match') || action === 'find_partner') {

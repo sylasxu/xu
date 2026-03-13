@@ -63,7 +63,7 @@ function UserRowActions({ user }: { user: User }) {
             setOpen('quota')
           }}
         >
-          AI 额度
+          创建活动额度
           <DropdownMenuShortcut>
             <Gauge size={16} />
           </DropdownMenuShortcut>

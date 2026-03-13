@@ -3,7 +3,10 @@ import { defineConfig } from 'orval'
 export default defineConfig({
   juchang: {
     input: {
-      target: 'http://127.0.0.1:1996/openapi/json',
+      target: '.openapi/openapi.json',
+      parserOptions: {
+        validate: false,
+      },
     },
     output: {
       mode: 'tags-split',
@@ -21,7 +24,7 @@ export default defineConfig({
       },
     },
     hooks: {
-      afterAllFilesWrite: 'prettier --write',
+      afterAllFilesWrite: './node_modules/.bin/prettier --write',
     },
   },
 })

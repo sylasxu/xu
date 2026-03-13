@@ -70,6 +70,32 @@ export interface PartnerIntentDraftPayload {
   tags: string[];
 }
 
+export interface PartnerIntentFormFieldOption {
+  label: string;
+  value: string;
+}
+
+export interface PartnerIntentFormField {
+  name: string;
+  label: string;
+  type: 'single-select' | 'multi-select' | 'textarea';
+  required?: boolean;
+  options?: PartnerIntentFormFieldOption[];
+  placeholder?: string;
+  maxLength?: number;
+}
+
+export interface PartnerIntentFormPayload {
+  title: string;
+  schema: {
+    formType: 'partner_intent';
+    submitAction: 'submit_partner_intent_form';
+    submitLabel: string;
+    fields: PartnerIntentFormField[];
+  };
+  initialValues: Record<string, unknown>;
+}
+
 /**
  * 存储格式 (保持 type 值不变以兼容已存储数据)
  */
@@ -149,6 +175,163 @@ const QUESTION_TEMPLATES: Record<string, PartnerMatchingQuestion> = {
     ],
   },
 };
+
+
+const PARTNER_LOCATION_OPTIONS = ['观音桥', '解放碑', '南坪', '沙坪坝', '江北嘴', '杨家坪', '大坪'];
+
+function inferPartnerActivityTypeFromText(message: string): PartnerActivityType | undefined {
+  if (/(麻将|桌游|狼人杀|剧本杀)/.test(message)) {
+    return 'boardgame';
+  }
+  if (/(火锅|烧烤|吃饭|约饭|咖啡|奶茶)/.test(message)) {
+    return 'food';
+  }
+  if (/(唱歌|KTV|电影|酒吧|livehouse)/i.test(message)) {
+    return 'entertainment';
+  }
+  if (/(羽毛球|篮球|跑步|徒步|运动|打球)/.test(message)) {
+    return 'sports';
+  }
+  return undefined;
+}
+
+function inferPartnerTimeRangeFromText(message: string): PartnerTimeRange | undefined {
+  if (/(今晚|今天|晚上)/.test(message)) return 'tonight';
+  if (/(明天|明晚)/.test(message)) return 'tomorrow';
+  if (/(周末|周六|周日)/.test(message)) return 'weekend';
+  if (/(下周)/.test(message)) return 'next_week';
+  return undefined;
+}
+
+function inferPartnerBudgetTypeFromText(message: string): 'AA' | 'Treat' | undefined {
+  if (/(^|\b)aa(制)?(\b|$)/i.test(message)) return 'AA';
+  if (/(请客|有人请|蹭饭)/.test(message)) return 'Treat';
+  return undefined;
+}
+
+function inferPartnerTagsFromText(message: string): string[] {
+  const tags: string[] = [];
+  if (/(不喝酒)/.test(message)) tags.push('NoAlcohol');
+  if (/(安静|别太闹|清净)/.test(message)) tags.push('Quiet');
+  if (/(女生友好|女孩子友好)/.test(message)) tags.push('WomenFriendly');
+  if (/(咖啡)/.test(message)) tags.push('Coffee');
+  return Array.from(new Set(tags));
+}
+
+function inferPartnerLocationFromText(message: string): string | undefined {
+  for (const location of PARTNER_LOCATION_OPTIONS) {
+    if (message.includes(location)) {
+      return location;
+    }
+  }
+  return undefined;
+}
+
+export function buildPartnerIntentFormPayload(params: {
+  state: PartnerMatchingState;
+  fallbackLocationHint: string;
+  rawInput?: string;
+  defaultActivityType?: string;
+  defaultLocation?: string;
+}): PartnerIntentFormPayload {
+  const rawInput = params.rawInput?.trim() || params.state.rawInput.trim();
+  const inferredActivityType = inferPartnerActivityTypeFromText(rawInput || '');
+  const inferredTimeRange = inferPartnerTimeRangeFromText(rawInput || '');
+  const inferredBudgetType = inferPartnerBudgetTypeFromText(rawInput || '');
+  const inferredLocation = inferPartnerLocationFromText(rawInput || '');
+  const inferredTags = inferPartnerTagsFromText(rawInput || '');
+  const mergedTags = Array.from(new Set([
+    ...(params.state.collectedPreferences.tags || []),
+    ...inferredTags,
+  ]));
+
+  const activityType = normalizePartnerActivityType(
+    params.state.collectedPreferences.activityType
+      || params.defaultActivityType
+      || inferredActivityType
+  );
+
+  const initialValues: Record<string, unknown> = {
+    rawInput,
+    activityType,
+    timeRange: params.state.collectedPreferences.timeRange || inferredTimeRange || '',
+    location: params.state.collectedPreferences.location || params.defaultLocation || inferredLocation || params.fallbackLocationHint,
+    budgetType: inferredBudgetType || '',
+    tags: mergedTags,
+    note: '',
+  };
+
+  return {
+    title: '找搭子偏好',
+    schema: {
+      formType: 'partner_intent',
+      submitAction: 'submit_partner_intent_form',
+      submitLabel: '开始找搭子',
+      fields: [
+        {
+          name: 'activityType',
+          label: '想找哪类搭子',
+          type: 'single-select',
+          required: true,
+          options: [
+            { label: '吃饭', value: 'food' },
+            { label: '娱乐', value: 'entertainment' },
+            { label: '运动', value: 'sports' },
+            { label: '麻将/桌游', value: 'boardgame' },
+          ],
+        },
+        {
+          name: 'timeRange',
+          label: '什么时候方便',
+          type: 'single-select',
+          required: true,
+          options: [
+            { label: '今晚', value: 'tonight' },
+            { label: '明天', value: 'tomorrow' },
+            { label: '周末', value: 'weekend' },
+            { label: '下周', value: 'next_week' },
+          ],
+        },
+        {
+          name: 'location',
+          label: '大概在哪儿',
+          type: 'single-select',
+          required: true,
+          options: PARTNER_LOCATION_OPTIONS.map((location) => ({ label: location, value: location })),
+        },
+        {
+          name: 'budgetType',
+          label: '费用方式',
+          type: 'single-select',
+          options: [
+            { label: 'AA制', value: 'AA' },
+            { label: '有人请客也行', value: 'Treat' },
+            { label: '都可以', value: 'Flexible' },
+          ],
+        },
+        {
+          name: 'tags',
+          label: '特别要求',
+          type: 'multi-select',
+          options: [
+            { label: '不喝酒', value: 'NoAlcohol' },
+            { label: '安静点的', value: 'Quiet' },
+            { label: '女生友好', value: 'WomenFriendly' },
+            { label: '没有特别要求', value: 'NoPreference' },
+          ],
+        },
+        {
+          name: 'note',
+          label: '补充说明',
+          type: 'textarea',
+          placeholder: '比如想凑一桌麻将，接受新手，或希望离地铁口近一点',
+          maxLength: 80,
+        },
+      ],
+    },
+    initialValues,
+  };
+}
 
 // ============ 核心函数 ============
 

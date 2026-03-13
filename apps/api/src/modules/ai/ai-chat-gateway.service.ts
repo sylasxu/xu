@@ -20,6 +20,7 @@ import {
   createEntityCardBlock,
   createCtaGroupBlock,
   createAlertBlock,
+  createFormBlock,
   pushBlock,
 } from './shared/genui-blocks';
 
@@ -45,7 +46,7 @@ const KNOWN_LOCATION_CENTERS = [
 ] as const;
 
 const EXPLORE_TEXT_PATTERN = /(附近.*(局|活动|好玩的)|有什么(局|活动)|推荐|找个局|找局|看看.*局|约饭|吃饭|火锅|羽毛球|桌游|咖啡)/;
-const EXPLORE_FOLLOWUP_PATTERN = /(有没有|还有|那|换成|改成|最好|预算|今晚|明天|周末|八点|8点|不吃辣|别太闹|安静|AA|清淡|轻松)/;
+const EXPLORE_FOLLOWUP_PATTERN = /(有没有|还有|那|换成|改成|最好|预算|今晚|明天|周末|八点|8点|不吃辣|别太闹|安静|AA|清淡|轻松|都可以|都行|随便)/;
 const CREATE_FROM_EXPLORE_PATTERN = /(我来组|我想自己组|我自己组|我来发|我自己发|帮我组一个|那就我来组|那我自己发)/;
 
 
@@ -331,6 +332,142 @@ function extractSearchContextFromHistory(historyMessages: ChatRequest['messages'
   return { center, activityType };
 }
 
+function looksLikeLocationQuestion(text: string): boolean {
+  return /(在哪儿|哪里|位置|地点|区域|商圈|哪边|去哪儿|想在哪|想去哪|换个地方)/.test(text);
+}
+
+function hasRecentLocationPrompt(historyMessages: ChatRequest['messages']): boolean {
+  let inspectedAssistantTurns = 0;
+
+  for (const message of [...historyMessages].reverse()) {
+    if (message.role !== 'assistant') {
+      continue;
+    }
+
+    inspectedAssistantTurns += 1;
+    const content = typeof message.content === 'string' ? message.content.trim() : '';
+    if (content && looksLikeLocationQuestion(content)) {
+      return true;
+    }
+
+    if (inspectedAssistantTurns >= 3) {
+      break;
+    }
+  }
+
+  return false;
+}
+
+function buildExploreSemanticQuery(locationName: string, activityType?: string): string {
+  const typeLabelMap: Record<string, string> = {
+    food: '约饭',
+    sports: '运动',
+    boardgame: '桌游',
+    entertainment: '娱乐',
+  };
+
+  if (!activityType) {
+    return `${locationName}附近的活动`;
+  }
+
+  return `${locationName}附近的${typeLabelMap[activityType] || '活动'}`;
+}
+
+function buildTypePreferencePayload(params: {
+  center: { name: string; lat: number; lng: number };
+  semanticQuery: string;
+}): Record<string, unknown> {
+  const baseParams = {
+    locationName: params.center.name,
+    lat: params.center.lat,
+    lng: params.center.lng,
+    radiusKm: 5,
+    semanticQuery: params.semanticQuery,
+  };
+
+  return {
+    questionType: 'type',
+    question: `${params.center.name}想先看哪类活动？`,
+    message: `${params.center.name}想先看哪类活动？`,
+    options: [
+      {
+        label: '先看全部',
+        value: 'all',
+        action: 'explore_nearby',
+        params: baseParams,
+      },
+      {
+        label: '约饭',
+        value: 'food',
+        action: 'explore_nearby',
+        params: {
+          ...baseParams,
+          type: 'food',
+        },
+      },
+      {
+        label: '运动',
+        value: 'sports',
+        action: 'explore_nearby',
+        params: {
+          ...baseParams,
+          type: 'sports',
+        },
+      },
+      {
+        label: '桌游',
+        value: 'boardgame',
+        action: 'explore_nearby',
+        params: {
+          ...baseParams,
+          type: 'boardgame',
+        },
+      },
+      {
+        label: '娱乐',
+        value: 'entertainment',
+        action: 'explore_nearby',
+        params: {
+          ...baseParams,
+          type: 'entertainment',
+        },
+      },
+    ],
+  };
+}
+
+function buildLocationPreferencePayload(inputText: string, activityType?: string): Record<string, unknown> {
+  const semanticQuery = inputText.trim() || '附近有什么活动';
+  const needsTypeStep = !activityType;
+  const options = KNOWN_LOCATION_CENTERS
+    .filter((location) => ['观音桥', '解放碑', '南坪', '江北嘴'].includes(location.name))
+    .map((location) => ({
+      label: location.name,
+      value: location.name,
+      action: needsTypeStep ? 'ask_preference' : 'explore_nearby',
+      params: needsTypeStep
+        ? buildTypePreferencePayload({
+            center: location,
+            semanticQuery,
+          })
+        : {
+            locationName: location.name,
+            lat: location.lat,
+            lng: location.lng,
+            radiusKm: 5,
+            semanticQuery,
+            ...(activityType ? { type: activityType } : {}),
+          },
+    }));
+
+  return {
+    questionType: 'location',
+    question: '想先看哪个区域的活动？',
+    options,
+    message: '想先看哪个区域的活动？',
+  };
+}
+
 function buildCreatePromptFromExplore(params: {
   locationName: string;
   originalText: string;
@@ -366,6 +503,12 @@ function inferTextUserAction(
   const historyContext = extractSearchContextFromHistory(historyMessages);
   const center = currentCenter || historyContext.center;
   const activityType = inferActivityTypeFromText(normalized) || historyContext.activityType;
+  const isBareLocationReply = Boolean(
+    currentCenter
+      && normalized.replace(/附近$/, '') === currentCenter.name
+      && !/[，。,.!?？！；;:：]/.test(normalized)
+      && normalized.length <= 12
+  );
 
   if (CREATE_FROM_EXPLORE_PATTERN.test(normalized) && center) {
     return {
@@ -384,8 +527,45 @@ function inferTextUserAction(
     };
   }
 
+  if (currentCenter && isBareLocationReply && hasRecentLocationPrompt(historyMessages)) {
+    if (!activityType) {
+      return {
+        action: 'ask_preference',
+        payload: buildTypePreferencePayload({
+          center: currentCenter,
+          semanticQuery: buildExploreSemanticQuery(currentCenter.name),
+        }),
+        source: 'text_inference',
+        originalText: normalized,
+      };
+    }
+
+    return {
+      action: 'explore_nearby',
+      payload: {
+        locationName: currentCenter.name,
+        lat: currentCenter.lat,
+        lng: currentCenter.lng,
+        radiusKm: 5,
+        semanticQuery: buildExploreSemanticQuery(currentCenter.name, activityType),
+        ...(activityType ? { type: activityType } : {}),
+      },
+      source: 'text_inference',
+      originalText: normalized,
+    };
+  }
+
   const shouldExplore = EXPLORE_TEXT_PATTERN.test(normalized)
     || (!!center && EXPLORE_FOLLOWUP_PATTERN.test(normalized));
+
+  if (shouldExplore && !center) {
+    return {
+      action: 'ask_preference',
+      payload: buildLocationPreferencePayload(normalized, activityType),
+      source: 'text_inference',
+      originalText: normalized,
+    };
+  }
 
   if (!shouldExplore || !center) {
     return undefined;
@@ -955,6 +1135,48 @@ function mapToolOutputToBlocks(params: {
   return blocks;
 }
 
+function mapPartnerIntentFormPayloadToBlock(
+  payload: Record<string, unknown>,
+  traceRef: string
+): GenUIBlock | null {
+  const schema = isRecord(payload.schema) ? payload.schema : null;
+  if (!schema) {
+    return null;
+  }
+
+  const title = toStringValue(payload.title, '找搭子偏好');
+  const initialValues = isRecord(payload.initialValues) ? payload.initialValues : undefined;
+
+  return createFormBlock({
+    title,
+    schema,
+    initialValues,
+    dedupeKey: 'partner_intent_form',
+    traceRef,
+  });
+}
+
+function mapDraftSettingsFormPayloadToBlock(
+  payload: Record<string, unknown>,
+  traceRef: string
+): GenUIBlock | null {
+  const schema = isRecord(payload.schema) ? payload.schema : null;
+  if (!schema) {
+    return null;
+  }
+
+  const title = toStringValue(payload.title, '调整活动草稿');
+  const initialValues = isRecord(payload.initialValues) ? payload.initialValues : undefined;
+
+  return createFormBlock({
+    title,
+    schema,
+    initialValues,
+    dedupeKey: 'draft_settings_form',
+    traceRef,
+  });
+}
+
 function mapWidgetDataToBlock(params: {
   widgetType: string;
   payload: unknown;
@@ -972,6 +1194,14 @@ function mapWidgetDataToBlock(params: {
 
   if (widgetType === 'widget_explore') {
     return mapExplorePayloadToList(payload, traceRef, 'widget_explore');
+  }
+
+  if (widgetType === 'widget_partner_intent_form') {
+    return mapPartnerIntentFormPayloadToBlock(payload, traceRef);
+  }
+
+  if (widgetType === 'widget_draft_settings_form') {
+    return mapDraftSettingsFormPayloadToBlock(payload, traceRef);
   }
 
   if (widgetType === 'widget_error') {
@@ -1065,8 +1295,8 @@ function inferResultOutcome(
     if (action === 'publish_draft' || action === 'confirm_publish') {
       return { outcome: 'published', confidence: 'high', evidence: 'input.action=' + action };
     }
-    if (action === 'create_activity') {
-      return { outcome: 'activity_ready', confidence: 'high', evidence: 'input.action=create_activity' };
+    if (action === 'create_activity' || action === 'save_draft_settings') {
+      return { outcome: 'activity_ready', confidence: 'high', evidence: 'input.action=' + action };
     }
     if (action === 'explore_nearby') {
       return { outcome: 'explored', confidence: 'high', evidence: 'input.action=explore_nearby' };

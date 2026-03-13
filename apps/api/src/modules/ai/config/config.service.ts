@@ -80,6 +80,36 @@ export async function getConfigValue<T>(configKey: string, defaultValue: T): Pro
 }
 
 /**
+ * 获取必需配置值。
+ *
+ * 用于关键路径：配置缺失或数据库读取失败时直接抛错，
+ * 禁止静默降级到默认值。
+ */
+export async function getRequiredConfigValue<T>(configKey: string): Promise<T> {
+  const cached = getCached(configKey);
+  if (cached !== undefined) return cached as T;
+
+  try {
+    const [row] = await db
+      .select()
+      .from(aiConfigs)
+      .where(eq(aiConfigs.configKey, configKey))
+      .limit(1);
+
+    if (!row) {
+      throw new Error(`缺少必需 AI 配置 ${configKey}，请先执行 bun run db:seed:ai-configs 或在 Admin 中补齐配置`);
+    }
+
+    const value = row.configValue as T;
+    setCache(configKey, value);
+    return value;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未知错误';
+    throw new Error(`[ConfigService] 加载必需配置 ${configKey} 失败: ${message}`);
+  }
+}
+
+/**
  * 更新配置值
  *
  * 写入数据库 + 刷新缓存 + 自动递增版本号。

@@ -43,9 +43,9 @@ try {
   // 3. AI 配置提示
   console.log('');
   console.log('🤖 AI 服务配置说明：');
-  console.log('   - 默认使用通义千问 (dashscope)，请在 .env 中配置 DASHSCOPE_API_KEY');
-  console.log('   - 也可以使用其他服务商，修改 AI_PROVIDER 即可');
-  console.log('   - 支持：openai, dashscope, zhipu, qianfan');
+  console.log('   - 当前默认：Qwen（dashscope）主力，DeepSeek 备选');
+  console.log('   - 请至少配置 DASHSCOPE_API_KEY；如需降级兜底，再配置 DEEPSEEK_API_KEY');
+  console.log('   - 当前运行口径：qwen + deepseek');
   console.log('');
 
   // 写入 .env

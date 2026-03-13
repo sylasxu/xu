@@ -5,6 +5,7 @@
  */
 
 import type { Activity } from '@juchang/db';
+import { ACTIVE_MODELS, EMBEDDING_DIMENSIONS } from '../models/types';
 
 /**
  * 混合检索参数
@@ -73,9 +74,9 @@ export interface IndexItem {
  * RAG 服务配置
  */
 export interface RagConfig {
-  /** Embedding 模型，默认 'embedding-3' (智谱) */
+  /** Embedding 模型，默认 Qwen text-embedding-v4 */
   embeddingModel: string;
-  /** 向量维度，默认 1024 */
+  /** 向量维度，默认 1536 */
   embeddingDimensions: number;
   /** 默认返回数量，默认 20 */
   defaultLimit: number;
@@ -93,8 +94,8 @@ export interface RagConfig {
  * 默认 RAG 配置
  */
 export const DEFAULT_RAG_CONFIG: RagConfig = {
-  embeddingModel: 'embedding-3',
-  embeddingDimensions: 1024,
+  embeddingModel: ACTIVE_MODELS.EMBEDDING_PRIMARY,
+  embeddingDimensions: EMBEDDING_DIMENSIONS.QWEN,
   defaultLimit: 20,
   defaultThreshold: 0.5,
   batchSize: 100,

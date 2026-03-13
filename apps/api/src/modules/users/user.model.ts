@@ -26,7 +26,7 @@ const SuccessResponse = t.Object({
 
 // 额度响应
 const QuotaResponse = t.Object({
-  aiCreateQuota: t.Number({ description: '今日剩余 AI 创建额度' }),
+  aiCreateQuota: t.Number({ description: '今日剩余创建活动额度' }),
   resetAt: t.Union([t.String(), t.Null()], { description: '额度重置时间' }),
 });
 
@@ -51,6 +51,10 @@ export const UserListResponseSchema = t.Object({
 export const UpdateUserRequestSchema = t.Object({
   nickname: t.Optional(t.String({ maxLength: 50, description: '昵称' })),
   avatarUrl: t.Optional(t.String({ maxLength: 500, description: '头像URL' })),
+  workingMemory: t.Optional(t.Union([
+    t.String({ description: '用户画像工作记忆（JSON 字符串）' }),
+    t.Null(),
+  ])),
 });
 
 // ============ 统计 Schema ============

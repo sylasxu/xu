@@ -315,7 +315,7 @@ Component({
       const draft = this.properties.draft as DraftData;
       if (!draft?.activityId) return;
 
-      this.dispatchDraftAction('edit_draft', this.buildDraftActionPayload(draft), '改下地点');
+      this.dispatchDraftAction('edit_draft', this.buildDraftActionPayload(draft, { field: 'location' }), '改下地点');
     },
 
     /**
@@ -325,7 +325,7 @@ Component({
       const draft = this.properties.draft as DraftData;
       if (!draft?.activityId) return;
 
-      this.dispatchDraftAction('edit_draft', this.buildDraftActionPayload(draft), '改下时间');
+      this.dispatchDraftAction('edit_draft', this.buildDraftActionPayload(draft, { field: 'time' }), '改下时间');
     },
 
     /**
@@ -335,7 +335,7 @@ Component({
       const draft = this.properties.draft as DraftData;
       if (!draft?.activityId) return;
 
-      this.dispatchDraftAction('edit_draft', this.buildDraftActionPayload(draft), '改下人数设置');
+      this.dispatchDraftAction('edit_draft', this.buildDraftActionPayload(draft, { field: 'participants' }), '改下人数设置');
     },
   },
 });

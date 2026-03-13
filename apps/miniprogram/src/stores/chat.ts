@@ -50,7 +50,7 @@ export type MessageRole = 'user' | 'assistant'
  */
 export interface WidgetPart {
   type: 'widget'
-  widgetType: 'dashboard' | 'draft' | 'explore' | 'share' | 'ask_preference' | 'error'
+  widgetType: 'dashboard' | 'draft' | 'explore' | 'share' | 'ask_preference' | 'partner_intent_form' | 'draft_settings_form' | 'error'
   data: unknown
 }
 
@@ -450,11 +450,42 @@ function mapCtaGroupToWidgetPart(block: GenUICtaGroupBlock): WidgetPart {
 
 function mapFormToWidgetPart(block: GenUIFormBlock): WidgetPart {
   const initial = isRecord(block.initialValues) ? block.initialValues : {}
+  const schema = isRecord(block.schema) ? block.schema : {}
+  const formType = typeof schema.formType === 'string' ? schema.formType : ''
+
+  if (formType === 'partner_intent') {
+    return {
+      type: 'widget',
+      widgetType: 'partner_intent_form',
+      data: {
+        title: typeof block.title === 'string' ? block.title : '找搭子偏好',
+        schema,
+        initialValues: initial,
+        disabled: false,
+      },
+    }
+  }
+
+  if (formType === 'draft_settings') {
+    return {
+      type: 'widget',
+      widgetType: 'draft_settings_form',
+      data: {
+        title: typeof block.title === 'string' ? block.title : '调整活动草稿',
+        schema,
+        initialValues: initial,
+        disabled: false,
+      },
+    }
+  }
 
   return {
     type: 'widget',
-    widgetType: 'draft',
-    data: buildDraftWidgetDataFromRecord(initial),
+    widgetType: 'error',
+    data: {
+      message: '暂不支持这种表单卡片，请换个方式试试',
+      showRetry: false,
+    },
   }
 }
 

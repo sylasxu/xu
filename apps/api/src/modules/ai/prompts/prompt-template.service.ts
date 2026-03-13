@@ -1,13 +1,12 @@
 /**
  * Prompt Template Service
  *
- * 核心服务：从 ai_configs 读取模板 → 构建变量 → 插值 → 返回 System Prompt
- * DB 不可用时自动降级到 FALLBACK_TEMPLATE
+ * 从 ai_configs 读取必需的 system prompt 模板，
+ * 缺失或格式错误时直接抛错，禁止静默降级。
  */
 
-import { getConfigValue } from '../config/config.service';
+import { getRequiredConfigValue } from '../config/config.service';
 import { formatDateTime, getTomorrowStr, escapeXml } from './builder';
-import { FALLBACK_TEMPLATE } from './fallback-template';
 import { interpolateTemplate } from './interpolator';
 import { generateWidgetCatalog } from './widget-catalog';
 import type { PromptContext } from './types';
@@ -15,14 +14,54 @@ import type { PromptContext } from './types';
 /** ai_configs 中的 configKey */
 const CONFIG_KEY = 'prompts.system_template';
 
+interface PromptTemplateMetadata {
+  version?: string;
+  description?: string;
+  lastModified?: string;
+  supportedVariables?: string[];
+  features?: string[];
+}
+
 /** DB 存储的模板 JSON 结构 */
-interface PromptTemplateConfig {
+export interface PromptTemplateConfig {
   template: string;
-  metadata: {
-    version: string;
-    description: string;
-    lastModified: string;
-    supportedVariables: string[];
+  metadata?: PromptTemplateMetadata;
+}
+
+function isPromptTemplateConfig(value: unknown): value is PromptTemplateConfig {
+  if (!value || typeof value !== 'object') return false;
+
+  const template = (value as { template?: unknown }).template;
+  return typeof template === 'string' && template.trim().length > 0;
+}
+
+export async function getPromptTemplateConfig(): Promise<PromptTemplateConfig> {
+  const config = await getRequiredConfigValue<unknown>(CONFIG_KEY);
+
+  if (!isPromptTemplateConfig(config)) {
+    throw new Error(
+      `[PromptTemplateService] 配置 ${CONFIG_KEY} 格式非法，要求 { template: string, metadata?: object }`,
+    );
+  }
+
+  return config;
+}
+
+export async function ensureSystemPromptConfigured(): Promise<void> {
+  await getPromptTemplateConfig();
+}
+
+export function getPromptTemplateMetadata(config: PromptTemplateConfig): {
+  version: string;
+  description: string;
+  lastModified: string;
+  features: string[];
+} {
+  return {
+    version: config.metadata?.version || 'unknown',
+    description: config.metadata?.description || '未填写描述',
+    lastModified: config.metadata?.lastModified || 'unknown',
+    features: Array.isArray(config.metadata?.features) ? config.metadata.features : [],
   };
 }
 
@@ -42,15 +81,12 @@ export function buildTemplateVariables(
   const timeStr = formatDateTime(currentTime);
   const tomorrowStr = getTomorrowStr(currentTime);
 
-  // 位置
   const locationStr = userLocation
     ? `${userLocation.lat.toFixed(4)},${userLocation.lng.toFixed(4)} (${escapeXml(userLocation.name || '当前位置')})`
     : '未提供';
 
-  // 用户昵称（含前缀，空时为空字符串 → 插值后该行消失）
   const nicknameVar = userNickname ? `用户: ${escapeXml(userNickname)}` : '';
 
-  // 草稿（含前缀）
   const draftVar = draftContext
     ? `草稿: ${JSON.stringify({
         id: draftContext.activityId,
@@ -75,30 +111,16 @@ export function buildTemplateVariables(
 
 /**
  * 获取 System Prompt（DB 模板 + 插值）
- *
- * 保持与原 getSystemPrompt 相同的函数签名
  */
 export async function getSystemPrompt(
   ctx: PromptContext,
   contextXml?: string,
 ): Promise<string> {
-  let template = FALLBACK_TEMPLATE;
-
-  try {
-    const config = await getConfigValue<PromptTemplateConfig | null>(CONFIG_KEY, null);
-    if (config?.template) {
-      template = config.template;
-    } else if (config === null) {
-      console.warn('[PromptTemplateService] 模板不存在，使用 Fallback Template');
-    }
-  } catch (error) {
-    console.warn('[PromptTemplateService] 读取模板失败，使用 Fallback Template', error);
-  }
-
+  const config = await getPromptTemplateConfig();
   const catalog = generateWidgetCatalog();
   const variables = buildTemplateVariables(ctx, contextXml, catalog);
 
-  return interpolateTemplate(template, variables);
+  return interpolateTemplate(config.template, variables);
 }
 
 /**

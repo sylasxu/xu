@@ -238,10 +238,10 @@ export function UserDetail() {
               </CardContent>
             </Card>
 
-            {/* AI 配额信息 */}
+            {/* 创建活动额度信息 */}
             <Card>
               <CardHeader>
-                <CardTitle>AI 配额</CardTitle>
+                <CardTitle>创建活动额度</CardTitle>
               </CardHeader>
               <CardContent className='space-y-3'>
                 <div className='flex justify-between text-sm'>

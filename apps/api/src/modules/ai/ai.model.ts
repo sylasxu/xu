@@ -6,111 +6,166 @@ import { selectConversationSchema, selectMessageSchema } from '@juchang/db';
  * AI Model Plugin - v3.3 Chat-First (行业标准命名)
  * 
  * 功能：
- * - AI 解析（魔法输入框）
+ * - AI Chat 统一网关（GenUI 协议）
  * - 对话历史管理（GET/POST/DELETE /ai/conversations）
- * - SSE 事件类型（创建场景 + 探索场景）
  */
 
 // ==========================================
-// AI 解析相关 Schema
+// AI Chat 协议 Schema
 // ==========================================
 
-// AI 解析请求
-const AIParseRequest = t.Object({
-  text: t.String({ 
-    description: '用户输入的自然语言文本',
-    minLength: 2,
-    maxLength: 500,
-  }),
-  location: t.Optional(t.Tuple([t.Number(), t.Number()], {
-    description: '用户当前位置 [lng, lat]',
-  })),
+const GenericObjectSchema = t.Object({}, { additionalProperties: true });
+
+const ChatInputTextSchema = t.Object({
+  type: t.Literal('text'),
+  text: t.String({ minLength: 1, description: '用户输入文本' }),
 });
 
-// AI 解析响应（SSE 流式返回的最终结果）
-const AIParseResponse = t.Object({
-  parsed: t.Object({
-    title: t.Optional(t.String()),
-    description: t.Optional(t.String()),
-    type: t.Optional(t.String()),
-    startAt: t.Optional(t.String()),
-    endAt: t.Optional(t.String()),
-    location: t.Optional(t.Tuple([t.Number(), t.Number()])),
-    locationName: t.Optional(t.String()),
-    address: t.Optional(t.String()),
-    locationHint: t.Optional(t.String({ description: '重庆地形位置备注' })),
-    maxParticipants: t.Optional(t.Number()),
-    feeType: t.Optional(t.String()),
-    estimatedCost: t.Optional(t.Number()),
-  }),
-  confidence: t.Number({ minimum: 0, maximum: 1 }),
-  suggestions: t.Array(t.String()),
+const ChatInputActionSchema = t.Object({
+  type: t.Literal('action'),
+  action: t.String({ minLength: 1, description: '结构化动作名称' }),
+  actionId: t.String({ minLength: 1, description: '动作唯一 ID' }),
+  params: t.Optional(GenericObjectSchema),
+  displayText: t.Optional(t.String({ description: '用户侧展示文本' })),
+}, { additionalProperties: true });
+
+const ChatContextSchema = t.Object({
+  client: t.Optional(t.Union([
+    t.Literal('web'),
+    t.Literal('miniprogram'),
+    t.Literal('admin'),
+  ])),
+  locale: t.Optional(t.String()),
+  timezone: t.Optional(t.String()),
+  platformVersion: t.Optional(t.String()),
+  lat: t.Optional(t.Number()),
+  lng: t.Optional(t.Number()),
+}, { additionalProperties: true });
+
+const ChatRequestSchema = t.Object({
+  conversationId: t.Optional(t.String({ minLength: 1, description: '会话 ID，可选续聊' })),
+  input: t.Union([ChatInputTextSchema, ChatInputActionSchema]),
+  context: t.Optional(ChatContextSchema),
+  stream: t.Optional(t.Boolean({ description: 'true 时返回 GenUI SSE 事件流' })),
 });
 
-// ==========================================
-// SSE 事件类型 (v3.2 新增探索场景)
-// ==========================================
-
-// SSE 事件类型枚举
-const SSEEventType = t.Union([
-  // 通用事件
-  t.Literal('thinking'),    // AI 思考中
-  t.Literal('chunk'),       // 流式文本块
-  t.Literal('error'),       // 错误
-  t.Literal('done'),        // 完成
-  // 创建场景事件
-  t.Literal('location'),    // 定位到位置
-  t.Literal('draft'),       // 返回活动草稿
-  // 探索场景事件 (v3.2 新增)
-  t.Literal('searching'),   // 搜索中
-  t.Literal('explore'),     // 返回探索结果
+const GenUIReplacePolicySchema = t.Union([
+  t.Literal('append'),
+  t.Literal('replace'),
+  t.Literal('ignore-if-exists'),
 ]);
 
-// 探索结果项
-const ExploreResultItem = t.Object({
-  id: t.String(),
-  title: t.String(),
-  type: t.String(),
-  lat: t.Number(),
-  lng: t.Number(),
-  locationName: t.String(),
-  distance: t.Number({ description: '距离（米）' }),
-  startAt: t.String(),
-  currentParticipants: t.Number(),
-  maxParticipants: t.Number(),
-  score: t.Optional(t.Number({ description: '匹配分数 0-1' })),
-  matchReason: t.Optional(t.String({ description: '推荐理由' })),
-});
+const GenUITurnStatusSchema = t.Union([
+  t.Literal('streaming'),
+  t.Literal('completed'),
+  t.Literal('error'),
+]);
 
-// 探索响应数据
-const ExploreResponseData = t.Object({
-  center: t.Object({
-    lat: t.Number(),
-    lng: t.Number(),
-    name: t.String(),
-  }),
-  results: t.Array(ExploreResultItem),
-  title: t.String({ description: '如：为你找到观音桥附近的 5 个热门活动' }),
-});
+const GenUIChoiceOptionSchema = t.Object({
+  label: t.String(),
+  action: t.String(),
+  params: t.Optional(GenericObjectSchema),
+}, { additionalProperties: true });
 
-// 活动草稿数据
-const ActivityDraftData = t.Object({
+const GenUICtaItemSchema = t.Object({
+  label: t.String(),
+  action: t.String(),
+  params: t.Optional(GenericObjectSchema),
+}, { additionalProperties: true });
+
+const GenUITextBlockSchema = t.Object({
+  blockId: t.String({ minLength: 1 }),
+  type: t.Literal('text'),
+  content: t.String(),
+  dedupeKey: t.Optional(t.String()),
+  replacePolicy: t.Optional(GenUIReplacePolicySchema),
+  meta: t.Optional(GenericObjectSchema),
+}, { additionalProperties: true });
+
+const GenUIChoiceBlockSchema = t.Object({
+  blockId: t.String({ minLength: 1 }),
+  type: t.Literal('choice'),
+  question: t.String(),
+  options: t.Array(GenUIChoiceOptionSchema),
+  dedupeKey: t.Optional(t.String()),
+  replacePolicy: t.Optional(GenUIReplacePolicySchema),
+  meta: t.Optional(GenericObjectSchema),
+}, { additionalProperties: true });
+
+const GenUIEntityCardBlockSchema = t.Object({
+  blockId: t.String({ minLength: 1 }),
+  type: t.Literal('entity-card'),
   title: t.String(),
-  description: t.Optional(t.String()),
-  type: t.Union([
-    t.Literal('food'),
-    t.Literal('entertainment'),
-    t.Literal('sports'),
-    t.Literal('boardgame'),
-    t.Literal('other'),
+  fields: GenericObjectSchema,
+  dedupeKey: t.Optional(t.String()),
+  replacePolicy: t.Optional(GenUIReplacePolicySchema),
+  meta: t.Optional(GenericObjectSchema),
+}, { additionalProperties: true });
+
+const GenUIListBlockSchema = t.Object({
+  blockId: t.String({ minLength: 1 }),
+  type: t.Literal('list'),
+  title: t.Optional(t.String()),
+  items: t.Array(GenericObjectSchema),
+  dedupeKey: t.Optional(t.String()),
+  replacePolicy: t.Optional(GenUIReplacePolicySchema),
+  meta: t.Optional(GenericObjectSchema),
+}, { additionalProperties: true });
+
+const GenUIFormBlockSchema = t.Object({
+  blockId: t.String({ minLength: 1 }),
+  type: t.Literal('form'),
+  title: t.Optional(t.String()),
+  schema: GenericObjectSchema,
+  initialValues: t.Optional(GenericObjectSchema),
+  dedupeKey: t.Optional(t.String()),
+  replacePolicy: t.Optional(GenUIReplacePolicySchema),
+  meta: t.Optional(GenericObjectSchema),
+}, { additionalProperties: true });
+
+const GenUICtaGroupBlockSchema = t.Object({
+  blockId: t.String({ minLength: 1 }),
+  type: t.Literal('cta-group'),
+  items: t.Array(GenUICtaItemSchema),
+  dedupeKey: t.Optional(t.String()),
+  replacePolicy: t.Optional(GenUIReplacePolicySchema),
+  meta: t.Optional(GenericObjectSchema),
+}, { additionalProperties: true });
+
+const GenUIAlertBlockSchema = t.Object({
+  blockId: t.String({ minLength: 1 }),
+  type: t.Literal('alert'),
+  level: t.Union([
+    t.Literal('info'),
+    t.Literal('warning'),
+    t.Literal('error'),
+    t.Literal('success'),
   ]),
-  startAt: t.String(),
-  location: t.Tuple([t.Number(), t.Number()]),
-  locationName: t.String(),
-  address: t.Optional(t.String()),
-  locationHint: t.String(),
-  maxParticipants: t.Number(),
-  activityId: t.String({ description: '创建的 draft 活动 ID' }),
+  message: t.String(),
+  dedupeKey: t.Optional(t.String()),
+  replacePolicy: t.Optional(GenUIReplacePolicySchema),
+  meta: t.Optional(GenericObjectSchema),
+}, { additionalProperties: true });
+
+const GenUIBlockSchema = t.Union([
+  GenUITextBlockSchema,
+  GenUIChoiceBlockSchema,
+  GenUIEntityCardBlockSchema,
+  GenUIListBlockSchema,
+  GenUIFormBlockSchema,
+  GenUICtaGroupBlockSchema,
+  GenUIAlertBlockSchema,
+]);
+
+const ChatTurnEnvelopeSchema = t.Object({
+  traceId: t.String({ minLength: 1 }),
+  conversationId: t.String({ minLength: 1 }),
+  turn: t.Object({
+    turnId: t.String({ minLength: 1 }),
+    role: t.Literal('assistant'),
+    status: GenUITurnStatusSchema,
+    blocks: t.Array(GenUIBlockSchema),
+  }),
 });
 
 // ==========================================
@@ -135,17 +190,6 @@ const ConversationMessageType = t.Union([
   t.Literal('widget_error'),
   t.Literal('widget_ask_preference'),  // v3.5 多轮对话偏好询问卡片
 ]);
-
-// 对话消息响应
-const ConversationMessage = t.Object({
-  id: t.String(),
-  userId: t.String(),
-  role: ConversationRole,
-  type: ConversationMessageType,
-  content: t.Any({ description: 'JSONB 内容，根据 type 不同结构不同' }),
-  activityId: t.Union([t.String(), t.Null()]),
-  createdAt: t.String(),
-});
 
 // 获取对话历史查询参数 (增强版 - 按显式 ID 查询)
 const ConversationsQuery = t.Object({
@@ -253,11 +297,24 @@ const SocialProfile = t.Object({
   preferenceCompleteness: t.Number({ description: '偏好完善度 0-100' }),
 });
 
+const WelcomePendingActivity = t.Object({
+  id: t.String({ description: '活动 ID' }),
+  title: t.String({ description: '活动标题' }),
+  type: t.String({ description: '活动类型' }),
+  startAt: t.String({ description: '开始时间 ISO' }),
+  locationName: t.String({ description: '地点名称' }),
+  locationHint: t.String({ description: '地点提示' }),
+  currentParticipants: t.Number({ description: '当前参与人数' }),
+  maxParticipants: t.Number({ description: '人数上限' }),
+  status: t.String({ description: '活动状态' }),
+});
+
 const WelcomeResponse = t.Object({
   greeting: t.String({ description: '问候语' }),
   subGreeting: t.Optional(t.String({ description: '副标题' })),
   sections: t.Array(WelcomeSection, { description: '分组列表' }),
   socialProfile: t.Optional(SocialProfile),
+  pendingActivities: t.Optional(t.Array(WelcomePendingActivity, { description: '待参加活动列表（最多 3 个）' })),
   quickPrompts: t.Array(t.Object({
     icon: t.String(),
     text: t.String(),
@@ -770,16 +827,10 @@ const SecurityStatsDBResponse = t.Object({
 // 注册到 Elysia
 export const aiModel = new Elysia({ name: 'aiModel' })
   .model({
-    // AI 解析
-    'ai.parseRequest': AIParseRequest,
-    'ai.parseResponse': AIParseResponse,
-    // SSE 事件类型 (v3.2 新增)
-    'ai.sseEventType': SSEEventType,
-    'ai.exploreResultItem': ExploreResultItem,
-    'ai.exploreResponseData': ExploreResponseData,
-    'ai.activityDraftData': ActivityDraftData,
+    // AI Chat 协议
+    'ai.chatRequest': ChatRequestSchema,
+    'ai.chatTurnEnvelope': ChatTurnEnvelopeSchema,
     // 对话历史 (v3.2 新增)
-    'ai.conversationMessage': ConversationMessage,
     'ai.conversationsQuery': ConversationsQuery,
     'ai.conversationsResponse': ConversationsResponse,
     'ai.addMessageRequest': AddMessageRequest,
@@ -842,18 +893,16 @@ export const aiModel = new Elysia({ name: 'aiModel' })
     // ==========================================
     'ai.contentGenerationRequest': ContentGenerationRequest,
     'ai.contentGenerationResponse': ContentGenerationResponse,
-  });
+});
 
 // 导出 TS 类型
-export type AIParseRequest = Static<typeof AIParseRequest>;
-export type AIParseResponse = Static<typeof AIParseResponse>;
-export type SSEEventType = Static<typeof SSEEventType>;
-export type ExploreResultItem = Static<typeof ExploreResultItem>;
-export type ExploreResponseData = Static<typeof ExploreResponseData>;
-export type ActivityDraftData = Static<typeof ActivityDraftData>;
+export type ChatInputText = Static<typeof ChatInputTextSchema>;
+export type ChatInputAction = Static<typeof ChatInputActionSchema>;
+export type ChatRequest = Static<typeof ChatRequestSchema>;
+export type GenUIBlock = Static<typeof GenUIBlockSchema>;
+export type ChatTurnEnvelope = Static<typeof ChatTurnEnvelopeSchema>;
 export type ConversationRole = Static<typeof ConversationRole>;
 export type ConversationMessageType = Static<typeof ConversationMessageType>;
-export type ConversationMessage = Static<typeof ConversationMessage>;
 export type ConversationsQuery = Static<typeof ConversationsQuery>;
 export type ConversationsResponse = Static<typeof ConversationsResponse>;
 export type AddMessageRequest = Static<typeof AddMessageRequest>;
@@ -864,6 +913,7 @@ export type ErrorResponse = Static<typeof ErrorResponse>;
 // Welcome Card 类型导出 (v3.4 新增)
 export type WelcomeResponse = Static<typeof WelcomeResponse>;
 export type WelcomeQuery = Static<typeof WelcomeQuery>;
+export type WelcomePendingActivity = Static<typeof WelcomePendingActivity>;
 
 // Metrics 类型导出 (v3.4 新增)
 export type MetricsUsageQuery = Static<typeof MetricsUsageQuery>;

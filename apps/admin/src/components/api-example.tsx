@@ -73,7 +73,7 @@ export function UserDetailExample({ userId }: { userId: string }) {
           <div><strong>手机号:</strong> {user?.phoneNumber || '未绑定'}</div>
           <div><strong>创建活动:</strong> {user?.activitiesCreatedCount || 0}</div>
           <div><strong>参与活动:</strong> {user?.participationCount || 0}</div>
-          <div><strong>今日AI额度:</strong> {user?.aiCreateQuotaToday || 3}</div>
+          <div><strong>今日创建活动额度:</strong> {user?.aiCreateQuotaToday || 3}</div>
           <div><strong>创建时间:</strong> {user?.createdAt ? new Date(user.createdAt).toLocaleString() : '未知'}</div>
         </div>
       </CardContent>

@@ -113,9 +113,9 @@ export function SettingsView({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="qwen-flash">Qwen Flash (免费)</SelectItem>
-                <SelectItem value="qwen-plus">Qwen Plus</SelectItem>
-                <SelectItem value="qwen-max">Qwen Max</SelectItem>
+                <SelectItem value="qwen-flash">Qwen Flash（极速闲聊）</SelectItem>
+                <SelectItem value="qwen-plus">Qwen Plus（深度思考）</SelectItem>
+                <SelectItem value="qwen3-max">Qwen3 Max（Agent）</SelectItem>
               </SelectContent>
             </Select>
           </div>

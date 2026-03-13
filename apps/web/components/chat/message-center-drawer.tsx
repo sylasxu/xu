@@ -214,9 +214,11 @@ function buildRebookPrompt(notification: SystemNotification): string {
   return `基于我刚结束的${activityHint}${activityRef}，帮我快速再约一场：延续合适的人、给个新时间建议，并直接生成一段可发送的招呼文案。`;
 }
 
-function buildKickoffPrompt(activityId?: string): string {
+function buildKickoffPrompt(activityId?: string, activityTitle?: string): string {
+  const normalizedTitle = activityTitle ? normalizeActivityTitle(activityTitle) : ""
+  const activityHint = normalizedTitle ? `「${normalizedTitle}」` : "这场活动"
   const activityRef = activityId ? `（activityId: ${activityId}）` : "";
-  return `我刚确认了一次搭子匹配${activityRef}，帮我生成一段群聊开场白，再给我 3 条组织提醒。`;
+  return `围绕${activityHint}${activityRef}，帮我生成一段讨论区开场白，再给我 3 条接下来的协同提醒。`;
 }
 
 function getNotificationFallbackContent(type: NotificationType): string {
@@ -494,12 +496,13 @@ export function MessageCenterDrawer({
     async (
       notification: SystemNotification,
       mode: "review" | "rebook" | "kickoff",
-      promptOverride?: { label: string; text: string }
+      promptOverride?: { label: string; text: string },
+      options?: { skipMarkRead?: boolean }
     ) => {
       const actionKey = `${mode}:${notification.id}`;
       setPendingActionKey(actionKey);
       try {
-        if (mode !== "kickoff" && !notification.isRead) {
+        if (!options?.skipMarkRead && !notification.isRead) {
           await markNotificationRead(notification.id);
         }
 
@@ -509,7 +512,11 @@ export function MessageCenterDrawer({
 
         const prompt =
           promptOverride?.text ||
-          (mode === "review" ? buildFeedbackPrompt(notification) : buildRebookPrompt(notification));
+          (mode === "review"
+            ? buildFeedbackPrompt(notification)
+            : mode === "rebook"
+              ? buildRebookPrompt(notification)
+              : buildKickoffPrompt(notification.activityId || undefined, notification.title));
         const displayText =
           promptOverride?.label || (mode === "review" ? "去复盘" : mode === "rebook" ? "去再约" : "让 AI 帮我写开场白");
 
@@ -614,7 +621,8 @@ export function MessageCenterDrawer({
                               createdAt: new Date().toISOString(),
                             },
                             "kickoff",
-                            prompt
+                            prompt,
+                            { skipMarkRead: true }
                           )
                         }
                         className={cn(
@@ -975,6 +983,10 @@ export function MessageCenterDrawer({
                       const readKey = `read:${notification.id}`;
                       const reviewKey = `review:${notification.id}`;
                       const rebookKey = `rebook:${notification.id}`;
+                      const kickoffKey = `kickoff:${notification.id}`;
+                      const canKickoff =
+                        (notification.type === "join" || notification.type === "new_participant") &&
+                        Boolean(notification.activityId);
                       return (
                         <div
                           key={notification.id}
@@ -1027,6 +1039,18 @@ export function MessageCenterDrawer({
                               >
                                 {pendingActionKey === rebookKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ChevronRight className="h-3.5 w-3.5" />}
                                 去再约
+                              </button>
+                            </div>
+                          ) : canKickoff ? (
+                            <div className="mt-3 flex gap-2">
+                              <button
+                                type="button"
+                                disabled={disabled || Boolean(pendingActionKey)}
+                                onClick={() => void handleFollowUpPrompt(notification, "kickoff")}
+                                className="inline-flex items-center gap-1 rounded-full bg-[#5b67f4] px-3 py-2 text-xs font-medium text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {pendingActionKey === kickoffKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                                让 AI 帮我写开场白
                               </button>
                             </div>
                           ) : !notification.isRead ? (
@@ -1105,6 +1129,38 @@ export function MessageCenterDrawer({
                           </span>
                           {chat.isArchived ? <span>已归档</span> : null}
                         </div>
+                        {!chat.isArchived ? (
+                          <div className="mt-3 flex gap-2">
+                            <button
+                              type="button"
+                              disabled={disabled || Boolean(pendingActionKey)}
+                              onClick={() =>
+                                void handleFollowUpPrompt(
+                                  {
+                                    id: `chat:${chat.activityId}`,
+                                    userId: "",
+                                    type: "new_participant",
+                                    title: chat.activityTitle,
+                                    content: chat.lastMessage,
+                                    activityId: chat.activityId,
+                                    isRead: true,
+                                    createdAt: new Date().toISOString(),
+                                  },
+                                  "kickoff",
+                                  undefined,
+                                  { skipMarkRead: true }
+                                )
+                              }
+                              className={cn(
+                                "inline-flex items-center gap-1 rounded-full px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
+                                isDarkMode ? "bg-white/10 text-white hover:bg-white/15" : "bg-[#edf1ff] text-[#34407c] hover:bg-[#e4eaff]"
+                              )}
+                            >
+                              <Sparkles className="h-3.5 w-3.5" />
+                              让 AI 帮我写开场白
+                            </button>
+                          </div>
+                        ) : null}
                       </div>
                     ))}
                   </div>

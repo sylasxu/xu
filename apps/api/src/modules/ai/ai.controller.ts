@@ -4,8 +4,6 @@ import { Elysia, t } from 'elysia';
 import { basePlugins, verifyAuth, verifyAdmin, AuthError } from '../../setup';
 import { aiModel, type ErrorResponse, type ConversationMessageType } from './ai.model';
 import {
-  checkAIQuota,
-  consumeAIQuota,
   clearConversations,
   getWelcomeCard,
   // v3.8：两层会话结构
@@ -14,7 +12,7 @@ import {
   addMessageToConversation,
   getOrCreateCurrentConversation,
 } from './ai.service';
-import { getSystemPrompt, FALLBACK_METADATA } from './prompts';
+import { getSystemPrompt, getPromptTemplateConfig, getPromptTemplateMetadata } from './prompts';
 import {
   getTokenUsageStats,
   getTokenUsageSummary,
@@ -35,45 +33,6 @@ import { aiRagController } from './ai-rag.controller';
 import { aiMemoryController } from './ai-memory.controller';
 import { aiSecurityController } from './ai-security.controller';
 import { aiMetricsController } from './ai-metrics.controller';
-
-const chatInputTextSchema = t.Object({
-  type: t.Literal('text'),
-  text: t.String(),
-});
-
-const chatInputActionSchema = t.Object({
-  type: t.Literal('action'),
-  action: t.String(),
-  actionId: t.String(),
-  params: t.Optional(t.Record(t.String(), t.Any())),
-  displayText: t.Optional(t.String()),
-});
-
-const chatContextSchema = t.Optional(
-  t.Object(
-    {
-      client: t.Optional(
-        t.Union([t.Literal('web'), t.Literal('miniprogram'), t.Literal('admin')])
-      ),
-      locale: t.Optional(t.String()),
-      timezone: t.Optional(t.String()),
-      platformVersion: t.Optional(t.String()),
-      lat: t.Optional(t.Number()),
-      lng: t.Optional(t.Number()),
-    },
-    { additionalProperties: true }
-  )
-);
-
-const chatBodySchema = t.Object(
-  {
-    conversationId: t.Optional(t.String()),
-    input: t.Union([chatInputTextSchema, chatInputActionSchema]),
-    context: chatContextSchema,
-    stream: t.Optional(t.Boolean()),
-  },
-  { additionalProperties: true }
-);
 
 export const aiController = new Elysia({ prefix: '/ai' })
   .use(basePlugins)
@@ -147,22 +106,6 @@ export const aiController = new Elysia({ prefix: '/ai' })
       try {
         const viewer = await verifyAuth(jwt, headers);
         const request = body as GenUIRequest & { stream?: boolean };
-        const client = request.context?.client;
-
-        const shouldConsumeQuota = Boolean(viewer) && client !== 'admin' && viewer?.role !== 'admin';
-        if (shouldConsumeQuota && viewer) {
-          const quota = await checkAIQuota(viewer.id);
-          if (!quota.hasQuota) {
-            set.status = 403;
-            return { code: 403, msg: 'AI 额度不足，今日已用完' } satisfies ErrorResponse;
-          }
-
-          const consumed = await consumeAIQuota(viewer.id);
-          if (!consumed) {
-            set.status = 403;
-            return { code: 403, msg: 'AI 额度扣减失败' } satisfies ErrorResponse;
-          }
-        }
 
         const result = await buildAiChatTurn(request, { viewer });
         const normalized = applyAiChatTurnPolicies({
@@ -194,7 +137,7 @@ export const aiController = new Elysia({ prefix: '/ai' })
         summary: 'AI 对话（Chat Gateway）',
         description: `统一的 GenUI Chat 网关：\n\n- 请求体固定为 conversationId + input + context\n- 全部请求统一走 AI Workflow（Processor/Intent/RAG/Tools）\n- stream=false 返回 GenUI turn envelope\n- stream=true 返回 GenUI SSE 事件序列`,
       },
-      body: chatBodySchema,
+      body: 'ai.chatRequest',
     }
   )
 
@@ -537,10 +480,12 @@ export const aiController = new Elysia({ prefix: '/ai' })
         }
       )
 
-      // Prompt 查看 (v3.6 - 代码即配置)
+      // Prompt 查看（DB 必需配置）
       .get(
         '/prompts/current',
         async () => {
+          const promptConfig = await getPromptTemplateConfig();
+          const metadata = getPromptTemplateMetadata(promptConfig);
           const content = await getSystemPrompt({
             currentTime: new Date(),
             userLocation: { lat: 29.5630, lng: 106.5516, name: '观音桥' },
@@ -548,10 +493,10 @@ export const aiController = new Elysia({ prefix: '/ai' })
           });
 
           return {
-            version: FALLBACK_METADATA.version,
-            description: FALLBACK_METADATA.description,
-            lastModified: FALLBACK_METADATA.lastModified,
-            features: FALLBACK_METADATA.features,
+            version: metadata.version,
+            description: metadata.description,
+            lastModified: metadata.lastModified,
+            features: metadata.features,
             content,
           };
         },
@@ -561,8 +506,8 @@ export const aiController = new Elysia({ prefix: '/ai' })
             summary: '获取当前 System Prompt',
             description: `获取当前激活的 System Prompt 信息（Admin 用）。
 
-Prompt 通过 Git 版本控制，此接口为只读查看。
-修改 Prompt 需要通过代码提交。`,
+Prompt 存储于 ai_configs 中，此接口返回当前生效模板。
+缺少关键配置时服务会在启动阶段直接失败，避免静默降级。`,
           },
           response: {
             200: 'ai.promptInfoResponse',

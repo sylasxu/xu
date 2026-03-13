@@ -41,19 +41,11 @@
     mask-composite: exclude;
     pointer-events: none;
   }
-  
-  // 聚焦状态
-  &.focused {
-    padding-bottom: @spacing-2;
-    box-shadow: var(--shadow-xl, @shadow-xl);
-    
-    &::before {
-      padding: 3rpx;
-      background: linear-gradient(135deg, 
-        rgba(91, 117, 251, 0.3) 0%, 
-        rgba(196, 181, 253, 0.3) 100%
-      );
-    }
+
+  // 长输入态：超过阈值后轻微增高，并显示一条提示
+  &.expanded {
+    gap: @spacing-2;
+    padding-bottom: @spacing-3;
   }
   
   // 禁用状态
@@ -162,38 +154,15 @@
 }
 
 .dock-secondary-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   width: 100%;
   padding: 0 @spacing-1;
 }
 
-.consultant-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: @spacing-1;
-  height: 52rpx;
-  padding: 0 @spacing-2;
-  background: var(--bg-input, @bg-input);
-  border: 1rpx solid var(--border-default, @border-default);
-  border-radius: var(--radius-full, @rounded-full);
-  color: var(--text-secondary, @text-secondary);
-}
-
-.consultant-text {
+.dock-hint {
+  display: block;
   font-size: @text-sm;
-}
-
-.profile-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 4rpx;
   color: var(--text-secondary, @text-secondary);
-}
-
-.profile-text {
-  font-size: @text-sm;
+  line-height: 1.5;
 }
 
 // 深色模式
@@ -209,17 +178,6 @@
         rgba(196, 181, 253, 0.25) 100%
       );
     }
-    
-    &.focused {
-      box-shadow: none;
-      border-color: var(--color-primary, @color-primary);
-      
-      &::before {
-        background: linear-gradient(135deg, 
-          rgba(91, 117, 251, 0.4) 0%, 
-          rgba(196, 181, 253, 0.4) 100%
-        );
-      }
     }
   }
   
@@ -255,13 +213,7 @@
     }
   }
 
-  .consultant-chip {
-    background: var(--bg-input, @bg-input-dark);
-    border-color: var(--border-default, @border-default-dark);
-    color: var(--text-secondary, @text-secondary-dark);
-  }
-
-  .profile-link {
+  .dock-hint {
     color: var(--text-secondary, @text-secondary-dark);
   }
 }

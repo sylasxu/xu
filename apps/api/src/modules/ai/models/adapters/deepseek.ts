@@ -3,7 +3,7 @@
  * 
  * 支持：
  * - Chat: deepseek-chat, deepseek-reasoner
- * - Embedding: 暂不支持（使用智谱）
+ * - Embedding: 暂不支持（由 Qwen 提供）
  * - Rerank: 暂不支持
  */
 

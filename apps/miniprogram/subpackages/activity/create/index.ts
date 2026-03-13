@@ -5,15 +5,11 @@
  * - 位置选择强制填写位置备注
  * - 必填字段校验
  * - 调用创建活动API
- * - 活动发布额度检查
+ * - 创建活动额度检查
  */
 import { postActivities } from '../../../src/api/endpoints/activities/activities';
 import type { ActivityCreateRequest } from '../../../src/api/model';
-import {
-  checkActivityCreateQuota,
-  consumeActivityCreateQuota,
-  showActivityCreateQuotaExhaustedTip,
-} from '../../../src/services/quota';
+import { useUserStore } from '../../../src/stores/user';
 
 // 类型定义
 interface PickerOption {
@@ -321,6 +317,15 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     return errors;
   },
 
+  showCreateQuotaExhaustedTip() {
+    wx.showModal({
+      title: '创建活动额度已用完',
+      content: '今天的创建活动额度用完了，明天再来吧～',
+      showCancel: false,
+      confirmText: '知道了',
+    });
+  },
+
   async onSubmit() {
     const errors = this.validateForm();
     if (errors.length > 0) {
@@ -332,9 +337,12 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
       return;
     }
 
-    // 检查活动发布额度 - Requirements: 19.3, 19.4
-    if (!checkActivityCreateQuota()) {
-      showActivityCreateQuotaExhaustedTip();
+    const userStore = useUserStore.getState();
+    const currentUser = userStore.user;
+
+    // 检查创建活动额度 - Requirements: 19.3, 19.4
+    if (!currentUser || (currentUser.aiCreateQuotaToday ?? 0) <= 0) {
+      this.showCreateQuotaExhaustedTip();
       return;
     }
 
@@ -343,9 +351,6 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     this.setData({ isSubmitting: true });
 
     try {
-      // 消耗活动发布额度
-      consumeActivityCreateQuota();
-
       const requestData: ActivityCreateRequest = {
         title: form.title.trim(),
         description: form.description?.trim() || undefined,
@@ -362,14 +367,20 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
 
       if (response.status === 200) {
         const activityId = (response.data as { id: string }).id;
+        useUserStore.getState().recordCreatedActivity();
         this.showSuccessAndShare(activityId);
       } else {
         throw new Error((response.data as { msg?: string })?.msg || '创建活动失败');
       }
     } catch (error) {
       console.error('创建活动失败', error);
+      const message = error instanceof Error ? error.message : '创建失败，请重试';
+      if (message.includes('今日发布额度已用完') || message.includes('创建活动额度')) {
+        this.showCreateQuotaExhaustedTip();
+        return;
+      }
       wx.showToast({
-        title: (error as Error).message || '创建失败，请重试',
+        title: message,
         icon: 'none',
       });
     } finally {

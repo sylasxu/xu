@@ -15,6 +15,7 @@ export interface User {
   phoneNumber: string | null
   nickname: string | null
   avatarUrl: string | null
+  workingMemory?: string | null
   aiCreateQuotaToday: number
   aiQuotaResetAt: string | null
   activitiesCreatedCount: number
@@ -35,6 +36,7 @@ export interface LoginParams {
 export interface UpdateUserParams {
   nickname?: string
   avatarUrl?: string
+  workingMemory?: string | null
 }
 
 // 登录响应

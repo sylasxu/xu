@@ -10,9 +10,8 @@
  * - models/ - 模型路由
  */
 
-import { db, users, conversations, conversationMessages, eq, desc, sql, inArray, and } from '@juchang/db';
+import { db, users, conversations, conversationMessages, activities, participants, eq, desc, sql, inArray, and, gt } from '@juchang/db';
 import {
-  streamText,
   createUIMessageStream,
   createUIMessageStreamResponse,
   convertToModelMessages,
@@ -30,6 +29,7 @@ import { resolveToolsForIntent, getToolWidgetType, getToolDisplayName } from './
 import { createPartnerIntent } from './tools/partner-tools';
 import { getSystemPrompt, type PromptContext, type ActivityDraftForPrompt } from './prompts';
 import { getModelByIntent } from './models/router';
+import { runObject, runStream } from './models/runtime';
 // Guardrails
 import { checkRateLimit } from './guardrails/rate-limiter';
 // 辅助函数（从独立模块导入）
@@ -71,6 +71,7 @@ import {
   inferPartnerMessageHints,
   persistPartnerMatchingState,
   buildPartnerIntentPayload,
+  buildPartnerIntentFormPayload,
   getPartnerActivityTypeLabel,
   getPartnerTimeLabel,
   type PartnerMatchingState,
@@ -150,36 +151,6 @@ export interface TraceStep {
   toolCallId: string;
   args: unknown;
   result?: unknown;
-}
-
-// ==========================================
-// AI 额度管理
-// ==========================================
-
-export async function checkAIQuota(userId: string): Promise<{ hasQuota: boolean; remaining: number }> {
-  const [user] = await db
-    .select({ aiCreateQuotaToday: users.aiCreateQuotaToday })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-
-  if (!user) return { hasQuota: false, remaining: 0 };
-  return { hasQuota: user.aiCreateQuotaToday > 0, remaining: user.aiCreateQuotaToday };
-}
-
-export async function consumeAIQuota(userId: string): Promise<boolean> {
-  const [user] = await db
-    .select({ aiCreateQuotaToday: users.aiCreateQuotaToday })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-
-  if (!user || user.aiCreateQuotaToday <= 0) return false;
-
-  await db.update(users)
-    .set({ aiCreateQuotaToday: user.aiCreateQuotaToday - 1 })
-    .where(eq(users.id, userId));
-  return true;
 }
 
 // ==========================================
@@ -456,7 +427,7 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
                   modelType === 'agent' ? 'qwen3-max' : 
                   'qwen-flash';
 
-  const result = streamText({
+  const result = runStream({
     model: selectedModel,
     system: systemPrompt,
     messages: aiMessages,
@@ -903,6 +874,36 @@ function createActionResponse(
         });
       }
 
+      if (data?.askPreference && typeof data.askPreference === 'object') {
+        writer.write({
+          type: 'data' as any,
+          data: {
+            type: 'widget_ask_preference',
+            payload: data.askPreference,
+          },
+        });
+      }
+
+      if (data?.partnerIntentForm && typeof data.partnerIntentForm === 'object') {
+        writer.write({
+          type: 'data' as any,
+          data: {
+            type: 'widget_partner_intent_form',
+            payload: data.partnerIntentForm,
+          },
+        });
+      }
+
+      if (data?.draftSettingsForm && typeof data.draftSettingsForm === 'object') {
+        writer.write({
+          type: 'data' as any,
+          data: {
+            type: 'widget_draft_settings_form',
+            payload: data.draftSettingsForm,
+          },
+        });
+      }
+
       if (data?.draft && typeof data.draft === 'object') {
         writer.write({
           type: 'data' as any,
@@ -1054,7 +1055,8 @@ function buildActionNextActions(
       });
       return items;
     }
-    case 'create_activity': {
+    case 'create_activity':
+    case 'save_draft_settings': {
       const draftActionPayload = buildDraftActionPayload(data);
       if (!draftActionPayload) {
         return [];
@@ -1069,17 +1071,17 @@ function buildActionNextActions(
         {
           label: '改下地点',
           action: 'edit_draft',
-          params: draftActionPayload,
+          params: { ...draftActionPayload, field: 'location' },
         },
         {
           label: '改下时间',
           action: 'edit_draft',
-          params: draftActionPayload,
+          params: { ...draftActionPayload, field: 'time' },
         },
         {
           label: '改下人数设置',
           action: 'edit_draft',
-          params: draftActionPayload,
+          params: { ...draftActionPayload, field: 'participants' },
         },
       ];
     }
@@ -1177,6 +1179,38 @@ function buildActionNextActions(
           params: { prompt: '我想调整找搭子的偏好' },
         },
       ];
+    case 'submit_partner_intent_form': {
+      const items: Array<{ label: string; action: string; params?: Record<string, unknown> }> = [];
+      if (locationName) {
+        items.push({
+          label: '看看附近同类局',
+          action: 'explore_nearby',
+          params: {
+            locationName,
+            ...(exploreType ? { type: exploreType } : {}),
+          },
+        });
+      }
+
+      items.push({
+        label: '改一下偏好',
+        action: 'find_partner',
+        params: {
+          ...(locationName ? { locationName } : {}),
+          ...(exploreType ? { type: exploreType } : {}),
+        },
+      });
+
+      if (typeof data?.matchId === 'string') {
+        items.push({
+          label: '看看我的搭子进展',
+          action: 'quick_prompt',
+          params: { prompt: '看看我的搭子进度' },
+        });
+      }
+
+      return items;
+    }
     default:
       return [];
   }
@@ -1351,32 +1385,27 @@ async function handlePartnerMatchingFlow(
     await persistPartnerMatchingState(threadId, userId, state);
   }
 
-  const requiredTotal = 2;
-  const requiredCollected = requiredTotal - state.missingRequired.length;
-  const questionText = `匹配进度 ${requiredCollected}/${requiredTotal}：${nextQuestion.question}`;
+  const fallbackLocationHint = state.collectedPreferences.location?.trim()
+    || (userLocation ? await reverseGeocode(userLocation.lat, userLocation.lng) : '附近');
+  const formPayload = buildPartnerIntentFormPayload({
+    state,
+    fallbackLocationHint,
+  });
+  const introText = '附近还没有合适的人选，填一下偏好，我帮你找找有没有同意向的人。';
   const stream = createUIMessageStream({
     execute: ({ writer }) => {
-      writer.write({ type: 'text-delta', delta: questionText, id: randomUUID() });
+      writer.write({ type: 'text-delta', delta: introText, id: randomUUID() });
       writer.write({
         type: 'data' as any,
         data: {
-          type: 'widget_ask_preference',
-          payload: {
-            questionType: nextQuestion.field,
-            question: nextQuestion.question,
-            options: nextQuestion.options,
-            partnerMatchingState: {
-              workflowId: state.workflowId,
-              round: state.round,
-              collected: state.collectedPreferences,
-            },
-          },
+          type: 'widget_partner_intent_form',
+          payload: formPayload,
         },
       });
       if (trace) {
         const now = new Date().toISOString();
         writer.write({ type: 'data-trace-start' as any, data: { requestId: randomUUID(), startedAt: now, intent: 'partner', intentMethod: 'partner_matching' }, transient: true });
-        writer.write({ type: 'data-trace-end' as any, data: { completedAt: now, status: 'collecting', output: { text: questionText, toolCalls: [] } }, transient: true });
+        writer.write({ type: 'data-trace-end' as any, data: { completedAt: now, status: 'collecting', output: { text: introText, toolCalls: [] } }, transient: true });
       }
     },
   });
@@ -1417,7 +1446,7 @@ async function _persistConversation(
   }
 }
 
-function createTracedStreamResponse(result: ReturnType<typeof streamText>, ctx: {
+function createTracedStreamResponse(result: ReturnType<typeof runStream>, ctx: {
   requestId: string;
   startedAt: string;
   intent: ClassifyResult;
@@ -1964,6 +1993,18 @@ export interface SocialProfile {
   preferenceCompleteness: number;
 }
 
+export interface WelcomePendingActivity {
+  id: string;
+  title: string;
+  type: string;
+  startAt: string;
+  locationName: string;
+  locationHint: string;
+  currentParticipants: number;
+  maxParticipants: number;
+  status: string;
+}
+
 // 快捷入口 (v4.4 新增)
 export interface QuickPrompt {
   icon: string;
@@ -1976,6 +2017,7 @@ export interface WelcomeResponse {
   subGreeting?: string;
   sections: WelcomeSection[];
   socialProfile?: SocialProfile | undefined;
+  pendingActivities?: WelcomePendingActivity[] | undefined;
   quickPrompts: QuickPrompt[];
   ui?: {
     composerPlaceholder: string;
@@ -2243,6 +2285,38 @@ function renderWelcomeTemplate(template: string, nickname: string): string {
   });
 }
 
+function parseWorkingMemorySummary(rawMemory: string | null): {
+  preferencesCount: number;
+  locationsCount: number;
+} {
+  if (!rawMemory) {
+    return { preferencesCount: 0, locationsCount: 0 };
+  }
+
+  try {
+    const parsed = JSON.parse(rawMemory) as {
+      preferences?: unknown[];
+      frequentLocations?: unknown[];
+    };
+
+    return {
+      preferencesCount: Array.isArray(parsed.preferences) ? parsed.preferences.length : 0,
+      locationsCount: Array.isArray(parsed.frequentLocations) ? parsed.frequentLocations.length : 0,
+    };
+  } catch {
+    return { preferencesCount: 0, locationsCount: 0 };
+  }
+}
+
+function clampWelcomeTitle(title: string, maxLength = 12): string {
+  const normalized = title.trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, Math.max(maxLength - 1, 1))}…`;
+}
+
 export function generateGreeting(
   nickname: string | null,
   config: WelcomeCopyConfig = DEFAULT_WELCOME_COPY_CONFIG,
@@ -2264,9 +2338,12 @@ export async function getWelcomeCard(
   const welcomeUi = normalizeWelcomeUiConfig(welcomeUiRaw);
   const greeting = generateGreeting(nickname, welcomeCopy);
   const sections: WelcomeSection[] = [];
+  const now = new Date();
 
   // 社交档案（已登录用户）
   let socialProfile: { participationCount: number; activitiesCreatedCount: number; preferenceCompleteness: number } | undefined;
+  let pendingActivities: WelcomePendingActivity[] = [];
+  let hasDraftActivity = false;
 
   if (userId) {
     const [user] = await db
@@ -2280,15 +2357,8 @@ export async function getWelcomeCard(
       .limit(1);
 
     if (user) {
-      // 计算偏好完善度
-      let preferenceCompleteness = 0;
-      if (user.workingMemory) {
-        const memory = user.workingMemory as { preferences?: unknown[]; frequentLocations?: unknown[] };
-        const preferencesCount = memory.preferences?.length || 0;
-        const locationsCount = memory.frequentLocations?.length || 0;
-        // 偏好完善度：偏好数量 * 15 + 常去地点 * 10，最高 100
-        preferenceCompleteness = Math.min(100, preferencesCount * 15 + locationsCount * 10);
-      }
+      const { preferencesCount, locationsCount } = parseWorkingMemorySummary(user.workingMemory);
+      const preferenceCompleteness = Math.min(100, preferencesCount * 15 + locationsCount * 10);
 
       socialProfile = {
         participationCount: user.participationCount,
@@ -2296,6 +2366,75 @@ export async function getWelcomeCard(
         preferenceCompleteness,
       };
     }
+
+    const [draftRows, activeRows] = await Promise.all([
+      db
+        .select({
+          id: activities.id,
+          title: activities.title,
+        })
+        .from(activities)
+        .where(and(
+          eq(activities.creatorId, userId),
+          eq(activities.status, 'draft'),
+          gt(activities.startAt, now),
+        ))
+        .orderBy(desc(activities.updatedAt))
+        .limit(1),
+      db
+        .select({
+          id: activities.id,
+          title: activities.title,
+          type: activities.type,
+          startAt: activities.startAt,
+          locationName: activities.locationName,
+          locationHint: activities.locationHint,
+          currentParticipants: activities.currentParticipants,
+          maxParticipants: activities.maxParticipants,
+          status: activities.status,
+        })
+        .from(participants)
+        .innerJoin(activities, eq(participants.activityId, activities.id))
+        .where(and(
+          eq(participants.userId, userId),
+          eq(participants.status, 'joined'),
+          eq(activities.status, 'active'),
+          gt(activities.startAt, now),
+        ))
+        .orderBy(sql`${activities.startAt} ASC`)
+        .limit(3),
+    ]);
+
+    if (draftRows.length > 0) {
+      const draft = draftRows[0];
+      hasDraftActivity = true;
+      sections.push({
+        id: 'draft',
+        icon: '📝',
+        title: '继续上次草稿',
+        items: [
+          {
+            type: 'draft',
+            icon: '✍️',
+            label: `继续完善「${clampWelcomeTitle(draft.title)}」`,
+            prompt: `继续完善我的活动草稿：${draft.title}`,
+            context: { activityId: draft.id },
+          },
+        ],
+      });
+    }
+
+    pendingActivities = activeRows.map((item) => ({
+      id: item.id,
+      title: item.title,
+      type: item.type,
+      startAt: item.startAt.toISOString(),
+      locationName: item.locationName,
+      locationHint: item.locationHint,
+      currentParticipants: item.currentParticipants,
+      maxParticipants: item.maxParticipants,
+      status: item.status,
+    }));
   }
 
   // 快速组局建议
@@ -2332,14 +2471,27 @@ export async function getWelcomeCard(
     sections.push(explore);
   }
 
+  let subGreeting = welcomeCopy.subGreeting;
+
+  if (hasDraftActivity) {
+    subGreeting = '你有一个草稿还没发出去，要不要现在继续？';
+  } else if (pendingActivities.length > 0) {
+    subGreeting = `你有 ${pendingActivities.length} 个待参加活动，先看看接下来怎么安排？`;
+  } else if (socialProfile && socialProfile.preferenceCompleteness < 30) {
+    subGreeting = '告诉我你偏爱什么，小聚会推荐得更准。';
+  } else if (location) {
+    subGreeting = '附近有新局，想直接看看吗？';
+  }
+
   // 快捷入口（v4.4 新增）
-  const quickPrompts = welcomeUi.quickPrompts;
+  const quickPrompts = hasDraftActivity ? [] : welcomeUi.quickPrompts;
 
   return {
     greeting,
-    subGreeting: welcomeCopy.subGreeting,
+    subGreeting,
     sections,
     socialProfile,
+    pendingActivities,
     quickPrompts,
     ui: {
       composerPlaceholder: welcomeUi.composerPlaceholder,
@@ -2354,7 +2506,7 @@ export async function getWelcomeCard(
 // AI 内容生成 (从 Growth 迁移)
 // ==========================================
 
-import { generateObject, jsonSchema } from 'ai';
+import { jsonSchema } from 'ai';
 import { t } from 'elysia';
 import { toJsonSchema } from '@juchang/utils';
 import { getQwenModelByIntent } from './models/adapters/qwen';
@@ -2433,7 +2585,7 @@ export async function generateContent(
 
     const fullPrompt = `${DEFAULT_SYSTEM_PROMPT}\n\n${contentPrompt}`;
 
-    const result = await generateObject({
+    const result = await runObject<NoteOutput>({
       model: getQwenModelByIntent('chat'),
       schema: jsonSchema<NoteOutput>(toJsonSchema(NoteOutputSchema) as any),
       prompt: fullPrompt,

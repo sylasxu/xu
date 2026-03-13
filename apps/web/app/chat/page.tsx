@@ -74,6 +74,7 @@ const DEFAULT_PROFILE_HINTS = {
   medium: "社交画像正在完善中，继续聊聊你的习惯",
   high: "社交画像已较完整，可直接让小聚给你安排",
 };
+const COMPOSER_EXPAND_THRESHOLD = 10;
 
 type ComposerStatus = "ready" | "submitted";
 
@@ -98,6 +99,22 @@ type WelcomeSocialProfile = {
   activitiesCreatedCount: number;
   preferenceCompleteness: number;
 };
+type WelcomePendingActivity = {
+  id: string;
+  title: string;
+  type: string;
+  startAt: string;
+  locationName: string;
+  locationHint: string;
+  currentParticipants: number;
+  maxParticipants: number;
+  status: string;
+};
+type WelcomeDraftAction = {
+  label: string;
+  prompt: string;
+  activityId?: string;
+};
 type WelcomeUiPayload = {
   composerPlaceholder: string;
   bottomQuickActions: string[];
@@ -118,6 +135,21 @@ function sleep(ms: number) {
   return new Promise<void>((resolve) => {
     window.setTimeout(resolve, ms);
   });
+}
+
+function shouldExpandComposer(value: string) {
+  return value.trim().length > COMPOSER_EXPAND_THRESHOLD;
+}
+
+function syncComposerHeight(element: HTMLTextAreaElement, value: string) {
+  if (!shouldExpandComposer(value)) {
+    element.style.height = "36px";
+    return;
+  }
+
+  element.style.height = "0px";
+  const nextHeight = Math.min(112, Math.max(36, element.scrollHeight));
+  element.style.height = `${nextHeight}px`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -281,6 +313,97 @@ function extractWelcomeUi(payload: unknown): WelcomeUiPayload {
   };
 }
 
+function extractWelcomePendingActivities(payload: unknown): WelcomePendingActivity[] {
+  if (!isRecord(payload) || !Array.isArray(payload.pendingActivities)) {
+    return [];
+  }
+
+  return payload.pendingActivities
+    .map((item) => {
+      if (!isRecord(item)) {
+        return null;
+      }
+
+      const id = typeof item.id === "string" ? item.id : "";
+      const title = typeof item.title === "string" ? item.title : "";
+      const type = typeof item.type === "string" ? item.type : "other";
+      const startAt = typeof item.startAt === "string" ? item.startAt : "";
+      const locationName = typeof item.locationName === "string" ? item.locationName : "";
+      const locationHint = typeof item.locationHint === "string" ? item.locationHint : "";
+      const currentParticipants = Number(item.currentParticipants);
+      const maxParticipants = Number(item.maxParticipants);
+      const status = typeof item.status === "string" ? item.status : "";
+
+      if (!id || !title || !startAt || !locationName || !Number.isFinite(currentParticipants) || !Number.isFinite(maxParticipants)) {
+        return null;
+      }
+
+      return {
+        id,
+        title,
+        type,
+        startAt,
+        locationName,
+        locationHint,
+        currentParticipants,
+        maxParticipants,
+        status,
+      };
+    })
+    .filter((item): item is WelcomePendingActivity => item !== null)
+    .slice(0, 3);
+}
+
+function extractWelcomeDraftAction(payload: unknown): WelcomeDraftAction | null {
+  if (!isRecord(payload) || !Array.isArray(payload.sections)) {
+    return null;
+  }
+
+  const draftSection = payload.sections.find((section) => {
+    if (!isRecord(section)) {
+      return false;
+    }
+
+    return section.id === "draft" && Array.isArray(section.items);
+  });
+
+  if (!isRecord(draftSection) || !Array.isArray(draftSection.items) || draftSection.items.length === 0) {
+    return null;
+  }
+
+  const firstItem = draftSection.items[0];
+  if (!isRecord(firstItem)) {
+    return null;
+  }
+
+  const label = typeof firstItem.label === "string" ? firstItem.label.trim() : "";
+  const prompt = typeof firstItem.prompt === "string" ? firstItem.prompt.trim() : "";
+  const activityId =
+    isRecord(firstItem.context) && typeof firstItem.context.activityId === "string"
+      ? firstItem.context.activityId
+      : undefined;
+
+  if (!label || !prompt) {
+    return null;
+  }
+
+  return { label, prompt, activityId };
+}
+
+function formatWelcomeActivityTime(startAt: string): string {
+  const date = new Date(startAt);
+  if (Number.isNaN(date.getTime())) {
+    return "时间待定";
+  }
+
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
 function getProfileHint(
   completeness: number,
   profileHints: WelcomeUiPayload["profileHints"] = DEFAULT_PROFILE_HINTS
@@ -321,6 +444,8 @@ export default function ChatPage() {
   const [status, setStatus] = useState<ComposerStatus>("ready");
   const [quickPrompts, setQuickPrompts] = useState<string[]>(DEFAULT_PROMPTS);
   const [welcomeProfile, setWelcomeProfile] = useState<WelcomeSocialProfile | null>(null);
+  const [welcomePendingActivities, setWelcomePendingActivities] = useState<WelcomePendingActivity[]>([]);
+  const [welcomeDraftAction, setWelcomeDraftAction] = useState<WelcomeDraftAction | null>(null);
   const [welcomeGreeting, setWelcomeGreeting] = useState(DEFAULT_WELCOME_GREETING);
   const [welcomeSubGreeting, setWelcomeSubGreeting] = useState(DEFAULT_WELCOME_SUB_GREETING);
   const [welcomeUi, setWelcomeUi] = useState<WelcomeUiPayload>({
@@ -329,10 +454,10 @@ export default function ChatPage() {
     profileHints: DEFAULT_PROFILE_HINTS,
   });
   const [clientLocation, setClientLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [isComposerFocused, setIsComposerFocused] = useState(false);
   const isDarkMode = false;
 
   const isSending = status === "submitted";
+  const showComposerHint = shouldExpandComposer(input);
 
   useEffect(() => {
     if (typeof window === "undefined" || !("geolocation" in navigator)) {
@@ -391,6 +516,8 @@ export default function ChatPage() {
         setWelcomeSubGreeting(subGreeting);
         setWelcomeUi(extractWelcomeUi(payload));
         setWelcomeProfile(extractWelcomeSocialProfile(payload));
+        setWelcomePendingActivities(extractWelcomePendingActivities(payload));
+        setWelcomeDraftAction(extractWelcomeDraftAction(payload));
       })
       .catch(() => {
         // keep local fallback prompts
@@ -781,6 +908,42 @@ export default function ChatPage() {
     }));
   }, [latestAssistantTurn, welcomeUi.bottomQuickActions]);
 
+  const handleWelcomeDraftContinue = useCallback(async () => {
+    if (!welcomeDraftAction) {
+      return;
+    }
+
+    if (welcomeDraftAction.activityId) {
+      await sendTurn(
+        {
+          type: "action",
+          action: "edit_draft",
+          actionId: randomId("action"),
+          params: { activityId: welcomeDraftAction.activityId },
+          displayText: welcomeDraftAction.label,
+        },
+        welcomeDraftAction.label
+      );
+      return;
+    }
+
+    await sendTurn(
+      {
+        type: "text",
+        text: welcomeDraftAction.prompt,
+      },
+      welcomeDraftAction.prompt
+    );
+  }, [sendTurn, welcomeDraftAction]);
+
+  const handleOpenPendingActivity = useCallback((activityId: string) => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.location.href = `/invite/${activityId}`;
+  }, []);
+
   const handleBottomAction = useCallback(
     async (action: { label: string; option?: ActionOption; prompt?: string }) => {
       if (isSending) {
@@ -948,6 +1111,49 @@ export default function ChatPage() {
                       </p>
                     </div>
 
+                    {welcomeDraftAction ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleWelcomeDraftContinue()}
+                        className="flex w-full items-center justify-between rounded-2xl border border-[#dfe4ff] bg-[linear-gradient(135deg,rgba(255,255,255,0.98)_0%,rgba(243,245,255,0.95)_100%)] px-3 py-3 text-left shadow-[0_16px_28px_-24px_rgba(76,98,191,0.55)]"
+                      >
+                        <div className="space-y-1">
+                          <p className="text-[12px] font-medium text-[#6470a6]">继续上次草稿</p>
+                          <p className="text-[14px] font-semibold text-[#2a315e]">{welcomeDraftAction.label}</p>
+                        </div>
+                        <ChevronRight className="h-4 w-4 shrink-0 text-[#7f8ad1]" />
+                      </button>
+                    ) : null}
+
+                    {welcomePendingActivities.length > 0 ? (
+                      <div className="space-y-2 rounded-2xl border border-white/70 bg-white/58 px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.68)]">
+                        <div className="mb-2 flex items-center gap-2 text-[#2b3168]">
+                          <span className="h-4 w-1 rounded-full bg-[linear-gradient(180deg,#5b75fb_0%,#7b90ff_100%)]" />
+                          <span className="text-[16px] font-semibold">接下来要参加的局</span>
+                        </div>
+                        <div className="space-y-2">
+                          {welcomePendingActivities.map((activity) => (
+                            <button
+                              key={activity.id}
+                              type="button"
+                              onClick={() => handleOpenPendingActivity(activity.id)}
+                              className="flex w-full items-start justify-between rounded-2xl bg-white/86 px-3 py-2.5 text-left shadow-[0_12px_24px_-20px_rgba(67,86,170,0.52)]"
+                            >
+                              <div className="min-w-0 flex-1 space-y-1 pr-3">
+                                <p className="truncate text-[14px] font-semibold text-[#2a315e]">{activity.title}</p>
+                                <p className="text-[12px] text-[#6470a6]">{formatWelcomeActivityTime(activity.startAt)} · {activity.locationName}</p>
+                                <p className="truncate text-[12px] text-slate-500">{activity.locationHint}</p>
+                              </div>
+                              <div className="shrink-0 text-right">
+                                <p className="text-[12px] font-medium text-[#5b67f4]">{activity.currentParticipants}/{activity.maxParticipants}人</p>
+                                <ChevronRight className="ml-auto mt-2 h-4 w-4 text-slate-300" />
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
                     <div className="space-y-2">
                       {quickPrompts.slice(0, 3).map((prompt) => (
                         <button
@@ -1034,35 +1240,37 @@ export default function ChatPage() {
             <PromptInputTextarea
               value={input}
               onChange={(event) => {
-                setInput(event.target.value);
-                event.currentTarget.style.height = "0px";
-                const nextHeight = Math.min(112, Math.max(36, event.currentTarget.scrollHeight));
-                event.currentTarget.style.height = `${nextHeight}px`;
-              }}
-              onFocus={(event) => {
-                setIsComposerFocused(true);
-                event.currentTarget.style.height = "0px";
-                const nextHeight = Math.min(112, Math.max(36, event.currentTarget.scrollHeight));
-                event.currentTarget.style.height = `${nextHeight}px`;
-              }}
-              onBlur={(event) => {
-                setIsComposerFocused(false);
-                event.currentTarget.style.height = "36px";
+                const nextValue = event.target.value;
+                setInput(nextValue);
+                syncComposerHeight(event.currentTarget, nextValue);
               }}
               rows={1}
               placeholder={welcomeUi.composerPlaceholder}
               disabled={isSending}
               className={cn(
                 "!max-h-none !min-h-0 flex-1 border-none bg-transparent px-3 py-1.5 text-[16px] leading-5 focus-visible:ring-0 focus-visible:outline-none",
-                isComposerFocused ? "h-auto overflow-hidden" : "h-9 overflow-hidden",
+                showComposerHint ? "h-auto overflow-hidden" : "h-9 overflow-hidden",
                 isDarkMode ? "text-[#e9edff] placeholder:text-[#808bc1]" : "text-[#252c5b] placeholder:text-slate-400"
               )}
             />
 
             <PromptInputFooter
-              align={isComposerFocused ? "block-end" : "inline-end"}
-              className={cn("items-center justify-end gap-2", isComposerFocused ? "!px-2 !pt-1 !pb-1" : "pr-1")}
+              align={showComposerHint ? "block-end" : "inline-end"}
+              className={cn(
+                "items-center gap-2",
+                showComposerHint ? "justify-between !px-2 !pt-1 !pb-1" : "justify-end pr-1"
+              )}
             >
+              {showComposerHint ? (
+                <span
+                  className={cn(
+                    "text-xs leading-5",
+                    isDarkMode ? "text-[#808bc1]" : "text-slate-400"
+                  )}
+                >
+                  可补充时间、地点、人数
+                </span>
+              ) : null}
               <PromptInputSubmit
                 status={isSending ? "submitted" : "ready"}
                 disabled={isSending || !input.trim()}

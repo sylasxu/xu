@@ -35,6 +35,18 @@ export interface SocialProfile {
   preferenceCompleteness: number;
 }
 
+export interface WelcomePendingActivity {
+  id: string;
+  title: string;
+  type: string;
+  startAt: string;
+  locationName: string;
+  locationHint: string;
+  currentParticipants: number;
+  maxParticipants: number;
+  status: string;
+}
+
 // 快捷入口 (v4.4 新增)
 export interface QuickPrompt {
   icon: string;
@@ -48,6 +60,7 @@ export interface WelcomeResponse {
   subGreeting?: string;
   sections: WelcomeSection[];
   socialProfile?: SocialProfile;
+  pendingActivities?: WelcomePendingActivity[];
   quickPrompts: QuickPrompt[];
   ui?: {
     composerPlaceholder?: string;

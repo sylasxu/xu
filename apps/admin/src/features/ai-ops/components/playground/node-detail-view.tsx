@@ -532,7 +532,7 @@ function FinalOutputDetail({
         </DetailRow>
       )}
       {cost > 0 && (
-        <DetailRow label="费用估算">
+        <DetailRow label="成本粗估">
           <span className="text-sm font-mono">${formatCost(cost)}</span>
         </DetailRow>
       )}

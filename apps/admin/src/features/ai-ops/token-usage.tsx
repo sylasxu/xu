@@ -27,7 +27,7 @@ export function TokenUsage() {
 
   const summary = data?.summary
   
-  // 费用估算（假设每 1K tokens = ¥0.002）
+  // 成本粗估（按内部统一系数计算，仅供排查）
   const estimatedCost = ((summary?.totalTokens ?? 0) / 1000) * 0.002
 
   return (
@@ -85,7 +85,7 @@ export function TokenUsage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
               <DollarSign className="h-4 w-4" />
-              费用估算
+              成本粗估
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -93,7 +93,7 @@ export function TokenUsage() {
               ¥{estimatedCost.toFixed(2)}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              按 ¥0.002/1K tokens 计算
+              按内部统一系数粗估，仅供内部排查
             </p>
           </CardContent>
         </Card>

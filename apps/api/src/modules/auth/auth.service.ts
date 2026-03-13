@@ -1,12 +1,20 @@
 // Auth Service - 认证相关业务逻辑 (MVP 简化版)
 import { db, users, eq } from '@juchang/db';
-import type { WxLoginRequest, BindPhoneRequest, AdminPhoneLoginRequest } from './auth.model';
+import { getJwtSecret } from '../../setup';
+import type {
+  WxLoginRequest,
+  BindPhoneRequest,
+  AdminPhoneLoginRequest,
+  BootstrapTestUsersRequest,
+} from './auth.model';
 
-// 管理员手机号白名单
-const ADMIN_PHONES = ['13996092317'];
-
-// 超级验证码（开发/测试用）
-const SUPER_CODE = '9999';
+const TEST_USER_BLUEPRINTS = [
+  { phoneNumber: '13800138001', nickname: '测试用户1', wxOpenId: 'test_bootstrap_user_1' },
+  { phoneNumber: '13800138002', nickname: '测试用户2', wxOpenId: 'test_bootstrap_user_2' },
+  { phoneNumber: '13800138003', nickname: '测试用户3', wxOpenId: 'test_bootstrap_user_3' },
+  { phoneNumber: '13800138004', nickname: '测试用户4', wxOpenId: 'test_bootstrap_user_4' },
+  { phoneNumber: '13800138005', nickname: '测试用户5', wxOpenId: 'test_bootstrap_user_5' },
+] as const;
 
 /**
  * 微信登录响应接口
@@ -34,6 +42,29 @@ interface WxPhoneResponse {
 
 let hasWarnedLoginMock = false;
 let hasWarnedPhoneMock = false;
+
+function getAdminPhoneWhitelist(): string[] {
+  const whitelist = process.env.ADMIN_PHONE_WHITELIST
+    ?.split(',')
+    .map((phone) => phone.trim())
+    .filter(Boolean);
+
+  if (!whitelist || whitelist.length === 0) {
+    throw new Error('管理员手机号白名单未配置');
+  }
+
+  return whitelist;
+}
+
+function getAdminSuperCode(): string {
+  const code = process.env.ADMIN_SUPER_CODE?.trim();
+
+  if (!code) {
+    throw new Error('管理员超级验证码未配置');
+  }
+
+  return code;
+}
 
 function isFlagEnabled(flag?: string): boolean {
   if (!flag) return false;
@@ -108,16 +139,7 @@ export async function wxLogin(params: WxLoginRequest) {
 export async function adminPhoneLogin(params: AdminPhoneLoginRequest) {
   const { phone, code } = params;
 
-  // 验证码校验
-  if (code !== SUPER_CODE) {
-    // TODO: 接入真实短信验证码服务
-    throw new Error('验证码错误');
-  }
-
-  // 检查是否为管理员
-  if (!ADMIN_PHONES.includes(phone)) {
-    throw new Error('该手机号无管理员权限');
-  }
+  assertAdminSuperCode(phone, code);
 
   // 查找用户
   let user = await db
@@ -165,6 +187,65 @@ export async function adminPhoneLogin(params: AdminPhoneLoginRequest) {
   };
 
   return adminUser;
+}
+
+export async function bootstrapTestUsers(params: BootstrapTestUsersRequest) {
+  const { phone, code, count = 5 } = params;
+
+  assertAdminSuperCode(phone, code);
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('生产环境不可批量创建测试账号');
+  }
+
+  const targetUsers = TEST_USER_BLUEPRINTS.slice(0, count);
+  const now = new Date();
+
+  const createdUsers = [] as Array<{ user: typeof users.$inferSelect; isNewUser: boolean }>;
+
+  for (const blueprint of targetUsers) {
+    const existingUser = await db
+      .select()
+      .from(users)
+      .where(eq(users.wxOpenId, blueprint.wxOpenId))
+      .limit(1)
+      .then((rows) => rows[0]);
+
+    if (existingUser) {
+      const [updatedUser] = await db
+        .update(users)
+        .set({
+          phoneNumber: blueprint.phoneNumber,
+          nickname: blueprint.nickname,
+          aiCreateQuotaToday: 999,
+          aiQuotaResetAt: now,
+          updatedAt: now,
+        })
+        .where(eq(users.id, existingUser.id))
+        .returning();
+
+      createdUsers.push({ user: updatedUser, isNewUser: false });
+      continue;
+    }
+
+    const [newUser] = await db
+      .insert(users)
+      .values({
+        wxOpenId: blueprint.wxOpenId,
+        phoneNumber: blueprint.phoneNumber,
+        nickname: blueprint.nickname,
+        avatarUrl: null,
+        aiCreateQuotaToday: 999,
+        aiQuotaResetAt: now,
+        activitiesCreatedCount: 0,
+        participationCount: 0,
+      })
+      .returning();
+
+    createdUsers.push({ user: newUser, isNewUser: true });
+  }
+
+  return createdUsers;
 }
 
 /**
@@ -307,10 +388,9 @@ async function getWxPhoneNumber(code: string): Promise<WxPhoneResponse> {
  */
 export async function verifyToken(token: string): Promise<{ id: string; role: string } | null> {
   try {
-    const secret = process.env.JWT_SECRET || 'dev-secret-key-change-in-production';
     const { jwtVerify } = await import('jose');
     const encoder = new TextEncoder();
-    const { payload } = await jwtVerify(token, encoder.encode(secret));
+    const { payload } = await jwtVerify(token, encoder.encode(getJwtSecret()));
 
     if (!payload.id || typeof payload.id !== 'string') {
       return null;
@@ -320,5 +400,15 @@ export async function verifyToken(token: string): Promise<{ id: string; role: st
   } catch (error) {
     console.error('[Auth] Token 验证失败:', error);
     return null;
+  }
+}
+
+function assertAdminSuperCode(phone: string, code: string): void {
+  if (code !== getAdminSuperCode()) {
+    throw new Error('验证码错误');
+  }
+
+  if (!getAdminPhoneWhitelist().includes(phone)) {
+    throw new Error('该手机号无管理员权限');
   }
 }

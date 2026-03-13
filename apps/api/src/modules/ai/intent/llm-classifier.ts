@@ -10,7 +10,7 @@
  * - 缓存上限 1000 条，超出时 LRU 淘汰（删除最早 timestamp 的条目）
  */
 
-import { generateText } from 'ai';
+import { runText } from '../models/runtime';
 import { getDefaultChatModel } from '../models/router';
 import { getConfigValue } from '../config/config.service';
 import type { IntentType, ClassifyResult } from './types';
@@ -283,7 +283,7 @@ export async function classifyByLLMFewShot(
   try {
     const prompt = buildFewShotPrompt(input, conversationHistory, examples);
 
-    const result = await generateText({
+    const result = await runText({
       model: getDefaultChatModel(),
       prompt,
       temperature: 0,

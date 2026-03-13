@@ -9,8 +9,13 @@
 import { t } from 'elysia';
 import { tool, jsonSchema } from 'ai';
 import { toJsonSchema } from '@juchang/utils';
-import { db, activities, participants, users, eq, and, desc, sql } from '@juchang/db';
-import { ACTIVITY_TYPE_THEME_MAP, PRESET_THEMES } from '../../../modules/activities/theme-presets';
+import { db, activities, eq, and, desc } from '@juchang/db';
+import {
+  createDraftActivity,
+  publishDraftActivity,
+  updateActivity,
+} from '../../activities/activity.service';
+import { getQuota } from '../../users/user.service';
 
 // ============ Schema 定义 ============
 
@@ -67,36 +72,6 @@ export type CreateDraftParams = typeof createDraftSchema.static;
 export type GetDraftParams = typeof getDraftSchema.static;
 export type RefineDraftParams = typeof refineDraftSchema.static;
 export type PublishActivityParams = typeof publishActivitySchema.static;
-
-// ============ 辅助函数 ============
-
-async function checkAIQuota(userId: string): Promise<{ hasQuota: boolean; remaining: number }> {
-  const [user] = await db
-    .select({ aiCreateQuotaToday: users.aiCreateQuotaToday })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-
-  if (!user) return { hasQuota: false, remaining: 0 };
-  return { hasQuota: user.aiCreateQuotaToday > 0, remaining: user.aiCreateQuotaToday };
-}
-
-async function consumeAIQuota(userId: string): Promise<boolean> {
-  const [user] = await db
-    .select({ aiCreateQuotaToday: users.aiCreateQuotaToday })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-
-  if (!user || user.aiCreateQuotaToday <= 0) return false;
-
-  await db
-    .update(users)
-    .set({ aiCreateQuotaToday: user.aiCreateQuotaToday - 1 })
-    .where(eq(users.id, userId));
-
-  return true;
-}
 
 function generateShareUrl(activityId: string): string {
   return `https://juchang.app/activity/${activityId}`;
@@ -302,38 +277,21 @@ export function buildCreateDraftParamsFromActionPayload(
 
 export async function createActivityDraftRecord(userId: string, params: CreateDraftParams) {
   try {
-    const { location, startAt, ...activityData } = params;
-
-    const themeName = ACTIVITY_TYPE_THEME_MAP[activityData.type] || 'minimal';
-    const themeConfig = PRESET_THEMES[themeName] || PRESET_THEMES.minimal;
-
-    const [newActivity] = await db
-      .insert(activities)
-      .values({
-        ...activityData,
-        creatorId: userId,
-        location: sql`ST_SetSRID(ST_MakePoint(${location[0]}, ${location[1]}), 4326)`,
-        startAt: new Date(startAt),
-        currentParticipants: 1,
-        status: 'draft',
-        theme: themeName,
-        themeConfig,
-      })
-      .returning({ id: activities.id });
-
-    await db
-      .insert(participants)
-      .values({ activityId: newActivity.id, userId, status: 'joined' });
+    const { summary: _summary, ...draftData } = params;
+    const result = await createDraftActivity(draftData, userId);
 
     return {
       success: true as const,
-      activityId: newActivity.id,
+      activityId: result.id,
       draft: params,
       message: '草稿已创建，可以在卡片上修改或直接发布',
     };
   } catch (error) {
     console.error('[createActivityDraft] Error:', error);
-    return { success: false as const, error: '创建草稿失败，请再试一次' };
+    return {
+      success: false as const,
+      error: error instanceof Error ? error.message : '创建草稿失败，请再试一次',
+    };
   }
 }
 
@@ -436,6 +394,50 @@ export function getDraftTool(userId: string | null) {
   });
 }
 
+export async function updateActivityDraftRecord(
+  userId: string,
+  activityId: string,
+  updates: RefineDraftParams['updates'],
+  reason: string
+) {
+  try {
+    const [existingActivity] = await db
+      .select({ id: activities.id, creatorId: activities.creatorId, status: activities.status })
+      .from(activities)
+      .where(eq(activities.id, activityId))
+      .limit(1);
+
+    if (!existingActivity) return { success: false as const, error: '找不到这个草稿，可能已经被删除了' };
+    if (existingActivity.creatorId !== userId) return { success: false as const, error: '你没有权限修改这个活动' };
+    if (existingActivity.status !== 'draft') return { success: false as const, error: '只能修改草稿状态的活动' };
+
+    await updateActivity(activityId, userId, updates);
+
+    const [updatedActivity] = await db
+      .select({
+        id: activities.id, title: activities.title, type: activities.type,
+        locationName: activities.locationName, locationHint: activities.locationHint,
+        startAt: activities.startAt, maxParticipants: activities.maxParticipants,
+      })
+      .from(activities)
+      .where(eq(activities.id, activityId))
+      .limit(1);
+
+    return {
+      success: true as const,
+      activityId,
+      draft: { ...updatedActivity, startAt: updatedActivity.startAt.toISOString() },
+      message: `已更新：${reason}`,
+    };
+  } catch (error) {
+    console.error('[refineDraft] Error:', error);
+    return {
+      success: false as const,
+      error: error instanceof Error ? error.message : '修改失败，请再试一次',
+    };
+  }
+}
+
 /**
  * 修改草稿 Tool
  */
@@ -443,63 +445,13 @@ export function refineDraftTool(userId: string | null) {
   return tool({
     description: '修改草稿。只改用户要求的字段，需要 activityId。',
     inputSchema: jsonSchema<RefineDraftParams>(toJsonSchema(refineDraftSchema)),
-    
+
     execute: async ({ activityId, updates, reason }: RefineDraftParams) => {
       if (!userId) {
         return buildLoginRequiredResult('修改活动草稿');
       }
-      
-      try {
-        const [existingActivity] = await db
-          .select({ id: activities.id, creatorId: activities.creatorId, status: activities.status })
-          .from(activities)
-          .where(eq(activities.id, activityId))
-          .limit(1);
-        
-        if (!existingActivity) return { success: false as const, error: '找不到这个草稿，可能已经被删除了' };
-        if (existingActivity.creatorId !== userId) return { success: false as const, error: '你没有权限修改这个活动' };
-        if (existingActivity.status !== 'draft') return { success: false as const, error: '只能修改草稿状态的活动' };
-        
-        const updateData: Record<string, unknown> = {};
-        if (updates.title) updateData.title = updates.title;
-        if (updates.type) updateData.type = updates.type;
-        if (updates.locationName) updateData.locationName = updates.locationName;
-        if (updates.locationHint) updateData.locationHint = updates.locationHint;
-        if (updates.maxParticipants) updateData.maxParticipants = updates.maxParticipants;
-        if (updates.startAt) updateData.startAt = new Date(updates.startAt);
-        
-        if (updates.location) {
-          await db.execute(sql`
-            UPDATE activities 
-            SET location = ST_SetSRID(ST_MakePoint(${updates.location[0]}, ${updates.location[1]}), 4326), updated_at = NOW()
-            WHERE id = ${activityId}
-          `);
-        }
-        
-        if (Object.keys(updateData).length > 0) {
-          await db.update(activities).set(updateData).where(eq(activities.id, activityId));
-        }
-        
-        const [updatedActivity] = await db
-          .select({
-            id: activities.id, title: activities.title, type: activities.type,
-            locationName: activities.locationName, locationHint: activities.locationHint,
-            startAt: activities.startAt, maxParticipants: activities.maxParticipants,
-          })
-          .from(activities)
-          .where(eq(activities.id, activityId))
-          .limit(1);
-        
-        return {
-          success: true as const,
-          activityId,
-          draft: { ...updatedActivity, startAt: updatedActivity.startAt.toISOString() },
-          message: `已更新：${reason}`,
-        };
-      } catch (error) {
-        console.error('[refineDraft] Error:', error);
-        return { success: false as const, error: '修改失败，请再试一次' };
-      }
+
+      return updateActivityDraftRecord(userId, activityId, updates, reason);
     },
   });
 }
@@ -507,33 +459,28 @@ export function refineDraftTool(userId: string | null) {
 export async function publishActivityRecord(userId: string, activityId: string) {
   try {
     const [existingActivity] = await db
-      .select({ id: activities.id, title: activities.title, creatorId: activities.creatorId, status: activities.status, startAt: activities.startAt })
+      .select({ title: activities.title })
       .from(activities)
       .where(eq(activities.id, activityId))
       .limit(1);
 
-    if (!existingActivity) return { success: false as const, error: '找不到这个活动，可能已经被删除了' };
-    if (existingActivity.creatorId !== userId) return { success: false as const, error: '你没有权限发布这个活动' };
-    if (existingActivity.status !== 'draft') return { success: false as const, error: '这个活动已经发布过了' };
-    if (existingActivity.startAt < new Date()) return { success: false as const, error: '活动时间已过期，请修改时间后再发布' };
-
-    const quota = await checkAIQuota(userId);
-    if (!quota.hasQuota) return { success: false as const, error: '今天的 AI 额度用完了，明天再来吧～', quotaRemaining: 0 };
-
-    await db.update(activities).set({ status: 'active' }).where(eq(activities.id, activityId));
-    await consumeAIQuota(userId);
+    await publishDraftActivity(activityId, userId);
+    const quota = await getQuota(userId);
 
     return {
       success: true as const,
       activityId,
-      title: existingActivity.title,
+      title: existingActivity?.title || '活动',
       shareUrl: generateShareUrl(activityId),
       message: '活动发布成功！快分享给朋友吧',
-      quotaRemaining: quota.remaining - 1,
+      quotaRemaining: quota?.aiCreateQuota ?? 0,
     };
   } catch (error) {
     console.error('[publishActivity] Error:', error);
-    return { success: false as const, error: '发布失败，请再试一次' };
+    return {
+      success: false as const,
+      error: error instanceof Error ? error.message : '发布失败，请再试一次',
+    };
   }
 }
 

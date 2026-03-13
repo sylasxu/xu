@@ -10,6 +10,7 @@ import { t } from 'elysia';
 import { tool, jsonSchema } from 'ai';
 import { toJsonSchema } from '@juchang/utils';
 import { db, activities, participants, users, eq, and, desc, sql } from '@juchang/db';
+import { joinActivity as joinActivityCommand, updateActivityStatus } from '../../activities/activity.service';
 
 // ============ Schema 定义 ============
 
@@ -63,46 +64,26 @@ export function joinActivityTool(userId: string | null) {
       
       try {
         const [activity] = await db
-          .select({
-            id: activities.id, title: activities.title, status: activities.status,
-            currentParticipants: activities.currentParticipants, maxParticipants: activities.maxParticipants,
-            creatorId: activities.creatorId, startAt: activities.startAt,
-          })
+          .select({ title: activities.title })
           .from(activities)
           .where(eq(activities.id, activityId))
           .limit(1);
-        
-        if (!activity) return { success: false as const, error: '找不到这个活动' };
-        if (activity.status !== 'active') return { success: false as const, error: '这个活动还不能报名（可能是草稿或已结束）' };
-        if (activity.creatorId === userId) return { success: false as const, error: '你是活动发起人，不需要报名哦' };
-        if (new Date(activity.startAt) < new Date()) return { success: false as const, error: '活动已经开始了，不能报名了' };
-        if (activity.currentParticipants >= activity.maxParticipants) return { success: false as const, error: '活动已满员，下次早点来！' };
-        
-        // 检查是否已报名
-        const [existing] = await db
-          .select({ id: participants.id, status: participants.status })
-          .from(participants)
-          .where(and(eq(participants.activityId, activityId), eq(participants.userId, userId)))
-          .limit(1);
-        
-        if (existing) {
-          if (existing.status === 'joined') return { success: false as const, error: '你已经报名了这个活动' };
-          await db.update(participants).set({ status: 'joined' }).where(eq(participants.id, existing.id));
-        } else {
-          await db.insert(participants).values({ activityId, userId, status: 'joined' });
-        }
-        
-        await db.update(activities).set({ currentParticipants: activity.currentParticipants + 1 }).where(eq(activities.id, activityId));
+
+        const result = await joinActivityCommand(activityId, userId);
         
         return {
           success: true as const,
           activityId,
-          activityTitle: activity.title,
-          message: `报名成功！「${activity.title}」等你来～`,
+          activityTitle: activity?.title || '活动',
+          participantId: result.id,
+          message: activity?.title ? `报名成功！「${activity.title}」等你来～` : '报名成功！等你来～',
         };
       } catch (error) {
         console.error('[joinActivity] Error:', error);
-        return { success: false as const, error: '报名失败，请再试一次' };
+        return {
+          success: false as const,
+          error: error instanceof Error ? error.message : '报名失败，请再试一次',
+        };
       }
     },
   });
@@ -122,28 +103,28 @@ export function cancelActivityTool(userId: string | null) {
       }
       
       try {
+        await updateActivityStatus(activityId, userId, 'cancelled');
+
         const [activity] = await db
-          .select({ id: activities.id, title: activities.title, status: activities.status, creatorId: activities.creatorId })
+          .select({ title: activities.title })
           .from(activities)
           .where(eq(activities.id, activityId))
           .limit(1);
         
-        if (!activity) return { success: false as const, error: '找不到这个活动' };
-        if (activity.creatorId !== userId) return { success: false as const, error: '只有活动发起人才能取消活动' };
-        if (activity.status === 'cancelled') return { success: false as const, error: '活动已经取消了' };
-        if (activity.status === 'completed') return { success: false as const, error: '活动已经结束了，不能取消' };
-        
-        await db.update(activities).set({ status: 'cancelled' }).where(eq(activities.id, activityId));
-        
         return {
           success: true as const,
           activityId,
-          activityTitle: activity.title,
-          message: reason ? `「${activity.title}」已取消，原因：${reason}` : `「${activity.title}」已取消`,
+          activityTitle: activity?.title || '活动',
+          message: activity?.title
+            ? (reason ? `「${activity.title}」已取消，原因：${reason}` : `「${activity.title}」已取消`)
+            : '活动已取消',
         };
       } catch (error) {
         console.error('[cancelActivity] Error:', error);
-        return { success: false as const, error: '取消失败，请再试一次' };
+        return {
+          success: false as const,
+          error: error instanceof Error ? error.message : '取消失败，请再试一次',
+        };
       }
     },
   });

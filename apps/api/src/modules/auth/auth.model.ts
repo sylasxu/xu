@@ -31,6 +31,21 @@ const AdminPhoneLoginRequest = t.Object({
   code: t.String({ minLength: 4, maxLength: 6, description: '验证码' }),
 });
 
+const BootstrapTestUsersRequest = t.Object({
+  phone: t.String({ pattern: '^1[3-9]\\d{9}$', description: '管理员手机号' }),
+  code: t.String({ minLength: 4, maxLength: 6, description: '管理员超级验证码' }),
+  count: t.Optional(t.Number({ minimum: 1, maximum: 5, default: 5, description: '生成账号数量，最多 5 个' })),
+});
+
+const BootstrapTestUsersResponse = t.Object({
+  users: t.Array(t.Object({
+    user: selectUserSchema,
+    token: t.String({ description: '测试账号 JWT Token' }),
+    isNewUser: t.Boolean({ description: '是否为本次新建账号' }),
+  })),
+  msg: t.String(),
+});
+
 // Admin 登录响应
 const AdminLoginResponse = t.Object({
   user: t.Object({
@@ -66,6 +81,8 @@ export const authModel = new Elysia({ name: 'authModel' })
     'auth.loginResponse': LoginResponse,
     'auth.adminPhoneLogin': AdminPhoneLoginRequest,
     'auth.adminLoginResponse': AdminLoginResponse,
+    'auth.bootstrapTestUsers': BootstrapTestUsersRequest,
+    'auth.bootstrapTestUsersResponse': BootstrapTestUsersResponse,
     'auth.error': ErrorResponse,
   });
 
@@ -76,4 +93,6 @@ export type BindPhoneResponse = Static<typeof BindPhoneResponse>;
 export type LoginResponse = Static<typeof LoginResponse>;
 export type AdminPhoneLoginRequest = Static<typeof AdminPhoneLoginRequest>;
 export type AdminLoginResponse = Static<typeof AdminLoginResponse>;
+export type BootstrapTestUsersRequest = Static<typeof BootstrapTestUsersRequest>;
+export type BootstrapTestUsersResponse = Static<typeof BootstrapTestUsersResponse>;
 export type ErrorResponse = Static<typeof ErrorResponse>;

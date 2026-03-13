@@ -1,7 +1,48 @@
 // 全局配置：分离关注点
+import { config } from 'dotenv';
 import { Elysia } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { jwt } from '@elysiajs/jwt';
+import { fileURLToPath } from 'url';
+
+config({ path: fileURLToPath(new URL('../../../.env', import.meta.url)) });
+
+const LOCAL_CORS_ORIGINS = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+];
+
+function readEnv(name: string): string | null {
+  const value = process.env[name]?.trim();
+  return value && value.length > 0 ? value : null;
+}
+
+export function getJwtSecret(): string {
+  const secret = readEnv('JWT_SECRET');
+  if (!secret) {
+    throw new Error('缺少 JWT_SECRET 环境变量，API 无法启动');
+  }
+  return secret;
+}
+
+export function getCorsOrigins(): string[] {
+  const configuredOrigins = readEnv('API_CORS_ORIGINS')
+    ?.split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  if (configuredOrigins && configuredOrigins.length > 0) {
+    return configuredOrigins;
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('生产环境必须配置 API_CORS_ORIGINS');
+  }
+
+  return LOCAL_CORS_ORIGINS;
+}
 
 /**
  * 基础插件配置（CORS + JWT）
@@ -9,13 +50,13 @@ import { jwt } from '@elysiajs/jwt';
  */
 export const basePlugins = new Elysia({ name: 'basePlugins' })
   .use(cors({
-    origin: true, // 开发环境允许所有来源，生产环境应该配置具体域名
+    origin: getCorsOrigins(),
     credentials: true,
   }))
   .use(
     jwt({
       name: 'jwt',
-      secret: process.env.JWT_SECRET || 'dev-secret-key-change-in-production',
+      secret: getJwtSecret(),
       exp: '7d', // Token 有效期 7 天
     })
   );
@@ -64,3 +105,19 @@ export async function verifyAdmin(
   return user;
 }
 
+export async function verifySelfOrAdmin(
+  jwt: any,
+  headers: Record<string, string | undefined>,
+  targetUserId: string
+): Promise<{ id: string; role: string }> {
+  const user = await verifyAuth(jwt, headers);
+  if (!user) {
+    throw new AuthError(401, '未授权');
+  }
+
+  if (user.role !== 'admin' && user.id !== targetUserId) {
+    throw new AuthError(403, '无权限访问该用户');
+  }
+
+  return user;
+}

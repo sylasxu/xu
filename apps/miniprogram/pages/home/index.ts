@@ -236,6 +236,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
         nickname: this.data.userNickname,
         greeting: welcomeData.greeting,
         subGreeting: welcomeData.subGreeting,
+        activities: welcomeData.pendingActivities || [],
         sections: welcomeData.sections,
         socialProfile: welcomeData.socialProfile,
         quickPrompts: welcomeData.quickPrompts,
@@ -505,6 +506,23 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     // Widget 内部已通过 sendAction 发送结构化请求，这里仅保留埋点。
     wx.reportEvent('ask_preference_skip', {
       source: 'widget_ask_preference',
+    })
+  },
+
+  onPartnerIntentFormSubmit(e: WechatMiniprogram.CustomEvent<{ values: Record<string, unknown> }>) {
+    wx.reportEvent('partner_intent_form_submit', {
+      activity_type: typeof e.detail?.values?.activityType === 'string' ? e.detail.values.activityType : '',
+      time_range: typeof e.detail?.values?.timeRange === 'string' ? e.detail.values.timeRange : '',
+      location: typeof e.detail?.values?.location === 'string' ? e.detail.values.location : '',
+    })
+  },
+
+  onDraftSettingsFormSubmit(e: WechatMiniprogram.CustomEvent<{ values: Record<string, unknown> }>) {
+    wx.reportEvent('draft_settings_form_submit', {
+      field: typeof e.detail?.values?.field === 'string' ? e.detail.values.field : '',
+      location_name: typeof e.detail?.values?.locationName === 'string' ? e.detail.values.locationName : '',
+      slot: typeof e.detail?.values?.slot === 'string' ? e.detail.values.slot : '',
+      max_participants: typeof e.detail?.values?.maxParticipants === 'string' ? e.detail.values.maxParticipants : '',
     })
   },
 

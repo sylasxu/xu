@@ -22,6 +22,7 @@ interface UserState {
   logout: () => void
   updateProfile: (data: UpdateUserParams) => Promise<void>
   refreshUserInfo: () => Promise<void>
+  recordCreatedActivity: () => void
   setLoading: (loading: boolean) => void
 }
 
@@ -157,6 +158,24 @@ export const useUserStore = create<UserState>()(
           if (errorMessage.includes('401') || errorMessage.includes('未授权')) {
             get().logout()
           }
+        }
+      },
+
+      // 本地同步创建活动成功后的用户信息
+      recordCreatedActivity: () => {
+        set((state) => {
+          if (!state.user) {
+            return
+          }
+
+          state.user.aiCreateQuotaToday = Math.max(0, (state.user.aiCreateQuotaToday ?? 0) - 1)
+          state.user.activitiesCreatedCount = (state.user.activitiesCreatedCount ?? 0) + 1
+          state.user.updatedAt = new Date().toISOString()
+        })
+
+        const currentUser = get().user
+        if (currentUser) {
+          wx.setStorageSync('userInfo', currentUser)
         }
       },
 

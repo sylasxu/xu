@@ -4,7 +4,7 @@
  * 替代简单的关键词匹配，实现"下次更懂你"的核心能力
  */
 
-import { generateObject } from 'ai';
+import { runObject } from '../models/runtime';
 import { t } from 'elysia';
 import { getDefaultChatModel } from '../models/router';
 import { toJsonSchema } from '@juchang/utils';
@@ -89,7 +89,7 @@ export async function extractPreferencesWithLLM(
   }
 
   try {
-    const result = await generateObject({
+    const result = await runObject<PreferenceExtraction>({
       model: getDefaultChatModel(),
       schema: toJsonSchema(PreferenceExtractionSchema) as any,
       prompt: `分析以下用户对话，提取用户的偏好信息。

@@ -4,7 +4,7 @@
  * 混合分类：规则优先，LLM 兜底
  */
 
-import { generateText } from 'ai';
+import { runText } from '../models/runtime';
 import { getDefaultChatModel } from '../models/router';
 import type { IntentType, ClassifyResult, ClassifyContext } from './types';
 import { intentPatterns, intentPriority, draftModifyPatterns } from './definitions';
@@ -109,7 +109,7 @@ async function classifyByLLM(
   const contextHint = context.hasDraftContext ? '（当前有活动草稿待确认）' : '';
 
   try {
-    const result = await generateText({
+    const result = await runText({
       model: getDefaultChatModel(),
       prompt: `你是一个意图分类器。根据对话历史，判断用户当前的意图。${contextHint}
 

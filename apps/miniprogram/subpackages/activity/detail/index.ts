@@ -4,8 +4,8 @@
  */
 import { getActivitiesById, deleteActivitiesById, patchActivitiesByIdStatus } from '../../../src/api/endpoints/activities/activities';
 import { getActivitiesByIdPublic } from '../../../src/api/endpoints/activities/activities';
-import { getUsersById } from '../../../src/api/endpoints/users/users';
 import { useAppStore } from '../../../src/stores/app';
+import { useUserStore } from '../../../src/stores/user';
 import { submitJoinAndOpenDiscussion } from '../../../src/utils/join-flow'
 import type { ActivityDetailResponse, ActivityPublicResponseRecentMessagesItem as RecentMessage } from '../../../src/api/model';
 
@@ -211,14 +211,17 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
   },
 
   async loadCurrentUser(): Promise<void> {
-    const token = wx.getStorageSync('token');
-    const cachedUserInfo = wx.getStorageSync('userInfo') as { id?: string } | null;
-    if (!token || !cachedUserInfo?.id) return;
+    const userStore = useUserStore.getState();
+    const currentUser = userStore.user;
+    if (!currentUser?.id) return;
+
+    this.setData({ currentUser: currentUser as unknown as User });
 
     try {
-      const response = await getUsersById(cachedUserInfo.id);
-      if (response.status === 200) {
-        this.setData({ currentUser: response.data as User });
+      await userStore.refreshUserInfo();
+      const refreshedUser = useUserStore.getState().user;
+      if (refreshedUser?.id === currentUser.id) {
+        this.setData({ currentUser: refreshedUser as unknown as User });
       }
     } catch (error) {
       console.error('获取用户信息失败', error);

@@ -17,6 +17,7 @@ import {
   postAiConversations,
   deleteAiConversations,
 } from '../api/endpoints/ai/ai'
+import { useUserStore } from './user'
 
 // 最大缓存消息数量
 const MAX_CACHED_MESSAGES = 50
@@ -120,8 +121,13 @@ const wechatStorage = {
 const generateLocalId = () => `local_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
 
 function getCurrentUserId(): string {
-  const userInfo = wx.getStorageSync('userInfo') as { id?: string } | null
-  return typeof userInfo?.id === 'string' ? userInfo.id : ''
+  const currentUserId = useUserStore.getState().user?.id
+  if (typeof currentUserId === 'string' && currentUserId.length > 0) {
+    return currentUserId
+  }
+
+  const cachedUserInfo = wx.getStorageSync('userInfo') as { id?: string } | null
+  return typeof cachedUserInfo?.id === 'string' ? cachedUserInfo.id : ''
 }
 
 function isConversationMessage(item: unknown): item is ConversationMessage {

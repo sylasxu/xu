@@ -128,6 +128,28 @@
                     bind:skip="onAskPreferenceSkip"
                   />
                 </block>
+
+                <!-- Widget_Partner_Intent_Form -->
+                <block wx:elif="{{part.widgetType === 'partner_intent_form'}}">
+                  <widget-partner-intent-form
+                    title="{{part.data.title}}"
+                    schema="{{part.data.schema}}"
+                    initialValues="{{part.data.initialValues}}"
+                    disabled="{{part.data.disabled}}"
+                    bind:submit="onPartnerIntentFormSubmit"
+                  />
+                </block>
+
+                <!-- Widget_Draft_Settings_Form -->
+                <block wx:elif="{{part.widgetType === 'draft_settings_form'}}">
+                  <widget-draft-settings-form
+                    title="{{part.data.title}}"
+                    schema="{{part.data.schema}}"
+                    initialValues="{{part.data.initialValues}}"
+                    disabled="{{part.data.disabled}}"
+                    bind:submit="onDraftSettingsFormSubmit"
+                  />
+                </block>
                 
                 <!-- Widget_Error -->
                 <block wx:elif="{{part.widgetType === 'error'}}">

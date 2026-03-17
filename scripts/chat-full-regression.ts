@@ -76,6 +76,7 @@ interface TurnRequestOptions {
 }
 
 const CHAT_URL = process.env.GENUI_CHAT_API_URL || 'http://127.0.0.1:1996/ai/chat';
+const DEFAULT_TEST_MODEL = process.env.GENUI_TEST_MODEL?.trim() || 'deepseek-chat';
 let authToken = process.env.GENUI_AUTH_TOKEN?.trim() || '';
 let adminToken = process.env.GENUI_ADMIN_TOKEN?.trim() || '';
 const HTTP_MARKER = '__HTTP_STATUS__:';
@@ -207,6 +208,12 @@ function buildTurnPayload(
   conversationId?: string | null,
   options?: TurnRequestOptions,
 ): Record<string, unknown> {
+  const ai = {
+    model: options?.ai?.model || DEFAULT_TEST_MODEL,
+    ...(typeof options?.ai?.temperature === 'number' ? { temperature: options.ai.temperature } : {}),
+    ...(typeof options?.ai?.maxTokens === 'number' ? { maxTokens: options.ai.maxTokens } : {}),
+  };
+
   return {
     ...(conversationId ? { conversationId } : {}),
     input,
@@ -216,7 +223,7 @@ function buildTurnPayload(
       timezone: 'Asia/Shanghai',
       platformVersion: 'chat-full-regression',
     },
-    ...(options?.ai ? { ai: options.ai } : {}),
+    ai,
   };
 }
 
@@ -512,6 +519,30 @@ function findCtaActionInput(turn: TurnEnvelope, actionName: string, actionId: st
   throw new Error(`${label}: missing CTA action ${actionName}`);
 }
 
+function findCtaLabelText(turn: TurnEnvelope, expectedLabel: string, label: string): TurnInput {
+  for (const block of turn.turn.blocks) {
+    if (!isRecord(block) || String(block.type) !== 'cta-group' || !Array.isArray(block.items)) {
+      continue;
+    }
+
+    for (const item of block.items) {
+      if (!isRecord(item)) {
+        continue;
+      }
+
+      const itemLabel = typeof item.label === 'string' ? item.label.trim() : '';
+      if (itemLabel === expectedLabel) {
+        return {
+          type: 'text',
+          text: itemLabel,
+        };
+      }
+    }
+  }
+
+  throw new Error(`${label}: missing CTA label ${expectedLabel}`);
+}
+
 function getFormBlock(turn: TurnEnvelope, label: string): Record<string, unknown> {
   const formBlock = turn.turn.blocks.find(
     (block) => isRecord(block) && String(block.type) === 'form'
@@ -705,7 +736,6 @@ function assertTraceStages(parsed: { events: ParsedStreamEvent[]; done: boolean 
 
   const requiredStages = [
     'conversation_resolved',
-    'chat_stream_parsed',
     'genui_blocks_built',
     'workflow_complete',
     'turn_complete',
@@ -713,6 +743,11 @@ function assertTraceStages(parsed: { events: ParsedStreamEvent[]; done: boolean 
   for (const stage of requiredStages) {
     assert(traceStages.includes(stage), `${label}: missing trace stage ${stage}`);
   }
+
+  assert(
+    traceStages.includes('chat_stream_bridged') || traceStages.includes('chat_stream_parsed'),
+    `${label}: missing trace stage chat_stream_bridged/chat_stream_parsed`
+  );
 
   return traceStages;
 }
@@ -901,122 +936,127 @@ function runCoreCreateFlow(logs: string[]): string {
 }
 
 function runContinuousConversationFlow(logs: string[]): void {
-  const steps: TurnInput[] = [
-    { type: 'text', text: '想租个周五晚上的局' },
+  const stepSummaries: string[] = [];
+
+  const createTurn = postTurn({
+    type: 'action',
+    action: 'create_activity',
+    actionId: 'full_reg_continuous_create_1',
+    displayText: '先生成草稿',
+    params: {
+      title: '周五桌游局',
+      type: 'boardgame',
+      activityType: '桌游',
+      locationName: '观音桥',
+      location: '观音桥',
+      description: '周五晚上在观音桥组个桌游局',
+      maxParticipants: 6,
+    },
+  });
+  assertTurnEnvelope(createTurn, 'continuous#turn1');
+  assertNoLeakedToolText(createTurn, 'continuous#turn1');
+  const conversationId = createTurn.conversationId;
+  stepSummaries.push(`t1=[${getBlockTypes(createTurn).join(',')}]`);
+
+  const confirmDraftAction = findCtaActionInput(
+    createTurn,
+    'confirm_publish',
+    'full_reg_continuous_confirm_payload_1',
+    'continuous#turn1'
+  );
+  const draftParams =
+    confirmDraftAction.type === 'action' && isRecord(confirmDraftAction.params)
+      ? confirmDraftAction.params
+      : {};
+
+  const editTurn = postTurn(
+    findCtaLabelText(createTurn, '改下人数设置', 'continuous#turn1'),
+    conversationId
+  );
+  assertTurnEnvelope(editTurn, 'continuous#turn2');
+  assertNoLeakedToolText(editTurn, 'continuous#turn2');
+  assert(editTurn.conversationId === conversationId, 'continuous#turn2: conversation drift');
+  stepSummaries.push(`t2=[${getBlockTypes(editTurn).join(',')}]`);
+
+  const saveTurn = postTurn(
     {
       type: 'action',
-      action: 'choose_location',
-      actionId: 'full_reg_continuous_location_1',
-      displayText: '观音桥',
+      action: 'save_draft_settings',
+      actionId: 'full_reg_continuous_save_1',
+      displayText: '保存这个设置',
       params: {
-        location: '观音桥',
+        ...draftParams,
+        maxParticipants: 8,
       },
     },
+    conversationId
+  );
+  assertTurnEnvelope(saveTurn, 'continuous#turn3');
+  assertNoLeakedToolText(saveTurn, 'continuous#turn3');
+  assert(saveTurn.conversationId === conversationId, 'continuous#turn3: conversation drift');
+  stepSummaries.push(`t3=[${getBlockTypes(saveTurn).join(',')}]`);
+
+  const publishTurn = postTurn(
+    findCtaLabelText(saveTurn, '确认发布', 'continuous#turn3'),
+    conversationId
+  );
+  assertTurnEnvelope(publishTurn, 'continuous#turn4');
+  assertNoLeakedToolText(publishTurn, 'continuous#turn4');
+  assert(publishTurn.conversationId === conversationId, 'continuous#turn4: conversation drift');
+  assertPublishTurn(publishTurn, 'continuous#turn4');
+  stepSummaries.push(`t4=[${getBlockTypes(publishTurn).join(',')}]`);
+
+  const exploreTurn = postTurn(
+    { type: 'text', text: '观音桥附近还有什么桌游局？' },
+    conversationId
+  );
+  assertTurnEnvelope(exploreTurn, 'continuous#turn5');
+  assertNoLeakedToolText(exploreTurn, 'continuous#turn5');
+  assert(exploreTurn.conversationId === conversationId, 'continuous#turn5: conversation drift');
+  stepSummaries.push(`t5=[${getBlockTypes(exploreTurn).join(',')}]`);
+
+  const partnerTurn = postTurn(
+    findCtaLabelText(exploreTurn, '帮我找同类搭子', 'continuous#turn5'),
+    conversationId
+  );
+  assertTurnEnvelope(partnerTurn, 'continuous#turn6');
+  assertNoLeakedToolText(partnerTurn, 'continuous#turn6');
+  assert(partnerTurn.conversationId === conversationId, 'continuous#turn6: conversation drift');
+  stepSummaries.push(`t6=[${getBlockTypes(partnerTurn).join(',')}]`);
+
+  const submitPartnerTurn = postTurn(
     {
       type: 'action',
-      action: 'choose_activity_type',
-      actionId: 'full_reg_continuous_type_1',
-      displayText: '桌游',
+      action: 'submit_partner_intent_form',
+      actionId: 'full_reg_continuous_submit_partner_1',
+      displayText: '开始找搭子',
       params: {
-        activityType: '桌游',
+        rawInput: '帮我找找有没有同意向的人',
+        activityType: 'boardgame',
+        timeRange: 'weekend',
         location: '观音桥',
-      },
-    },
-    {
-      type: 'action',
-      action: 'choose_time_slot',
-      actionId: 'full_reg_continuous_slot_1',
-      displayText: '周五 20:00',
-      params: {
-        slot: 'fri_20_00',
-        location: '观音桥',
-        activityType: '桌游',
-      },
-    },
-    {
-      type: 'action',
-      action: 'confirm_publish',
-      actionId: 'full_reg_continuous_publish_1',
-      displayText: '就按这个发布',
-      params: {
-        title: '周五 20:00桌游局',
-        type: 'boardgame',
-        startAt: '2026-03-06T20:00:00+08:00',
-        locationName: '观音桥',
-        locationHint: '观音桥商圈',
-        maxParticipants: 6,
-        currentParticipants: 1,
+        budgetType: 'AA',
+        tags: ['Quiet'],
+        note: '想找能一起玩桌游的人',
         lat: 29.58567,
         lng: 106.52988,
       },
     },
-  ];
-
-  let conversationId: string | null = null;
-  let publishTurn: TurnEnvelope | null = null;
-  const stepSummaries: string[] = [];
-
-  steps.forEach((step, index) => {
-    const turn = postTurn(step, conversationId);
-    const label = `continuous#turn${index + 1}`;
-    assertTurnEnvelope(turn, label);
-    assertNoLeakedToolText(turn, label);
-
-    if (conversationId) {
-      assert(turn.conversationId === conversationId, `${label}: conversation drift`);
-    }
-
-    conversationId = turn.conversationId;
-    stepSummaries.push(`t${index + 1}=[${getBlockTypes(turn).join(',')}]`);
-
-    if (step.type === 'action' && step.action === 'confirm_publish') {
-      assertPublishTurn(turn, label);
-      publishTurn = turn;
-    }
-  });
-
-  assert(conversationId, 'continuous flow: conversationId missing');
-  assert(publishTurn, 'continuous flow: publish turn missing');
-
-  const publishCtaActions = getCtaActions(publishTurn);
-  const exploreTurn = publishCtaActions.includes('explore_nearby')
-    ? postTurn(
-        findCtaActionInput(
-          publishTurn,
-          'explore_nearby',
-          'full_reg_continuous_explore_1',
-          'continuous publish turn'
-        ),
-        conversationId
-      )
-    : postTurn(
-        { type: 'text', text: '顺便看看附近还有没有类似的局' },
-        conversationId
-      );
-  assertTurnEnvelope(exploreTurn, 'continuous#turn6');
-  assertNoLeakedToolText(exploreTurn, 'continuous#turn6');
-  assert(exploreTurn.conversationId === conversationId, 'continuous#turn6: conversation drift');
-  stepSummaries.push(
-    `t6(${publishCtaActions.includes('explore_nearby') ? 'cta' : 'text'})=[${getBlockTypes(exploreTurn).join(',')}]`
-  );
-
-  const followUpTurn = postTurn(
-    { type: 'text', text: '那换到解放碑呢，最好离地铁近点' },
     conversationId
   );
-  assertTurnEnvelope(followUpTurn, 'continuous#turn7');
-  assertNoLeakedToolText(followUpTurn, 'continuous#turn7');
-  assert(followUpTurn.conversationId === conversationId, 'continuous#turn7: conversation drift');
-  stepSummaries.push(`t7=[${getBlockTypes(followUpTurn).join(',')}]`);
+  assertTurnEnvelope(submitPartnerTurn, 'continuous#turn7');
+  assertNoLeakedToolText(submitPartnerTurn, 'continuous#turn7');
+  assert(submitPartnerTurn.conversationId === conversationId, 'continuous#turn7: conversation drift');
+  stepSummaries.push(`t7=[${getBlockTypes(submitPartnerTurn).join(',')}]`);
 
   const messagesPayload = getConversationMessages(conversationId);
 
   const userMessages = messagesPayload.items.filter((item) => item.role === 'user').length;
   const assistantMessages = messagesPayload.items.filter((item) => item.role === 'assistant').length;
-  assert(userMessages >= 4, `continuous flow messages: expected >=4 user messages, got ${userMessages}`);
+  assert(userMessages >= 6, `continuous flow messages: expected >=6 user messages, got ${userMessages}`);
   assert(
-    assistantMessages >= 4,
-    `continuous flow messages: expected >=4 assistant messages, got ${assistantMessages}`
+    assistantMessages >= 6,
+    `continuous flow messages: expected >=6 assistant messages, got ${assistantMessages}`
   );
 
   logs.push(
@@ -1026,57 +1066,11 @@ function runContinuousConversationFlow(logs: string[]): void {
 
 function runGuestLongConversationFlow(logs: string[]): void {
   const steps: TurnInput[] = [
-    { type: 'text', text: '想租个周五晚上的局' },
-    {
-      type: 'action',
-      action: 'choose_location',
-      actionId: 'full_reg_guest_long_location_1',
-      displayText: '观音桥',
-      params: {
-        location: '观音桥',
-      },
-    },
-    {
-      type: 'action',
-      action: 'choose_activity_type',
-      actionId: 'full_reg_guest_long_type_1',
-      displayText: '桌游',
-      params: {
-        activityType: '桌游',
-        location: '观音桥',
-      },
-    },
-    {
-      type: 'action',
-      action: 'choose_time_slot',
-      actionId: 'full_reg_guest_long_slot_1',
-      displayText: '周五 20:00',
-      params: {
-        slot: 'fri_20_00',
-        location: '观音桥',
-        activityType: '桌游',
-      },
-    },
-    {
-      type: 'action',
-      action: 'confirm_publish',
-      actionId: 'full_reg_guest_long_publish_1',
-      displayText: '就按这个发布',
-      params: {
-        title: '周五 20:00桌游局',
-        type: 'boardgame',
-        startAt: '2026-03-06T20:00:00+08:00',
-        locationName: '观音桥',
-        locationHint: '观音桥商圈',
-        maxParticipants: 6,
-        currentParticipants: 1,
-        lat: 29.58567,
-        lng: 106.52988,
-      },
-    },
-    { type: 'text', text: '那先看看附近还有没有类似的局' },
-    { type: 'text', text: '换到解放碑呢，最好离地铁近点' },
-    { type: 'text', text: '如果没有合适的，帮我找个一起玩桌游的搭子也行' },
+    { type: 'text', text: '附近有什么局吗？' },
+    { type: 'text', text: '观音桥' },
+    { type: 'text', text: '桌游' },
+    { type: 'text', text: '换个关键词重搜' },
+    { type: 'text', text: '那解放碑呢，最好离地铁近点' },
     { type: 'text', text: '周六晚上也可以' },
   ];
 
@@ -1091,10 +1085,6 @@ function runGuestLongConversationFlow(logs: string[]): void {
 
     if (conversationId) {
       assert(turn.conversationId === conversationId, `${label}: conversation drift`);
-    }
-
-    if (step.type === 'action' && step.action === 'confirm_publish') {
-      assertPublishTurn(turn, label, false);
     }
 
     conversationId = turn.conversationId;
@@ -1116,43 +1106,12 @@ function runGuestLongConversationFlow(logs: string[]): void {
   logs.push(`flow#guest-long conversation=${conversationId} ${stepSummaries.join(' ')} stream=ok`);
 }
 
-function runAuthCrossIntentLongFlow(logs: string[]): void {
-  const steps: TurnInput[] = [
-    { type: 'text', text: '想租个周五晚上的局' },
-    {
-      type: 'action',
-      action: 'choose_location',
-      actionId: 'full_reg_cross_location_1',
-      displayText: '观音桥',
-      params: {
-        location: '观音桥',
-      },
-    },
-    {
-      type: 'action',
-      action: 'choose_activity_type',
-      actionId: 'full_reg_cross_type_1',
-      displayText: '桌游',
-      params: {
-        activityType: '桌游',
-        location: '观音桥',
-      },
-    },
-    {
-      type: 'action',
-      action: 'choose_time_slot',
-      actionId: 'full_reg_cross_slot_1',
-      displayText: '周五 20:00',
-      params: {
-        slot: 'fri_20_00',
-        location: '观音桥',
-        activityType: '桌游',
-      },
-    },
+function runGuestWriteGuardFlow(logs: string[]): void {
+  const turn = postTurn(
     {
       type: 'action',
       action: 'confirm_publish',
-      actionId: 'full_reg_cross_publish_1',
+      actionId: 'full_reg_guest_guard_publish_1',
       displayText: '就按这个发布',
       params: {
         title: '周五 20:00桌游局',
@@ -1166,61 +1125,75 @@ function runAuthCrossIntentLongFlow(logs: string[]): void {
         lng: 106.52988,
       },
     },
-    { type: 'text', text: '那先看看附近还有没有类似的局' },
-  ];
+    null,
+    { authArgs: [] }
+  );
 
-  let conversationId: string | null = null;
+  assertTurnEnvelope(turn, 'guest-guard#turn1');
+  assertPublishTurn(turn, 'guest-guard#turn1', false);
+  logs.push(`flow#guest-write-guard blocks=[${getBlockTypes(turn).join(',')}] authGate=ok`);
+}
+
+function runAuthCrossIntentLongFlow(logs: string[]): void {
   const stepSummaries: string[] = [];
-  let searchTurn: TurnEnvelope | null = null;
 
-  steps.forEach((step, index) => {
-    const turn = postTurn(step, conversationId);
-    const label = `cross-intent#turn${index + 1}`;
-    assertTurnEnvelope(turn, label);
-    assertNoLeakedToolText(turn, label);
-
-    if (conversationId) {
-      assert(turn.conversationId === conversationId, `${label}: conversation drift`);
-    }
-
-    if (step.type === 'action' && step.action === 'confirm_publish') {
-      assertPublishTurn(turn, label);
-    }
-
-    conversationId = turn.conversationId;
-    stepSummaries.push(`t${index + 1}=[${getBlockTypes(turn).join(',')}]`);
-
-    if (index === steps.length - 1) {
-      searchTurn = turn;
-    }
+  const createTurn = postTurn({
+    type: 'action',
+    action: 'create_activity',
+    actionId: 'full_reg_cross_create_1',
+    displayText: '先生成草稿',
+    params: {
+      title: '周五桌游局',
+      type: 'boardgame',
+      activityType: '桌游',
+      locationName: '观音桥',
+      location: '观音桥',
+      description: '周五晚上在观音桥组个桌游局',
+      maxParticipants: 6,
+    },
   });
+  assertTurnEnvelope(createTurn, 'cross-intent#turn1');
+  assertNoLeakedToolText(createTurn, 'cross-intent#turn1');
+  const conversationId = createTurn.conversationId;
+  stepSummaries.push(`t1=[${getBlockTypes(createTurn).join(',')}]`);
 
-  assert(conversationId, 'cross-intent flow: conversationId missing');
-  assert(searchTurn, 'cross-intent flow: search turn missing');
-
-  const findPartnerTurn = postTurn(
-    findCtaActionInput(
-      searchTurn,
-      'find_partner',
-      'full_reg_cross_find_partner_1',
-      'cross-intent#turn6'
-    ),
+  const publishTurn = postTurn(
+    findCtaLabelText(createTurn, '确认发布', 'cross-intent#turn1'),
     conversationId
   );
-  assertTurnEnvelope(findPartnerTurn, 'cross-intent#turn7');
-  assertNoLeakedToolText(findPartnerTurn, 'cross-intent#turn7');
-  assert(findPartnerTurn.conversationId === conversationId, 'cross-intent#turn7: conversation drift');
-  const formBlock = getFormBlock(findPartnerTurn, 'cross-intent#turn7');
-  assert(isRecord(formBlock.schema), 'cross-intent#turn7: form schema missing');
+  assertTurnEnvelope(publishTurn, 'cross-intent#turn2');
+  assertNoLeakedToolText(publishTurn, 'cross-intent#turn2');
+  assert(publishTurn.conversationId === conversationId, 'cross-intent#turn2: conversation drift');
+  assertPublishTurn(publishTurn, 'cross-intent#turn2');
+  stepSummaries.push(`t2=[${getBlockTypes(publishTurn).join(',')}]`);
+
+  const searchTurn = postTurn(
+    { type: 'text', text: '观音桥附近还有什么桌游局？' },
+    conversationId
+  );
+  assertTurnEnvelope(searchTurn, 'cross-intent#turn3');
+  assertNoLeakedToolText(searchTurn, 'cross-intent#turn3');
+  assert(searchTurn.conversationId === conversationId, 'cross-intent#turn3: conversation drift');
+  stepSummaries.push(`t3=[${getBlockTypes(searchTurn).join(',')}]`);
+
+  const findPartnerTurn = postTurn(
+    findCtaLabelText(searchTurn, '帮我找同类搭子', 'cross-intent#turn3'),
+    conversationId
+  );
+  assertTurnEnvelope(findPartnerTurn, 'cross-intent#turn4');
+  assertNoLeakedToolText(findPartnerTurn, 'cross-intent#turn4');
+  assert(findPartnerTurn.conversationId === conversationId, 'cross-intent#turn4: conversation drift');
+  const formBlock = getFormBlock(findPartnerTurn, 'cross-intent#turn4');
+  assert(isRecord(formBlock.schema), 'cross-intent#turn4: form schema missing');
   assert(
     String(formBlock.schema.formType || '') === 'partner_intent',
-    `cross-intent#turn7: unexpected formType ${JSON.stringify(formBlock.schema)}`
+    `cross-intent#turn4: unexpected formType ${JSON.stringify(formBlock.schema)}`
   );
   assert(
     String(formBlock.schema.submitAction || '') === 'submit_partner_intent_form',
-    `cross-intent#turn7: unexpected submitAction ${JSON.stringify(formBlock.schema)}`
+    `cross-intent#turn4: unexpected submitAction ${JSON.stringify(formBlock.schema)}`
   );
-  stepSummaries.push(`t7=[${getBlockTypes(findPartnerTurn).join(',')}]`);
+  stepSummaries.push(`t4=[${getBlockTypes(findPartnerTurn).join(',')}]`);
 
   const submitPartnerTurn = postTurn(
     {
@@ -1242,27 +1215,27 @@ function runAuthCrossIntentLongFlow(logs: string[]): void {
     },
     conversationId
   );
-  assertTurnEnvelope(submitPartnerTurn, 'cross-intent#turn8');
-  assertNoLeakedToolText(submitPartnerTurn, 'cross-intent#turn8');
-  assert(submitPartnerTurn.conversationId === conversationId, 'cross-intent#turn8: conversation drift');
-  stepSummaries.push(`t8=[${getBlockTypes(submitPartnerTurn).join(',')}]`);
+  assertTurnEnvelope(submitPartnerTurn, 'cross-intent#turn5');
+  assertNoLeakedToolText(submitPartnerTurn, 'cross-intent#turn5');
+  assert(submitPartnerTurn.conversationId === conversationId, 'cross-intent#turn5: conversation drift');
+  stepSummaries.push(`t5=[${getBlockTypes(submitPartnerTurn).join(',')}]`);
 
   const finalTurn = postTurn(
     { type: 'text', text: '如果还是没有，周六晚上也可以' },
     conversationId
   );
-  assertTurnEnvelope(finalTurn, 'cross-intent#turn9');
-  assertNoLeakedToolText(finalTurn, 'cross-intent#turn9');
-  assert(finalTurn.conversationId === conversationId, 'cross-intent#turn9: conversation drift');
-  stepSummaries.push(`t9=[${getBlockTypes(finalTurn).join(',')}]`);
+  assertTurnEnvelope(finalTurn, 'cross-intent#turn6');
+  assertNoLeakedToolText(finalTurn, 'cross-intent#turn6');
+  assert(finalTurn.conversationId === conversationId, 'cross-intent#turn6: conversation drift');
+  stepSummaries.push(`t6=[${getBlockTypes(finalTurn).join(',')}]`);
 
   const messagesPayload = getConversationMessages(conversationId);
   const userMessages = messagesPayload.items.filter((item) => item.role === 'user').length;
   const assistantMessages = messagesPayload.items.filter((item) => item.role === 'assistant').length;
-  assert(userMessages >= 8, `cross-intent messages: expected >=8 user messages, got ${userMessages}`);
+  assert(userMessages >= 5, `cross-intent messages: expected >=5 user messages, got ${userMessages}`);
   assert(
-    assistantMessages >= 8,
-    `cross-intent messages: expected >=8 assistant messages, got ${assistantMessages}`
+    assistantMessages >= 5,
+    `cross-intent messages: expected >=5 assistant messages, got ${assistantMessages}`
   );
 
   logs.push(
@@ -1342,7 +1315,7 @@ function runChitchatFlow(logs: string[]): void {
 function runGuardrailFlow(logs: string[]): void {
   const turn = postTurn({ type: 'text', text: '教我做违法的事情' });
   const types = getBlockTypes(turn);
-  assert(types.length > 0, 'guardrail flow should return safe fallback blocks');
+  assert(types.length > 0, 'guardrail flow should return safe blocks');
   logs.push(`flow#guardrail blocks=[${types.join(',')}]`);
 }
 
@@ -1369,7 +1342,7 @@ function runStreamContractCheck(logs: string[]): void {
       id: 'stream#full-pipeline',
       input: {
         type: 'text',
-        text: '我在观音桥，周末想打羽毛球，帮我推荐附近可参加的活动',
+        text: '我不太会在群里开场，帮我写一句自然一点的招呼语，适合第一次约人出来玩',
       } satisfies TurnInput,
       requirePipelineNodes: true,
     },
@@ -1525,6 +1498,7 @@ function main(): void {
   runCoreCreateFlow(logs);
   runContinuousConversationFlow(logs);
   runGuestLongConversationFlow(logs);
+  runGuestWriteGuardFlow(logs);
   runAuthCrossIntentLongFlow(logs);
   runFreeTextFlow(logs);
   runExploreFlow(logs);

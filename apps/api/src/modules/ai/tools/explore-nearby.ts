@@ -76,6 +76,27 @@ export interface ExploreData {
   semanticQuery?: string;
 }
 
+export interface ExplorePreview {
+  total: number;
+  firstItem?: {
+    id: string;
+    title: string;
+    type: string;
+    locationName: string;
+    distance: number;
+  };
+}
+
+export interface ExploreNearbyResultPayload {
+  locationName: string;
+  type?: string;
+  message: string;
+  explore: ExploreData;
+  fetchConfig?: WidgetFetchConfig;
+  preview?: ExplorePreview;
+  interaction?: WidgetInteraction;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -134,6 +155,79 @@ function toExploreResultItem(scored: ScoredActivity): ExploreResultItem {
  */
 const REFERENCE_MODE_THRESHOLD = 5;
 
+export function buildExploreNearbyResult(params: {
+  center: { lat: number; lng: number; name: string };
+  results: ExploreResultItem[];
+  radiusKm: number;
+  semanticQuery?: string;
+  type?: string;
+}): ExploreNearbyResultPayload {
+  const { center, results, radiusKm, semanticQuery, type } = params;
+  const title = results.length > 0
+    ? `为你找到${center.name}附近的 ${results.length} 个活动`
+    : `${center.name}附近暂时没有活动`;
+  const message = results.length > 0
+    ? `先给你看看${center.name}附近的局，顺眼的话点一个就能继续。`
+    : `${center.name}附近暂时没有合适的局，我再给你几个下一步。`;
+
+  if (results.length > REFERENCE_MODE_THRESHOLD) {
+    return {
+      locationName: center.name,
+      ...(type ? { type } : {}),
+      message,
+      explore: {
+        center,
+        results: [],
+        title,
+        ...(semanticQuery ? { semanticQuery } : {}),
+      },
+      fetchConfig: {
+        source: 'nearby_activities',
+        params: {
+          lat: center.lat,
+          lng: center.lng,
+          radius: radiusKm * 1000,
+          ...(type ? { type } : {}),
+        },
+      },
+      preview: {
+        total: results.length,
+        ...(results[0]
+          ? {
+              firstItem: {
+                id: results[0].id,
+                title: results[0].title,
+                type: results[0].type,
+                locationName: results[0].locationName,
+                distance: results[0].distance,
+              },
+            }
+          : {}),
+      },
+      interaction: {
+        swipeable: true,
+        halfScreenDetail: true,
+        actions: [
+          { type: 'join', label: '报名', params: {} },
+          { type: 'share', label: '分享', params: {} },
+        ],
+      },
+    };
+  }
+
+  return {
+    locationName: center.name,
+    ...(type ? { type } : {}),
+    message,
+    explore: {
+      center,
+      results,
+      title,
+      ...(semanticQuery ? { semanticQuery } : {}),
+    },
+  };
+}
+
 /**
  * exploreNearby Tool 工厂
  */
@@ -167,59 +261,15 @@ export const exploreNearbyTool = createToolFactory<ExploreNearbyParams, ExploreD
       // 转换结果格式
       const results = scoredResults.map(toExploreResultItem);
       
-      const title = results.length > 0 
-        ? `为你找到${center.name}附近的 ${results.length} 个活动`
-        : `${center.name}附近暂时没有活动`;
-
-      if (results.length > REFERENCE_MODE_THRESHOLD) {
-        // ── 引用模式：结果多时返回 fetchConfig，前端自主拉取 ──
-        return {
-          success: true as const,
-          explore: {
-            center,
-            results: [],
-            title,
-            semanticQuery: semanticQuery || undefined,
-          },
-          fetchConfig: {
-            source: 'nearby_activities',
-            params: {
-              lat: center.lat,
-              lng: center.lng,
-              radius: radius * 1000,
-              ...(type ? { type } : {}),
-            },
-          } satisfies WidgetFetchConfig,
-          preview: {
-            total: results.length,
-            firstItem: {
-              id: results[0].id,
-              title: results[0].title,
-              type: results[0].type,
-              locationName: results[0].locationName,
-              distance: results[0].distance,
-            },
-          },
-          interaction: {
-            swipeable: true,
-            halfScreenDetail: true,
-            actions: [
-              { type: 'join', label: '报名', params: {} },
-              { type: 'share', label: '分享', params: {} },
-            ],
-          } satisfies WidgetInteraction,
-        };
-      }
-
-      // ── 自包含模式：结果少时直接返回完整数据 ──
       return {
         success: true as const,
-        explore: {
+        ...buildExploreNearbyResult({
           center,
           results,
-          title,
-          semanticQuery: semanticQuery || undefined,
-        },
+          radiusKm: radius,
+          ...(semanticQuery ? { semanticQuery } : {}),
+          ...(type ? { type } : {}),
+        }),
       };
     } catch (error) {
       console.error('[exploreNearby] Error:', error);

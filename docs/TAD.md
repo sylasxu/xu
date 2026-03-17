@@ -1,6 +1,6 @@
 # 聚场 (JuChang) 技术架构文档
 
-> **版本**：v5.3 (Result Workflow + A2UI Passthrough + Real Social Loop)
+> **版本**：v5.3 (Result Workflow + Structured Action Flow + Real Social Loop)
 > **更新日期**：2026-03-09
 > **架构**：原生小程序 + Zustand Vanilla + Elysia API + Drizzle ORM + Next.js Web
 
@@ -778,7 +778,7 @@ type GenUIChatResponse =
 
 **职责收口**：
 - `input.type='text'`：进入 Processor / Intent / Tool 主链路
-- `input.type='action'`：优先映射为 `ChatRequest.userAction`，避免按钮点击退化为文本意图识别
+- `input.type='action'`：优先映射为 `ChatRequest.structuredAction`，避免按钮点击退化为文本意图识别
 - `context.lat/lng`：统一映射为 `ChatRequest.location=[lng,lat]`
 - `context.activityId/followUpMode/entry`：用于 post_activity、discussion 等后续承接与真实结果写回
 - 输出统一为 `turn.blocks`，前端不再消费旧 parse widget 协议
@@ -1067,8 +1067,8 @@ apps/api/src/modules/ai/
 │
 ├── user-action/          # v4.7 结构化用户操作模块
 │   ├── index.ts          # 模块导出
-│   ├── types.ts          # UserAction, UserActionType, ActionResult
-│   └── handler.ts        # Action 处理器 (跳过 LLM，直接调用 Service)
+│   ├── types.ts          # StructuredAction, StructuredActionType, StructuredActionResult
+│   └── handler.ts        # 结构化动作处理器 (跳过 LLM，直接调用 Service)
 │
 ├── agent/                # @deprecated v4.5 Agent 封装（已废弃，保留备份）
 │   ├── ...
@@ -2026,8 +2026,8 @@ flowchart TD
     C --> D["AI Gateway: buildAiChatTurn"]
 
     D --> E{"input.type === action ?"}
-    E -->|Yes| F["构建 userAction + location 透传"]
-    F --> G["handleUserAction 快车道"]
+    E -->|Yes| F["构建 structuredAction + location 透传"]
+    F --> G["handleStructuredAction 结构化动作链路"]
     G --> H{"fallbackToLLM ?"}
     H -->|No| I["直接生成 GenUI blocks"]
     H -->|Yes| J["回退到 LLM 主链路"]
@@ -2052,11 +2052,11 @@ flowchart TD
 **全流程节点与代码落点**：
 - **入口层**：`apps/miniprogram/src/stores/chat.ts` 发送 `text/action`，并携带 `context.lat/lng`
 - **网关层**：`apps/api/src/modules/ai/ai-chat-gateway.service.ts` 统一构建 `ChatRequest`
-- **A2UI 快车道**：`ChatRequest.userAction` 直达 `handleUserAction`，避免按钮点击退化为纯文本
+- **结构化动作链路**：`ChatRequest.structuredAction` 直达 `handleStructuredAction`，避免按钮点击退化为纯文本
 - **位置上下文**：`context.lat/lng -> ChatRequest.location([lng,lat])`，统一给 RAG/Tool/Action 使用
 - **结果层**：通过 `join/publish/match` 状态流转判断“找到局/找到搭子”是否完成
 
-### 6.12 AI 请求流程（v5.3：Gateway + A2UI + Processor）
+### 6.12 AI 请求流程（v5.3：Gateway + 结构化动作链路 + Processor）
 
 ```
 客户端输入（text/action）
@@ -2066,7 +2066,7 @@ flowchart TD
 │ 0. Chat Gateway 规范化                   │
 │ - normalizeActionDisplayText             │
 │ - 解析 context.lat/lng -> location       │
-│ - action -> ChatRequest.userAction       │
+│ - action -> ChatRequest.structuredAction │
 └────────┬─────────────────────────────────┘
          │
          ▼
@@ -2074,8 +2074,8 @@ flowchart TD
     ┌───────────────┴───────────────┐
     ▼                               ▼
 ┌─────────────────┐          ┌─────────────────┐
-│ A. UserAction   │          │ B. LLM 主链路   │
-│ handleUserAction│          │ 频率限制/护栏   │
+│ A. 结构化动作链路│         │ B. 模型编排链路 │
+│ handleStructuredAction │    │ 频率限制/护栏   │
 └────────┬────────┘          └────────┬────────┘
          │                             │
     fallbackToLLM?                     ▼
@@ -2223,21 +2223,26 @@ await runPostLLMProcessors([{ processor: saveHistoryProcessor }], postLLMContext
 runAsyncProcessors([{ processor: extractPreferencesProcessor }], postLLMContext);
 ```
 
-### 6.12.2 结构化用户操作 (User Action) - v5.3
+### 6.12.2 结构化动作链路（Structured Action）- v5.3
 
 **设计理念**：
-参考 Google A2UI 和 Vercel json-render 的设计，当用户点击 Widget 按钮时，发送结构化的 Action 数据而非文本消息，优先走 Action 快车道并直达 Service 执行；仅在 `fallbackToLLM=true` 时回退到 LLM 主链路。
+当用户点击 Widget 按钮时，发送结构化动作数据而非文本消息，优先走结构化动作链路并直达 Service 执行；仅在 `fallbackToLLM=true` 时回退到模型编排链路。
+
+**当前边界约束**：
+- `/ai/chat` 统一入口会先过限流与输入护栏，再决定走结构化动作链路还是模型编排链路
+- 结构化动作集合以 `apps/api/src/modules/ai/user-action/types.ts` 为唯一真源
+- 已删除 fallback wizard / shadow actions；当前不再允许 `choose_location`、`choose_activity_type`、`choose_time_slot` 这类非正式动作混入主链
 
 **v5.3 关键补齐**：
-- `/ai/chat` 网关层显式透传 `input.type='action' -> ChatRequest.userAction`
+- `/ai/chat` 网关层显式透传 `input.type='action' -> ChatRequest.structuredAction`
 - GenUI `context` 新增 `lat/lng`，并在网关映射为 `ChatRequest.location=[lng,lat]`
 - GenUI `context` 支持 `activityId + followUpMode + entry`，用于 post_activity / discussion 等后续承接场景
 - 小程序 `sendMessage/sendAction` 均携带当前定位上下文，保障“附近推荐/找搭子”一致性
-- Action 响应支持 `nextActions`，网关映射为 `cta-group`，形成“操作成功 → 下一步”闭环
+- 结构化动作响应支持 `nextActions`，网关映射为 `cta-group`，形成“操作成功 → 下一步”闭环
 - 找搭子追问输出 `匹配进度 x/2` 与完成态分流选项，降低用户在“等待匹配”阶段流失
 
 **P0/P1 实施映射（本轮）**：
-- **P0-Action 快车道**：`apps/api/src/modules/ai/ai-chat-gateway.service.ts` + `apps/api/src/modules/ai/ai.service.ts`
+- **P0-结构化动作链路**：`apps/api/src/modules/ai/ai-chat-gateway.service.ts` + `apps/api/src/modules/ai/ai.service.ts`
 - **P0-位置上下文**：`packages/genui-contract/src/protocol.ts` + `apps/api/src/modules/ai/ai.controller.ts` + 小程序 `stores/chat.ts`
 - **P0-成功态下一步**：`apps/api/src/modules/ai/next-best-action.service.ts` 输出 `nextActions`，`ai.service.ts` 复用该策略层并由网关映射 `cta-group`
 - **P0-找搭子进度**：`apps/api/src/modules/ai/ai.service.ts` 在 partner flow 输出 `匹配进度 x/2`
@@ -2254,16 +2259,16 @@ runAsyncProcessors([{ processor: extractPreferencesProcessor }], postLLMContext)
 **核心类型**：
 
 ```typescript
-// UserAction - 前端发送的结构化操作
-interface UserAction {
-  action: UserActionType;           // 操作类型
-  payload: Record<string, unknown>; // 操作参数
+// StructuredAction - 前端发送的结构化动作
+interface StructuredAction {
+  action: StructuredActionType;           // 操作类型
+  payload: Record<string, unknown>;       // 操作参数
   source: 'widget' | 'quick_action' | 'keyboard';
-  originalText?: string;            // 原始文本（用于 fallback）
+  originalText?: string;                  // 原始文本（用于 fallback）
 }
 
-// UserActionType - 支持的操作类型
-type UserActionType = 
+// StructuredActionType - 支持的操作类型
+type StructuredActionType = 
   | 'join_activity'      // 报名活动
   | 'view_activity'      // 查看详情
   | 'cancel_join'        // 取消报名
@@ -2283,8 +2288,8 @@ type UserActionType =
   | 'cancel'             // 取消
   | 'quick_prompt';      // 快捷提示词
 
-// ActionResult - 处理结果
-interface ActionResult {
+// StructuredActionResult - 处理结果
+interface StructuredActionResult {
   success: boolean;
   data?: Record<string, unknown>;
   error?: string;
@@ -2301,16 +2306,16 @@ Widget 按钮点击
        ▼
 ┌─────────────────┐
 │ sendAction()    │  小程序 chat.ts
-│ 发送 userAction │
+│ 发送 structuredAction │
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
 │ /ai/chat        │  API Controller
-│ 检测 userAction │
+│ 检测 structuredAction │
 └────────┬────────┘
          │
-    有 userAction?
+    有 structuredAction?
     ┌────┴────┐
     │ Yes     │ No
     ▼         ▼
@@ -2921,7 +2926,7 @@ function resolveThemeConfig(theme: string, themeConfig: ThemeConfig | null, acti
 说明：
 
 - `/ai/chat` + `stream=true` 为 H5 与小程序统一主链路，确保多端同构的 GenUI 实时渲染
-- Action 输入在网关层映射为 `ChatRequest.userAction`，避免按钮点击退化为文本意图识别
+- Action 输入在网关层映射为 `ChatRequest.structuredAction`，避免按钮点击退化为文本意图识别
 - Orval 开发 target 使用 `127.0.0.1`（非 `localhost`），避免本机 IPv6 解析导致连接失败
 
 ### 7.1 Zustand Vanilla Store
@@ -2942,7 +2947,7 @@ interface ChatState {
 
 interface ChatActions {
   sendMessage: (text: string) => Promise<void>;
-  sendUserAction: (action: string, payload?: Record<string, unknown>) => Promise<void>;
+  sendAction: (action: string, payload?: Record<string, unknown>) => Promise<void>;
   setLocation: (location: { lat: number; lng: number } | null) => void;
   stop: () => void;
   resetConversation: () => void;

@@ -1,11 +1,11 @@
 {
-  "name": "friday-night-roundtrip",
-  "description": "Core multi-turn fixture: text input and action reply for Friday-night matchmaking.",
+  "name": "location-preference-roundtrip",
+  "description": "Core GenUI roundtrip fixture: text input enters text action inference and returns a legal ask_preference choice block.",
   "request": {
     "conversationId": "conv_fixture_001",
     "input": {
       "type": "text",
-      "text": "想租个周五晚上的局"
+      "text": "附近有什么局吗？"
     },
     "context": {
       "client": "web",
@@ -24,27 +24,169 @@
         {
           "blockId": "b_text_1",
           "type": "text",
-          "content": "可以，先帮你把这个周五晚上的局梳理好。"
+          "content": "想先看哪个区域的活动？"
         },
         {
           "blockId": "b_choice_1",
           "type": "choice",
-          "dedupeKey": "ask_location",
+          "dedupeKey": "ask_preference",
           "replacePolicy": "replace",
-          "question": "想在哪儿组局呢？",
+          "question": "请选择一个选项",
           "options": [
             {
               "label": "观音桥",
-              "action": "choose_location",
+              "action": "ask_preference",
               "params": {
-                "location": "观音桥"
+                "questionType": "type",
+                "question": "观音桥想先看哪类活动？",
+                "message": "观音桥想先看哪类活动？",
+                "options": [
+                  {
+                    "label": "先看全部",
+                    "value": "all",
+                    "action": "explore_nearby",
+                    "params": {
+                      "locationName": "观音桥",
+                      "lat": 29.58567,
+                      "lng": 106.52988,
+                      "radiusKm": 5,
+                      "semanticQuery": "附近有什么局吗？"
+                    }
+                  },
+                  {
+                    "label": "约饭",
+                    "value": "food",
+                    "action": "explore_nearby",
+                    "params": {
+                      "locationName": "观音桥",
+                      "lat": 29.58567,
+                      "lng": 106.52988,
+                      "radiusKm": 5,
+                      "semanticQuery": "附近有什么局吗？",
+                      "type": "food"
+                    }
+                  },
+                  {
+                    "label": "运动",
+                    "value": "sports",
+                    "action": "explore_nearby",
+                    "params": {
+                      "locationName": "观音桥",
+                      "lat": 29.58567,
+                      "lng": 106.52988,
+                      "radiusKm": 5,
+                      "semanticQuery": "附近有什么局吗？",
+                      "type": "sports"
+                    }
+                  },
+                  {
+                    "label": "桌游",
+                    "value": "boardgame",
+                    "action": "explore_nearby",
+                    "params": {
+                      "locationName": "观音桥",
+                      "lat": 29.58567,
+                      "lng": 106.52988,
+                      "radiusKm": 5,
+                      "semanticQuery": "附近有什么局吗？",
+                      "type": "boardgame"
+                    }
+                  },
+                  {
+                    "label": "娱乐",
+                    "value": "entertainment",
+                    "action": "explore_nearby",
+                    "params": {
+                      "locationName": "观音桥",
+                      "lat": 29.58567,
+                      "lng": 106.52988,
+                      "radiusKm": 5,
+                      "semanticQuery": "附近有什么局吗？",
+                      "type": "entertainment"
+                    }
+                  }
+                ],
+                "value": "观音桥",
+                "selectedValue": "观音桥",
+                "selectedLabel": "观音桥"
               }
             },
             {
               "label": "解放碑",
-              "action": "choose_location",
+              "action": "ask_preference",
               "params": {
-                "location": "解放碑"
+                "questionType": "type",
+                "question": "解放碑想先看哪类活动？",
+                "message": "解放碑想先看哪类活动？",
+                "options": [
+                  {
+                    "label": "先看全部",
+                    "value": "all",
+                    "action": "explore_nearby",
+                    "params": {
+                      "locationName": "解放碑",
+                      "lat": 29.55792,
+                      "lng": 106.57709,
+                      "radiusKm": 5,
+                      "semanticQuery": "附近有什么局吗？"
+                    }
+                  },
+                  {
+                    "label": "约饭",
+                    "value": "food",
+                    "action": "explore_nearby",
+                    "params": {
+                      "locationName": "解放碑",
+                      "lat": 29.55792,
+                      "lng": 106.57709,
+                      "radiusKm": 5,
+                      "semanticQuery": "附近有什么局吗？",
+                      "type": "food"
+                    }
+                  },
+                  {
+                    "label": "运动",
+                    "value": "sports",
+                    "action": "explore_nearby",
+                    "params": {
+                      "locationName": "解放碑",
+                      "lat": 29.55792,
+                      "lng": 106.57709,
+                      "radiusKm": 5,
+                      "semanticQuery": "附近有什么局吗？",
+                      "type": "sports"
+                    }
+                  },
+                  {
+                    "label": "桌游",
+                    "value": "boardgame",
+                    "action": "explore_nearby",
+                    "params": {
+                      "locationName": "解放碑",
+                      "lat": 29.55792,
+                      "lng": 106.57709,
+                      "radiusKm": 5,
+                      "semanticQuery": "附近有什么局吗？",
+                      "type": "boardgame"
+                    }
+                  },
+                  {
+                    "label": "娱乐",
+                    "value": "entertainment",
+                    "action": "explore_nearby",
+                    "params": {
+                      "locationName": "解放碑",
+                      "lat": 29.55792,
+                      "lng": 106.57709,
+                      "radiusKm": 5,
+                      "semanticQuery": "附近有什么局吗？",
+                      "type": "entertainment"
+                    }
+                  }
+                ],
+                "value": "解放碑",
+                "selectedValue": "解放碑",
+                "selectedLabel": "解放碑"
               }
             }
           ]

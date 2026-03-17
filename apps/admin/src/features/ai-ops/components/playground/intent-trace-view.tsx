@@ -33,10 +33,12 @@ export function IntentTraceView({ trace }: IntentTraceViewProps) {
   // 从 trace steps 中提取 P0 和 P1/P2 数据
   const p0Step = trace.steps.find((step) => step.type === 'keyword-match' || step.name.includes('keyword'))
   const intentStep = trace.steps.find((step) => step.type === 'intent-classify' || step.name.includes('intent'))
+  const structuredActionSteps = trace.steps.filter((step) => step.type === 'structured-action')
 
   const intent = trace.intent
   const method = trace.intentMethod
   const intentLabel = intent ? (INTENT_DISPLAY_NAMES[intent as IntentType] ?? intent) : '未知'
+  const structuredActionDuration = structuredActionSteps[structuredActionSteps.length - 1]?.duration
 
   // 从 step data 提取详细信息
   const p0Data = isRecord(p0Step?.data) ? p0Step.data : undefined
@@ -44,7 +46,7 @@ export function IntentTraceView({ trace }: IntentTraceViewProps) {
 
   return (
     <div className="space-y-3 p-4">
-      <h3 className="text-sm font-medium">意图分类 Trace</h3>
+      <h3 className="text-sm font-medium">意图 / 动作 Trace</h3>
 
       {/* 最终结果 */}
       <div className="rounded-lg border p-3 space-y-2">
@@ -66,45 +68,75 @@ export function IntentTraceView({ trace }: IntentTraceViewProps) {
         )}
       </div>
 
-      {/* 三层漏斗 */}
-      <div className="space-y-2">
-        <span className="text-xs font-medium text-muted-foreground">分类漏斗</span>
+      {method === 'structured_action' ? (
+        <div className="space-y-2">
+          <span className="text-xs font-medium text-muted-foreground">结构化动作链路</span>
+          {structuredActionSteps.length > 0 ? structuredActionSteps.map((step) => {
+            const stepData = isRecord(step.data) ? step.data : undefined
+            const action = typeof stepData?.action === 'string' ? stepData.action : undefined
+            const phase = typeof stepData?.phase === 'string' ? stepData.phase : undefined
 
-        {/* P0 Layer */}
-        <FunnelLayer
-          layer="P0"
-          label="关键词匹配"
-          matched={Boolean(p0Data?.matched)}
-          duration={p0Step?.duration}
-          detail={p0Data?.keyword ? `关键词: ${p0Data.keyword}` : undefined}
-        />
+            return (
+              <FunnelLayer
+                key={step.id}
+                layer={getStructuredActionLayerLabel(phase)}
+                label={step.name}
+                matched={step.status === 'success'}
+                duration={step.duration}
+                detail={action ? `动作: ${action}` : undefined}
+              />
+            )
+          }) : (
+            <FunnelLayer
+              layer="直达"
+              label="结构化动作"
+              matched
+              detail="本轮直接命中结构化动作，没有进入模型编排。"
+            />
+          )}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <span className="text-xs font-medium text-muted-foreground">分类漏斗</span>
 
-        {/* P1 Layer */}
-        <FunnelLayer
-          layer="P1"
-          label="Feature_Combination"
-          matched={method === 'regex' && !p0Data?.matched}
-          duration={readNumber(intentData?.p1Duration)}
-          detail={intentData?.p1Features ? `命中特征: ${JSON.stringify(intentData.p1Features)}` : undefined}
-          confidence={readNumber(intentData?.p1Confidence)}
-        />
+          {/* P0 Layer */}
+          <FunnelLayer
+            layer="P0"
+            label="关键词匹配"
+            matched={Boolean(p0Data?.matched)}
+            duration={p0Step?.duration}
+            detail={p0Data?.keyword ? `关键词: ${p0Data.keyword}` : undefined}
+          />
 
-        {/* P2 Layer */}
-        <FunnelLayer
-          layer="P2"
-          label="LLM Few-shot"
-          matched={method === 'llm'}
-          duration={readNumber(intentData?.p2Duration)}
-          detail={intentData?.degraded ? '降级触发' : undefined}
-          confidence={readNumber(intentData?.p2Confidence)}
-        />
-      </div>
+          {/* P1 Layer */}
+          <FunnelLayer
+            layer="P1"
+            label="Feature_Combination"
+            matched={method === 'regex' && !p0Data?.matched}
+            duration={readNumber(intentData?.p1Duration)}
+            detail={intentData?.p1Features ? `命中特征: ${JSON.stringify(intentData.p1Features)}` : undefined}
+            confidence={readNumber(intentData?.p1Confidence)}
+          />
+
+          {/* P2 Layer */}
+          <FunnelLayer
+            layer="P2"
+            label="LLM Few-shot"
+            matched={method === 'llm'}
+            duration={readNumber(intentData?.p2Duration)}
+            detail={intentData?.degraded ? '降级触发' : undefined}
+            confidence={readNumber(intentData?.p2Confidence)}
+          />
+        </div>
+      )}
 
       {/* 总耗时 */}
-      {intentStep?.duration !== undefined && (
+      {(method === 'structured_action' ? structuredActionDuration : intentStep?.duration) !== undefined && (
         <div className="flex items-center justify-between text-xs border-t pt-2">
-          <span className="text-muted-foreground">分类总耗时</span>
-          <span className="font-mono">{formatDuration(intentStep.duration)}</span>
+          <span className="text-muted-foreground">{method === 'structured_action' ? '动作总耗时' : '分类总耗时'}</span>
+          <span className="font-mono">
+            {formatDuration(method === 'structured_action' ? structuredActionDuration ?? 0 : intentStep?.duration ?? 0)}
+          </span>
         </div>
       )}
     </div>
@@ -151,6 +183,18 @@ function getMethodLabel(method: string): string {
   switch (method) {
     case 'regex': return 'P1 规则引擎'
     case 'llm': return 'P2 LLM'
+    case 'structured_action': return '结构化动作'
     default: return method
+  }
+}
+
+function getStructuredActionLayerLabel(phase?: string): string {
+  switch (phase) {
+    case 'resolved':
+      return '判定'
+    case 'executed':
+      return '执行'
+    default:
+      return '直达'
   }
 }

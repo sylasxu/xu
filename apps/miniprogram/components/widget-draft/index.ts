@@ -9,7 +9,7 @@
  * - 点击位置卡片打开原生地图导航
  * - 实现 [📍 调整位置] 按钮（使用 wx.chooseLocation）
  * - 实现 [✅ 确认发布] 按钮
- * - v5.2: 快捷操作直接发送 A2UI action（edit_draft/save_draft_settings/confirm_publish）
+ * - v5.2: 快捷操作直接发送结构化动作（edit_draft/save_draft_settings/confirm_publish）
  */
 
 import { chooseLocation, openMapNavigation } from '../../src/config/index';
@@ -385,7 +385,7 @@ Component({
     },
 
     /**
-     * 点击换地方按钮（A2UI）
+     * 点击换地方按钮（结构化动作）
      */
     onChangeLocation() {
       const draft = readDraftData(this.properties.draft);
@@ -395,7 +395,7 @@ Component({
     },
 
     /**
-     * 点击换时间按钮（A2UI）
+     * 点击换时间按钮（结构化动作）
      */
     onChangeTime() {
       const draft = readDraftData(this.properties.draft);
@@ -405,7 +405,7 @@ Component({
     },
 
     /**
-     * 点击加人按钮（A2UI）
+     * 点击加人按钮（结构化动作）
      */
     onChangeParticipants() {
       const draft = readDraftData(this.properties.draft);

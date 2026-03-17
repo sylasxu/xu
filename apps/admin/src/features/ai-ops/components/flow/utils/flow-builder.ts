@@ -89,8 +89,18 @@ export const PIPELINE_LAYERS: LayerConfig[] = [
 
 
 // P0 命中时需要跳过的节点 ID
-const SKIPPABLE_NODE_IDS = [
+const P0_SKIPPABLE_NODE_IDS = [
   'intent-classify',
+  'user-profile',
+  'semantic-recall',
+  'token-limit',
+  'llm',
+  'tool-placeholder',
+]
+
+// 结构化动作直达时，需要显式标记为非模型路径的节点
+const STRUCTURED_ACTION_SKIPPED_NODE_IDS = [
+  'keyword-match',
   'user-profile',
   'semantic-recall',
   'token-limit',
@@ -320,12 +330,15 @@ export function applyTraceToGraph(
   let edges: FlowEdge[] = graph.edges.map(e => ({ ...e }))
 
   let p0Matched = false
+  const usesStructuredActionPath = trace.intentMethod === 'structured_action'
+    || trace.steps.some(step => step.type === 'structured-action')
 
   // 1. 遍历 trace steps，匹配并更新节点
   // 后端 trace step type → 前端 flow node type 映射
   const traceToFlowType: Record<string, string> = {
     'input': 'user-input',
     'output': 'final-output',
+    'structured-action': 'intent-classify',
   }
 
   for (const step of trace.steps) {
@@ -333,11 +346,16 @@ export function applyTraceToGraph(
     const flowType = traceToFlowType[stepType] ?? stepType
     const stepData = readStepData(step)
     const processorType = readOptionalString(stepData, 'processorType')
+    const structuredAction = readOptionalString(stepData, 'action')
+    const phase = readOptionalString(stepData, 'phase')
 
     // 查找匹配的节点
     const matchedNode = nodes.find(n => {
       if (stepType === 'processor' && processorType) {
         return n.data.type === 'processor' && n.data.processorType === processorType
+      }
+      if (stepType === 'structured-action') {
+        return n.id === 'intent-classify'
       }
       if (stepType === 'tool') {
         // tool 节点特殊处理（见下方）
@@ -352,6 +370,15 @@ export function applyTraceToGraph(
       matchedNode.data = {
         ...matchedNode.data,
         ...stepData,
+        ...(stepType === 'structured-action'
+          ? {
+              label: '结构化动作',
+              intent: trace.intent ?? 'unknown',
+              method: 'structured_action',
+              ...(structuredAction ? { action: structuredAction } : {}),
+              ...(phase ? { phase } : {}),
+            }
+          : {}),
         status: mapStepStatus(step.status),
         subtitle: extractSubtitle(step),
         stepData: step.data,
@@ -371,7 +398,15 @@ export function applyTraceToGraph(
   // 2. P0 命中 → 跳过后续节点
   if (p0Matched) {
     for (const node of nodes) {
-      if (SKIPPABLE_NODE_IDS.includes(node.id)) {
+      if (P0_SKIPPABLE_NODE_IDS.includes(node.id)) {
+        node.data = { ...node.data, status: 'skipped' }
+      }
+    }
+  }
+
+  if (usesStructuredActionPath) {
+    for (const node of nodes) {
+      if (STRUCTURED_ACTION_SKIPPED_NODE_IDS.includes(node.id)) {
         node.data = { ...node.data, status: 'skipped' }
       }
     }
@@ -436,11 +471,22 @@ export function applyTraceToGraph(
         data: nodeData,
       }))
 
-      // LLM → Tool 边
-      edges.push(createStyledEdge('llm', toolId, mapStepStatus(step.status)))
+      // 结构化动作路径下，工具节点应挂在结构化动作节点之后，而不是 LLM 之后
+      edges.push(createStyledEdge(
+        usesStructuredActionPath ? 'intent-classify' : 'llm',
+        toolId,
+        mapStepStatus(step.status)
+      ))
       // Tool → Output 边
       edges.push(createStyledEdge(toolId, 'output', mapStepStatus(step.status)))
     })
+  } else if (usesStructuredActionPath) {
+    const toolPlaceholderIndex = nodes.findIndex(n => n.id === 'tool-placeholder')
+    if (toolPlaceholderIndex !== -1) {
+      nodes.splice(toolPlaceholderIndex, 1)
+    }
+    edges = edges.filter(e => e.source !== 'tool-placeholder' && e.target !== 'tool-placeholder')
+    edges.push(createStyledEdge('intent-classify', 'output', 'success'))
   }
 
   // 4. 更新所有边的样式（根据源节点状态）
@@ -481,12 +527,20 @@ function extractSubtitle(step: TraceStep): string | undefined {
       const tokens = readOptionalNumber(data, 'totalTokens')
       return tokens ? `${tokens} tokens · ${durationStr}` : durationStr
     }
+    if (type === 'structured-action') {
+      const action = readOptionalString(data, 'action')
+      return action ? `${action} · ${durationStr}` : durationStr
+    }
     return durationStr
   }
 
   if (type === 'input') {
     const text = readOptionalString(data, 'text')
     return text ? `${text.length} 字符` : undefined
+  }
+
+  if (type === 'structured-action') {
+    return readOptionalString(data, 'action')
   }
 
   return undefined

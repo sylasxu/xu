@@ -51,7 +51,33 @@
           "type": "string",
           "enum": ["review", "rebook", "kickoff"]
         },
-        "entry": { "type": "string" }
+        "entry": { "type": "string" },
+        "transientTurns": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "type": "object",
+            "required": ["role", "text"],
+            "properties": {
+              "role": {
+                "type": "string",
+                "enum": ["user", "assistant"]
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1
+              },
+              "primaryBlockType": {
+                "type": ["string", "null"],
+                "enum": ["text", "choice", "entity-card", "list", "form", "cta-group", "alert", null]
+              },
+              "turnContext": {
+                "$ref": "#/definitions/turnContext"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
       },
       "additionalProperties": true
     },
@@ -73,6 +99,92 @@
         }
       },
       "additionalProperties": false
+    }
+  },
+  "definitions": {
+    "turnContextChoiceOption": {
+      "type": "object",
+      "required": ["label", "action"],
+      "properties": {
+        "label": { "type": "string", "minLength": 1 },
+        "action": { "type": "string", "minLength": 1 },
+        "params": { "type": "object" },
+        "value": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "turnContextListItem": {
+      "type": "object",
+      "required": ["title", "action"],
+      "properties": {
+        "title": { "type": "string", "minLength": 1 },
+        "action": { "type": "string", "minLength": 1 },
+        "params": { "type": "object" },
+        "aliases": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "additionalProperties": false
+    },
+    "turnContextCtaItem": {
+      "type": "object",
+      "required": ["label", "action"],
+      "properties": {
+        "label": { "type": "string", "minLength": 1 },
+        "action": { "type": "string", "minLength": 1 },
+        "params": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "turnContext": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "options"],
+          "properties": {
+            "kind": { "const": "choice" },
+            "question": { "type": "string" },
+            "options": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 12,
+              "items": { "$ref": "#/definitions/turnContextChoiceOption" }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "items"],
+          "properties": {
+            "kind": { "const": "list" },
+            "title": { "type": "string" },
+            "items": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 12,
+              "items": { "$ref": "#/definitions/turnContextListItem" }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "items"],
+          "properties": {
+            "kind": { "const": "cta-group" },
+            "items": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 12,
+              "items": { "$ref": "#/definitions/turnContextCtaItem" }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
     }
   },
   "additionalProperties": false

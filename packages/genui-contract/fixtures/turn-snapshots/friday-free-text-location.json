@@ -1,104 +1,334 @@
 {
-  "name": "friday-free-text-location",
-  "description": "周五首轮后通过自由文本补充地点",
+  "name": "text-action-inference-location-preference",
+  "description": "自由文本在未命中地点时，会先进入正式 ask_preference 结构化动作链路",
   "steps": [
     {
       "input": {
         "type": "text",
-        "text": "想租个周五晚上的局"
+        "text": "附近有什么局吗？"
       },
       "expected": {
         "blocks": [
           {
             "type": "text",
-            "content": "可以，先帮你把这个周五晚上的局梳理好。"
+            "content": "想先看哪个区域的活动？"
           },
           {
             "type": "choice",
-            "dedupeKey": "ask_location",
+            "dedupeKey": "ask_preference",
             "replacePolicy": "replace",
-            "question": "想在哪儿组局呢？",
+            "question": "请选择一个选项",
             "options": [
               {
                 "label": "观音桥",
-                "action": "choose_location",
+                "action": "ask_preference",
                 "params": {
-                  "location": "观音桥"
+                  "questionType": "type",
+                  "question": "观音桥想先看哪类活动？",
+                  "message": "观音桥想先看哪类活动？",
+                  "options": [
+                    {
+                      "label": "先看全部",
+                      "value": "all",
+                      "action": "explore_nearby",
+                      "params": {
+                        "locationName": "观音桥",
+                        "lat": 29.58567,
+                        "lng": 106.52988,
+                        "radiusKm": 5,
+                        "semanticQuery": "附近有什么局吗？"
+                      }
+                    },
+                    {
+                      "label": "约饭",
+                      "value": "food",
+                      "action": "explore_nearby",
+                      "params": {
+                        "locationName": "观音桥",
+                        "lat": 29.58567,
+                        "lng": 106.52988,
+                        "radiusKm": 5,
+                        "semanticQuery": "附近有什么局吗？",
+                        "type": "food"
+                      }
+                    },
+                    {
+                      "label": "运动",
+                      "value": "sports",
+                      "action": "explore_nearby",
+                      "params": {
+                        "locationName": "观音桥",
+                        "lat": 29.58567,
+                        "lng": 106.52988,
+                        "radiusKm": 5,
+                        "semanticQuery": "附近有什么局吗？",
+                        "type": "sports"
+                      }
+                    },
+                    {
+                      "label": "桌游",
+                      "value": "boardgame",
+                      "action": "explore_nearby",
+                      "params": {
+                        "locationName": "观音桥",
+                        "lat": 29.58567,
+                        "lng": 106.52988,
+                        "radiusKm": 5,
+                        "semanticQuery": "附近有什么局吗？",
+                        "type": "boardgame"
+                      }
+                    },
+                    {
+                      "label": "娱乐",
+                      "value": "entertainment",
+                      "action": "explore_nearby",
+                      "params": {
+                        "locationName": "观音桥",
+                        "lat": 29.58567,
+                        "lng": 106.52988,
+                        "radiusKm": 5,
+                        "semanticQuery": "附近有什么局吗？",
+                        "type": "entertainment"
+                      }
+                    }
+                  ],
+                  "value": "观音桥",
+                  "selectedValue": "观音桥",
+                  "selectedLabel": "观音桥"
                 }
               },
               {
                 "label": "解放碑",
-                "action": "choose_location",
+                "action": "ask_preference",
                 "params": {
-                  "location": "解放碑"
+                  "questionType": "type",
+                  "question": "解放碑想先看哪类活动？",
+                  "message": "解放碑想先看哪类活动？",
+                  "options": [
+                    {
+                      "label": "先看全部",
+                      "value": "all",
+                      "action": "explore_nearby",
+                      "params": {
+                        "locationName": "解放碑",
+                        "lat": 29.55792,
+                        "lng": 106.57709,
+                        "radiusKm": 5,
+                        "semanticQuery": "附近有什么局吗？"
+                      }
+                    },
+                    {
+                      "label": "约饭",
+                      "value": "food",
+                      "action": "explore_nearby",
+                      "params": {
+                        "locationName": "解放碑",
+                        "lat": 29.55792,
+                        "lng": 106.57709,
+                        "radiusKm": 5,
+                        "semanticQuery": "附近有什么局吗？",
+                        "type": "food"
+                      }
+                    },
+                    {
+                      "label": "运动",
+                      "value": "sports",
+                      "action": "explore_nearby",
+                      "params": {
+                        "locationName": "解放碑",
+                        "lat": 29.55792,
+                        "lng": 106.57709,
+                        "radiusKm": 5,
+                        "semanticQuery": "附近有什么局吗？",
+                        "type": "sports"
+                      }
+                    },
+                    {
+                      "label": "桌游",
+                      "value": "boardgame",
+                      "action": "explore_nearby",
+                      "params": {
+                        "locationName": "解放碑",
+                        "lat": 29.55792,
+                        "lng": 106.57709,
+                        "radiusKm": 5,
+                        "semanticQuery": "附近有什么局吗？",
+                        "type": "boardgame"
+                      }
+                    },
+                    {
+                      "label": "娱乐",
+                      "value": "entertainment",
+                      "action": "explore_nearby",
+                      "params": {
+                        "locationName": "解放碑",
+                        "lat": 29.55792,
+                        "lng": 106.57709,
+                        "radiusKm": 5,
+                        "semanticQuery": "附近有什么局吗？",
+                        "type": "entertainment"
+                      }
+                    }
+                  ],
+                  "value": "解放碑",
+                  "selectedValue": "解放碑",
+                  "selectedLabel": "解放碑"
                 }
               },
               {
                 "label": "南坪",
-                "action": "choose_location",
+                "action": "ask_preference",
                 "params": {
-                  "location": "南坪"
+                  "questionType": "type",
+                  "question": "南坪想先看哪类活动？",
+                  "message": "南坪想先看哪类活动？",
+                  "options": [
+                    {
+                      "label": "先看全部",
+                      "value": "all",
+                      "action": "explore_nearby",
+                      "params": {
+                        "locationName": "南坪",
+                        "lat": 29.52589,
+                        "lng": 106.57024,
+                        "radiusKm": 5,
+                        "semanticQuery": "附近有什么局吗？"
+                      }
+                    },
+                    {
+                      "label": "约饭",
+                      "value": "food",
+                      "action": "explore_nearby",
+                      "params": {
+                        "locationName": "南坪",
+                        "lat": 29.52589,
+                        "lng": 106.57024,
+                        "radiusKm": 5,
+                        "semanticQuery": "附近有什么局吗？",
+                        "type": "food"
+                      }
+                    },
+                    {
+                      "label": "运动",
+                      "value": "sports",
+                      "action": "explore_nearby",
+                      "params": {
+                        "locationName": "南坪",
+                        "lat": 29.52589,
+                        "lng": 106.57024,
+                        "radiusKm": 5,
+                        "semanticQuery": "附近有什么局吗？",
+                        "type": "sports"
+                      }
+                    },
+                    {
+                      "label": "桌游",
+                      "value": "boardgame",
+                      "action": "explore_nearby",
+                      "params": {
+                        "locationName": "南坪",
+                        "lat": 29.52589,
+                        "lng": 106.57024,
+                        "radiusKm": 5,
+                        "semanticQuery": "附近有什么局吗？",
+                        "type": "boardgame"
+                      }
+                    },
+                    {
+                      "label": "娱乐",
+                      "value": "entertainment",
+                      "action": "explore_nearby",
+                      "params": {
+                        "locationName": "南坪",
+                        "lat": 29.52589,
+                        "lng": 106.57024,
+                        "radiusKm": 5,
+                        "semanticQuery": "附近有什么局吗？",
+                        "type": "entertainment"
+                      }
+                    }
+                  ],
+                  "value": "南坪",
+                  "selectedValue": "南坪",
+                  "selectedLabel": "南坪"
                 }
               },
               {
                 "label": "江北嘴",
-                "action": "choose_location",
+                "action": "ask_preference",
                 "params": {
-                  "location": "江北嘴"
-                }
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "input": {
-        "type": "text",
-        "text": "解放碑"
-      },
-      "expected": {
-        "blocks": [
-          {
-            "type": "text",
-            "content": "收到，地点先定在解放碑。"
-          },
-          {
-            "type": "choice",
-            "dedupeKey": "ask_activity_type",
-            "replacePolicy": "replace",
-            "question": "想组哪种类型的局？",
-            "options": [
-              {
-                "label": "桌游",
-                "action": "choose_activity_type",
-                "params": {
-                  "activityType": "桌游",
-                  "location": "解放碑"
-                }
-              },
-              {
-                "label": "羽毛球",
-                "action": "choose_activity_type",
-                "params": {
-                  "activityType": "羽毛球",
-                  "location": "解放碑"
-                }
-              },
-              {
-                "label": "夜跑",
-                "action": "choose_activity_type",
-                "params": {
-                  "activityType": "夜跑",
-                  "location": "解放碑"
-                }
-              },
-              {
-                "label": "K歌",
-                "action": "choose_activity_type",
-                "params": {
-                  "activityType": "K歌",
-                  "location": "解放碑"
+                  "questionType": "type",
+                  "question": "江北嘴想先看哪类活动？",
+                  "message": "江北嘴想先看哪类活动？",
+                  "options": [
+                    {
+                      "label": "先看全部",
+                      "value": "all",
+                      "action": "explore_nearby",
+                      "params": {
+                        "locationName": "江北嘴",
+                        "lat": 29.58263,
+                        "lng": 106.56653,
+                        "radiusKm": 5,
+                        "semanticQuery": "附近有什么局吗？"
+                      }
+                    },
+                    {
+                      "label": "约饭",
+                      "value": "food",
+                      "action": "explore_nearby",
+                      "params": {
+                        "locationName": "江北嘴",
+                        "lat": 29.58263,
+                        "lng": 106.56653,
+                        "radiusKm": 5,
+                        "semanticQuery": "附近有什么局吗？",
+                        "type": "food"
+                      }
+                    },
+                    {
+                      "label": "运动",
+                      "value": "sports",
+                      "action": "explore_nearby",
+                      "params": {
+                        "locationName": "江北嘴",
+                        "lat": 29.58263,
+                        "lng": 106.56653,
+                        "radiusKm": 5,
+                        "semanticQuery": "附近有什么局吗？",
+                        "type": "sports"
+                      }
+                    },
+                    {
+                      "label": "桌游",
+                      "value": "boardgame",
+                      "action": "explore_nearby",
+                      "params": {
+                        "locationName": "江北嘴",
+                        "lat": 29.58263,
+                        "lng": 106.56653,
+                        "radiusKm": 5,
+                        "semanticQuery": "附近有什么局吗？",
+                        "type": "boardgame"
+                      }
+                    },
+                    {
+                      "label": "娱乐",
+                      "value": "entertainment",
+                      "action": "explore_nearby",
+                      "params": {
+                        "locationName": "江北嘴",
+                        "lat": 29.58263,
+                        "lng": 106.56653,
+                        "radiusKm": 5,
+                        "semanticQuery": "附近有什么局吗？",
+                        "type": "entertainment"
+                      }
+                    }
+                  ],
+                  "value": "江北嘴",
+                  "selectedValue": "江北嘴",
+                  "selectedLabel": "江北嘴"
                 }
               }
             ]

@@ -13,6 +13,7 @@ import type {
   TraceEvent,
   ModelParams,
   IntentType,
+  IntentMethod,
   SessionStats,
 } from '../types/trace'
 import { DEFAULT_MODEL_PARAMS, calculateSessionStats } from '../types/trace'
@@ -31,7 +32,7 @@ interface UseExecutionTraceReturn {
   /** 处理追踪事件 */
   handleTraceEvent: (event: TraceEvent) => void
   /** 处理追踪开始（追加新轮次） */
-  handleTraceStart: (requestId: string, startedAt: string, systemPrompt?: string, tools?: Array<{ name: string; description: string; schema: Record<string, unknown> }>, intent?: IntentType, intentMethod?: 'regex' | 'llm') => void
+  handleTraceStart: (requestId: string, startedAt: string, systemPrompt?: string, tools?: Array<{ name: string; description: string; schema: Record<string, unknown> }>, intent?: IntentType, intentMethod?: IntentMethod) => void
   /** 处理追踪步骤 */
   handleTraceStep: (step: TraceStep) => void
   /** 更新追踪步骤 */
@@ -65,7 +66,7 @@ export function useExecutionTrace(): UseExecutionTraceReturn {
     systemPrompt?: string, 
     tools?: Array<{ name: string; description: string; schema: Record<string, unknown> }>,
     intent?: IntentType,
-    intentMethod?: 'regex' | 'llm'
+    intentMethod?: IntentMethod
   ) => {
     const newTrace: ExecutionTrace = {
       requestId,

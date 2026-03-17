@@ -45,6 +45,7 @@ const BASE_URL =
   process.env.GENUI_CHAT_API_URL ||
   process.env.GENUI_TURNS_API_URL ||
   "http://127.0.0.1:1996/ai/chat";
+const DEFAULT_TEST_MODEL = process.env.GENUI_TEST_MODEL?.trim() || "deepseek-chat";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -65,6 +66,9 @@ async function postTurn(conversationId: string | null, input: TurnInput): Promis
       locale: "zh-CN",
       timezone: "Asia/Shanghai",
       platformVersion: "parity-regression",
+    },
+    ai: {
+      model: DEFAULT_TEST_MODEL,
     },
   };
 
@@ -264,38 +268,56 @@ async function main(): Promise<void> {
   const scenarios: Scenario[] = [
     {
       id: "friday-core-full-chain",
-      description: "周五组局全链路：地点 -> 类型 -> 时间 -> 发布",
+      description: "附近找局文本续接链路：区域 -> 类型 -> explore 结果",
       steps: [
-        { type: "text", text: "想租个周五晚上的局" },
+        { type: "text", text: "附近有什么局吗？" },
+        { type: "text", text: "观音桥" },
+        { type: "text", text: "桌游" },
+      ],
+    },
+    {
+      id: "friday-explore-branch",
+      description: "自由文本地点补充后走 explore 分支",
+      steps: [
+        { type: "text", text: "附近有什么局吗？" },
+        { type: "text", text: "解放碑" },
+      ],
+    },
+    {
+      id: "create-draft-action",
+      description: "正式结构化动作 create_activity 的跨端渲染一致性",
+      steps: [
         {
           type: "action",
-          action: "choose_location",
-          actionId: "parity_loc_1",
-          params: { location: "观音桥" },
-          displayText: "观音桥",
-        },
-        {
-          type: "action",
-          action: "choose_activity_type",
-          actionId: "parity_type_1",
-          params: { activityType: "桌游", location: "观音桥" },
-          displayText: "桌游",
-        },
-        {
-          type: "action",
-          action: "choose_time_slot",
-          actionId: "parity_slot_1",
-          params: { slot: "fri_20_00", location: "观音桥", activityType: "桌游" },
-          displayText: "周五 20:00",
-        },
-        {
-          type: "action",
-          action: "confirm_publish",
-          actionId: "parity_publish_1",
+          action: "create_activity",
+          actionId: "parity_create_3",
           params: {
-            title: "周五 20:00桌游局",
+            title: "周五桌游局",
             type: "boardgame",
-            startAt: "2026-03-06T20:00:00+08:00",
+            activityType: "桌游",
+            locationName: "观音桥",
+            location: "观音桥",
+            description: "周五晚上在观音桥组个桌游局",
+            maxParticipants: 6,
+          },
+          displayText: "先生成草稿",
+        },
+      ],
+    },
+    {
+      id: "draft-adjust-form",
+      description: "正式结构化动作 edit_draft 的跨端渲染一致性",
+      steps: [
+        {
+          type: "action",
+          action: "edit_draft",
+          actionId: "parity_edit_4",
+          params: {
+            activityId: "draft_demo_001",
+            title: "周五 20:00桌游局",
+            type: "桌游",
+            activityType: "桌游",
+            slot: "fri_20_00",
             locationName: "观音桥",
             locationHint: "观音桥商圈",
             maxParticipants: 6,
@@ -303,101 +325,7 @@ async function main(): Promise<void> {
             lat: 29.58567,
             lng: 106.52988,
           },
-          displayText: "就按这个发布",
-        },
-      ],
-    },
-    {
-      id: "friday-explore-branch",
-      description: "时间确认后走 explore 分支",
-      steps: [
-        { type: "text", text: "想租个周五晚上的局" },
-        {
-          type: "action",
-          action: "choose_location",
-          actionId: "parity_loc_2",
-          params: { location: "解放碑" },
-          displayText: "解放碑",
-        },
-        {
-          type: "action",
-          action: "choose_activity_type",
-          actionId: "parity_type_2",
-          params: { activityType: "羽毛球", location: "解放碑" },
-          displayText: "羽毛球",
-        },
-        {
-          type: "action",
-          action: "choose_time_slot",
-          actionId: "parity_slot_2",
-          params: { slot: "fri_19_00", location: "解放碑", activityType: "羽毛球" },
-          displayText: "周五 19:00",
-        },
-        {
-          type: "action",
-          action: "explore_nearby",
-          actionId: "parity_explore_1",
-          params: { location: "解放碑", activityType: "羽毛球", slot: "fri_19_00" },
-          displayText: "先看附近同类局",
-        },
-      ],
-    },
-    {
-      id: "draft-adjust-then-save",
-      description: "草稿编辑链路：edit_draft -> save_draft_settings",
-      steps: [
-        { type: "text", text: "想租个周五晚上的局" },
-        {
-          type: "action",
-          action: "choose_location",
-          actionId: "parity_loc_3",
-          params: { location: "观音桥" },
-          displayText: "观音桥",
-        },
-        {
-          type: "action",
-          action: "choose_activity_type",
-          actionId: "parity_type_3",
-          params: { activityType: "桌游", location: "观音桥" },
-          displayText: "桌游",
-        },
-        {
-          type: "action",
-          action: "choose_time_slot",
-          actionId: "parity_slot_3",
-          params: { slot: "fri_20_00", location: "观音桥", activityType: "桌游" },
-          displayText: "周五 20:00",
-        },
-        {
-          type: "action",
-          action: "edit_draft",
-          actionId: "parity_edit_3",
-          params: {
-            title: "周五 20:00桌游局",
-            type: "桌游",
-            slot: "fri_20_00",
-            location: "观音桥",
-            maxParticipants: 6,
-          },
           displayText: "改下人数设置",
-        },
-        {
-          type: "action",
-          action: "save_draft_settings",
-          actionId: "parity_save_3",
-          params: {
-            title: "周五 20:00桌游局",
-            type: "桌游",
-            activityType: "桌游",
-            slot: "fri_20_00",
-            location: "南坪万达",
-            locationHint: "南坪万达广场",
-            maxParticipants: 8,
-            currentParticipants: 2,
-            lat: 29.53012,
-            lng: 106.57221,
-          },
-          displayText: "保存这个设置",
         },
       ],
     },

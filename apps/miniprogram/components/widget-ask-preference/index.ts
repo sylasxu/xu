@@ -8,7 +8,7 @@
  * - 支持"随便/都可以"跳过按钮
  * - 点击后触发事件通知父组件
  * 
- * v4.7: A2UI 结构化 Action
+ * v4.7: 结构化动作
  * - 点击选项发送 select_preference action
  * - 点击跳过发送 skip_preference action
  */
@@ -124,8 +124,8 @@ Component({
 
   methods: {
     /**
-     * 点击选项 (A2UI)
-     * v4.7: 发送结构化 action
+     * 点击选项
+     * v4.7: 发送结构化动作
      */
     onSelectOption(e: WechatMiniprogram.TouchEvent) {
       if (this.properties.disabled || this.data.isSubmitting) return;
@@ -156,7 +156,7 @@ Component({
         Object.assign(actionPayload, option.params);
       }
       
-      // 发送结构化 action
+      // 发送结构化动作
       const chatStore = useChatStore.getState();
       chatStore.sendAction({
         action: option.action || 'select_preference',
@@ -167,8 +167,8 @@ Component({
     },
 
     /**
-     * 点击跳过按钮 (A2UI)
-     * v4.7: 发送结构化 action
+     * 点击跳过按钮
+     * v4.7: 发送结构化动作
      */
     onSkip() {
       if (this.properties.disabled || this.data.isSubmitting) return;
@@ -184,7 +184,7 @@ Component({
         collectedInfo: this.properties.collectedInfo,
       });
       
-      // 发送结构化 action
+      // 发送结构化动作
       const chatStore = useChatStore.getState();
       chatStore.sendAction({
         action: 'skip_preference',

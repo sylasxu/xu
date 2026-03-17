@@ -70,8 +70,10 @@ export interface P0MatchNodeData extends BaseFlowNodeData {
 export interface P1IntentNodeData extends BaseFlowNodeData {
   type: 'intent-classify';
   intent: string;
-  method: 'regex' | 'llm';
+  method: 'regex' | 'llm' | 'structured_action';
   confidence?: number;
+  action?: string;
+  phase?: string;
   regexRules?: Array<{ pattern: string; intent: string }>;
   llmDetails?: {
     model: string;
@@ -211,4 +213,3 @@ export const NODE_CHINESE_LABELS: Record<string, string> = {
 export function getNodeChineseLabel(type: string): string {
   return NODE_CHINESE_LABELS[type] ?? type
 }
-

@@ -113,8 +113,14 @@ function NodeSummary({ data }: { data: FlowNodeData }) {
       return <Badge variant="outline" className="text-[10px]">{data.toolDisplayName || data.toolName}</Badge>
     case 'keyword-match':
       return <Badge variant={data.matched ? 'default' : 'secondary'} className="text-[10px]">{data.matched ? '命中' : '未命中'}</Badge>
-    case 'intent-classify':
-      return <Badge variant="outline" className="text-[10px]">{data.intent}</Badge>
+    case 'intent-classify': {
+      const action = typeof data.action === 'string' ? data.action : null
+      return (
+        <Badge variant="outline" className="text-[10px]">
+          {data.method === 'structured_action' && action ? action : data.intent}
+        </Badge>
+      )
+    }
     default:
       return <span className="text-[10px] text-muted-foreground">{data.status}</span>
   }

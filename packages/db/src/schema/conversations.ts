@@ -29,7 +29,7 @@ export const conversationRoleEnum = pgEnum("conversation_role", [
 // 对话消息类型枚举
 export const conversationMessageTypeEnum = pgEnum("conversation_message_type", [
   "text",                    // 普通文本
-  "user_action",             // 结构化用户操作 (A2UI 风格)
+  "user_action",             // 结构化用户操作
   "widget_dashboard",        // 进场欢迎卡片
   "widget_launcher",         // 组局发射台
   "widget_action",           // 快捷操作按钮

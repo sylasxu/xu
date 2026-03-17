@@ -32,6 +32,7 @@ import type {
   GenUIInput,
   GenUIListBlock,
   GenUIRequestContext,
+  GenUITurnContext,
   GenUITurnEnvelope,
 } from '../gen/genui-contract'
 
@@ -56,13 +57,13 @@ export interface WidgetPart {
 }
 
 /**
- * User Action - A2UI 风格的结构化用户操作
+ * Structured Action Input
  * 用户点击 Widget 按钮时发送，跳过 LLM 意图识别
  */
-export interface UserAction {
-  /** Action 类型 */
+export interface StructuredActionInput {
+  /** 结构化动作类型 */
   action: string
-  /** Action 参数 */
+  /** 结构化动作参数 */
   payload: Record<string, unknown>
   /** 来源 Widget 类型 */
   source?: string
@@ -78,6 +79,7 @@ export interface UIMessage {
   id: string
   role: MessageRole
   parts: (UIMessagePart | WidgetPart)[]
+  turnContext?: GenUITurnContext
   createdAt: Date
 }
 
@@ -88,6 +90,9 @@ export type ChatStatus = 'idle' | 'submitted' | 'streaming'
 export type StreamingMessageId = string | null
 
 type ChatPromptContext = Pick<GenUIRequestContext, 'activityId' | 'followUpMode' | 'entry'>
+type GenUITransientTurn = NonNullable<GenUIRequestContext['transientTurns']>[number]
+
+const MAX_TRANSIENT_TURNS = 8
 
 // ============================================================================
 // Protocol and message operations
@@ -255,6 +260,86 @@ function upsertAssistantText(message: UIMessage, text: string): void {
 
 function removeAssistantText(message: UIMessage): void {
   message.parts = message.parts.filter((part) => part.type !== 'text')
+}
+
+function readWidgetSummaryText(widget: WidgetPart | null): string {
+  if (!widget || !isRecord(widget.data)) {
+    return ''
+  }
+
+  const data = widget.data
+  const directTextCandidates = [
+    data.question,
+    data.title,
+    data.message,
+  ]
+
+  for (const value of directTextCandidates) {
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim()
+    }
+  }
+
+  const firstResult = Array.isArray(data.results) ? data.results[0] : null
+  if (isRecord(firstResult) && typeof firstResult.title === 'string' && firstResult.title.trim()) {
+    return firstResult.title.trim()
+  }
+
+  return ''
+}
+
+function readMessagePrimaryBlockType(message: UIMessage): GenUITransientTurn['primaryBlockType'] {
+  const widget = getWidgetPart(message)
+  if (!widget) {
+    return getTextContent(message).trim() ? 'text' : null
+  }
+
+  switch (widget.widgetType) {
+    case 'ask_preference':
+      return 'choice'
+    case 'explore':
+      return 'list'
+    case 'draft':
+    case 'share':
+      return 'entity-card'
+    case 'partner_intent_form':
+    case 'draft_settings_form':
+      return 'form'
+    case 'error':
+      return 'alert'
+    case 'dashboard':
+    default:
+      return getTextContent(message).trim() ? 'text' : null
+  }
+}
+
+function extractMessageTextForTransientTurn(message: UIMessage): string {
+  const text = getTextContent(message).trim()
+  if (text) {
+    return text
+  }
+
+  return readWidgetSummaryText(getWidgetPart(message))
+}
+
+function buildTransientTurns(messages: UIMessage[]): GenUITransientTurn[] {
+  return messages
+    .slice(-MAX_TRANSIENT_TURNS)
+    .map((message) => {
+      const text = extractMessageTextForTransientTurn(message)
+      if (!text) {
+        return null
+      }
+
+      const primaryBlockType = readMessagePrimaryBlockType(message)
+      return {
+        role: message.role,
+        text,
+        ...(primaryBlockType !== undefined ? { primaryBlockType } : {}),
+        ...(message.role === 'assistant' && message.turnContext ? { turnContext: message.turnContext } : {}),
+      }
+    })
+    .filter((turn): turn is GenUITransientTurn => Boolean(turn))
 }
 
 function extractAskPreferenceQuestion(data: unknown): string {
@@ -491,6 +576,49 @@ function mapEntityCardToWidgetPart(block: GenUIEntityCardBlock): WidgetPart {
   }
 }
 
+function readExploreBlockMeta(block: GenUIListBlock): {
+  center: { lat: number; lng: number; name: string } | null
+  semanticQuery: string
+  fetchConfig: Record<string, unknown> | null
+  interaction: Record<string, unknown> | null
+  preview: Record<string, unknown> | null
+} {
+  const meta = isRecord(block.meta) ? block.meta : null
+  const explore = isRecord(meta?.explore) ? meta.explore : null
+  const centerSource = isRecord(block.center)
+    ? block.center
+    : isRecord(explore?.center)
+      ? explore.center
+      : null
+  const center = centerSource
+    ? {
+        lat: toNumberValue(centerSource.lat, 29.58567),
+        lng: toNumberValue(centerSource.lng, 106.52988),
+        name: toStringValue(centerSource.name, '附近'),
+      }
+    : null
+
+  return {
+    center,
+    semanticQuery: toStringValue(block.semanticQuery, toStringValue(explore?.semanticQuery, '')),
+    fetchConfig: isRecord(block.fetchConfig)
+      ? block.fetchConfig
+      : isRecord(explore?.fetchConfig)
+        ? explore.fetchConfig
+        : null,
+    interaction: isRecord(block.interaction)
+      ? block.interaction
+      : isRecord(explore?.interaction)
+        ? explore.interaction
+        : null,
+    preview: isRecord(block.preview)
+      ? block.preview
+      : isRecord(explore?.preview)
+        ? explore.preview
+        : null,
+  }
+}
+
 function mapListToWidgetPart(block: GenUIListBlock): WidgetPart {
   const results = block.items
     .filter((item): item is Record<string, unknown> => isRecord(item))
@@ -511,21 +639,23 @@ function mapListToWidgetPart(block: GenUIListBlock): WidgetPart {
       }
     })
 
+  const exploreMeta = readExploreBlockMeta(block)
   const first = results[0]
   return {
     type: 'widget',
     widgetType: 'explore',
     data: {
       results,
-      center: {
+      center: exploreMeta.center ?? {
         lat: first?.lat ?? 29.58567,
         lng: first?.lng ?? 106.52988,
         name: first?.locationName ?? '附近',
       },
       title: block.title || '',
-      fetchConfig: null,
-      interaction: null,
-      preview: null,
+      semanticQuery: exploreMeta.semanticQuery,
+      fetchConfig: exploreMeta.fetchConfig,
+      interaction: exploreMeta.interaction,
+      preview: exploreMeta.preview,
     },
   }
 }
@@ -696,6 +826,7 @@ type ChatGatewayTurnsRequest = {
     activityId?: string
     followUpMode?: 'review' | 'rebook' | 'kickoff'
     entry?: string
+    transientTurns?: GenUIRequestContext['transientTurns']
   }
   stream?: boolean
   [key: string]: unknown
@@ -723,6 +854,7 @@ function buildChatGatewayTurnsRequest(
     activityId?: string
     followUpMode?: 'review' | 'rebook' | 'kickoff'
     entry?: string
+    transientTurns?: GenUIRequestContext['transientTurns']
   }
 ): ChatGatewayTurnsRequest {
   return {
@@ -737,6 +869,9 @@ function buildChatGatewayTurnsRequest(
       ...(context.activityId ? { activityId: context.activityId } : {}),
       ...(context.followUpMode ? { followUpMode: context.followUpMode } : {}),
       ...(context.entry ? { entry: context.entry } : {}),
+      ...(context.transientTurns && context.transientTurns.length > 0
+        ? { transientTurns: context.transientTurns }
+        : {}),
     },
   }
 }
@@ -795,6 +930,10 @@ function arrayBufferToString(buffer: ArrayBuffer): string {
 function readStorageString(key: string): string {
   const value = wx.getStorageSync(key)
   return typeof value === 'string' ? value : ''
+}
+
+function hasAuthenticatedSession(): boolean {
+  return readStorageString('token').trim().length > 0
 }
 
 function streamChatGatewayTurns(
@@ -950,8 +1089,8 @@ interface ChatState {
   setLocation: (location: { lat: number; lng: number } | null) => void
   /** 添加 Widget 消息（用于 Dashboard、Share 等） */
   addWidgetMessage: (widgetType: WidgetPart['widgetType'], data: unknown) => string
-  /** 发送结构化 Action (A2UI 风格) */
-  sendAction: (action: UserAction) => void
+  /** 发送结构化动作 */
+  sendAction: (action: StructuredActionInput) => void
   /** 追加 Widget 操作结果到对话历史（让 AI 下次对话时感知用户的卡内操作） */
   appendActionResult: (actionType: string, params: Record<string, unknown>, success: boolean, summary: string) => void
   
@@ -987,6 +1126,9 @@ export const useChatStore = create<ChatState>()(
         }
 
         const state = get()
+        const transientTurns = !hasAuthenticatedSession()
+          ? buildTransientTurns(state.messages)
+          : undefined
         
         // 如果正在请求中，先停止
         if (state.status !== 'idle') {
@@ -1031,6 +1173,7 @@ export const useChatStore = create<ChatState>()(
             timezone: 'Asia/Shanghai',
             platformVersion: 'miniprogram-vnext',
             location: state.location,
+            ...(transientTurns && transientTurns.length > 0 ? { transientTurns } : {}),
             ...(contextOverrides || {}),
           }
         )
@@ -1041,14 +1184,24 @@ export const useChatStore = create<ChatState>()(
         let settled = false
         let eventQueue: Promise<void> = Promise.resolve()
         let controller: SSEController | null = null
+        let controllerRegistered = false
+
+        const isCurrentController = () => (
+          controller !== null && (!controllerRegistered || get()._controller === controller)
+        )
 
         const updateAssistantFromEnvelope = (envelope: GenUITurnEnvelope, status: ChatStatus) => {
+          if (!isCurrentController()) {
+            return
+          }
+
           const assistantParts = buildAssistantPartsFromBlocks(envelope.turn.blocks)
 
           set((draft) => {
             const msgIndex = draft.messages.findIndex((message) => message.id === aiMessageId)
             if (msgIndex !== -1) {
               draft.messages[msgIndex].parts = assistantParts
+              draft.messages[msgIndex].turnContext = envelope.turn.turnContext
               sanitizeAssistantMessage(draft.messages[msgIndex])
             }
             draft.conversationId = envelope.conversationId
@@ -1115,6 +1268,10 @@ export const useChatStore = create<ChatState>()(
           }
 
           for (let cursor = 1; cursor <= fullText.length; cursor += 1) {
+            if (!isCurrentController()) {
+              return
+            }
+
             const envelope = ensureEnvelope()
             const blocks = [...envelope.turn.blocks]
             const currentBlock = blocks[index]
@@ -1141,7 +1298,7 @@ export const useChatStore = create<ChatState>()(
         }
 
         const completeSuccess = () => {
-          if (settled) {
+          if (settled || !isCurrentController()) {
             return
           }
           settled = true
@@ -1167,7 +1324,7 @@ export const useChatStore = create<ChatState>()(
         }
 
         const completeError = (errorMessage: string) => {
-          if (settled) {
+          if (settled || !isCurrentController()) {
             return
           }
           settled = true
@@ -1199,6 +1356,10 @@ export const useChatStore = create<ChatState>()(
         }
 
         const processEvent = async (eventName: string, payload: unknown) => {
+          if (!isCurrentController()) {
+            return
+          }
+
           if (eventName === 'trace') {
             return
           }
@@ -1312,6 +1473,7 @@ export const useChatStore = create<ChatState>()(
         set((draft) => {
           draft._controller = controller
         })
+        controllerRegistered = true
       },
       
       /**
@@ -1388,11 +1550,14 @@ export const useChatStore = create<ChatState>()(
       },
       
       /**
-       * 发送结构化 Action (A2UI 风格)
+       * 发送结构化动作
        * 跳过 LLM 意图识别，直接执行对应操作
        */
-      sendAction: (action: UserAction) => {
+      sendAction: (action: StructuredActionInput) => {
         const state = get()
+        const transientTurns = !hasAuthenticatedSession()
+          ? buildTransientTurns(state.messages)
+          : undefined
         
         // 如果正在请求中，先停止
         if (state.status !== 'idle') {
@@ -1441,6 +1606,7 @@ export const useChatStore = create<ChatState>()(
             timezone: 'Asia/Shanghai',
             platformVersion: 'miniprogram-vnext',
             location: state.location,
+            ...(transientTurns && transientTurns.length > 0 ? { transientTurns } : {}),
           }
         )
         chatRequest.stream = true
@@ -1450,14 +1616,24 @@ export const useChatStore = create<ChatState>()(
         let settled = false
         let eventQueue: Promise<void> = Promise.resolve()
         let controller: SSEController | null = null
+        let controllerRegistered = false
+
+        const isCurrentController = () => (
+          controller !== null && (!controllerRegistered || get()._controller === controller)
+        )
 
         const updateAssistantFromEnvelope = (envelope: GenUITurnEnvelope, status: ChatStatus) => {
+          if (!isCurrentController()) {
+            return
+          }
+
           const assistantParts = buildAssistantPartsFromBlocks(envelope.turn.blocks)
 
           set((draft) => {
             const msgIndex = draft.messages.findIndex((message) => message.id === aiMessageId)
             if (msgIndex !== -1) {
               draft.messages[msgIndex].parts = assistantParts
+              draft.messages[msgIndex].turnContext = envelope.turn.turnContext
               sanitizeAssistantMessage(draft.messages[msgIndex])
             }
             draft.conversationId = envelope.conversationId
@@ -1524,6 +1700,10 @@ export const useChatStore = create<ChatState>()(
           }
 
           for (let cursor = 1; cursor <= fullText.length; cursor += 1) {
+            if (!isCurrentController()) {
+              return
+            }
+
             const envelope = ensureEnvelope()
             const blocks = [...envelope.turn.blocks]
             const currentBlock = blocks[index]
@@ -1550,7 +1730,7 @@ export const useChatStore = create<ChatState>()(
         }
 
         const completeSuccess = () => {
-          if (settled) {
+          if (settled || !isCurrentController()) {
             return
           }
           settled = true
@@ -1576,7 +1756,7 @@ export const useChatStore = create<ChatState>()(
         }
 
         const completeError = (errorMessage: string) => {
-          if (settled) {
+          if (settled || !isCurrentController()) {
             return
           }
           settled = true
@@ -1608,6 +1788,10 @@ export const useChatStore = create<ChatState>()(
         }
 
         const processEvent = async (eventName: string, payload: unknown) => {
+          if (!isCurrentController()) {
+            return
+          }
+
           if (eventName === 'trace') {
             return
           }
@@ -1721,6 +1905,7 @@ export const useChatStore = create<ChatState>()(
         set((draft) => {
           draft._controller = controller
         })
+        controllerRegistered = true
       },
       
       /**
@@ -1754,11 +1939,10 @@ export const useChatStore = create<ChatState>()(
     {
       name: 'chat-store',
       storage: createJSONStorage(() => wechatStorage),
-      // 只持久化消息列表
-      partialize: (state) => ({
-        messages: state.messages.slice(-50), // 只缓存最近 50 条
-        conversationId: state.conversationId,
-      }),
+      version: 2,
+      migrate: () => ({}),
+      // 匿名与登录聊天都只保留当前页内存，不做本地持久化恢复
+      partialize: () => ({}),
     }
   )
 )

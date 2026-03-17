@@ -587,7 +587,7 @@ Component({
       }, 900);
     },
 
-    /** 点击报名按钮 (A2UI — 自包含模式保留) */
+    /** 点击报名按钮（结构化动作链路，自包含模式保留） */
     onJoinTap(e: WechatMiniprogram.TouchEvent) {
       const id = readString(e.currentTarget.dataset.id);
       const title = readString(e.currentTarget.dataset.title) ?? undefined;

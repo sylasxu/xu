@@ -35,6 +35,63 @@ const ChatFollowUpModeSchema = t.Union([
   t.Literal('kickoff'),
 ]);
 
+const GenUIBlockTypeSchema = t.Union([
+  t.Literal('text'),
+  t.Literal('choice'),
+  t.Literal('entity-card'),
+  t.Literal('list'),
+  t.Literal('form'),
+  t.Literal('cta-group'),
+  t.Literal('alert'),
+]);
+
+const TurnContextChoiceOptionSchema = t.Object({
+  label: t.String({ minLength: 1 }),
+  action: t.String({ minLength: 1 }),
+  params: t.Optional(GenericObjectSchema),
+  value: t.Optional(t.String()),
+}, { additionalProperties: false });
+
+const TurnContextListItemSchema = t.Object({
+  title: t.String({ minLength: 1 }),
+  action: t.String({ minLength: 1 }),
+  params: t.Optional(GenericObjectSchema),
+  aliases: t.Optional(t.Array(t.String({ minLength: 1 }), { maxItems: 8 })),
+}, { additionalProperties: false });
+
+const TurnContextCtaItemSchema = t.Object({
+  label: t.String({ minLength: 1 }),
+  action: t.String({ minLength: 1 }),
+  params: t.Optional(GenericObjectSchema),
+}, { additionalProperties: false });
+
+const TurnContextSchema = t.Union([
+  t.Object({
+    kind: t.Literal('choice'),
+    question: t.Optional(t.String()),
+    options: t.Array(TurnContextChoiceOptionSchema, { minItems: 1, maxItems: 12 }),
+  }, { additionalProperties: false }),
+  t.Object({
+    kind: t.Literal('list'),
+    title: t.Optional(t.String()),
+    items: t.Array(TurnContextListItemSchema, { minItems: 1, maxItems: 12 }),
+  }, { additionalProperties: false }),
+  t.Object({
+    kind: t.Literal('cta-group'),
+    items: t.Array(TurnContextCtaItemSchema, { minItems: 1, maxItems: 12 }),
+  }, { additionalProperties: false }),
+]);
+
+const ChatTransientTurnSchema = t.Object({
+  role: t.Union([
+    t.Literal('user'),
+    t.Literal('assistant'),
+  ]),
+  text: t.String({ minLength: 1 }),
+  primaryBlockType: t.Optional(t.Union([GenUIBlockTypeSchema, t.Null()])),
+  turnContext: t.Optional(TurnContextSchema),
+}, { additionalProperties: false });
+
 const ChatContextSchema = t.Object({
   client: t.Optional(t.Union([
     t.Literal('web'),
@@ -49,6 +106,10 @@ const ChatContextSchema = t.Object({
   activityId: t.Optional(t.String({ minLength: 1, description: '关联活动 ID，用于活动后 follow-up 等承接场景' })),
   followUpMode: t.Optional(ChatFollowUpModeSchema),
   entry: t.Optional(t.String({ description: '触发入口标识，如 message_center_post_activity' })),
+  transientTurns: t.Optional(t.Array(ChatTransientTurnSchema, {
+    maxItems: 12,
+    description: '匿名用户当前页临时上下文，不会服务端持久化',
+  })),
 }, { additionalProperties: true });
 
 const ChatAiSchema = t.Object({
@@ -123,6 +184,15 @@ const GenUIListBlockSchema = t.Object({
   type: t.Literal('list'),
   title: t.Optional(t.String()),
   items: t.Array(GenericObjectSchema),
+  center: t.Optional(t.Object({
+    lat: t.Number(),
+    lng: t.Number(),
+    name: t.String(),
+  }, { additionalProperties: true })),
+  semanticQuery: t.Optional(t.String()),
+  fetchConfig: t.Optional(GenericObjectSchema),
+  interaction: t.Optional(GenericObjectSchema),
+  preview: t.Optional(GenericObjectSchema),
   dedupeKey: t.Optional(t.String()),
   replacePolicy: t.Optional(GenUIReplacePolicySchema),
   meta: t.Optional(GenericObjectSchema),
@@ -181,6 +251,7 @@ const ChatTurnEnvelopeSchema = t.Object({
     role: t.Literal('assistant'),
     status: GenUITurnStatusSchema,
     blocks: t.Array(GenUIBlockSchema),
+    turnContext: t.Optional(TurnContextSchema),
   }),
 });
 

@@ -1,4 +1,4 @@
-import type { UserAction } from './user-action';
+import type { StructuredAction } from './user-action';
 
 export interface NextBestActionItem {
   label: string;
@@ -7,7 +7,7 @@ export interface NextBestActionItem {
 }
 
 interface NextBestActionInput {
-  actionType: UserAction['action'] | undefined;
+  actionType: StructuredAction['action'] | undefined;
   data: Record<string, unknown> | undefined;
 }
 

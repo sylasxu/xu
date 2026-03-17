@@ -1,10 +1,10 @@
 /**
- * User Action Handler - 处理结构化用户操作
- * 
- * 跳过 LLM 意图识别，直接路由到对应 Service 执行
+ * Structured Action Handler
+ *
+ * 跳过 LLM 意图识别，直接路由到对应 Service 执行。
  */
 
-import type { UserAction, UserActionType, ActionResult } from './types';
+import type { StructuredAction, StructuredActionResult, StructuredActionType } from './types';
 import { createLogger } from '../observability/logger';
 
 // 复用现有 Service 函数
@@ -13,9 +13,10 @@ import { search } from '../rag';
 import { confirmMatch, cancelMatch } from '../tools/partner-match';
 import { buildCreateDraftParamsFromActionPayload, createActivityDraftRecord, publishActivityRecord, updateActivityDraftRecord } from '../tools/activity-tools';
 import { createPartnerIntent } from '../tools/partner-tools';
+import { buildExploreNearbyResult, type ExploreResultItem } from '../tools/explore-nearby';
 import { buildPartnerIntentFormPayload, createPartnerMatchingState, getPartnerTimeLabel, normalizePartnerActivityType } from '../workflow/partner-matching';
 
-const logger = createLogger('user-action');
+const logger = createLogger('structured-action');
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -28,8 +29,8 @@ function getErrorMessage(error: unknown, fallback = '操作失败'): string {
 /**
  * Action 到 Tool 的映射表
  */
-const ACTION_HANDLERS: Record<UserActionType, {
-  handler: (payload: Record<string, unknown>, userId: string | null) => Promise<ActionResult>;
+const STRUCTURED_ACTION_HANDLERS: Record<StructuredActionType, {
+  handler: (payload: Record<string, unknown>, userId: string | null) => Promise<StructuredActionResult>;
   requiresAuth: boolean;
   description: string;
 }> = {
@@ -155,19 +156,19 @@ const ACTION_HANDLERS: Record<UserActionType, {
 };
 
 /**
- * 处理 UserAction
- * 
- * @returns ActionResult，如果 fallbackToLLM=true 则需要回退到 LLM 处理
+ * 处理 Structured Action
+ *
+ * @returns StructuredActionResult，如果 fallbackToLLM=true 则需要回退到 LLM 处理
  */
-export async function handleUserAction(
-  action: UserAction,
+export async function handleStructuredAction(
+  structuredAction: StructuredAction,
   userId: string | null,
   location?: { lat: number; lng: number }
-): Promise<ActionResult> {
+): Promise<StructuredActionResult> {
   const startTime = Date.now();
-  const { action: actionType, payload, source } = action;
+  const { action: actionType, payload, source } = structuredAction;
   
-  logger.info('Processing user action', { 
+  logger.info('Processing structured action', {
     actionType, 
     source, 
     userId: userId || 'anon',
@@ -175,13 +176,13 @@ export async function handleUserAction(
   });
   
   // 查找处理器
-  const handlerConfig = ACTION_HANDLERS[actionType];
+  const handlerConfig = STRUCTURED_ACTION_HANDLERS[actionType];
   if (!handlerConfig) {
-    logger.warn('Unknown action type', { actionType });
+    logger.warn('Unknown structured action type', { actionType });
     return {
       success: false,
       fallbackToLLM: true,
-      fallbackText: action.originalText || `执行 ${actionType}`,
+      fallbackText: structuredAction.originalText || `执行 ${actionType}`,
     };
   }
   
@@ -204,16 +205,19 @@ export async function handleUserAction(
     const result = await handlerConfig.handler(enrichedPayload, userId);
     
     const duration = Date.now() - startTime;
-    logger.info('User action completed', { 
+    logger.info('Structured action completed', {
       actionType, 
       success: result.success,
       duration,
       fallbackToLLM: result.fallbackToLLM,
     });
     
-    return result;
+    return {
+      ...result,
+      durationMs: duration,
+    };
   } catch (error) {
-    logger.error('User action failed', { 
+    logger.error('Structured action failed', { 
       actionType, 
       error: getErrorMessage(error),
     });
@@ -221,14 +225,15 @@ export async function handleUserAction(
     return {
       success: false,
       error: getErrorMessage(error),
+      durationMs: Date.now() - startTime,
       fallbackToLLM: true,
-      fallbackText: action.originalText,
+      fallbackText: structuredAction.originalText,
     };
   }
 }
 
 // ============================================================================
-// Action Handlers
+// Structured Action Handlers
 // ============================================================================
 
 function resolveActionLocation(payload: Record<string, unknown>): { lat: number; lng: number } | null {
@@ -281,6 +286,119 @@ const DRAFT_PARTICIPANT_OPTIONS = [4, 6, 8, 10].map((value) => ({
   label: `${value} 人`,
   value: String(value),
 }));
+
+const EXPLORE_ACTIVITY_TYPE_OPTIONS = [
+  { label: '先看全部', value: 'all' },
+  { label: '约饭', value: 'food' },
+  { label: '运动', value: 'sports' },
+  { label: '桌游', value: 'boardgame' },
+  { label: '娱乐', value: 'entertainment' },
+] as const;
+
+function normalizeExploreActivityType(value: string): string | undefined {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized || normalized === 'all' || normalized === '全部' || normalized === '先看全部') {
+    return undefined;
+  }
+
+  const aliases: Record<string, string> = {
+    food: 'food',
+    '约饭': 'food',
+    '吃饭': 'food',
+    '火锅': 'food',
+    sports: 'sports',
+    '运动': 'sports',
+    '羽毛球': 'sports',
+    boardgame: 'boardgame',
+    '桌游': 'boardgame',
+    entertainment: 'entertainment',
+    '娱乐': 'entertainment',
+    'ktv': 'entertainment',
+    'k歌': 'entertainment',
+  };
+
+  return aliases[normalized];
+}
+
+function resolvePresetLocation(
+  locationName: string
+): { name: string; lat: number; lng: number } | null {
+  const trimmed = locationName.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const matched = DRAFT_LOCATION_OPTIONS.find((item) => item.value === trimmed || item.label === trimmed);
+  if (!matched) {
+    return null;
+  }
+
+  return {
+    name: matched.value,
+    lat: matched.lat,
+    lng: matched.lng,
+  };
+}
+
+function buildExploreSemanticQueryFromSelection(
+  locationName: string,
+  activityType?: string
+): string {
+  const typeLabelMap: Record<string, string> = {
+    food: '约饭',
+    sports: '运动',
+    boardgame: '桌游',
+    entertainment: '娱乐',
+  };
+
+  if (activityType) {
+    return `${locationName}附近的${typeLabelMap[activityType] || '活动'}`;
+  }
+
+  return `${locationName}附近的活动`;
+}
+
+function buildTypeAskPreferencePayload(params: {
+  locationName: string;
+  lat: number;
+  lng: number;
+}): {
+  message: string;
+  askPreference: {
+    questionType: 'type';
+    question: string;
+    options: Array<Record<string, unknown>>;
+  };
+} {
+  const question = `${params.locationName}想先看哪类活动？`;
+  const baseParams = {
+    locationName: params.locationName,
+    lat: params.lat,
+    lng: params.lng,
+    radiusKm: 5,
+  };
+
+  return {
+    message: question,
+    askPreference: {
+      questionType: 'type',
+      question,
+      options: EXPLORE_ACTIVITY_TYPE_OPTIONS.map((option) => ({
+        label: option.label,
+        value: option.value,
+        action: 'explore_nearby',
+        params: {
+          ...baseParams,
+          semanticQuery: buildExploreSemanticQueryFromSelection(
+            params.locationName,
+            option.value === 'all' ? undefined : option.value
+          ),
+          ...(option.value === 'all' ? {} : { type: option.value }),
+        },
+      })),
+    },
+  };
+}
 
 function toTextValue(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value.trim() : fallback;
@@ -472,7 +590,7 @@ function buildDraftSettingsFormPayload(payload: Record<string, unknown>) {
 async function handleJoinActivity(
   payload: Record<string, unknown>,
   userId: string | null
-): Promise<ActionResult> {
+): Promise<StructuredActionResult> {
   const activityId = toTextValue(payload.activityId);
   if (!activityId) {
     return { success: false, error: '缺少活动 ID' };
@@ -505,7 +623,7 @@ async function handleJoinActivity(
 async function handleViewActivity(
   payload: Record<string, unknown>,
   _userId: string | null
-): Promise<ActionResult> {
+): Promise<StructuredActionResult> {
   const activityId = toTextValue(payload.activityId);
   if (!activityId) {
     return { success: false, error: '缺少活动 ID' };
@@ -524,7 +642,7 @@ async function handleViewActivity(
 async function handleCancelJoin(
   payload: Record<string, unknown>,
   userId: string | null
-): Promise<ActionResult> {
+): Promise<StructuredActionResult> {
   if (!userId) {
     return { success: false, error: '请先登录', data: { requiresAuth: true } };
   }
@@ -553,7 +671,7 @@ async function handleCancelJoin(
 async function handleShareActivity(
   payload: Record<string, unknown>,
   _userId: string | null
-): Promise<ActionResult> {
+): Promise<StructuredActionResult> {
   const activityId = toTextValue(payload.activityId);
   if (!activityId) {
     return { success: false, error: '缺少活动 ID' };
@@ -573,7 +691,7 @@ async function handleShareActivity(
 async function handleCreateActivity(
   payload: Record<string, unknown>,
   userId: string | null
-): Promise<ActionResult> {
+): Promise<StructuredActionResult> {
   if (!userId) {
     return { success: false, error: '请先登录', data: { requiresAuth: true } };
   }
@@ -603,7 +721,7 @@ async function handleCreateActivity(
 async function handleEditDraft(
   payload: Record<string, unknown>,
   _userId: string | null
-): Promise<ActionResult> {
+): Promise<StructuredActionResult> {
   const activityId = toTextValue(payload.activityId);
   if (!activityId) {
     return { success: false, error: '缺少活动 ID' };
@@ -624,7 +742,7 @@ async function handleEditDraft(
 async function handleSaveDraftSettings(
   payload: Record<string, unknown>,
   userId: string | null
-): Promise<ActionResult> {
+): Promise<StructuredActionResult> {
   if (!userId) {
     return { success: false, error: '请先登录', data: { requiresAuth: true } };
   }
@@ -702,7 +820,7 @@ async function handleSaveDraftSettings(
 async function handlePublishDraft(
   payload: Record<string, unknown>,
   userId: string | null
-): Promise<ActionResult> {
+): Promise<StructuredActionResult> {
   if (!userId) {
     return { success: false, error: '请先登录', data: { requiresAuth: true } };
   }
@@ -729,7 +847,7 @@ async function handlePublishDraft(
 async function handleAskPreference(
   payload: Record<string, unknown>,
   _userId: string | null
-): Promise<ActionResult> {
+): Promise<StructuredActionResult> {
   const question = typeof payload.question === 'string' && payload.question.trim()
     ? payload.question.trim()
     : '想先看哪个区域的活动？';
@@ -756,7 +874,7 @@ async function handleAskPreference(
 async function handleExploreNearby(
   payload: Record<string, unknown>,
   userId: string | null
-): Promise<ActionResult> {
+): Promise<StructuredActionResult> {
   const location = resolveActionLocation(payload);
 
   if (!location) {
@@ -790,7 +908,7 @@ async function handleExploreNearby(
       userId: userId ?? undefined,
     });
 
-    const results = scoredResults.map(scored => {
+    const results: ExploreResultItem[] = scoredResults.map((scored) => {
       const { activity, score, distance } = scored;
       const point = readActivityPoint(activity.location);
 
@@ -809,27 +927,15 @@ async function handleExploreNearby(
       };
     });
 
-    const title = results.length > 0
-      ? `为你找到${locationName}附近的 ${results.length} 个活动`
-      : `${locationName}附近暂时没有合适的活动`;
-
-    const message = results.length > 0
-      ? `先给你看看${locationName}附近的局，顺眼的话点一个就能继续。`
-      : `${locationName}附近暂时没有合适的局，我再给你几个下一步。`;
-
     return {
       success: true,
-      data: {
-        locationName,
+      data: buildExploreNearbyResult({
+        center: { lat: location.lat, lng: location.lng, name: locationName },
+        results,
+        radiusKm: radius,
+        semanticQuery,
         ...(type ? { type } : {}),
-        message,
-        explore: {
-          center: { lat: location.lat, lng: location.lng, name: locationName },
-          results,
-          title,
-          semanticQuery,
-        },
-      },
+      }),
     };
   } catch (error) {
     return { success: false, error: getErrorMessage(error) };
@@ -839,7 +945,7 @@ async function handleExploreNearby(
 async function handleExpandMap(
   payload: Record<string, unknown>,
   _userId: string | null
-): Promise<ActionResult> {
+): Promise<StructuredActionResult> {
   // 展开地图由前端处理
   return {
     success: true,
@@ -854,7 +960,7 @@ async function handleExpandMap(
 async function handleFilterActivities(
   payload: Record<string, unknown>,
   _userId: string | null
-): Promise<ActionResult> {
+): Promise<StructuredActionResult> {
   // 筛选需要 LLM 理解筛选条件
   return {
     success: false,
@@ -866,7 +972,7 @@ async function handleFilterActivities(
 async function handleFindPartner(
   payload: Record<string, unknown>,
   userId: string | null
-): Promise<ActionResult> {
+): Promise<StructuredActionResult> {
   if (!userId) {
     return { success: false, error: '请先登录', data: { requiresAuth: true } };
   }
@@ -902,7 +1008,7 @@ async function handleFindPartner(
 async function handleSubmitPartnerIntentForm(
   payload: Record<string, unknown>,
   userId: string | null
-): Promise<ActionResult> {
+): Promise<StructuredActionResult> {
   if (!userId) {
     return { success: false, error: '请先登录', data: { requiresAuth: true } };
   }
@@ -971,7 +1077,7 @@ async function handleSubmitPartnerIntentForm(
 async function handleConfirmMatch(
   payload: Record<string, unknown>,
   userId: string | null
-): Promise<ActionResult> {
+): Promise<StructuredActionResult> {
   if (!userId) {
     return { success: false, error: '请先登录', data: { requiresAuth: true } };
   }
@@ -999,7 +1105,7 @@ async function handleConfirmMatch(
 async function handleCancelMatch(
   payload: Record<string, unknown>,
   userId: string | null
-): Promise<ActionResult> {
+): Promise<StructuredActionResult> {
   if (!userId) {
     return { success: false, error: '请先登录', data: { requiresAuth: true } };
   }
@@ -1025,12 +1131,62 @@ async function handleCancelMatch(
 
 async function handleSelectPreference(
   payload: Record<string, unknown>,
-  _userId: string | null
-): Promise<ActionResult> {
+  userId: string | null
+): Promise<StructuredActionResult> {
+  const questionType = toTextValue(payload.questionType);
   const selectedValue = toTextValue(payload.selectedValue) || toTextValue(payload.value);
   const selectedLabel = toTextValue(payload.selectedLabel) || toTextValue(payload.label);
-  
-  // 选择偏好后，用选中的标签作为用户输入继续对话
+
+  if (questionType === 'location') {
+    const locationName = toTextValue(payload.locationName)
+      || toTextValue(payload.location)
+      || selectedLabel
+      || selectedValue;
+    const presetLocation = resolvePresetLocation(locationName);
+    if (presetLocation) {
+      const activityType = normalizeExploreActivityType(toTextValue(payload.activityType));
+      if (activityType) {
+        return handleExploreNearby({
+          ...payload,
+          locationName: presetLocation.name,
+          lat: presetLocation.lat,
+          lng: presetLocation.lng,
+          type: activityType,
+          semanticQuery: buildExploreSemanticQueryFromSelection(presetLocation.name, activityType),
+        }, userId);
+      }
+
+      return {
+        success: true,
+        data: buildTypeAskPreferencePayload({
+          locationName: presetLocation.name,
+          lat: presetLocation.lat,
+          lng: presetLocation.lng,
+        }),
+      };
+    }
+  }
+
+  if (questionType === 'type') {
+    const locationName = toTextValue(payload.locationName) || toTextValue(payload.location);
+    const resolvedLocation = resolveActionLocation(payload) || resolvePresetLocation(locationName);
+    if (resolvedLocation) {
+      const normalizedLocationName = locationName || '附近';
+      const activityType = normalizeExploreActivityType(
+        toTextValue(payload.activityType) || selectedValue || selectedLabel
+      );
+
+      return handleExploreNearby({
+        ...payload,
+        locationName: normalizedLocationName,
+        lat: resolvedLocation.lat,
+        lng: resolvedLocation.lng,
+        ...(activityType ? { type: activityType } : {}),
+        semanticQuery: buildExploreSemanticQueryFromSelection(normalizedLocationName, activityType),
+      }, userId);
+    }
+  }
+
   return {
     success: false,
     fallbackToLLM: true,
@@ -1041,7 +1197,7 @@ async function handleSelectPreference(
 async function handleSkipPreference(
   _payload: Record<string, unknown>,
   _userId: string | null
-): Promise<ActionResult> {
+): Promise<StructuredActionResult> {
   // 跳过偏好，用默认文本继续
   return {
     success: false,
@@ -1053,7 +1209,7 @@ async function handleSkipPreference(
 async function handleRetry(
   payload: Record<string, unknown>,
   _userId: string | null
-): Promise<ActionResult> {
+): Promise<StructuredActionResult> {
   const originalText = toTextValue(payload.originalText);
   
   return {
@@ -1066,7 +1222,7 @@ async function handleRetry(
 async function handleCancel(
   _payload: Record<string, unknown>,
   _userId: string | null
-): Promise<ActionResult> {
+): Promise<StructuredActionResult> {
   return {
     success: true,
     data: { action: 'cancelled' },
@@ -1076,7 +1232,7 @@ async function handleCancel(
 async function handleQuickPrompt(
   payload: Record<string, unknown>,
   _userId: string | null
-): Promise<ActionResult> {
+): Promise<StructuredActionResult> {
   const prompt = toTextValue(payload.prompt);
   
   if (!prompt) {

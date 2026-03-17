@@ -11,11 +11,14 @@ export type TraceStatus = 'running' | 'completed' | 'error'
 /** 步骤状态 */
 export type StepStatus = 'pending' | 'running' | 'success' | 'error'
 
+/** 意图判定方法 */
+export type IntentMethod = 'regex' | 'llm' | 'structured_action'
+
 /** 步骤类型 */
 export type StepType = 'input' | 'prompt' | 'llm' | 'tool' | 'output'
 
 /** 扩展步骤类型（包含 Processor 和 P0/P1） */
-export type ExtendedStepType = StepType | 'processor' | 'keyword-match' | 'intent-classify'
+export type ExtendedStepType = StepType | 'processor' | 'keyword-match' | 'intent-classify' | 'structured-action'
 
 /** 执行追踪 */
 export interface ExecutionTrace {
@@ -38,7 +41,7 @@ export interface ExecutionTrace {
   /** 意图分类 */
   intent?: IntentType
   /** 意图分类方法 */
-  intentMethod?: 'regex' | 'llm'
+  intentMethod?: IntentMethod
   /** AI 输出摘要 */
   output?: TraceOutput
 }
@@ -60,9 +63,10 @@ export interface TraceOutput {
 export type IntentType = 'create' | 'explore' | 'manage' | 'partner' | 'idle' | 'chitchat' | 'unknown'
 
 /** 意图分类方法显示名称 */
-export const INTENT_METHOD_NAMES: Record<'regex' | 'llm', string> = {
+export const INTENT_METHOD_NAMES: Record<IntentMethod, string> = {
   regex: '正则',
   llm: 'LLM',
+  structured_action: '结构化动作',
 }
 
 /** 意图显示名称 */
@@ -114,6 +118,7 @@ export type TraceStepData =
   | PromptStepData
   | LLMStepData
   | ToolStepData
+  | StructuredActionStepData
   | OutputStepData
 
 /** 用户输入步骤数据 */
@@ -237,6 +242,18 @@ export interface OutputStepData {
   text: string
 }
 
+/** 结构化动作步骤数据 */
+export interface StructuredActionStepData {
+  /** 当前阶段 */
+  phase?: string
+  /** 动作名 */
+  action?: string
+  /** 执行路径 */
+  executionPath?: string
+  /** 是否成功 */
+  success?: boolean
+}
+
 // ============ Type Guards ============
 
 /** 检查是否为用户输入步骤数据 */
@@ -257,6 +274,11 @@ export function isLLMStepData(data: TraceStepData): data is LLMStepData {
 /** 检查是否为 Tool 步骤数据 */
 export function isToolStepData(data: TraceStepData): data is ToolStepData {
   return 'toolName' in data
+}
+
+/** 检查是否为结构化动作步骤数据 */
+export function isStructuredActionStepData(data: TraceStepData): data is StructuredActionStepData {
+  return 'action' in data || 'phase' in data
 }
 
 /** 检查是否为输出步骤数据 */

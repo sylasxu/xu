@@ -196,6 +196,7 @@ const ADMIN_CODE = process.env.SMOKE_ADMIN_CODE?.trim()
   || '9999';
 const BASE_URL = 'http://localhost';
 const USER_COUNT = 5;
+const DEFAULT_TEST_MODEL = process.env.GENUI_TEST_MODEL?.trim() || 'deepseek-chat';
 const scenarioArgIndex = Bun.argv.indexOf('--scenario');
 const scenarioFilter = scenarioArgIndex >= 0 ? Bun.argv[scenarioArgIndex + 1] : '';
 
@@ -525,6 +526,7 @@ async function postAiChat(params: {
     payload: {
       ...(params.conversationId ? { conversationId: params.conversationId } : {}),
       input: { type: 'text', text: params.text },
+      ai: { model: DEFAULT_TEST_MODEL },
       context: {
         client: 'web',
         locale: 'zh-CN',
@@ -558,6 +560,7 @@ async function postAiAction(params: {
         ...(params.payload ? { params: params.payload } : {}),
         ...(params.displayText ? { displayText: params.displayText } : {}),
       },
+      ai: { model: DEFAULT_TEST_MODEL },
       context: {
         client: 'web',
         locale: 'zh-CN',
@@ -1277,6 +1280,7 @@ async function scenarioAiAccessFlow(context: ScenarioContext): Promise<ScenarioR
     payload: {
       conversationId: authChat.conversationId,
       input: { type: 'text', text: '我要继续这段对话' },
+      ai: { model: DEFAULT_TEST_MODEL },
       context: { client: 'web', locale: 'zh-CN', timezone: 'Asia/Shanghai' },
       stream: false,
     },

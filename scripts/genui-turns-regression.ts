@@ -39,6 +39,7 @@ const BASE_URL =
   process.env.GENUI_CHAT_API_URL ||
   process.env.GENUI_TURNS_API_URL ||
   "http://127.0.0.1:1996/ai/chat";
+const DEFAULT_TEST_MODEL = process.env.GENUI_TEST_MODEL?.trim() || "deepseek-chat";
 const AUTH_TOKEN = process.env.GENUI_AUTH_TOKEN?.trim() || "";
 const AUTH_HEADER_ARGS = AUTH_TOKEN ? ["-H", `Authorization: Bearer ${AUTH_TOKEN}`] : [];
 
@@ -70,6 +71,43 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function readTurnCompleteEnvelopeFromStream(streamOutput: string): TurnEnvelope | null {
+  const packets = streamOutput
+    .split(/\n\n+/)
+    .map((packet) => packet.trim())
+    .filter(Boolean);
+
+  for (const packet of packets) {
+    const lines = packet.split(/\r?\n/);
+    let eventName = "message";
+    const dataLines: string[] = [];
+
+    for (const line of lines) {
+      if (line.startsWith("event:")) {
+        eventName = line.slice(6).trim();
+        continue;
+      }
+
+      if (line.startsWith("data:")) {
+        dataLines.push(line.slice(5).trim());
+      }
+    }
+
+    if (eventName !== "turn-complete" || dataLines.length === 0) {
+      continue;
+    }
+
+    try {
+      const payload = JSON.parse(dataLines.join("\n")) as { data?: unknown };
+      return isRecord(payload) && isRecord(payload.data) ? (payload.data as TurnEnvelope) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
 function postTurn(conversationId: string | null, input: InputStep): TurnEnvelope {
   const body = {
     ...(conversationId ? { conversationId } : {}),
@@ -79,6 +117,9 @@ function postTurn(conversationId: string | null, input: InputStep): TurnEnvelope
       locale: "zh-CN",
       timezone: "Asia/Shanghai",
       platformVersion: "regression",
+    },
+    ai: {
+      model: DEFAULT_TEST_MODEL,
     },
   };
 
@@ -110,6 +151,9 @@ function postTurnStream(conversationId: string | null, input: InputStep): string
       locale: "zh-CN",
       timezone: "Asia/Shanghai",
       platformVersion: "regression",
+    },
+    ai: {
+      model: DEFAULT_TEST_MODEL,
     },
     stream: true,
   };
@@ -274,7 +318,7 @@ function renderForWeb(turn: TurnEnvelope): void {
       continue;
     }
 
-    // 其他 block 在 web 端当前走 fallback 容器，验证不会抛错
+    // 其他 block 在 web 端当前走通用容器，验证不会抛错
     String(block.type);
   }
 }
@@ -480,11 +524,22 @@ function runScenario(scenario: Scenario): string[] {
   });
 
   assert(streamOutput.includes("event: turn-start"), `${scenario.id}: stream missing turn-start`);
-  assert(streamOutput.includes("event: block-append"), `${scenario.id}: stream missing block-append`);
+  const hasBlockAppend = streamOutput.includes("event: block-append");
+  const hasBlockReplace = streamOutput.includes("event: block-replace");
   assert(streamOutput.includes("event: turn-complete"), `${scenario.id}: stream missing turn-complete`);
   assert(streamOutput.includes("data: [DONE]"), `${scenario.id}: stream missing [DONE]`);
 
-  logs.push("stream check: turn-start/block-append/turn-complete/[DONE] OK");
+  if (!hasBlockAppend && !hasBlockReplace) {
+    const turnCompleteEnvelope = readTurnCompleteEnvelopeFromStream(streamOutput);
+    assert(turnCompleteEnvelope, `${scenario.id}: stream missing block event and turn-complete envelope`);
+    assertTurnEnvelope(turnCompleteEnvelope, `${scenario.id}: stream turn-complete envelope`);
+    logs.push("stream check: turn-start/turn-complete-only/[DONE] OK");
+    return logs;
+  }
+
+  logs.push(
+    `stream check: turn-start/${hasBlockAppend ? "block-append" : "block-replace"}/turn-complete/[DONE] OK`
+  );
   return logs;
 }
 
@@ -492,38 +547,56 @@ function main(): void {
   const scenarios: Scenario[] = [
     {
       id: "friday-night-core",
-      description: "目标用例：想租个周五晚上的局，多轮 action 继续推进",
+      description: "目标用例：附近找局，自由文本续接推进到 explore 结果",
       steps: [
-        { type: "text", text: "想租个周五晚上的局" },
+        { type: "text", text: "附近有什么局吗？" },
+        { type: "text", text: "观音桥" },
+        { type: "text", text: "桌游" },
+      ],
+    },
+    {
+      id: "friday-night-free-text-followup",
+      description: "首轮自由文本追问，第二轮地点补充，验证文本续接解析",
+      steps: [
+        { type: "text", text: "附近有什么局吗？" },
+        { type: "text", text: "解放碑" },
+      ],
+    },
+    {
+      id: "create-draft-action",
+      description: "正式结构化动作 create_activity 返回草稿卡片或登录闸门块",
+      steps: [
         {
           type: "action",
-          action: "choose_location",
-          actionId: "act_choose_location_reg_1",
-          params: { location: "观音桥" },
-          displayText: "观音桥",
-        },
-        {
-          type: "action",
-          action: "choose_activity_type",
-          actionId: "act_choose_type_reg_1",
-          params: { activityType: "桌游" },
-          displayText: "桌游",
-        },
-        {
-          type: "action",
-          action: "choose_time_slot",
-          actionId: "act_choose_slot_reg_1",
-          params: { slot: "fri_20_00", location: "观音桥", activityType: "桌游" },
-          displayText: "周五 20:00",
-        },
-        {
-          type: "action",
-          action: "confirm_publish",
-          actionId: "act_publish_reg_1",
+          action: "create_activity",
+          actionId: "act_create_draft_reg_1",
           params: {
-            title: "周五 20:00桌游局",
+            title: "周五桌游局",
             type: "boardgame",
-            startAt: "2026-03-06T20:00:00+08:00",
+            activityType: "桌游",
+            locationName: "观音桥",
+            location: "观音桥",
+            description: "周五晚上在观音桥组个桌游局",
+            maxParticipants: 6,
+          },
+          displayText: "先生成草稿",
+        },
+      ],
+    },
+    {
+      id: "draft-adjust-form",
+      description: "正式结构化动作 edit_draft 返回草稿设置表单",
+      steps: [
+        {
+          type: "action",
+          action: "edit_draft",
+          actionId: "act_edit_draft_reg_2",
+          params: {
+            activityId: "draft_demo_001",
+            title: "周五 20:00桌游局",
+            type: "桌游",
+            activityType: "桌游",
+            slot: "fri_20_00",
             locationName: "观音桥",
             locationHint: "观音桥商圈",
             maxParticipants: 6,
@@ -531,74 +604,7 @@ function main(): void {
             lat: 29.58567,
             lng: 106.52988,
           },
-          displayText: "就按这个发布",
-        },
-      ],
-    },
-    {
-      id: "friday-night-free-text-followup",
-      description: "首轮 typo + 第二轮自由文本地点，验证 fallback 解析",
-      steps: [
-        { type: "text", text: "想租个周五晚上的局" },
-        { type: "text", text: "解放碑" },
-      ],
-    },
-    {
-      id: "draft-adjust-then-save",
-      description: "草稿编辑链路：edit_draft -> save_draft_settings，校验结构化 block 可渲染",
-      steps: [
-        { type: "text", text: "想租个周五晚上的局" },
-        {
-          type: "action",
-          action: "choose_location",
-          actionId: "act_choose_location_reg_2",
-          params: { location: "观音桥" },
-          displayText: "观音桥",
-        },
-        {
-          type: "action",
-          action: "choose_activity_type",
-          actionId: "act_choose_type_reg_2",
-          params: { activityType: "桌游", location: "观音桥" },
-          displayText: "桌游",
-        },
-        {
-          type: "action",
-          action: "choose_time_slot",
-          actionId: "act_choose_slot_reg_2",
-          params: { slot: "fri_20_00", location: "观音桥", activityType: "桌游" },
-          displayText: "周五 20:00",
-        },
-        {
-          type: "action",
-          action: "edit_draft",
-          actionId: "act_edit_draft_reg_2",
-          params: {
-            title: "周五 20:00桌游局",
-            type: "桌游",
-            slot: "fri_20_00",
-            location: "观音桥",
-            maxParticipants: 6,
-          },
           displayText: "改下人数设置",
-        },
-        {
-          type: "action",
-          action: "save_draft_settings",
-          actionId: "act_save_draft_reg_2",
-          params: {
-            title: "周五 20:00桌游局",
-            type: "桌游",
-            activityType: "桌游",
-            slot: "fri_20_00",
-            location: "南坪万达",
-            locationHint: "南坪万达广场",
-            maxParticipants: 8,
-            currentParticipants: 2,
-            lat: 29.53012,
-            lng: 106.57221,
-          },
-          displayText: "保存这个设置",
         },
       ],
     },

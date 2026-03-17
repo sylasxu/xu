@@ -23,8 +23,7 @@ import type { GenUIRequest } from '@juchang/genui-contract';
 import { db, users, activities, eq } from '@juchang/db';
 import {
   buildAiChatTurn,
-  buildAiChatStreamEvents,
-  createAiChatSSEStreamResponse,
+  createAiChatBridgeStreamResponse,
 } from './ai-chat-gateway.service';
 import { applyAiChatTurnPolicies } from './ai-chat-policy.service';
 
@@ -126,10 +125,17 @@ export const aiController = new Elysia({ prefix: '/ai' })
   // ==========================================
   .post(
     '/chat',
-    async ({ body, set, jwt, headers }) => {
+    async ({ body, set, jwt, headers, request: rawRequest }) => {
       try {
         const viewer = await verifyAuth(jwt, headers);
         const request = body as GenUIRequest & { stream?: boolean };
+
+        if (request.stream) {
+          return createAiChatBridgeStreamResponse(request, {
+            viewer,
+            requestAbortSignal: rawRequest.signal,
+          });
+        }
 
         const result = await buildAiChatTurn(request, { viewer });
         const normalized = applyAiChatTurnPolicies({
@@ -137,7 +143,22 @@ export const aiController = new Elysia({ prefix: '/ai' })
           viewer,
           envelope: result.envelope,
           traces: result.traces,
+          resolvedStructuredAction: result.resolvedStructuredAction,
+          executionPath: result.executionPath,
         });
+        const responseTraces = [
+          ...normalized.traces,
+          {
+            stage: 'controller_response_ready',
+            detail: {
+              executionPath: result.executionPath,
+              structuredAction: result.resolvedStructuredAction?.action || null,
+              stream: false,
+              authenticated: !!viewer,
+              blockCount: normalized.envelope.turn.blocks.length,
+            },
+          },
+        ];
 
         if (viewer) {
           await syncConversationTurnSnapshot({
@@ -145,12 +166,12 @@ export const aiController = new Elysia({ prefix: '/ai' })
             userId: viewer.id,
             userText: resolveConversationUserText(request.input),
             blocks: normalized.envelope.turn.blocks,
+            turnId: normalized.envelope.turn.turnId,
+            traceId: normalized.envelope.traceId,
+            inputType: request.input.type,
+            resolvedStructuredAction: result.resolvedStructuredAction,
+            activityId: typeof request.context?.activityId === 'string' ? request.context.activityId : undefined,
           });
-        }
-
-        if (request.stream) {
-          const events = buildAiChatStreamEvents(normalized.envelope, normalized.traces);
-          return createAiChatSSEStreamResponse(events);
         }
 
         return normalized.envelope;

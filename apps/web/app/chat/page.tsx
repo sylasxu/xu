@@ -78,6 +78,8 @@ const COMPOSER_EXPAND_THRESHOLD = 10;
 
 type ComposerStatus = "ready" | "submitted";
 type TurnContextOverrides = Pick<GenUIRequestContext, "activityId" | "followUpMode" | "entry">;
+type GenUITransientTurn = NonNullable<GenUIRequestContext["transientTurns"]>[number];
+const MAX_TRANSIENT_TURNS = 8;
 
 type ChatRecord =
   | {
@@ -199,6 +201,103 @@ function createEmptyEnvelope(params: {
       blocks: [],
     },
   };
+}
+
+function resolvePrimaryBlockType(blocks: GenUIBlock[]): GenUITransientTurn["primaryBlockType"] {
+  const primaryBlock = blocks.find((block) => block.type !== "text") ?? blocks[0];
+  return primaryBlock?.type ?? null;
+}
+
+function summarizeAssistantBlocks(blocks: GenUIBlock[]): string {
+  const textBlocks = blocks
+    .filter((block): block is GenUITextBlock => block.type === "text")
+    .map((block) => block.content.trim())
+    .filter(Boolean);
+
+  if (textBlocks.length > 0) {
+    return textBlocks.join("\n\n");
+  }
+
+  for (const block of blocks) {
+    if (block.type === "choice" && block.question.trim()) {
+      return block.question.trim();
+    }
+
+    if (block.type === "list") {
+      if (typeof block.title === "string" && block.title.trim()) {
+        return block.title.trim();
+      }
+
+      const firstItem = block.items.find((item) => isRecord(item) && typeof item.title === "string" && item.title.trim());
+      if (firstItem && typeof firstItem.title === "string") {
+        return firstItem.title.trim();
+      }
+    }
+
+    if (block.type === "entity-card" && block.title.trim()) {
+      return block.title.trim();
+    }
+
+    if (block.type === "form" && typeof block.title === "string" && block.title.trim()) {
+      return block.title.trim();
+    }
+
+    if (block.type === "cta-group" && block.items.length > 0) {
+      return block.items[0]?.label?.trim() || "";
+    }
+
+    if (block.type === "alert" && block.message.trim()) {
+      return block.message.trim();
+    }
+  }
+
+  return "";
+}
+
+function extractRecordText(record: ChatRecord): string {
+  if (record.role === "user") {
+    return record.text.trim();
+  }
+
+  if (record.turn) {
+    return summarizeAssistantBlocks(record.turn.turn.blocks);
+  }
+
+  if (typeof record.error === "string" && record.error.trim()) {
+    return record.error.trim();
+  }
+
+  return "";
+}
+
+function buildTransientTurns(records: ChatRecord[]): GenUITransientTurn[] {
+  return records
+    .slice(-MAX_TRANSIENT_TURNS)
+    .map((record) => {
+      const text = extractRecordText(record);
+      if (!text) {
+        return null;
+      }
+
+      if (record.role === "user") {
+        return {
+          role: "user",
+          text,
+        };
+      }
+
+      const primaryBlockType = record.turn
+        ? resolvePrimaryBlockType(record.turn.turn.blocks)
+        : null;
+
+      return {
+        role: "assistant",
+        text,
+        ...(primaryBlockType !== undefined ? { primaryBlockType } : {}),
+        ...(record.turn?.turn.turnContext ? { turnContext: record.turn.turn.turnContext } : {}),
+      };
+    })
+    .filter((turn): turn is GenUITransientTurn => Boolean(turn));
 }
 
 function isGenUIAlertLevel(value: unknown): value is GenUIAlertBlock["level"] {
@@ -752,6 +851,7 @@ export default function ChatPage() {
         };
 
         const token = readClientToken();
+        const transientTurns = !token ? buildTransientTurns(messages) : undefined;
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
         };
@@ -774,6 +874,11 @@ export default function ChatPage() {
                 ? {
                     lat: clientLocation.lat,
                     lng: clientLocation.lng,
+                  }
+                : {}),
+              ...(transientTurns && transientTurns.length > 0
+                ? {
+                    transientTurns,
                   }
                 : {}),
               ...(contextOverrides || {}),
@@ -941,7 +1046,7 @@ export default function ChatPage() {
         setStatus("ready");
       }
     },
-    [clientLocation, conversationId, isSending]
+    [clientLocation, conversationId, isSending, messages]
   );
 
   const handleSubmit = useCallback(

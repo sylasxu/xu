@@ -15,7 +15,7 @@ import { SessionStatsBar } from './session-stats-bar'
 import { RoundSelector } from './round-selector'
 import type { MockSettings } from './mock-settings-panel'
 import type { FlowNode } from '../../types/flow'
-import type { TraceStep, TraceStatus, IntentType } from '../../types/trace'
+import type { TraceStep, TraceStatus, IntentMethod, IntentType } from '../../types/trace'
 import { API_BASE_URL } from '@/lib/eden'
 import { Header } from '@/components/layout/header'
 import { Search } from '@/components/search'
@@ -62,7 +62,7 @@ function isTraceStartPartData(value: unknown): value is {
   systemPrompt?: string
   tools?: Array<{ name: string; description: string; schema: Record<string, unknown> }>
   intent?: IntentType
-  intentMethod?: 'regex' | 'llm'
+  intentMethod?: IntentMethod
 } {
   return (
     isRecord(value) &&
@@ -71,7 +71,12 @@ function isTraceStartPartData(value: unknown): value is {
     (value.systemPrompt === undefined || typeof value.systemPrompt === 'string') &&
     (value.tools === undefined || (Array.isArray(value.tools) && value.tools.every(isTraceToolDefinition))) &&
     (value.intent === undefined || isIntentType(value.intent)) &&
-    (value.intentMethod === undefined || value.intentMethod === 'regex' || value.intentMethod === 'llm')
+    (
+      value.intentMethod === undefined
+      || value.intentMethod === 'regex'
+      || value.intentMethod === 'llm'
+      || value.intentMethod === 'structured_action'
+    )
   )
 }
 

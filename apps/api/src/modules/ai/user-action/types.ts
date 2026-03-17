@@ -1,12 +1,11 @@
 /**
- * User Action Types - A2UI 风格的结构化用户操作
- * 
- * 用户点击 Widget 按钮时，发送结构化 action 而非文本消息
- * AI 可以跳过意图识别，直接路由到对应 Tool
- * 
+ * Structured Action Types
+ *
+ * 用户点击 Widget 按钮时，会发送结构化动作而不是纯文本消息。
+ * 服务端可以跳过意图识别，直接路由到对应能力。
+ *
  * @example
  * ```typescript
- * // 用户点击"报名"按钮
  * {
  *   action: 'join_activity',
  *   payload: { activityId: 'xxx' },
@@ -16,11 +15,11 @@
  */
 
 /**
- * 支持的 Action 类型
+ * 支持的结构化动作类型
  * 
  * 命名规范：动词_名词，如 join_activity, create_activity
  */
-export const USER_ACTION_TYPES = [
+export const STRUCTURED_ACTION_TYPES = [
   // 活动相关
   'join_activity',           // 报名活动
   'view_activity',           // 查看活动详情
@@ -50,10 +49,10 @@ export const USER_ACTION_TYPES = [
   'quick_prompt',            // 快捷提示词
 ] as const;
 
-export type UserActionType = (typeof USER_ACTION_TYPES)[number];
+export type StructuredActionType = (typeof STRUCTURED_ACTION_TYPES)[number];
 
-export function isUserActionType(value: string): value is UserActionType {
-  return (USER_ACTION_TYPES as readonly string[]).includes(value);
+export function isStructuredActionType(value: string): value is StructuredActionType {
+  return (STRUCTURED_ACTION_TYPES as readonly string[]).includes(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -61,12 +60,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * User Action 结构
+ * Structured Action 结构
  */
-export interface UserAction {
-  /** Action 类型 */
-  action: UserActionType;
-  /** Action 参数 */
+export interface StructuredAction {
+  /** 结构化动作类型 */
+  action: StructuredActionType;
+  /** 结构化动作参数 */
   payload: Record<string, unknown>;
   /** 来源 Widget 类型 */
   source?: string;
@@ -75,9 +74,9 @@ export interface UserAction {
 }
 
 /**
- * Action 到 Tool 的映射配置
+ * 结构化动作到 Tool 的映射配置
  */
-export interface ActionToolMapping {
+export interface StructuredActionToolMapping {
   /** 对应的 Tool 名称 */
   toolName: string;
   /** 参数转换函数 */
@@ -89,15 +88,17 @@ export interface ActionToolMapping {
 }
 
 /**
- * Action 处理结果
+ * 结构化动作处理结果
  */
-export interface ActionResult {
+export interface StructuredActionResult {
   /** 是否成功 */
   success: boolean;
   /** 结果数据 */
   data?: unknown;
   /** 错误信息 */
   error?: string;
+  /** 执行耗时（毫秒） */
+  durationMs?: number;
   /** 是否需要回退到 LLM 处理 */
   fallbackToLLM?: boolean;
   /** 回退时的提示文本 */
@@ -105,18 +106,18 @@ export interface ActionResult {
 }
 
 /**
- * 判断消息是否为 UserAction
+ * 判断消息是否为 Structured Action
  */
-export function isUserAction(message: unknown): message is { type: 'user_action'; action: UserAction } {
+export function isStructuredAction(message: unknown): message is { type: 'user_action'; action: StructuredAction } {
   if (!isRecord(message)) return false;
   const msg = message;
   return msg.type === 'user_action' && typeof msg.action === 'object';
 }
 
 /**
- * 从消息内容中提取 UserAction
+ * 从消息内容中提取 Structured Action
  */
-export function extractUserAction(content: unknown): UserAction | null {
+export function extractStructuredAction(content: unknown): StructuredAction | null {
   if (!isRecord(content)) return null;
   
   const obj = content;
@@ -124,7 +125,7 @@ export function extractUserAction(content: unknown): UserAction | null {
   // 检查是否有 action 字段
   if (typeof obj.action !== 'string') return null;
   
-  if (!isUserActionType(obj.action)) {
+  if (!isStructuredActionType(obj.action)) {
     return null;
   }
 

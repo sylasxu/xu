@@ -50,7 +50,6 @@ import {
 import {
   inputGuardProcessor,
   keywordMatchProcessor,
-  saveHistoryProcessor,
   extractPreferencesProcessor,
   outputGuardProcessor,
   recordMetricsProcessor,
@@ -79,8 +78,9 @@ import {
   getPartnerTimeLabel,
   type PartnerMatchingState,
 } from './workflow/partner-matching';
-// User Action — A2UI (Action-to-UI: 结构化用户操作直接映射为 UI 响应)
-import { handleUserAction, type UserAction } from './user-action';
+// Structured Action：结构化动作可直接映射为 UI 响应
+import { handleStructuredAction, type StructuredAction } from './user-action';
+import { buildTurnContextFromBlocks } from './turn-context';
 import { getConfigValue } from './config/config.service';
 import { buildNextBestActions } from './next-best-action.service';
 
@@ -173,8 +173,9 @@ export interface ChatRequest {
   draftContext?: { activityId: string; currentDraft: ActivityDraftForPrompt };
   trace?: boolean;
   ai?: { model?: string; temperature?: number; maxTokens?: number };
-  /** A2UI：结构化用户操作，跳过 LLM 意图识别直接执行 */
-  userAction?: UserAction;
+  abortSignal?: AbortSignal;
+  /** 结构化动作：跳过 LLM 意图识别直接执行 */
+  structuredAction?: StructuredAction;
 }
 
 export interface TraceStep {
@@ -306,6 +307,14 @@ function writeTraceStartEvent(writer: AIStreamWriter, data: Record<string, unkno
   });
 }
 
+function writeTraceStepEvent(writer: AIStreamWriter, data: Record<string, unknown>): void {
+  writer.write({
+    type: 'data-trace-step',
+    data,
+    transient: true,
+  });
+}
+
 function writeTraceEndEvent(writer: AIStreamWriter, data: Record<string, unknown>): void {
   writer.write({
     type: 'data-trace-end',
@@ -320,6 +329,53 @@ function getCacheHitTokens(usage: LanguageModelUsage): number | undefined {
 
 function getCacheMissTokens(usage: LanguageModelUsage): number | undefined {
   return usage.inputTokenDetails.noCacheTokens;
+}
+
+function inferIntentFromStructuredAction(actionType: StructuredAction['action'] | undefined): ClassifyResult['intent'] {
+  if (!actionType) {
+    return 'unknown';
+  }
+
+  if (
+    actionType === 'create_activity'
+    || actionType === 'edit_draft'
+    || actionType === 'save_draft_settings'
+    || actionType === 'publish_draft'
+    || actionType === 'confirm_publish'
+  ) {
+    return 'create';
+  }
+
+  if (
+    actionType === 'explore_nearby'
+    || actionType === 'ask_preference'
+    || actionType === 'expand_map'
+    || actionType === 'filter_activities'
+  ) {
+    return 'explore';
+  }
+
+  if (
+    actionType === 'find_partner'
+    || actionType === 'submit_partner_intent_form'
+    || actionType === 'confirm_match'
+    || actionType === 'cancel_match'
+    || actionType === 'select_preference'
+    || actionType === 'skip_preference'
+  ) {
+    return 'partner';
+  }
+
+  if (
+    actionType === 'join_activity'
+    || actionType === 'view_activity'
+    || actionType === 'cancel_join'
+    || actionType === 'share_activity'
+  ) {
+    return 'manage';
+  }
+
+  return 'unknown';
 }
 
 function extractToolSchema(tool: unknown): unknown {
@@ -342,64 +398,89 @@ function extractToolSchema(tool: unknown): unknown {
 
 export async function handleChatStream(request: ChatRequest): Promise<Response> {
   return runWithTrace(async () => {
-  const { messages, userId, rateLimitUserId, conversationId, location, source, draftContext, trace, ai, userAction } = request;
+  const { messages, userId, rateLimitUserId, conversationId, location, source, draftContext, trace, ai, abortSignal, structuredAction } = request;
   let effectiveMessages = messages;
   const startTime = Date.now();
   const latestMessage = messages[messages.length - 1];
   const currentInputText = typeof latestMessage?.content === 'string'
     ? latestMessage.content
     : latestMessage?.parts?.find((part): part is { type: 'text'; text: string } => part.type === 'text')?.text
-      || userAction?.originalText
+      || structuredAction?.originalText
       || '';
 
-  if (userId && userAction?.source === 'text_inference') {
+  // 0. 提前执行限流与输入护栏，避免文本推断出的结构化动作绕过基础保护
+  const rateLimitSubject = userId || rateLimitUserId || null;
+  const rateLimitResult = await checkRateLimit(rateLimitSubject, { maxRequests: 30, windowSeconds: 60 });
+  if (!rateLimitResult.allowed) {
+    logger.warn('Rate limit exceeded', { userId, retryAfter: rateLimitResult.retryAfter });
+    return createDirectResponse('请求太频繁了，休息一下再来吧～', trace);
+  }
+
+  const processorLogs: ProcessorLogEntry[] = [];
+  const createGuardContext = (inputText: string): ProcessorContext => ({
+    userId,
+    messages: [],
+    rawUserInput: inputText,
+    userInput: inputText.trim().slice(0, 2000),
+    systemPrompt: '',
+    metadata: {},
+  });
+
+  const initialGuardResult = await inputGuardProcessor(createGuardContext(currentInputText));
+  processorLogs.push({
+    processorName: inputGuardProcessor.processorName,
+    executionTime: initialGuardResult.executionTime,
+    success: initialGuardResult.success,
+    data: initialGuardResult.data,
+    error: initialGuardResult.error,
+    timestamp: new Date().toISOString(),
+  });
+
+  if (!initialGuardResult.success) {
+    logger.warn('Input blocked', { userId, error: initialGuardResult.error });
+    return createDirectResponse('这个话题我帮不了你 😅', trace);
+  }
+
+  let sanitizedInput = initialGuardResult.context.userInput;
+
+  if (userId && structuredAction?.source === 'text_action_inference') {
     const partnerThreadId = conversationId || (await getOrCreateThread(userId)).id;
     const partnerMatchingState = await recoverPartnerMatchingState(partnerThreadId);
     if (partnerMatchingState) {
       const currentQuestion = getNextQuestion(partnerMatchingState);
-      if (looksLikePartnerAnswer(currentInputText, currentQuestion)) {
+      if (looksLikePartnerAnswer(sanitizedInput, currentQuestion)) {
         return handlePartnerMatchingFlow(
           request,
           partnerMatchingState,
           partnerThreadId,
-          currentInputText,
+          sanitizedInput,
           { intent: 'partner', confidence: 1, method: 'p1' }
         );
       }
     }
   }
 
-  // 0. A2UI: 检查是否为结构化 userAction（跳过 LLM 意图识别）
-  if (userAction) {
-    logger.info('Processing user action (A2UI)', { 
-      action: userAction.action, 
-      source: userAction.source,
+  // 1. 先尝试执行结构化动作
+  if (structuredAction) {
+    logger.info('Processing structured action', {
+      action: structuredAction.action,
+      source: structuredAction.source,
       userId: userId || 'anon',
     });
     
-    const actionResult = await handleUserAction(
-      userAction,
+    const actionResult = await handleStructuredAction(
+      structuredAction,
       userId,
       location ? { lat: location[1], lng: location[0] } : undefined
     );
     
-    // 如果 action 处理成功且不需要回退到 LLM
+    // 如果动作处理成功且不需要回退到 LLM
     if (actionResult.success && !actionResult.fallbackToLLM) {
-      await saveUserActionConversation({
-        conversationId,
-        userId,
-        userMessage: typeof messages[messages.length - 1]?.content === 'string'
-          ? (messages[messages.length - 1]!.content || '')
-          : '',
-        userAction,
-        result: actionResult,
-      });
-      return createActionResponse(actionResult, trace, userAction);
+      return createStructuredActionResponse(actionResult, trace, structuredAction);
     }
     
     // 如果需要回退到 LLM，使用 fallbackText 作为用户消息
     if (actionResult.fallbackToLLM && actionResult.fallbackText) {
-      // 修改最后一条消息为 fallbackText
       const modifiedMessages = [...effectiveMessages];
       if (modifiedMessages.length > 0) {
         const lastMsg = modifiedMessages[modifiedMessages.length - 1];
@@ -408,16 +489,34 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
         }
       }
       effectiveMessages = modifiedMessages;
-      // 继续正常的 LLM 流程
+
+      if (actionResult.fallbackText !== currentInputText) {
+        const fallbackGuardResult = await inputGuardProcessor(createGuardContext(actionResult.fallbackText));
+        processorLogs.push({
+          processorName: inputGuardProcessor.processorName,
+          executionTime: fallbackGuardResult.executionTime,
+          success: fallbackGuardResult.success,
+          data: fallbackGuardResult.data,
+          error: fallbackGuardResult.error,
+          timestamp: new Date().toISOString(),
+        });
+
+        if (!fallbackGuardResult.success) {
+          logger.warn('Fallback input blocked', { userId, error: fallbackGuardResult.error });
+          return createDirectResponse('这个话题我帮不了你 😅', trace);
+        }
+
+        sanitizedInput = fallbackGuardResult.context.userInput;
+      }
     }
     
-    // 如果 action 失败且不回退，返回错误
+    // 如果动作失败且不回退，直接返回错误
     if (!actionResult.success && !actionResult.fallbackToLLM) {
       return createDirectResponse(actionResult.error || '操作失败', trace);
     }
   }
 
-  // 0.1 提取最后一条用户消息（用于护栏检查）
+  // 2. 提取最后一条用户消息（用于后续 LLM 管线）
   const conversationHistory: Array<{
     role: ChatRequest['messages'][number]['role'];
     content: string;
@@ -425,41 +524,7 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
     role: m.role,
     content: getMessageTextContent(m),
   }));
-  const rawUserInput = conversationHistory.filter(m => m.role === 'user').pop()?.content || '';
-
-  // 1. 频率限制检查
-  const rateLimitSubject = userId || rateLimitUserId || null;
-  const rateLimitResult = await checkRateLimit(rateLimitSubject, { maxRequests: 30, windowSeconds: 60 });
-  if (!rateLimitResult.allowed) {
-    logger.warn('Rate limit exceeded', { userId, retryAfter: rateLimitResult.retryAfter });
-    return createDirectResponse('请求太频繁了，休息一下再来吧～', trace);
-  }
-
-  // 2. 输入护栏检查 (inputGuardProcessor)
-  const processorLogs: ProcessorLogEntry[] = [];
-  const guardContext: ProcessorContext = {
-    userId,
-    messages: [],
-    rawUserInput,
-    userInput: rawUserInput.trim().slice(0, 2000),
-    systemPrompt: '',
-    metadata: {},
-  };
-  const guardResult = await inputGuardProcessor(guardContext);
-  processorLogs.push({
-    processorName: inputGuardProcessor.processorName,
-    executionTime: guardResult.executionTime,
-    success: guardResult.success,
-    data: guardResult.data,
-    error: guardResult.error,
-    timestamp: new Date().toISOString(),
-  });
-
-  if (!guardResult.success) {
-    logger.warn('Input blocked', { userId, error: guardResult.error });
-    return createDirectResponse('这个话题我帮不了你 😅', trace);
-  }
-  const sanitizedInput = guardResult.context.userInput;
+  const rawUserInput = conversationHistory.filter((message) => message.role === 'user').pop()?.content || currentInputText;
 
   // ── Pre-LLM 管线阶段 ──
   // 2.5 构建上下文（promptContext 需要在 ProcessorContext 之前准备好）
@@ -521,7 +586,7 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
     const { matchKeyword } = await import('../hot-keywords/hot-keywords.service');
     const matchedKeyword = await matchKeyword(sanitizedInput);
     if (matchedKeyword) {
-      return createKeywordResponse(matchedKeyword, trace, userId, sanitizedInput);
+      return createKeywordResponse(matchedKeyword, trace);
     }
     // 降级：metadata 标记命中但无法获取完整 keyword 对象，继续后续流程
   }
@@ -619,6 +684,7 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
     tools,
     temperature: ai?.temperature ?? 0,
     maxOutputTokens: ai?.maxTokens,
+    abortSignal,
     stopWhen: [stepCountIs(5), hasToolCall('askPreference')],
     onStepFinish: (step) => {
       // 记录每一步的详细信息
@@ -701,6 +767,7 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
         ],
         metadata: {
           ...preLLMContext.metadata,
+          chatProtocol: 'genui_chat',
           conversationId: conversationId ?? undefined,
           activityId: getActivityIdFromTraceSteps(toolCallRecords),
           // record-metrics-processor 数据
@@ -747,9 +814,9 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
       };
 
       if (userId) {
-        // Post-LLM: output-guard → save-history（失败时记录日志，不影响响应）
+        // Post-LLM: output-guard（对话持久化统一在 controller 末端处理）
         const { logs: postLLMLogs } = await runPostLLMProcessors(
-          [{ processor: outputGuardProcessor }, { processor: saveHistoryProcessor }],
+          [{ processor: outputGuardProcessor }],
           postLLMContext
         );
         processorLogs.push(...postLLMLogs);
@@ -800,7 +867,7 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
     // Processor 数据（从 ProcessorContext.metadata 读取）
     preLLMContext,
     inputGuard: {
-      duration: guardResult.executionTime,
+      duration: initialGuardResult.executionTime,
       blocked: false,
       sanitized: sanitizedInput,
       triggeredRules: [],
@@ -845,116 +912,18 @@ function createDirectResponse(text: string, trace?: boolean): Response {
   return createUIMessageStreamResponse({ stream });
 }
 
-function resolveActionMessage(
-  result: import('./user-action').ActionResult,
-  data: Record<string, unknown> | undefined
-): string {
-  return (
-    typeof data?.message === 'string' && data.message.trim()
-      ? data.message.trim()
-      : data?.action === 'navigate'
-        ? '已为你打开详情入口'
-        : data?.action === 'share'
-          ? '准备分享给朋友吧～'
-          : data?.action === 'publish'
-            ? '草稿已准备好，确认后就能发出去'
-            : result.success
-              ? '操作成功！'
-              : '操作失败，请稍后再试'
-  );
-}
-
-async function saveUserActionConversation(params: {
-  conversationId?: string;
-  userId: string | null;
-  userMessage: string;
-  userAction?: UserAction;
-  result: import('./user-action').ActionResult;
-}): Promise<void> {
-  const { conversationId, userId, userMessage, userAction, result } = params;
-  if (!conversationId || !userId) {
-    return;
-  }
-
-  const data = asRecord(result.data);
-  const actionMessage = resolveActionMessage(result, data);
-
-  await saveMessage({
-    conversationId,
-    userId,
-    role: 'user',
-    messageType: 'text',
-    content: {
-      text: userMessage,
-      ...(userAction ? { action: userAction.action, source: userAction.source || 'a2ui' } : {}),
-    },
-  });
-
-  await saveMessage({
-    conversationId,
-    userId,
-    role: 'assistant',
-    messageType: 'text',
-    content: {
-      text: actionMessage,
-      ...(userAction ? { action: userAction.action } : {}),
-    },
-    ...(typeof data?.activityId === 'string' ? { activityId: data.activityId } : {}),
-  });
-}
-
 /**
  * 创建关键词匹配响应 (P0 层)
  * 直接返回预设响应，无需 LLM 处理
  */
 async function createKeywordResponse(
   keyword: import('../hot-keywords/hot-keywords.model').GlobalKeywordResponse, 
-  trace: boolean | undefined,
-  userId: string | null,
-  userMessage: string
+  trace: boolean | undefined
 ): Promise<Response> {
   const keywordContext = {
     keywordId: keyword.id,
     matchedAt: new Date().toISOString(),
   };
-  const keywordResponseContent = asRecord(keyword.responseContent);
-  
-  // 异步保存对话历史（不阻塞响应）
-  if (userId) {
-    (async () => {
-      try {
-        const thread = await getOrCreateThread(userId);
-        
-        // 保存用户消息
-        await saveMessage({
-          conversationId: thread.id,
-          userId,
-          role: 'user',
-          messageType: 'text',
-          content: { text: userMessage },
-        });
-        
-        // 保存 AI 响应（包含 keywordContext）
-        await saveMessage({
-          conversationId: thread.id,
-          userId,
-          role: 'assistant',
-          messageType: keyword.responseType,
-          content: keyword.responseType === 'text' && typeof keyword.responseContent === 'string'
-            ? {
-                text: keyword.responseContent,
-                keywordContext,
-              }
-            : {
-                ...(keywordResponseContent ?? {}),
-                keywordContext,
-              },
-        });
-      } catch (err) {
-        logger.error('Failed to save keyword match conversation', { error: err });
-      }
-    })();
-  }
   
   const stream = createUIMessageStream({
     execute: ({ writer }) => {
@@ -995,16 +964,39 @@ async function createKeywordResponse(
 }
 
 /**
- * 创建 UserAction 响应 (A2UI)
- * 直接返回 action 执行结果，不经过 LLM
+ * 创建 Structured Action 响应
+ * 直接返回动作执行结果，不经过 LLM
  */
-function createActionResponse(
-  result: import('./user-action').ActionResult,
+function createStructuredActionResponse(
+  result: import('./user-action').StructuredActionResult,
   trace?: boolean,
-  userAction?: UserAction
+  structuredAction?: StructuredAction
 ): Response {
   const data = asRecord(result.data);
-  const actionType = userAction?.action;
+  const explorePayload = (() => {
+    if (Array.isArray(data?.explore)) {
+      return {
+        results: data.explore,
+        title: '帮你找到这些局，点一个就能继续',
+      };
+    }
+
+    const explore = asRecord(data?.explore);
+    const fetchConfig = asRecord(data?.fetchConfig);
+    const interaction = asRecord(data?.interaction);
+    const preview = asRecord(data?.preview);
+    if (!explore) {
+      return null;
+    }
+
+    return {
+      ...explore,
+      ...(fetchConfig ? { fetchConfig } : {}),
+      ...(interaction ? { interaction } : {}),
+      ...(preview ? { preview } : {}),
+    };
+  })();
+  const actionType = structuredAction?.action;
   const actionMessage = (
     typeof data?.message === 'string' && data.message.trim()
       ? data.message.trim()
@@ -1019,9 +1011,63 @@ function createActionResponse(
               : '操作失败，请稍后再试'
   );
   const nextActions = buildNextBestActions({ actionType, data });
+  const actionDurationMs = typeof result.durationMs === 'number' && Number.isFinite(result.durationMs)
+    ? Math.max(0, result.durationMs)
+    : 0;
+  const traceCompletedAtMs = Date.now();
+  const traceStartedAtMs = traceCompletedAtMs - actionDurationMs;
+  const traceStartedAt = new Date(traceStartedAtMs).toISOString();
+  const traceCompletedAt = new Date(traceCompletedAtMs).toISOString();
+  const requestId = randomUUID();
+  const structuredIntent = inferIntentFromStructuredAction(actionType);
+  const activityId = typeof data?.activityId === 'string' ? data.activityId : null;
 
   const stream = createUIMessageStream({
     execute: ({ writer }) => {
+      if (trace) {
+        writeTraceStartEvent(writer, {
+          requestId,
+          startedAt: traceStartedAt,
+          intent: structuredIntent,
+          intentMethod: 'structured_action',
+          executionPath: 'structured_action',
+        });
+
+        writeTraceStepEvent(writer, {
+          id: `${requestId}-structured_action_resolved`,
+          type: 'structured-action',
+          name: '结构化动作判定',
+          startedAt: traceStartedAt,
+          completedAt: traceStartedAt,
+          status: 'success',
+          duration: 0,
+          data: {
+            phase: 'resolved',
+            action: actionType,
+            source: structuredAction?.source || 'structured_action',
+            executionPath: 'structured_action',
+          },
+        });
+
+        writeTraceStepEvent(writer, {
+          id: `${requestId}-structured_action_executed`,
+          type: 'structured-action',
+          name: '结构化动作执行',
+          startedAt: traceStartedAt,
+          completedAt: traceCompletedAt,
+          status: result.success ? 'success' : 'error',
+          duration: actionDurationMs,
+          data: {
+            phase: 'executed',
+            action: actionType,
+            success: result.success,
+            fallbackToLLM: result.fallbackToLLM === true,
+            ...(activityId ? { activityId } : {}),
+          },
+          ...(result.error ? { error: result.error } : {}),
+        });
+      }
+
       // 返回 action 结果作为 data
       writeWidgetEvent(writer, {
         type: 'action_result',
@@ -1031,21 +1077,10 @@ function createActionResponse(
         nextActions,
       });
 
-      if (Array.isArray(data?.explore)) {
+      if (explorePayload) {
         writeWidgetEvent(writer, {
           type: 'widget_explore',
-          payload: {
-            results: data.explore,
-            title: '帮你找到这些局，点一个就能继续',
-          },
-        });
-      } else if (
-        data?.explore &&
-        typeof data.explore === 'object'
-      ) {
-        writeWidgetEvent(writer, {
-          type: 'widget_explore',
-          payload: data.explore,
+          payload: explorePayload,
         });
       }
 
@@ -1092,17 +1127,33 @@ function createActionResponse(
       }
       
       if (trace) {
-        const now = new Date().toISOString();
-        writeTraceStartEvent(writer, {
-          requestId: randomUUID(),
-          startedAt: now,
-          intent: 'user_action',
-          intentMethod: 'a2ui',
+        writeTraceStepEvent(writer, {
+          id: `${requestId}-output`,
+          type: 'output',
+          name: '输出',
+          startedAt: traceCompletedAt,
+          completedAt: traceCompletedAt,
+          status: result.success ? 'success' : 'error',
+          duration: 0,
+          data: {
+            text: actionMessage,
+            executionPath: 'structured_action',
+            structuredAction: actionType,
+          },
         });
+
         writeTraceEndEvent(writer, {
-          completedAt: now,
+          requestId,
+          completedAt: traceCompletedAt,
+          totalDuration: actionDurationMs,
           status: result.success ? 'completed' : 'failed',
-          output: { actionResult: result },
+          executionPath: 'structured_action',
+          output: {
+            text: actionMessage,
+            structuredAction: actionType,
+            success: result.success,
+            ...(activityId ? { activityId } : {}),
+          },
         });
       }
     },
@@ -2006,82 +2057,152 @@ export async function getConversationMessages(conversationId: string) {
   };
 }
 
-function buildAssistantConversationSnapshot(blocks: GenUIBlock[]): {
+function summarizeAssistantBlocks(blocks: GenUIBlock[]): string {
+  const textSegments = blocks
+    .filter((block): block is Extract<GenUIBlock, { type: 'text' }> =>
+      block.type === 'text' && typeof block.content === 'string' && block.content.trim().length > 0
+    )
+    .map((block) => block.content.trim());
+
+  if (textSegments.length > 0) {
+    return textSegments.join('\n\n');
+  }
+
+  for (const block of blocks) {
+    if (block.type === 'alert' && block.message.trim()) {
+      return block.message.trim();
+    }
+
+    if (block.type === 'choice' && block.question.trim()) {
+      return block.question.trim();
+    }
+
+    if (block.type === 'list') {
+      const title = typeof block.title === 'string' && block.title.trim()
+        ? block.title.trim()
+        : '';
+      if (title) {
+        return title;
+      }
+
+      const firstItem = block.items.find((item) => isRecord(item) && typeof item.title === 'string' && item.title.trim());
+      if (firstItem && typeof firstItem.title === 'string') {
+        return firstItem.title.trim();
+      }
+
+      return '附近活动';
+    }
+
+    if (block.type === 'entity-card' && block.title.trim()) {
+      return block.title.trim();
+    }
+
+    if (block.type === 'form') {
+      if (typeof block.title === 'string' && block.title.trim()) {
+        return block.title.trim();
+      }
+
+      return '请先补充一下信息';
+    }
+
+    if (block.type === 'cta-group') {
+      return '下一步操作';
+    }
+  }
+
+  return '';
+}
+
+function resolveAssistantMessageTypeFromBlocks(
+  blocks: GenUIBlock[]
+): ConversationMessageRecord['messageType'] {
+  for (const block of blocks) {
+    if (block.type === 'choice') {
+      return 'widget_ask_preference';
+    }
+
+    if (block.type === 'list') {
+      return 'widget_explore';
+    }
+
+    if (block.type === 'entity-card') {
+      return 'widget_draft';
+    }
+
+    if (block.type === 'cta-group' || block.type === 'form') {
+      return 'widget_action';
+    }
+
+    if (block.type === 'alert' && block.level === 'error') {
+      return 'widget_error';
+    }
+  }
+
+  return 'text';
+}
+
+function extractActivityIdFromBlocks(blocks: GenUIBlock[]): string | undefined {
+  for (const block of blocks) {
+    if (block.type === 'entity-card' && isRecord(block.fields) && typeof block.fields.activityId === 'string') {
+      return block.fields.activityId;
+    }
+
+    if (block.type === 'cta-group') {
+      for (const item of block.items) {
+        if (isRecord(item.params) && typeof item.params.activityId === 'string') {
+          return item.params.activityId;
+        }
+      }
+    }
+
+    if (block.type === 'form' && isRecord(block.initialValues) && typeof block.initialValues.activityId === 'string') {
+      return block.initialValues.activityId;
+    }
+  }
+
+  return undefined;
+}
+
+function hasAssistantErrorBlock(blocks: GenUIBlock[]): boolean {
+  return blocks.some((block) => block.type === 'alert' && block.level === 'error');
+}
+
+function resolvePrimaryBlockType(blocks: GenUIBlock[]): GenUIBlock['type'] | null {
+  const primaryBlock = blocks.find((block) => block.type !== 'text') ?? blocks[0];
+  return primaryBlock?.type ?? null;
+}
+
+function buildAssistantConversationSnapshot(
+  blocks: GenUIBlock[],
+  params?: { turnId?: string; traceId?: string }
+): {
   messageType: ConversationMessageRecord['messageType'];
   content: Record<string, unknown>;
 } | null {
-  const textBlock = blocks.find((block): block is Extract<GenUIBlock, { type: 'text' }> =>
-    block.type === 'text' && typeof block.content === 'string' && block.content.trim().length > 0
-  );
-  const choiceBlock = blocks.find((block): block is Extract<GenUIBlock, { type: 'choice' }> => block.type === 'choice');
-  const listBlock = blocks.find((block): block is Extract<GenUIBlock, { type: 'list' }> => block.type === 'list');
-  const entityBlock = blocks.find((block): block is Extract<GenUIBlock, { type: 'entity-card' }> => block.type === 'entity-card');
-  const ctaBlock = blocks.find((block): block is Extract<GenUIBlock, { type: 'cta-group' }> => block.type === 'cta-group');
-  const alertBlock = blocks.find((block): block is Extract<GenUIBlock, { type: 'alert' }> => block.type === 'alert');
-
-  if (choiceBlock) {
-    return {
-      messageType: 'widget_ask_preference',
-      content: {
-        text: textBlock?.content || choiceBlock.question,
-        question: choiceBlock.question,
-        options: choiceBlock.options,
-      },
-    };
+  if (blocks.length === 0) {
+    return null;
   }
 
-  if (listBlock) {
-    return {
-      messageType: 'widget_explore',
-      content: {
-        text: textBlock?.content || listBlock.title || '附近活动',
-        ...(typeof listBlock.title === 'string' ? { title: listBlock.title } : {}),
-        items: listBlock.items,
-      },
-    };
-  }
+  const text = summarizeAssistantBlocks(blocks);
+  const turnContext = buildTurnContextFromBlocks(blocks);
 
-  if (entityBlock) {
-    return {
-      messageType: 'widget_draft',
-      content: {
-        text: textBlock?.content || entityBlock.title,
-        title: entityBlock.title,
-        fields: entityBlock.fields,
+  return {
+    messageType: resolveAssistantMessageTypeFromBlocks(blocks),
+    content: {
+      ...(text ? { text } : {}),
+      primaryBlockType: resolvePrimaryBlockType(blocks),
+      ...(turnContext ? { turnContext } : {}),
+      blocks,
+      turn: {
+        ...(params?.turnId ? { turnId: params.turnId } : {}),
+        ...(params?.traceId ? { traceId: params.traceId } : {}),
+        status: 'completed',
+        primaryBlockType: resolvePrimaryBlockType(blocks),
+        ...(turnContext ? { turnContext } : {}),
+        blocks,
       },
-    };
-  }
-
-  if (ctaBlock) {
-    return {
-      messageType: 'widget_action',
-      content: {
-        text: textBlock?.content || '下一步操作',
-        items: ctaBlock.items,
-      },
-    };
-  }
-
-  if (alertBlock) {
-    return {
-      messageType: alertBlock.level === 'error' ? 'widget_error' : 'text',
-      content: {
-        text: textBlock?.content || alertBlock.message,
-        level: alertBlock.level,
-      },
-    };
-  }
-
-  if (textBlock) {
-    return {
-      messageType: 'text',
-      content: {
-        text: textBlock.content,
-      },
-    };
-  }
-
-  return null;
+    },
+  };
 }
 
 function extractStoredConversationText(content: unknown): string {
@@ -2109,11 +2230,37 @@ export async function syncConversationTurnSnapshot(params: {
   userId: string;
   userText?: string;
   blocks: GenUIBlock[];
+  turnId?: string;
+  traceId?: string;
+  inputType?: 'text' | 'action';
+  resolvedStructuredAction?: StructuredAction;
+  activityId?: string;
 }) {
-  const snapshot = buildAssistantConversationSnapshot(params.blocks);
-  if (!snapshot) {
+  const assistantRecord = buildAssistantConversationSnapshot(params.blocks, {
+    turnId: params.turnId,
+    traceId: params.traceId,
+  });
+  if (!assistantRecord) {
     return;
   }
+
+  const normalizedUserText = params.userText?.trim() || '';
+  const shouldPersistStructuredActionInput = params.inputType === 'action' && !!params.resolvedStructuredAction;
+  const userRecord = normalizedUserText
+    ? {
+        messageType: shouldPersistStructuredActionInput ? 'user_action' as const : 'text' as const,
+        content: shouldPersistStructuredActionInput
+          ? {
+              text: normalizedUserText,
+              action: params.resolvedStructuredAction?.action,
+              payload: params.resolvedStructuredAction?.payload,
+              source: params.resolvedStructuredAction?.source || 'structured_action',
+            }
+          : { text: normalizedUserText },
+      }
+    : null;
+  const resolvedActivityId = params.activityId || extractActivityIdFromBlocks(params.blocks);
+  const hasError = hasAssistantErrorBlock(params.blocks);
 
   const recentMessages = await db
     .select({
@@ -2124,67 +2271,55 @@ export async function syncConversationTurnSnapshot(params: {
     .from(conversationMessages)
     .where(eq(conversationMessages.conversationId, params.conversationId))
     .orderBy(desc(conversationMessages.createdAt))
-    .limit(3);
+    .limit(4);
 
-  const latestMessage = recentMessages[0];
-  const normalizedUserText = params.userText?.trim() || '';
-  const matchedUserMessage = normalizedUserText
-    ? recentMessages.find((message) =>
-      message.role === 'user' && extractStoredConversationText(message.content) === normalizedUserText
-    )
+  const existingAssistantForTurn = params.turnId
+    ? recentMessages.find((message) => {
+      if (message.role !== 'assistant' || !isRecord(message.content)) {
+        return false;
+      }
+
+      const turn = isRecord(message.content.turn) ? message.content.turn : null;
+      return turn?.turnId === params.turnId;
+    })
     : undefined;
 
-  if (!latestMessage) {
-    if (normalizedUserText) {
-      await saveMessage({
-        conversationId: params.conversationId,
-        userId: params.userId,
-        role: 'user',
-        messageType: 'text',
-        content: { text: normalizedUserText },
-      });
-    }
-
-    await saveMessage({
-      conversationId: params.conversationId,
-      userId: params.userId,
-      role: 'assistant',
-      messageType: snapshot.messageType,
-      content: snapshot.content,
-    });
-    return;
-  }
-
-  if (latestMessage.role === 'assistant' && matchedUserMessage) {
-    const nextContent = isRecord(latestMessage.content)
-      ? {
-          ...latestMessage.content,
-          ...snapshot.content,
-        }
-      : snapshot.content;
-
+  if (existingAssistantForTurn) {
     await db
       .update(conversationMessages)
       .set({
-        messageType: snapshot.messageType,
-        content: nextContent,
+        messageType: assistantRecord.messageType,
+        content: assistantRecord.content,
+        activityId: resolvedActivityId ?? null,
         embedding: null,
       })
-      .where(eq(conversationMessages.id, latestMessage.id));
+      .where(eq(conversationMessages.id, existingAssistantForTurn.id));
+
+    if (hasError) {
+      await db
+        .update(conversations)
+        .set({ hasError: true })
+        .where(eq(conversations.id, params.conversationId));
+    }
     return;
   }
 
-  const latestUserText = latestMessage.role === 'user'
-    ? extractStoredConversationText(latestMessage.content)
-    : '';
+  const latestMessage = recentMessages[0];
+  const shouldInsertUser = Boolean(
+    userRecord
+      && !(
+        latestMessage?.role === 'user'
+        && extractStoredConversationText(latestMessage.content) === normalizedUserText
+      )
+  );
 
-  if (normalizedUserText && latestUserText !== normalizedUserText) {
+  if (shouldInsertUser && userRecord) {
     await saveMessage({
       conversationId: params.conversationId,
       userId: params.userId,
       role: 'user',
-      messageType: 'text',
-      content: { text: normalizedUserText },
+      messageType: userRecord.messageType,
+      content: userRecord.content,
     });
   }
 
@@ -2192,9 +2327,17 @@ export async function syncConversationTurnSnapshot(params: {
     conversationId: params.conversationId,
     userId: params.userId,
     role: 'assistant',
-    messageType: snapshot.messageType,
-    content: snapshot.content,
+    messageType: assistantRecord.messageType,
+    content: assistantRecord.content,
+    ...(resolvedActivityId ? { activityId: resolvedActivityId } : {}),
   });
+
+  if (hasError) {
+    await db
+      .update(conversations)
+      .set({ hasError: true })
+      .where(eq(conversations.id, params.conversationId));
+  }
 }
 
 // ==========================================

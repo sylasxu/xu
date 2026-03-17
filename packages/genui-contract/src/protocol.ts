@@ -1,4 +1,4 @@
-export const GENUI_CONTRACT_VERSION = "2026-03-15";
+export const GENUI_CONTRACT_VERSION = "2026-03-16";
 
 export const GENUI_BLOCK_TYPES = [
   "text",
@@ -14,6 +14,55 @@ export type GenUIBlockType = (typeof GENUI_BLOCK_TYPES)[number];
 export type GenUIReplacePolicy = "append" | "replace" | "ignore-if-exists";
 export type GenUITurnStatus = "streaming" | "completed" | "error";
 
+export interface GenUITurnChoiceContextOption {
+  label: string;
+  action: string;
+  params?: Record<string, unknown>;
+  value?: string;
+}
+
+export interface GenUITurnListContextItem {
+  title: string;
+  action: string;
+  params?: Record<string, unknown>;
+  aliases?: string[];
+}
+
+export interface GenUITurnCtaContextItem {
+  label: string;
+  action: string;
+  params?: Record<string, unknown>;
+}
+
+export interface GenUITurnChoiceContext {
+  kind: "choice";
+  question?: string;
+  options: GenUITurnChoiceContextOption[];
+}
+
+export interface GenUITurnListContext {
+  kind: "list";
+  title?: string;
+  items: GenUITurnListContextItem[];
+}
+
+export interface GenUITurnCtaContext {
+  kind: "cta-group";
+  items: GenUITurnCtaContextItem[];
+}
+
+export type GenUITurnContext =
+  | GenUITurnChoiceContext
+  | GenUITurnListContext
+  | GenUITurnCtaContext;
+
+export interface GenUITransientTurn {
+  role: "user" | "assistant";
+  text: string;
+  primaryBlockType?: GenUIBlockType | null;
+  turnContext?: GenUITurnContext;
+}
+
 export interface GenUIRequestContext {
   client?: "web" | "miniprogram" | "admin";
   locale?: string;
@@ -24,6 +73,7 @@ export interface GenUIRequestContext {
   activityId?: string;
   followUpMode?: "review" | "rebook" | "kickoff";
   entry?: string;
+  transientTurns?: GenUITransientTurn[];
 }
 
 export interface GenUIRequestAi {
@@ -94,6 +144,11 @@ export interface GenUIListBlock extends GenUIBlockBase {
   type: "list";
   title?: string;
   items: Record<string, unknown>[];
+  center?: { lat: number; lng: number; name: string };
+  semanticQuery?: string;
+  fetchConfig?: Record<string, unknown>;
+  interaction?: Record<string, unknown>;
+  preview?: Record<string, unknown>;
 }
 
 export interface GenUIFormBlock extends GenUIBlockBase {
@@ -134,6 +189,7 @@ export interface GenUITurn {
   role: "assistant";
   status: GenUITurnStatus;
   blocks: GenUIBlock[];
+  turnContext?: GenUITurnContext;
 }
 
 export interface GenUITurnEnvelope {

@@ -22,6 +22,15 @@ export async function saveHistoryProcessor(context: ProcessorContext): Promise<P
   
   try {
     const { userId, messages, metadata } = context;
+
+    if (metadata.chatProtocol === 'genui_chat') {
+      return {
+        success: true,
+        context,
+        executionTime: Date.now() - startTime,
+        data: { skipped: true, reason: 'genui-chat-owned-by-turn-snapshot' },
+      };
+    }
     
     // 如果没有 userId，跳过
     if (!userId) {

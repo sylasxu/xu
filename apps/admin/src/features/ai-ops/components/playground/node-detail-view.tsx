@@ -319,15 +319,27 @@ function P0MatchDetail({ data }: { data: FlowNodeData & { type: 'keyword-match' 
 function P1IntentDetail({ data }: { data: FlowNodeData & { type: 'intent-classify' } }) {
   const intentLabel = INTENT_DISPLAY_NAMES[data.intent as IntentType] ?? data.intent
   const methodLabel = INTENT_METHOD_NAMES[data.method] ?? data.method
+  const structuredAction = typeof data.action === 'string' ? data.action : undefined
+  const phase = typeof data.phase === 'string' ? data.phase : undefined
 
   return (
     <div className="space-y-3">
       <DetailRow label="意图类型">
         <Badge>{intentLabel}</Badge>
       </DetailRow>
-      <DetailRow label="识别方法">
+      <DetailRow label={data.method === 'structured_action' ? '执行路径' : '识别方法'}>
         <span className="text-sm">{methodLabel}</span>
       </DetailRow>
+      {data.method === 'structured_action' && structuredAction && (
+        <DetailRow label="动作">
+          <Badge variant="outline" className="font-mono">{structuredAction}</Badge>
+        </DetailRow>
+      )}
+      {data.method === 'structured_action' && phase && (
+        <DetailRow label="阶段">
+          <span className="text-sm">{getStructuredActionPhaseLabel(phase)}</span>
+        </DetailRow>
+      )}
       {data.confidence !== undefined && (
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
@@ -339,6 +351,17 @@ function P1IntentDetail({ data }: { data: FlowNodeData & { type: 'intent-classif
       )}
     </div>
   )
+}
+
+function getStructuredActionPhaseLabel(phase: string): string {
+  switch (phase) {
+    case 'resolved':
+      return '已判定'
+    case 'executed':
+      return '已执行'
+    default:
+      return phase
+  }
 }
 
 /** LLM 详情 */

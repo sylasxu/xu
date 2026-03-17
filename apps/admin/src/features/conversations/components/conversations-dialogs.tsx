@@ -19,7 +19,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { useListContext } from '@/components/list-page'
 import { cn } from '@/lib/utils'
 import {
   useConversationDetail,
@@ -28,7 +27,7 @@ import {
   type ConversationSession,
   type ConversationMessage,
 } from '@/hooks/use-conversations'
-import { type ConversationDialogType } from './conversations-columns'
+import { useConversationsListContext } from '../list-context'
 
 // 消息类型映射
 const MESSAGE_TYPES: Record<string, string> = {
@@ -57,7 +56,7 @@ const messageTypeColors: Record<string, string> = {
 }
 
 export function ConversationsDialogs() {
-  const { open, setOpen, currentRow, selectedRows, setSelectedRows } = useListContext<ConversationSession, ConversationDialogType>()
+  const { open, setOpen, currentRow, selectedRows, setSelectedRows } = useConversationsListContext()
   const deleteSession = useDeleteSession()
   const deleteSessionsBatch = useDeleteSessionsBatch()
 

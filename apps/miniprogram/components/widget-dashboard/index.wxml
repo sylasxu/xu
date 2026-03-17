@@ -24,9 +24,9 @@
   <!-- v4.4: 社交档案卡片 -->
   <block wx:if="{{hasSocialProfile}}">
     <social-profile-card 
-      profile="{{socialProfile}}"
+      profile="{{displaySocialProfile}}"
       collapsed="{{hasActivities}}"
-      profileHints="{{ui.profileHints}}"
+      profileHints="{{displayUi.profileHints}}"
     />
   </block>
   
@@ -34,7 +34,7 @@
   <block wx:if="{{hasQuickPrompts && !hasActivities}}">
     <view class="quick-prompts-section">
       <quick-prompts 
-        prompts="{{quickPrompts}}"
+        prompts="{{displayQuickPrompts}}"
         bind:prompttap="onQuickPromptTap"
       />
     </view>

@@ -1,5 +1,5 @@
 // User Service - 纯业务逻辑 (纯 RESTful)
-import { db, users, activities, eq, or, ilike, count, desc, sql, gte, lte, and, not } from '@juchang/db';
+import { db, users, activities, eq, or, ilike, count, desc, sql, gte, lte, and, not, toTimestamp, inArray } from '@juchang/db';
 import type { 
   UserResponse,
   QuotaResponse, 
@@ -13,6 +13,17 @@ import type {
 
 type UserQuotaExecutor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
+const DEFAULT_DAILY_AI_CREATE_QUOTA = 3;
+const UNLIMITED_AI_CREATE_QUOTA = 999;
+
+function getQuotaResetPoint(now = new Date()): Date {
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+function isUnlimitedQuota(quota: number): boolean {
+  return quota >= UNLIMITED_AI_CREATE_QUOTA;
+}
+
 async function getQuotaSourceUser(id: string, executor: UserQuotaExecutor = db) {
   const [user] = await executor
     .select({
@@ -25,6 +36,46 @@ async function getQuotaSourceUser(id: string, executor: UserQuotaExecutor = db) 
     .limit(1);
 
   return user ?? null;
+}
+
+async function syncQuotaToToday(
+  id: string,
+  executor: UserQuotaExecutor = db,
+): Promise<{
+  id: string;
+  aiCreateQuotaToday: number;
+  aiQuotaResetAt: Date | null;
+} | null> {
+  const user = await getQuotaSourceUser(id, executor);
+  if (!user) {
+    return null;
+  }
+
+  const now = new Date();
+  const today = getQuotaResetPoint(now);
+
+  if (user.aiQuotaResetAt && user.aiQuotaResetAt >= today) {
+    return user;
+  }
+
+  const resetQuota = isUnlimitedQuota(user.aiCreateQuotaToday)
+    ? user.aiCreateQuotaToday
+    : DEFAULT_DAILY_AI_CREATE_QUOTA;
+
+  await executor
+    .update(users)
+    .set({
+      aiCreateQuotaToday: resetQuota,
+      aiQuotaResetAt: today,
+      updatedAt: now,
+    })
+    .where(eq(users.id, id));
+
+  return {
+    ...user,
+    aiCreateQuotaToday: resetQuota,
+    aiQuotaResetAt: today,
+  };
 }
 
 /**
@@ -142,35 +193,12 @@ export async function deleteUser(id: string): Promise<boolean> {
  * 获取用户今日额度
  */
 export async function getQuota(id: string, executor: UserQuotaExecutor = db): Promise<QuotaResponse | null> {
-  const user = await getQuotaSourceUser(id, executor);
+  const user = await syncQuotaToToday(id, executor);
   if (!user) return null;
 
-  // 检查是否需要重置额度（跨天重置）
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  
-  let aiCreateQuota = user.aiCreateQuotaToday;
-  let resetAt = user.aiQuotaResetAt?.toISOString() || null;
-
-  // 如果上次重置时间不是今天，重置额度
-  if (!user.aiQuotaResetAt || user.aiQuotaResetAt < today) {
-    aiCreateQuota = 3; // 默认每日 3 次
-    resetAt = today.toISOString();
-    
-    // 更新数据库
-    await executor
-      .update(users)
-      .set({
-        aiCreateQuotaToday: 3,
-        aiQuotaResetAt: today,
-        updatedAt: now,
-      })
-      .where(eq(users.id, id));
-  }
-
   return {
-    aiCreateQuota,
-    resetAt,
+    aiCreateQuota: user.aiCreateQuotaToday,
+    resetAt: user.aiQuotaResetAt?.toISOString() || null,
   };
 }
 
@@ -179,20 +207,40 @@ export async function getQuota(id: string, executor: UserQuotaExecutor = db): Pr
  * 返回 true 表示扣减成功，false 表示额度不足
  */
 export async function deductAiCreateQuota(id: string, executor: UserQuotaExecutor = db): Promise<boolean> {
-  const quota = await getQuota(id, executor);
-  if (!quota || quota.aiCreateQuota <= 0) {
-    return false;
-  }
+  const now = new Date();
+  const today = getQuotaResetPoint(now);
+  const todayTimestamp = toTimestamp(today);
 
-  await executor
+  const updated = await executor
     .update(users)
     .set({
-      aiCreateQuotaToday: quota.aiCreateQuota - 1,
-      updatedAt: new Date(),
+      aiCreateQuotaToday: sql<number>`
+        CASE
+          WHEN ${users.aiCreateQuotaToday} >= ${UNLIMITED_AI_CREATE_QUOTA} THEN ${users.aiCreateQuotaToday}
+          WHEN ${users.aiQuotaResetAt} IS NULL OR ${users.aiQuotaResetAt} < ${todayTimestamp} THEN ${DEFAULT_DAILY_AI_CREATE_QUOTA - 1}
+          ELSE ${users.aiCreateQuotaToday} - 1
+        END
+      `,
+      aiQuotaResetAt: sql`
+        CASE
+          WHEN ${users.aiQuotaResetAt} IS NULL OR ${users.aiQuotaResetAt} < ${todayTimestamp} THEN ${todayTimestamp}
+          ELSE ${users.aiQuotaResetAt}
+        END
+      `,
+      updatedAt: now,
     })
-    .where(eq(users.id, id));
+    .where(and(
+      eq(users.id, id),
+      sql`
+        ${users.aiCreateQuotaToday} >= ${UNLIMITED_AI_CREATE_QUOTA}
+        OR ${users.aiQuotaResetAt} IS NULL
+        OR ${users.aiQuotaResetAt} < ${todayTimestamp}
+        OR ${users.aiCreateQuotaToday} > 0
+      `,
+    ))
+    .returning({ id: users.id });
 
-  return true;
+  return updated.length > 0;
 }
 
 /**
@@ -204,11 +252,15 @@ export async function setUserQuota(id: string, quota: number): Promise<UserRespo
   const existingUser = await getUserById(id);
   if (!existingUser) return null;
 
+  const now = new Date();
+  const resetAt = getQuotaResetPoint(now);
+
   await db
     .update(users)
     .set({
       aiCreateQuotaToday: quota,
-      updatedAt: new Date(),
+      aiQuotaResetAt: resetAt,
+      updatedAt: now,
     })
     .where(eq(users.id, id));
 
@@ -225,13 +277,17 @@ export async function setUserQuotaBatch(userIds: string[], quota: number): Promi
     return { updatedCount: 0 };
   }
 
+  const now = new Date();
+  const resetAt = getQuotaResetPoint(now);
+
   const result = await db
     .update(users)
     .set({
       aiCreateQuotaToday: quota,
-      updatedAt: new Date(),
+      aiQuotaResetAt: resetAt,
+      updatedAt: now,
     })
-    .where(sql`${users.id} IN (${sql.join(userIds.map(id => sql`${id}`), sql`, `)})`)
+    .where(inArray(users.id, userIds))
     .returning({ id: users.id });
 
   return { updatedCount: result.length };

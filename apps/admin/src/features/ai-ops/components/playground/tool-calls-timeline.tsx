@@ -16,6 +16,10 @@ interface ToolCallsTimelineProps {
   steps: TraceStep[]
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
 export function ToolCallsTimeline({ steps }: ToolCallsTimelineProps) {
   const toolSteps = steps.filter(s => s.type === 'tool')
 
@@ -41,7 +45,7 @@ export function ToolCallsTimeline({ steps }: ToolCallsTimelineProps) {
 
 function ToolCallItem({ step, isLast }: { step: TraceStep; isLast: boolean }) {
   const [expanded, setExpanded] = useState(false)
-  const data = step.data as unknown as Record<string, unknown>
+  const data: Record<string, unknown> = isRecord(step.data) ? step.data : {}
   const toolName = String(data.toolName ?? '')
   const displayName = TOOL_DISPLAY_NAMES[toolName] ?? String(data.toolDisplayName ?? toolName)
 

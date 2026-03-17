@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { and, db, eq, inArray, partnerIntents } from '@juchang/db';
+import { and, db, eq, inArray, partnerIntents, users } from '@juchang/db';
 import { app } from '../apps/api/src/index';
 
 interface ApiError {
@@ -26,7 +26,7 @@ interface BootstrapResponse {
   msg: string;
 }
 
-interface AdminLoginResponse {
+interface LoginResponse {
   token: string;
 }
 
@@ -37,6 +37,18 @@ interface PublicActivityResponse {
   currentParticipants: number;
   participants: Array<{ userId: string; nickname: string | null }>;
   recentMessages: Array<{ content: string; createdAt: string }>;
+}
+
+interface ActivityParticipantInfo {
+  id: string;
+  userId: string;
+  status: string;
+  joinedAt: string | null;
+  user: {
+    id: string;
+    nickname: string | null;
+    avatarUrl: string | null;
+  } | null;
 }
 
 interface ChatMessagesResponse {
@@ -99,6 +111,20 @@ interface WelcomeResponse {
   sections?: unknown[];
 }
 
+type FollowUpMode = 'review' | 'rebook' | 'kickoff';
+
+interface AiChatRequestContext {
+  client?: 'web' | 'miniprogram' | 'admin';
+  locale?: string;
+  timezone?: string;
+  platformVersion?: string;
+  lat?: number;
+  lng?: number;
+  activityId?: string;
+  followUpMode?: FollowUpMode;
+  entry?: string;
+}
+
 interface AiChatBlock {
   blockId: string;
   type: string;
@@ -137,6 +163,18 @@ interface AiConversationsResponse {
   total: number;
   hasMore: boolean;
   cursor: string | null;
+}
+
+interface StoredActivityOutcome {
+  activityId: string;
+  activityTitle: string;
+  activityType: string;
+  locationName: string;
+  attended: boolean | null;
+  rebookTriggered: boolean;
+  reviewSummary?: string | null;
+  happenedAt: string;
+  updatedAt: string;
 }
 
 interface ScenarioResult {
@@ -221,10 +259,11 @@ async function requestJson<T>(params: {
 }
 
 async function getAdminToken(): Promise<string> {
-  const response = await requestJson<AdminLoginResponse>({
+  const response = await requestJson<LoginResponse>({
     method: 'POST',
-    path: '/auth/admin/login',
+    path: '/auth/login',
     payload: {
+      grantType: 'phone_otp',
       phone: ADMIN_PHONE,
       code: ADMIN_CODE,
     },
@@ -319,7 +358,7 @@ async function bootstrapUsers(): Promise<BootstrappedUser[]> {
   const adminToken = await getAdminToken();
   const bootstrap = await requestJson<BootstrapResponse>({
     method: 'POST',
-    path: '/auth/admin/bootstrap-test-users',
+    path: '/auth/test-users/bootstrap',
     token: adminToken,
     payload: {
       phone: ADMIN_PHONE,
@@ -385,10 +424,26 @@ async function cancelActivity(activityId: string, creator: BootstrappedUser) {
   });
 }
 
+async function markActivityCompleted(activityId: string, creator: BootstrappedUser) {
+  return requestJson<{ success: boolean; msg: string }>({
+    method: 'PATCH',
+    path: `/activities/${activityId}/status`,
+    token: creator.token,
+    payload: { status: 'completed' },
+  });
+}
+
 async function getPublicActivity(activityId: string) {
   return requestJson<PublicActivityResponse>({
     method: 'GET',
     path: `/activities/${activityId}/public`,
+  });
+}
+
+async function getActivityParticipants(activityId: string) {
+  return requestJson<ActivityParticipantInfo[]>({
+    method: 'GET',
+    path: `/participants/activity/${activityId}`,
   });
 }
 
@@ -461,6 +516,7 @@ async function postAiChat(params: {
   user?: BootstrappedUser;
   text: string;
   conversationId?: string;
+  context?: AiChatRequestContext;
 }) {
   return requestJson<AiChatEnvelope>({
     method: 'POST',
@@ -469,7 +525,12 @@ async function postAiChat(params: {
     payload: {
       ...(params.conversationId ? { conversationId: params.conversationId } : {}),
       input: { type: 'text', text: params.text },
-      context: { client: 'web', locale: 'zh-CN', timezone: 'Asia/Shanghai' },
+      context: {
+        client: 'web',
+        locale: 'zh-CN',
+        timezone: 'Asia/Shanghai',
+        ...params.context,
+      },
       stream: false,
     },
   });
@@ -482,6 +543,7 @@ async function postAiAction(params: {
   conversationId?: string;
   payload?: Record<string, unknown>;
   displayText?: string;
+  context?: AiChatRequestContext;
 }) {
   return requestJson<AiChatEnvelope>({
     method: 'POST',
@@ -496,7 +558,12 @@ async function postAiAction(params: {
         ...(params.payload ? { params: params.payload } : {}),
         ...(params.displayText ? { displayText: params.displayText } : {}),
       },
-      context: { client: 'web', locale: 'zh-CN', timezone: 'Asia/Shanghai' },
+      context: {
+        client: 'web',
+        locale: 'zh-CN',
+        timezone: 'Asia/Shanghai',
+        ...params.context,
+      },
       stream: false,
     },
   });
@@ -508,6 +575,101 @@ async function getAiConversations(user: BootstrappedUser) {
     path: `/ai/conversations?userId=${user.user.id}&limit=20`,
     token: user.token,
   });
+}
+
+async function confirmFulfillment(params: {
+  activityId: string;
+  creator: BootstrappedUser;
+  participants: Array<{ userId: string; fulfilled: boolean }>;
+}) {
+  return requestJson<{
+    activityId: string;
+    attendedCount: number;
+    noShowCount: number;
+    totalSubmitted: number;
+    msg: string;
+  }>({
+    method: 'POST',
+    path: '/participants/confirm-fulfillment',
+    token: params.creator.token,
+    payload: {
+      activityId: params.activityId,
+      participants: params.participants,
+    },
+  });
+}
+
+async function markRebookFollowUp(activityId: string, user: BootstrappedUser) {
+  return requestJson<{ code: number; msg: string }>({
+    method: 'POST',
+    path: '/participants/rebook-follow-up',
+    token: user.token,
+    payload: { activityId },
+  });
+}
+
+function readActivityOutcomesFromWorkingMemory(workingMemory: string | null): StoredActivityOutcome[] {
+  if (!workingMemory) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(workingMemory) as {
+      version?: unknown;
+      activityOutcomes?: unknown;
+    };
+
+    if (parsed.version !== 2 || !Array.isArray(parsed.activityOutcomes)) {
+      return [];
+    }
+
+    return parsed.activityOutcomes.flatMap((item): StoredActivityOutcome[] => {
+      if (typeof item !== 'object' || item === null) {
+        return [];
+      }
+
+      const outcome = item as Partial<StoredActivityOutcome>;
+      if (
+        typeof outcome.activityId !== 'string'
+        || typeof outcome.activityTitle !== 'string'
+        || typeof outcome.activityType !== 'string'
+        || typeof outcome.locationName !== 'string'
+        || !(outcome.attended === null || typeof outcome.attended === 'boolean')
+        || typeof outcome.rebookTriggered !== 'boolean'
+        || typeof outcome.happenedAt !== 'string'
+        || typeof outcome.updatedAt !== 'string'
+      ) {
+        return [];
+      }
+
+      if (
+        outcome.reviewSummary !== undefined
+        && outcome.reviewSummary !== null
+        && typeof outcome.reviewSummary !== 'string'
+      ) {
+        return [];
+      }
+
+      return [outcome];
+    });
+  } catch {
+    return [];
+  }
+}
+
+async function getUserActivityOutcome(userId: string, activityId: string): Promise<StoredActivityOutcome | null> {
+  const [record] = await db
+    .select({ workingMemory: users.workingMemory })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  if (!record) {
+    return null;
+  }
+
+  return readActivityOutcomesFromWorkingMemory(record.workingMemory)
+    .find((item) => item.activityId === activityId) ?? null;
 }
 
 async function withActivity<T>(creator: BootstrappedUser, run: (activityId: string) => Promise<T>, overrides?: Parameters<typeof buildCreatePayload>[0]) {
@@ -738,6 +900,112 @@ async function scenarioNotificationsFlow(context: ScenarioContext): Promise<Scen
   }
 
   return { name: 'notifications-flow', passed: true, details };
+}
+
+async function scenarioPostActivityFollowUpFlow(context: ScenarioContext): Promise<ScenarioResult> {
+  const [creator, joiner] = context.users;
+  const details: string[] = [];
+  const activityTitle = `活动后跟进验收局-${Date.now()}`;
+  const activityId = await createActivity(creator, {
+    title: activityTitle,
+    description: '用于验证活动完成后的 review / rebook 写回。',
+  });
+
+  await joinActivity(activityId, joiner);
+  await sendChatMessage(activityId, creator, '今晚结束后记得回来复盘一下，看看下次还约不约。');
+
+  const completed = await markActivityCompleted(activityId, creator);
+  assert(completed.success === true, `活动完成状态更新失败: ${completed.msg}`);
+
+  const afterCompletedMessages = await getChatMessages(activityId, joiner);
+  assert(
+    afterCompletedMessages.messages.some((item) => item.content.includes('已确认成局')),
+    '活动完成后讨论区缺少“已确认成局”系统消息',
+  );
+
+  const joinedParticipants = (await getActivityParticipants(activityId))
+    .filter((item) => item.status === 'joined');
+  assert(joinedParticipants.length >= 2, `履约确认前 joined 参与者数量异常: ${joinedParticipants.length}`);
+
+  const fulfillment = await confirmFulfillment({
+    activityId,
+    creator,
+    participants: joinedParticipants.map((item) => ({
+      userId: item.userId,
+      fulfilled: true,
+    })),
+  });
+  assert(fulfillment.noShowCount === 0, `履约确认缺席人数异常: ${fulfillment.noShowCount}`);
+  assert(fulfillment.totalSubmitted === joinedParticipants.length, `履约确认提交人数异常: ${fulfillment.totalSubmitted}`);
+
+  const afterFulfillmentMessages = await getChatMessages(activityId, joiner);
+  assert(
+    afterFulfillmentMessages.messages.some((item) => item.content.includes('履约确认完成')),
+    '履约确认后讨论区缺少系统总结消息',
+  );
+
+  const initialOutcome = await waitFor(
+    async () => getUserActivityOutcome(joiner.user.id, activityId),
+    { retries: 8, delayMs: 300 },
+  );
+  assert(initialOutcome, '履约确认后参与者 workingMemory 未写入 activityOutcome');
+  assert(initialOutcome.attended === true, `参与者 attended 写回异常: ${initialOutcome.attended}`);
+  assert(initialOutcome.rebookTriggered === false, '履约确认后不应提前写入 rebookTriggered');
+  assert(
+    typeof initialOutcome.reviewSummary === 'string' && initialOutcome.reviewSummary.includes('真实履约结果'),
+    `履约确认后的初始 reviewSummary 异常: ${initialOutcome.reviewSummary}`,
+  );
+
+  const reviewTurn = await postAiChat({
+    user: joiner,
+    text: `我刚结束「${activityTitle}」（activityId: ${activityId}），帮我先做一份复盘：亮点、槽点、下次优化和一句可直接发群里的总结。`,
+    context: {
+      activityId,
+      followUpMode: 'review',
+      entry: 'message_center_post_activity',
+    },
+  });
+  assertNoLeakedToolText(reviewTurn.turn.blocks, '活动后 review 复盘');
+  assert(
+    hasTextContent(reviewTurn.turn.blocks),
+    `活动后 review 复盘没有返回文本块: ${JSON.stringify(reviewTurn.turn.blocks)}`,
+  );
+
+  const reviewedOutcome = await waitFor(async () => {
+    const outcome = await getUserActivityOutcome(joiner.user.id, activityId);
+    if (!outcome) {
+      return null;
+    }
+
+    const reviewSummary = outcome.reviewSummary?.trim();
+    if (!reviewSummary || reviewSummary === initialOutcome.reviewSummary) {
+      return null;
+    }
+
+    return outcome;
+  }, { retries: 8, delayMs: 300 });
+  assert(reviewedOutcome, '活动后 review 未写回新的 reviewSummary');
+  assert(reviewedOutcome.rebookTriggered === false, 'review 写回不应顺带开启 rebookTriggered');
+
+  const rebookResult = await markRebookFollowUp(activityId, joiner);
+  assert(rebookResult.code === 200, `记录再约意愿失败: ${rebookResult.msg}`);
+
+  const rebookedOutcome = await waitFor(async () => {
+    const outcome = await getUserActivityOutcome(joiner.user.id, activityId);
+    return outcome?.rebookTriggered ? outcome : null;
+  }, { retries: 8, delayMs: 300 });
+  assert(rebookedOutcome, '活动后 rebook 未写回 rebookTriggered=true');
+  assert(
+    rebookedOutcome.reviewSummary === reviewedOutcome.reviewSummary,
+    '记录再约意愿时不应覆盖已有的 reviewSummary',
+  );
+
+  details.push(`活动 ${activityId} 已串通 completed -> confirm-fulfillment -> review -> rebook`);
+  details.push(`参与者初始复盘="${initialOutcome.reviewSummary}"`);
+  details.push(`AI 复盘后写回摘要="${reviewedOutcome.reviewSummary}"`);
+  details.push(`再约标记已落库，rebookTriggered=${rebookedOutcome.rebookTriggered}`);
+
+  return { name: 'post-activity-follow-up-flow', passed: true, details };
 }
 
 async function scenarioAiExploreWithoutLocationFlow(context: ScenarioContext): Promise<ScenarioResult> {
@@ -1030,6 +1298,7 @@ const scenarios = [
   scenarioPermissionGuards,
   scenarioCancelVisibility,
   scenarioNotificationsFlow,
+  scenarioPostActivityFollowUpFlow,
   scenarioAiExploreWithoutLocationFlow,
   scenarioAiLocationFollowupFlow,
   scenarioAiPartnerIntentFormFlow,

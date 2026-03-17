@@ -36,7 +36,9 @@ export type WidgetActionType =
   | 'share'
   | 'detail'
   | 'publish'
-  | 'confirm_match';
+  | 'confirm_match'
+  | 'select'
+  | 'skip';
 
 export interface WidgetAction {
   type: WidgetActionType;
@@ -74,6 +76,8 @@ export const WidgetActionSchema = t.Object({
     t.Literal('detail'),
     t.Literal('publish'),
     t.Literal('confirm_match'),
+    t.Literal('select'),
+    t.Literal('skip'),
   ]),
   label: t.String(),
   params: t.Record(t.String(), t.Unknown()),

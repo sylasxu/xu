@@ -1,4 +1,4 @@
-// Notification Service - MVP 简化版 + Admin 扩展
+// Notification Service - 通知与消息中心业务逻辑
 import { db, notifications, users, participants, intentMatches, partnerIntents, matchMessages, eq, count, and, desc, inArray, sql } from '@juchang/db';
 import type {
   MessageCenterQuery,
@@ -11,7 +11,7 @@ import type {
 } from './notification.model';
 import { getChatActivities } from '../chat/chat.service';
 import { sendServiceNotificationByUserId, type ServiceNotificationScene } from '../wechat';
-import { confirmMatch as confirmPendingMatchService, cancelMatch as cancelPendingMatchService } from '../ai/tools/helpers/match';
+import { confirmMatch as confirmPendingMatchService, cancelMatch as cancelPendingMatchService } from '../ai/tools/partner-match';
 
 // 通知类型枚举值
 const NOTIFICATION_TYPES = ['join', 'quit', 'activity_start', 'completed', 'cancelled', 'new_participant', 'post_activity', 'activity_reminder'] as const;
@@ -57,7 +57,7 @@ function isNotificationType(value: string): value is NotificationType {
 }
 
 /**
- * 获取用户通知列表（用户模式）
+ * 获取指定用户的通知列表
  */
 export async function getNotifications(
   userId: string,
@@ -76,105 +76,6 @@ export async function getNotifications(
     db
       .select()
       .from(notifications)
-      .where(and(...conditions))
-      .limit(limit)
-      .offset(offset)
-      .orderBy(desc(notifications.createdAt)),
-    db
-      .select({ count: count() })
-      .from(notifications)
-      .where(and(...conditions)),
-  ]);
-
-  const total = totalResult[0]?.count || 0;
-  const totalPages = Math.ceil(total / limit);
-
-  return { items: data, total, page, totalPages };
-}
-
-/**
- * 获取所有用户的通知列表（Admin 模式）
- */
-export async function getAllNotifications(
-  query: NotificationListQuery
-): Promise<NotificationListResponse & { items: Array<any> }> {
-  const { page = 1, limit = 20, type } = query;
-  const offset = (page - 1) * limit;
-
-  // 构建查询条件
-  const conditions = [];
-  if (type && isNotificationType(type)) {
-    conditions.push(eq(notifications.type, type));
-  }
-
-  const whereCondition = conditions.length > 0 ? and(...conditions) : undefined;
-
-  // 查询通知列表（包含用户信息）
-  const [data, totalResult] = await Promise.all([
-    db
-      .select({
-        id: notifications.id,
-        userId: notifications.userId,
-        type: notifications.type,
-        title: notifications.title,
-        content: notifications.content,
-        isRead: notifications.isRead,
-        activityId: notifications.activityId,
-        createdAt: notifications.createdAt,
-        userNickname: users.nickname,
-        userAvatarUrl: users.avatarUrl,
-      })
-      .from(notifications)
-      .leftJoin(users, eq(notifications.userId, users.id))
-      .where(whereCondition)
-      .limit(limit)
-      .offset(offset)
-      .orderBy(desc(notifications.createdAt)),
-    db
-      .select({ count: count() })
-      .from(notifications)
-      .where(whereCondition),
-  ]);
-
-  const total = totalResult[0]?.count || 0;
-  const totalPages = Math.ceil(total / limit);
-
-  return { items: data, total, page, totalPages };
-}
-
-/**
- * 获取指定用户的通知列表（Admin 查指定用户）
- */
-export async function getNotificationsByUserId(
-  targetUserId: string,
-  query: NotificationListQuery
-): Promise<NotificationListResponse & { items: Array<any> }> {
-  const { page = 1, limit = 20, type } = query;
-  const offset = (page - 1) * limit;
-
-  // 构建查询条件
-  const conditions = [eq(notifications.userId, targetUserId)];
-  if (type && isNotificationType(type)) {
-    conditions.push(eq(notifications.type, type));
-  }
-
-  // 查询通知列表（包含用户信息）
-  const [data, totalResult] = await Promise.all([
-    db
-      .select({
-        id: notifications.id,
-        userId: notifications.userId,
-        type: notifications.type,
-        title: notifications.title,
-        content: notifications.content,
-        isRead: notifications.isRead,
-        activityId: notifications.activityId,
-        createdAt: notifications.createdAt,
-        userNickname: users.nickname,
-        userAvatarUrl: users.avatarUrl,
-      })
-      .from(notifications)
-      .leftJoin(users, eq(notifications.userId, users.id))
       .where(and(...conditions))
       .limit(limit)
       .offset(offset)

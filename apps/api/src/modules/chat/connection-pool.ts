@@ -1,11 +1,13 @@
 // 连接池管理模块
 // 纯函数式设计，无 class
 
-// @ts-ignore - bun types available at runtime
-import type { ServerWebSocket } from 'bun';
+export interface ChatSocketConnection {
+  send(data: string): unknown;
+  close(code?: number, reason?: string): void;
+}
 
 export interface Connection {
-  ws: ServerWebSocket<{ userId: string; activityId: string }>;
+  ws: ChatSocketConnection;
   userId: string;
   activityId: string;
   connectedAt: number;

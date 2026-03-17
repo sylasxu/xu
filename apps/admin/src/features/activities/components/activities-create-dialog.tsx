@@ -27,19 +27,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { useListContext } from '@/components/list-page'
-import { type Activity } from '../data/schema'
-import { type ActivityDialogType } from './activities-columns'
 import { activityTypes } from '../data/data'
 import { toast } from 'sonner'
 import { api } from '@/lib/eden'
+import { useActivitiesListContext } from '../list-context'
 
 // 从 Eden Treaty 推导创建活动的 body 类型
 type CreateActivityBody = NonNullable<Parameters<typeof api.activities.post>[0]>
 type CreateActivityForm = Pick<CreateActivityBody, 'title' | 'description' | 'locationName' | 'address' | 'locationHint' | 'startAt' | 'type' | 'maxParticipants'>
 
 export function ActivitiesCreateDialog() {
-  const { open, setOpen } = useListContext<Activity, ActivityDialogType>()
+  const { open, setOpen } = useActivitiesListContext()
   const isOpen = open === 'create'
 
   // 无需 resolver，API 层已做验证

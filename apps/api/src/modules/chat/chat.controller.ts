@@ -5,10 +5,31 @@ import { chatModel, ChatMessageResponseSchema, type ErrorResponse } from './chat
 import { getChatActivities, getMessages, sendMessage } from './chat.service';
 import { handleWsUpgrade, handleWsMessage, handleWsClose, startHeartbeatChecker } from './chat.ws';
 import { createReport } from '../reports/report.service';
-import type { ReportReason } from '../reports/report.model';
+import { isReportReason } from '../reports/report.model';
 
 // 启动心跳检测
 startHeartbeatChecker(10000);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function readSocketOpenPayload(data: unknown): { activityId: string; token: string } | null {
+  if (!isRecord(data)) {
+    return null;
+  }
+
+  const params = isRecord(data.params) ? data.params : null;
+  const query = isRecord(data.query) ? data.query : null;
+  const activityId = params && typeof params.activityId === 'string' ? params.activityId : null;
+  const token = query && typeof query.token === 'string' ? query.token : null;
+
+  if (!activityId || !token) {
+    return null;
+  }
+
+  return { activityId, token };
+}
 
 export const chatController = new Elysia({ prefix: '/chat' })
   .use(basePlugins)
@@ -163,10 +184,18 @@ export const chatController = new Elysia({ prefix: '/chat' })
       }
 
       try {
+        if (!isReportReason(body.reason)) {
+          set.status = 400;
+          return {
+            code: 400,
+            msg: '无效的举报原因',
+          } satisfies ErrorResponse;
+        }
+
         await createReport({
           type: 'message',
           targetId: body.messageId,
-          reason: body.reason as ReportReason,
+          reason: body.reason,
         }, user.id);
         return { msg: '举报成功' };
       } catch (error: any) {
@@ -201,22 +230,21 @@ export const chatController = new Elysia({ prefix: '/chat' })
     }),
     
     async open(ws) {
-      const activityId = (ws.data as any).params?.activityId;
-      const token = (ws.data as any).query?.token;
-      
-      if (!activityId || !token) {
+      const payload = readSocketOpenPayload(ws.data);
+
+      if (!payload) {
         ws.close(4000, 'Missing parameters');
         return;
       }
 
-      await handleWsUpgrade(ws as any, activityId, token);
+      await handleWsUpgrade(ws, payload.activityId, payload.token);
     },
 
     async message(ws, message) {
-      await handleWsMessage(ws as any, message);
+      await handleWsMessage(ws, message);
     },
 
     async close(ws) {
-      await handleWsClose(ws as any);
+      await handleWsClose(ws);
     },
   });

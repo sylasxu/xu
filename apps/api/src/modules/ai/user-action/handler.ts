@@ -10,12 +10,20 @@ import { createLogger } from '../observability/logger';
 // 复用现有 Service 函数
 import { joinActivity, quitActivity, getActivityById } from '../../activities/activity.service';
 import { search } from '../rag';
-import { confirmMatch, cancelMatch } from '../tools/helpers/match';
+import { confirmMatch, cancelMatch } from '../tools/partner-match';
 import { buildCreateDraftParamsFromActionPayload, createActivityDraftRecord, publishActivityRecord, updateActivityDraftRecord } from '../tools/activity-tools';
 import { createPartnerIntent } from '../tools/partner-tools';
 import { buildPartnerIntentFormPayload, createPartnerMatchingState, getPartnerTimeLabel, normalizePartnerActivityType } from '../workflow/partner-matching';
 
 const logger = createLogger('user-action');
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function getErrorMessage(error: unknown, fallback = '操作失败'): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
 
 /**
  * Action 到 Tool 的映射表
@@ -204,15 +212,15 @@ export async function handleUserAction(
     });
     
     return result;
-  } catch (error: any) {
+  } catch (error) {
     logger.error('User action failed', { 
       actionType, 
-      error: error.message,
+      error: getErrorMessage(error),
     });
     
     return {
       success: false,
-      error: error.message || '操作失败',
+      error: getErrorMessage(error),
       fallbackToLLM: true,
       fallbackText: action.originalText,
     };
@@ -225,8 +233,8 @@ export async function handleUserAction(
 
 function resolveActionLocation(payload: Record<string, unknown>): { lat: number; lng: number } | null {
   const embedded = payload._location;
-  if (embedded && typeof embedded === 'object') {
-    const record = embedded as Record<string, unknown>;
+  if (isRecord(embedded)) {
+    const record = embedded;
     const lat = typeof record.lat === 'number' ? record.lat : null;
     const lng = typeof record.lng === 'number' ? record.lng : null;
     if (lat !== null && lng !== null) {
@@ -235,8 +243,8 @@ function resolveActionLocation(payload: Record<string, unknown>): { lat: number;
   }
 
   const center = payload.center;
-  if (center && typeof center === 'object') {
-    const record = center as Record<string, unknown>;
+  if (isRecord(center)) {
+    const record = center;
     const lat = typeof record.lat === 'number' ? record.lat : null;
     const lng = typeof record.lng === 'number' ? record.lng : null;
     if (lat !== null && lng !== null) {
@@ -291,6 +299,20 @@ function toNumericValue(value: unknown): number | null {
   }
 
   return null;
+}
+
+function readActivityPoint(value: unknown): { lat: number; lng: number } | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const lng = toNumericValue(value.x);
+  const lat = toNumericValue(value.y);
+  if (lat === null || lng === null) {
+    return null;
+  }
+
+  return { lat, lng };
 }
 
 function inferDraftSlotFromStartAt(startAt: string): string {
@@ -451,7 +473,7 @@ async function handleJoinActivity(
   payload: Record<string, unknown>,
   userId: string | null
 ): Promise<ActionResult> {
-  const activityId = payload.activityId as string;
+  const activityId = toTextValue(payload.activityId);
   if (!activityId) {
     return { success: false, error: '缺少活动 ID' };
   }
@@ -475,8 +497,8 @@ async function handleJoinActivity(
         message: `报名成功！「${activity?.title || '活动'}」等你来～`,
       },
     };
-  } catch (error: any) {
-    return { success: false, error: error.message };
+  } catch (error) {
+    return { success: false, error: getErrorMessage(error) };
   }
 }
 
@@ -484,7 +506,7 @@ async function handleViewActivity(
   payload: Record<string, unknown>,
   _userId: string | null
 ): Promise<ActionResult> {
-  const activityId = payload.activityId as string;
+  const activityId = toTextValue(payload.activityId);
   if (!activityId) {
     return { success: false, error: '缺少活动 ID' };
   }
@@ -507,7 +529,7 @@ async function handleCancelJoin(
     return { success: false, error: '请先登录', data: { requiresAuth: true } };
   }
   
-  const activityId = payload.activityId as string;
+  const activityId = toTextValue(payload.activityId);
   if (!activityId) {
     return { success: false, error: '缺少活动 ID' };
   }
@@ -523,8 +545,8 @@ async function handleCancelJoin(
         message: '已取消报名',
       },
     };
-  } catch (error: any) {
-    return { success: false, error: error.message };
+  } catch (error) {
+    return { success: false, error: getErrorMessage(error) };
   }
 }
 
@@ -532,7 +554,7 @@ async function handleShareActivity(
   payload: Record<string, unknown>,
   _userId: string | null
 ): Promise<ActionResult> {
-  const activityId = payload.activityId as string;
+  const activityId = toTextValue(payload.activityId);
   if (!activityId) {
     return { success: false, error: '缺少活动 ID' };
   }
@@ -543,7 +565,7 @@ async function handleShareActivity(
     data: {
       action: 'share',
       activityId,
-      title: payload.title as string,
+      title: toTextValue(payload.title),
     },
   };
 }
@@ -685,7 +707,7 @@ async function handlePublishDraft(
     return { success: false, error: '请先登录', data: { requiresAuth: true } };
   }
   
-  const activityId = payload.activityId as string;
+  const activityId = toTextValue(payload.activityId);
   if (!activityId) {
     return { success: false, error: '缺少活动 ID' };
   }
@@ -746,9 +768,9 @@ async function handleExploreNearby(
   }
 
   try {
-    const locationName = (payload.locationName as string) || '附近';
-    const radius = (payload.radiusKm as number) || 5;
-    const type = payload.type as string | undefined;
+    const locationName = toTextValue(payload.locationName, '附近') || '附近';
+    const radius = toNumericValue(payload.radiusKm) ?? 5;
+    const type = toTextValue(payload.type) || undefined;
     const semanticQuery = typeof payload.semanticQuery === 'string' && payload.semanticQuery.trim()
       ? payload.semanticQuery.trim()
       : `${locationName}附近的活动`;
@@ -770,14 +792,14 @@ async function handleExploreNearby(
 
     const results = scoredResults.map(scored => {
       const { activity, score, distance } = scored;
-      const loc = activity.location as unknown as { x: number; y: number } | null;
+      const point = readActivityPoint(activity.location);
 
       return {
         id: activity.id,
         title: activity.title,
         type: activity.type,
-        lat: loc?.y ?? 0,
-        lng: loc?.x ?? 0,
+        lat: point?.lat ?? 0,
+        lng: point?.lng ?? 0,
         locationName: activity.locationName,
         distance: distance ? Math.round(distance) : 0,
         startAt: new Date(activity.startAt).toISOString(),
@@ -809,8 +831,8 @@ async function handleExploreNearby(
         },
       },
     };
-  } catch (error: any) {
-    return { success: false, error: error.message };
+  } catch (error) {
+    return { success: false, error: getErrorMessage(error) };
   }
 }
 
@@ -954,7 +976,7 @@ async function handleConfirmMatch(
     return { success: false, error: '请先登录', data: { requiresAuth: true } };
   }
 
-  const matchId = payload.matchId as string;
+  const matchId = toTextValue(payload.matchId);
   if (!matchId) {
     return { success: false, error: '缺少匹配 ID' };
   }
@@ -982,7 +1004,7 @@ async function handleCancelMatch(
     return { success: false, error: '请先登录', data: { requiresAuth: true } };
   }
 
-  const matchId = payload.matchId as string;
+  const matchId = toTextValue(payload.matchId);
   if (!matchId) {
     return { success: false, error: '缺少匹配 ID' };
   }
@@ -1005,20 +1027,8 @@ async function handleSelectPreference(
   payload: Record<string, unknown>,
   _userId: string | null
 ): Promise<ActionResult> {
-  const selectedValue = (
-    (typeof payload.selectedValue === 'string' && payload.selectedValue.trim())
-      ? payload.selectedValue
-      : (typeof payload.value === 'string' && payload.value.trim())
-        ? payload.value
-        : ''
-  ) as string;
-  const selectedLabel = (
-    (typeof payload.selectedLabel === 'string' && payload.selectedLabel.trim())
-      ? payload.selectedLabel
-      : (typeof payload.label === 'string' && payload.label.trim())
-        ? payload.label
-        : ''
-  ) as string;
+  const selectedValue = toTextValue(payload.selectedValue) || toTextValue(payload.value);
+  const selectedLabel = toTextValue(payload.selectedLabel) || toTextValue(payload.label);
   
   // 选择偏好后，用选中的标签作为用户输入继续对话
   return {
@@ -1044,7 +1054,7 @@ async function handleRetry(
   payload: Record<string, unknown>,
   _userId: string | null
 ): Promise<ActionResult> {
-  const originalText = payload.originalText as string;
+  const originalText = toTextValue(payload.originalText);
   
   return {
     success: false,
@@ -1067,7 +1077,7 @@ async function handleQuickPrompt(
   payload: Record<string, unknown>,
   _userId: string | null
 ): Promise<ActionResult> {
-  const prompt = payload.prompt as string;
+  const prompt = toTextValue(payload.prompt);
   
   if (!prompt) {
     return { success: false, error: '缺少提示词' };

@@ -13,9 +13,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { DataTableColumnHeader } from '@/components/data-table'
-import { useListContext } from '@/components/list-page'
 import { type GlobalKeyword } from '../data/schema'
 import { useUpdateHotKeyword } from '../hooks/use-hot-keywords'
+import { useHotKeywordsListContext } from './list-context'
 
 // 热词弹窗类型
 export type HotKeywordDialogType = 'delete' | 'view'
@@ -40,7 +40,7 @@ const responseTypeLabels: Record<string, string> = {
 // 行操作组件
 function HotKeywordRowActions({ keyword }: { keyword: GlobalKeyword }) {
   const navigate = useNavigate()
-  const { setOpen, setCurrentRow } = useListContext<GlobalKeyword, HotKeywordDialogType>()
+  const { setOpen, setCurrentRow } = useHotKeywordsListContext()
   const updateMutation = useUpdateHotKeyword()
 
   const handleToggleStatus = () => {

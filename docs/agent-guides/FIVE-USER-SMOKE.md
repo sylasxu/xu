@@ -19,7 +19,7 @@
 - Admin 白名单手机号和超级验证码已在 `.env` 中配置
   - `ADMIN_PHONE_WHITELIST`
   - `ADMIN_SUPER_CODE`
-  - 脚本会先读取 `SMOKE_ADMIN_PHONE` / `SMOKE_ADMIN_CODE`，再调用 `POST /auth/admin/login` 换管理员 JWT
+  - 脚本会先读取 `SMOKE_ADMIN_PHONE` / `SMOKE_ADMIN_CODE`，再调用 `POST /auth/login` 换受保护 JWT
 
 ## 一键执行
 
@@ -62,8 +62,8 @@ SMOKE_USER_COUNT=5 bun run smoke:five-users
 
 脚本文件：`scripts/five-user-smoke.ts`
 
-- 调用 `POST /auth/admin/login` 获取管理员 JWT
-- 带管理员 JWT 调用 `POST /auth/admin/bootstrap-test-users` 准备测试账号
+- 调用 `POST /auth/login` 获取受保护 JWT
+- 带受保护 JWT 调用 `POST /auth/test-users/bootstrap` 准备测试账号
 - 用第 1 个账号创建活动
 - 用第 2-5 个账号调用 `POST /activities/:id/join`
 - 用 3 个账号调用 `POST /chat/:activityId/messages`

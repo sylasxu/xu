@@ -26,6 +26,22 @@ export interface JoinSuccessOptions {
   onBeforeNavigate?: () => void
 }
 
+function readResponseMessage(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null) {
+    return null
+  }
+
+  if ('msg' in value && typeof value.msg === 'string' && value.msg.trim()) {
+    return value.msg.trim()
+  }
+
+  if ('message' in value && typeof value.message === 'string' && value.message.trim()) {
+    return value.message.trim()
+  }
+
+  return null
+}
+
 function normalizeJoinTitle(title?: string): string {
   const normalized = typeof title === 'string' ? title.trim() : ''
   return normalized || '这场活动'
@@ -36,10 +52,9 @@ export async function requestJoinActivity(activityId: string): Promise<JoinActiv
     const response = await postActivitiesByIdJoin(activityId)
 
     if (response.status !== 200) {
-      const errorData = response.data as { msg?: string; message?: string } | undefined
       return {
         success: false,
-        msg: errorData?.msg || errorData?.message || '报名失败，请重试',
+        msg: readResponseMessage(response.data) || '报名失败，请重试',
       }
     }
 

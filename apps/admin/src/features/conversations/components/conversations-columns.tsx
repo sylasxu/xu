@@ -14,15 +14,15 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { DataTableColumnHeader } from '@/components/data-table'
-import { useListContext } from '@/components/list-page'
 import type { ConversationSession } from '@/hooks/use-conversations'
+import { useConversationsListContext } from '../list-context'
 
 // 弹窗类型
 export type ConversationDialogType = 'view' | 'delete' | 'batch-delete'
 
 // 行操作组件
 function SessionRowActions({ session }: { session: ConversationSession }) {
-  const { setOpen, setCurrentRow } = useListContext<ConversationSession, ConversationDialogType>()
+  const { setOpen, setCurrentRow } = useConversationsListContext()
   const navigate = useNavigate()
 
   const handleView = () => {

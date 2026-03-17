@@ -19,6 +19,10 @@ interface ComponentProperties {
   showTimestamp: WechatMiniprogram.Component.PropertyOption;
 }
 
+function readBubbleString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
 Component({
   options: {
     styleIsolation: 'apply-shared',
@@ -130,7 +134,7 @@ Component({
      * 长按复制
      */
     onLongPress() {
-      const content = this.properties.content as string;
+      const content = readBubbleString(this.properties.content) || '';
       if (!content) return;
       
       wx.setClipboardData({

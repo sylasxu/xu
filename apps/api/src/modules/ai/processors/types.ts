@@ -53,6 +53,13 @@ export interface ProcessorMetadata {
     degraded?: boolean;
   };
 
+  /** 请求级 AI 参数（由 /ai/chat 透传） */
+  requestAi?: {
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+  };
+
   /** user-profile-processor 输出 */
   userProfile?: {
     hasProfile: boolean;

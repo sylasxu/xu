@@ -3,8 +3,9 @@ import type {
   GenUIBlock,
   GenUIChoiceOption,
   GenUIRequest,
+  GenUIRequestAi,
+  GenUIRequestContext,
   GenUIStreamEvent,
-  GenUIStreamEventType,
   GenUITracePayload,
   GenUITurnEnvelope,
 } from '@juchang/genui-contract';
@@ -14,7 +15,7 @@ import {
   type ChatRequest,
 } from './ai.service';
 import { createThread } from './memory';
-import type { UserActionType } from './user-action';
+import { isUserActionType } from './user-action';
 import {
   createChoiceBlock,
   createEntityCardBlock,
@@ -23,6 +24,7 @@ import {
   createFormBlock,
   pushBlock,
 } from './shared/genui-blocks';
+import { saveActivityReviewSummary } from '../participants/participant.service';
 
 const ID_PREFIX = {
   conversation: 'conv',
@@ -48,12 +50,17 @@ const KNOWN_LOCATION_CENTERS = [
 const EXPLORE_TEXT_PATTERN = /(附近.*(局|活动|好玩的)|有什么(局|活动)|推荐|找个局|找局|看看.*局|约饭|吃饭|火锅|羽毛球|桌游|咖啡)/;
 const EXPLORE_FOLLOWUP_PATTERN = /(有没有|还有|那|换成|改成|最好|预算|今晚|明天|周末|八点|8点|不吃辣|别太闹|安静|AA|清淡|轻松|都可以|都行|随便)/;
 const CREATE_FROM_EXPLORE_PATTERN = /(我来组|我想自己组|我自己组|我来发|我自己发|帮我组一个|那就我来组|那我自己发)/;
+const CREATE_ACTIVITY_PATTERN = /(组|租|约).{0,8}局|想.*局|周五.*局/;
+const REVIEW_SUMMARY_MAX_LENGTH = 280;
 
 
 interface ViewerContext {
   id: string;
   role: string;
 }
+
+type FollowUpMode = NonNullable<GenUIRequestContext['followUpMode']>;
+type ChatAiParams = GenUIRequestAi;
 
 interface BuildAiChatTurnOptions {
   viewer?: ViewerContext | null;
@@ -75,6 +82,15 @@ interface DataStreamEvent {
   [key: string]: unknown;
 }
 
+type StreamEventArgs =
+  | ['turn-start', Extract<GenUIStreamEvent, { event: 'turn-start' }>['data']]
+  | ['block-append', Extract<GenUIStreamEvent, { event: 'block-append' }>['data']]
+  | ['block-replace', Extract<GenUIStreamEvent, { event: 'block-replace' }>['data']]
+  | ['turn-status', Extract<GenUIStreamEvent, { event: 'turn-status' }>['data']]
+  | ['turn-complete', Extract<GenUIStreamEvent, { event: 'turn-complete' }>['data']]
+  | ['turn-error', Extract<GenUIStreamEvent, { event: 'turn-error' }>['data']]
+  | ['trace', Extract<GenUIStreamEvent, { event: 'trace' }>['data']];
+
 interface ToolInvocationState {
   toolCallId: string;
   toolName: string;
@@ -93,6 +109,24 @@ interface ActionResultEvent {
   }>;
 }
 
+function isActionResultNextActions(value: unknown): value is NonNullable<ActionResultEvent['nextActions']> {
+  return Array.isArray(value) && value.every((item) => {
+    if (!isRecord(item)) {
+      return false;
+    }
+
+    if (typeof item.label !== 'string' || typeof item.action !== 'string') {
+      return false;
+    }
+
+    if (item.params !== undefined && !isRecord(item.params)) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
 interface ResolvedConversation {
   conversationId: string;
   historyMessages: ChatRequest['messages'];
@@ -105,6 +139,19 @@ function createId(prefix: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function isDataStreamEvent(value: unknown): value is DataStreamEvent {
+  return isRecord(value) && typeof value.type === 'string';
+}
+
+function parseDataStreamEvent(dataText: string): DataStreamEvent | null {
+  try {
+    const parsed: unknown = JSON.parse(dataText);
+    return isDataStreamEvent(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function parseSSEPacket(packet: string): string {
@@ -179,13 +226,9 @@ async function parseDataStreamResponse(response: Response): Promise<ParsedDataSt
         continue;
       }
 
-      try {
-        const parsed = JSON.parse(dataText) as DataStreamEvent;
-        if (parsed && typeof parsed.type === 'string') {
-          events.push(parsed);
-        }
-      } catch {
-        // Ignore malformed chunks and continue collecting valid events.
+      const parsed = parseDataStreamEvent(dataText);
+      if (parsed) {
+        events.push(parsed);
       }
 
       nextPacket = splitNextSSEPacket(buffer);
@@ -199,13 +242,9 @@ async function parseDataStreamResponse(response: Response): Promise<ParsedDataSt
     if (dataText === '[DONE]') {
       done = true;
     } else if (dataText) {
-      try {
-        const parsed = JSON.parse(dataText) as DataStreamEvent;
-        if (parsed && typeof parsed.type === 'string') {
-          events.push(parsed);
-        }
-      } catch {
-        // Ignore malformed tail chunk.
+      const parsed = parseDataStreamEvent(dataText);
+      if (parsed) {
+        events.push(parsed);
       }
     }
   }
@@ -271,6 +310,168 @@ function parseRequestLocation(request: GenUIRequest): [number, number] | undefin
   }
 
   return [lng, lat];
+}
+
+function parseAiNumber(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+
+  return value;
+}
+
+function parseRequestAiParams(request: GenUIRequest): ChatAiParams | undefined {
+  if (!request.ai) {
+    return undefined;
+  }
+
+  const model = typeof request.ai.model === 'string' && request.ai.model.trim()
+    ? request.ai.model.trim()
+    : undefined;
+  const temperature = parseAiNumber(request.ai.temperature);
+  const maxTokens = parseAiNumber(request.ai.maxTokens);
+
+  if (!model && temperature === undefined && maxTokens === undefined) {
+    return undefined;
+  }
+
+  return {
+    ...(model ? { model } : {}),
+    ...(temperature !== undefined ? { temperature } : {}),
+    ...(maxTokens !== undefined ? { maxTokens } : {}),
+  };
+}
+
+function parseFollowUpMode(value: unknown): FollowUpMode | undefined {
+  if (value === 'review' || value === 'rebook' || value === 'kickoff') {
+    return value;
+  }
+  return undefined;
+}
+
+function parseActivityFollowUpContext(request: GenUIRequest): {
+  activityId?: string;
+  followUpMode?: FollowUpMode;
+  entry?: string;
+} {
+  const activityId =
+    typeof request.context?.activityId === 'string' && request.context.activityId.trim()
+      ? request.context.activityId.trim()
+      : undefined;
+  const followUpMode = parseFollowUpMode(request.context?.followUpMode);
+  const entry =
+    typeof request.context?.entry === 'string' && request.context.entry.trim()
+      ? request.context.entry.trim()
+      : undefined;
+
+  return {
+    ...(activityId ? { activityId } : {}),
+    ...(followUpMode ? { followUpMode } : {}),
+    ...(entry ? { entry } : {}),
+  };
+}
+
+function clampText(text: string, maxLength: number): string {
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  return `${text.slice(0, maxLength - 3).trimEnd()}...`;
+}
+
+function extractReviewSummaryFromBlocks(blocks: GenUIBlock[]): string | null {
+  const segments = blocks.flatMap((block) => {
+    if (block.type === 'text' && block.content.trim()) {
+      return [block.content.trim()];
+    }
+
+    if (block.type === 'alert' && block.level !== 'error' && block.message.trim()) {
+      return [block.message.trim()];
+    }
+
+    return [];
+  });
+
+  if (segments.length === 0) {
+    return null;
+  }
+
+  const normalized = segments
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  return clampText(normalized, REVIEW_SUMMARY_MAX_LENGTH);
+}
+
+async function persistActivityFollowUpResult(params: {
+  request: GenUIRequest;
+  blocks: GenUIBlock[];
+  viewer: ViewerContext | null;
+  traces: GenUITracePayload[];
+}): Promise<void> {
+  const { request, blocks, viewer, traces } = params;
+  const followUpContext = parseActivityFollowUpContext(request);
+
+  if (followUpContext.followUpMode !== 'review' || !followUpContext.activityId) {
+    return;
+  }
+
+  if (!viewer?.id) {
+    traces.push({
+      stage: 'activity_review_memory',
+      detail: {
+        saved: false,
+        reason: 'anonymous_user',
+        activityId: followUpContext.activityId,
+        entry: followUpContext.entry || null,
+      },
+    });
+    return;
+  }
+
+  const reviewSummary = extractReviewSummaryFromBlocks(blocks);
+  if (!reviewSummary) {
+    traces.push({
+      stage: 'activity_review_memory',
+      detail: {
+        saved: false,
+        reason: 'empty_review_summary',
+        activityId: followUpContext.activityId,
+        entry: followUpContext.entry || null,
+      },
+    });
+    return;
+  }
+
+  try {
+    await saveActivityReviewSummary(viewer.id, followUpContext.activityId, reviewSummary);
+    traces.push({
+      stage: 'activity_review_memory',
+      detail: {
+        saved: true,
+        activityId: followUpContext.activityId,
+        entry: followUpContext.entry || null,
+        summaryLength: reviewSummary.length,
+      },
+    });
+  } catch (error) {
+    console.error('Failed to persist activity review summary:', error);
+    traces.push({
+      stage: 'activity_review_memory',
+      detail: {
+        saved: false,
+        activityId: followUpContext.activityId,
+        entry: followUpContext.entry || null,
+        error: error instanceof Error ? error.message : 'unknown_error',
+      },
+    });
+  }
 }
 
 function findKnownLocationCenter(text: string): { name: string; lat: number; lng: number } | null {
@@ -351,6 +552,28 @@ function hasRecentLocationPrompt(historyMessages: ChatRequest['messages']): bool
     }
 
     if (inspectedAssistantTurns >= 3) {
+      break;
+    }
+  }
+
+  return false;
+}
+
+function hasRecentCreatePrompt(historyMessages: ChatRequest['messages']): boolean {
+  let inspectedUserTurns = 0;
+
+  for (const message of [...historyMessages].reverse()) {
+    if (message.role !== 'user') {
+      continue;
+    }
+
+    inspectedUserTurns += 1;
+    const content = typeof message.content === 'string' ? message.content.trim() : '';
+    if (content && CREATE_ACTIVITY_PATTERN.test(content)) {
+      return true;
+    }
+
+    if (inspectedUserTurns >= 3) {
       break;
     }
   }
@@ -527,7 +750,11 @@ function inferTextUserAction(
     };
   }
 
-  if (currentCenter && isBareLocationReply && hasRecentLocationPrompt(historyMessages)) {
+  if (
+    currentCenter
+    && isBareLocationReply
+    && (hasRecentLocationPrompt(historyMessages) || hasRecentCreatePrompt(historyMessages))
+  ) {
     if (!activityType) {
       return {
         action: 'ask_preference',
@@ -607,8 +834,12 @@ function buildUserAction(
   historyMessages: ChatRequest['messages']
 ): ChatRequest['userAction'] | undefined {
   if (input.type === 'action') {
+    if (!isUserActionType(input.action)) {
+      return undefined;
+    }
+
     return {
-      action: input.action as UserActionType,
+      action: input.action,
       payload: isRecord(input.params) ? input.params : {},
       source: 'genui',
       originalText: typeof input.displayText === 'string' ? input.displayText : undefined,
@@ -1399,7 +1630,7 @@ function buildBlocksFromDataStream(events: DataStreamEvent[]): {
       continue;
     }
 
-    if (event.type === 'data' && isRecord(event.data)) {
+    if ((event.type === 'data-widget' || event.type === 'data') && isRecord(event.data)) {
       const widgetType = toStringValue(event.data.type);
       if (widgetType.startsWith('widget_')) {
         widgetDataEvents.push({
@@ -1410,7 +1641,7 @@ function buildBlocksFromDataStream(events: DataStreamEvent[]): {
         actionResultEvents.push({
           success: event.data.success === true,
           ...(typeof event.data.error === 'string' ? { error: event.data.error } : {}),
-          ...(Array.isArray(event.data.nextActions) ? { nextActions: event.data.nextActions as ActionResultEvent['nextActions'] } : {}),
+          ...(isActionResultNextActions(event.data.nextActions) ? { nextActions: event.data.nextActions } : {}),
         });
       }
       continue;
@@ -1509,16 +1740,26 @@ function buildBlocksFromDataStream(events: DataStreamEvent[]): {
   };
 }
 
-function createStreamEvent<T extends GenUIStreamEventType>(
-  event: T,
-  data: Extract<GenUIStreamEvent, { event: T }>['data']
-): Extract<GenUIStreamEvent, { event: T }> {
-  return {
-    eventId: createId(ID_PREFIX.event),
-    event,
-    timestamp: new Date().toISOString(),
-    data,
-  } as Extract<GenUIStreamEvent, { event: T }>;
+function createStreamEvent(...args: StreamEventArgs): GenUIStreamEvent {
+  const eventId = createId(ID_PREFIX.event);
+  const timestamp = new Date().toISOString();
+
+  switch (args[0]) {
+    case 'turn-start':
+      return { eventId, event: args[0], timestamp, data: args[1] };
+    case 'block-append':
+      return { eventId, event: args[0], timestamp, data: args[1] };
+    case 'block-replace':
+      return { eventId, event: args[0], timestamp, data: args[1] };
+    case 'turn-status':
+      return { eventId, event: args[0], timestamp, data: args[1] };
+    case 'turn-complete':
+      return { eventId, event: args[0], timestamp, data: args[1] };
+    case 'turn-error':
+      return { eventId, event: args[0], timestamp, data: args[1] };
+    case 'trace':
+      return { eventId, event: args[0], timestamp, data: args[1] };
+  }
 }
 
 export function buildAiChatStreamEvents(
@@ -1603,6 +1844,7 @@ export async function buildAiChatTurn(
   const userText = normalizeActionDisplayText(request.input);
   const userAction = buildUserAction(request.input, conversation.historyMessages);
   const location = parseRequestLocation(request) || parseUserActionLocation(userAction);
+  const ai = parseRequestAiParams(request);
 
   if (!userText) {
     throw new Error('输入内容不能为空');
@@ -1625,6 +1867,7 @@ export async function buildAiChatTurn(
     userAction,
     location,
     trace: true,
+    ...(ai ? { ai } : {}),
   };
 
   const aiResponse = await handleChatStream(chatRequest);
@@ -1678,6 +1921,13 @@ export async function buildAiChatTurn(
       },
     });
   }
+
+  await persistActivityFollowUpResult({
+    request,
+    blocks: mapped.blocks,
+    viewer,
+    traces,
+  });
 
   return {
     envelope,

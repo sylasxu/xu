@@ -1,18 +1,18 @@
 import { useState } from 'react'
 import { MessageSquare, Trash2 } from 'lucide-react'
 import { getRouteApi } from '@tanstack/react-router'
-import { ListPage, DataTable, ListProvider, useListContext } from '@/components/list-page'
+import { ListPage, DataTable } from '@/components/list-page'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { DatePicker } from '@/components/date-picker'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { useSessionsList, useSessionsStats, type ConversationSession } from '@/hooks/use-conversations'
+import { useSessionsList, useSessionsStats } from '@/hooks/use-conversations'
 import {
   conversationsColumns,
-  type ConversationDialogType,
 } from './components/conversations-columns'
 import { ConversationsDialogs } from './components/conversations-dialogs'
+import { ConversationsListProvider, useConversationsListContext } from './list-context'
 
 const route = getRouteApi('/_authenticated/ai-ops/conversations')
 
@@ -66,7 +66,7 @@ function StatsBar() {
 
 // 批量操作按钮
 function BatchActions() {
-  const { selectedRows, setOpen } = useListContext<ConversationSession, ConversationDialogType>()
+  const { selectedRows, setOpen } = useConversationsListContext()
   
   if (!selectedRows || selectedRows.length === 0) return null
 
@@ -87,7 +87,7 @@ function ConversationsContent() {
   const search = route.useSearch()
   const navigate = route.useNavigate()
   const pageSize = search.pageSize ?? 20
-  const { setSelectedRows } = useListContext<ConversationSession, ConversationDialogType>()
+  const { setSelectedRows } = useConversationsListContext()
 
   // 日期筛选状态
   const defaultRange = getDefaultDateRange()
@@ -182,8 +182,8 @@ function ConversationsContent() {
 
 export function Conversations() {
   return (
-    <ListProvider<ConversationSession, ConversationDialogType>>
+    <ConversationsListProvider>
       <ConversationsContent />
-    </ListProvider>
+    </ConversationsListProvider>
   )
 }

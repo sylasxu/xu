@@ -279,7 +279,7 @@ Page({
         })
       }, 500)
       
-      this.setData({ regionChangeTimer: timer as unknown as number })
+      this.setData({ regionChangeTimer: Number(timer) })
     }
   },
 

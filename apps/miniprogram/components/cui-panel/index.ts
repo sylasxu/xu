@@ -95,15 +95,15 @@ Component({
 
   methods: {
     /**
-     * 开始 AI 解析 - Requirements: 3.1
+     * 开始助手处理流程 - Requirements: 3.1
      */
-    startParse(inputText: string, prefillData?: { type?: string; location?: [number, number] }) {
+    startAssistFlow(inputText: string, prefillData?: { type?: string; location?: [number, number] }) {
       this.setData({
         phase: 'thinking',
         thinkingText: '收到，让我想想...',
         _inputText: inputText,
       });
-      this.triggerEvent('parse', {
+      this.triggerEvent('assist', {
         text: inputText,
         prefillType: prefillData?.type,
         prefillLocation: prefillData?.location,
@@ -169,7 +169,7 @@ Component({
       this.clearStreamingTimer();
       const fullText = this.data._fullSearchingText;
       let index = 0;
-      streamingTimer = setInterval(() => {
+      streamingTimer = Number(setInterval(() => {
         if (index < fullText.length) {
           index++;
           this.setData({
@@ -179,7 +179,7 @@ Component({
         } else {
           this.clearStreamingTimer();
         }
-      }, 50) as unknown as number;
+      }, 50));
     },
 
     clearStreamingTimer() {
@@ -244,7 +244,7 @@ Component({
     onRetry() {
       const inputText = this.data._inputText;
       if (inputText) {
-        this.startParse(inputText);
+        this.startAssistFlow(inputText);
       }
     },
 
@@ -252,7 +252,7 @@ Component({
 
     // 模拟 AI 响应流程（开发调试用）
     simulateAIResponse(inputText: string) {
-      this.startParse(inputText);
+      this.startAssistFlow(inputText);
       setTimeout(() => this.handleThinking('收到，正在定位观音桥...'), 300);
       setTimeout(() => this.handleLocation('观音桥', [106.5515, 29.5630]), 800);
       setTimeout(() => this.handleSearching('正在检索附近的麻将局...', 30), 1200);

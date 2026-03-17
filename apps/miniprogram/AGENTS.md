@@ -27,6 +27,18 @@ if (response.status === 200) {
 
 **禁止**：直接使用 `wx.request`
 
+### 小程序运行时边界
+
+- 小程序不能依赖 Monorepo 中跨端共享的前端运行时实现
+- 允许使用 Orval 生成 SDK、生成类型、静态常量；不允许把 Web/Admin 的流处理、状态机、组件行为抽成共享运行时代码再给小程序吃
+- 小程序消费 API/SSE/Storage 时，必须在 `apps/miniprogram` 内显式处理协议分支和异常分支
+
+### 测试与回归
+
+- 默认沿用 Bun First，不为小程序链路新增 Jest / Vitest 作为默认测试栈
+- 小程序消费协议、页面状态流、SSE/GenUI 承接一旦改动，必须补顶层 `bun scripts/*.ts` 或既有回归，验证真实后端契约和用户流程
+- 不要靠页面里的魔法 mock、兜底常量、类型断言把问题压过去；如果回归暴露协议不稳，就回头修 SDK、接口或页面分支本身
+
 ---
 
 ## 🎨 样式规范
@@ -89,6 +101,12 @@ if (response.status === 200) {
 ---
 
 ## 📐 TypeScript 类型推导
+
+### 禁止 `helper/helpers` 与类型逃逸
+
+- 禁止新增 `helper/helpers` 命名的文件、目录、函数
+- 禁止用通用 helper 包住 `JSON.parse`、SSE 事件、Storage 读取、组件属性读取，然后再用断言强行过类型
+- 遇到类型错误，直接改当前页面、store、component 的边界判断和协议分支，不要靠 `as any`、`as unknown as`、万能 helper 兜底
 
 ### Page 泛型
 

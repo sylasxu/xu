@@ -10,15 +10,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { useListContext } from '@/components/list-page'
 import { useSetUserQuota, DAILY_QUOTA_LIMIT } from '@/hooks/use-users'
-import { type User } from '../data/schema'
-import { type UserDialogType } from './users-columns'
 import { UsersMutateDrawer } from './users-mutate-drawer'
 import { UsersDeleteDialog } from './users-delete-dialog'
+import { useUsersListContext } from '../list-context'
 
 export function UsersDialogs() {
-  const { open, setOpen, currentRow } = useListContext<User, UserDialogType>()
+  const { open, setOpen, currentRow } = useUsersListContext()
   const setUserQuota = useSetUserQuota()
   const [quotaValue, setQuotaValue] = useState<string>('')
 
@@ -71,7 +69,7 @@ export function UsersDialogs() {
                 type='number'
                 min={0}
                 max={999}
-                placeholder={`当前: ${(currentRow as any)?.aiCreateQuotaToday ?? DAILY_QUOTA_LIMIT}`}
+                placeholder={`当前: ${currentRow?.aiCreateQuotaToday ?? DAILY_QUOTA_LIMIT}`}
                 value={quotaValue}
                 onChange={(e) => setQuotaValue(e.target.value)}
               />

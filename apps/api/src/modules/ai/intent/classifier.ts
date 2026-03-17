@@ -5,9 +5,53 @@
  */
 
 import { runText } from '../models/runtime';
-import { getDefaultChatModel } from '../models/router';
+import { resolveChatModelSelection } from '../models/router';
 import type { IntentType, ClassifyResult, ClassifyContext } from './types';
 import { intentPatterns, intentPriority, draftModifyPatterns } from './definitions';
+
+const VALID_INTENTS: IntentType[] = [
+  'create', 'explore', 'manage', 'partner', 'chitchat',
+  'idle', 'unknown', 'modify', 'confirm', 'deny', 'cancel',
+  'share', 'join', 'show_activity',
+];
+
+const INTENT_ALIASES: Record<string, IntentType> = {
+  rent: 'create',
+  create_activity: 'create',
+  createactivity: 'create',
+  explore_nearby: 'explore',
+  explorenearby: 'explore',
+  nearby: 'explore',
+  find_partner: 'partner',
+  findpartner: 'partner',
+  partner_intent: 'partner',
+  partnerintent: 'partner',
+  showactivity: 'show_activity',
+  get_my_activities: 'show_activity',
+  getmyactivities: 'show_activity',
+  chat: 'chitchat',
+  casual_chat: 'chitchat',
+  casualchat: 'chitchat',
+  reject: 'deny',
+  approve: 'confirm',
+};
+
+function normalizeIntentCandidate(value: unknown): IntentType | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  if ((VALID_INTENTS as string[]).includes(normalized)) {
+    return normalized as IntentType;
+  }
+
+  return INTENT_ALIASES[normalized] ?? null;
+}
 
 /**
  * 混合意图分类（纯函数）
@@ -108,9 +152,11 @@ async function classifyByLLM(
 
   const contextHint = context.hasDraftContext ? '（当前有活动草稿待确认）' : '';
 
+  const { model, modelId } = await resolveChatModelSelection({ intent: 'chat' });
+
   try {
     const result = await runText({
-      model: getDefaultChatModel(),
+      model,
       prompt: `你是一个意图分类器。根据对话历史，判断用户当前的意图。${contextHint}
 
 意图类型：
@@ -148,35 +194,21 @@ ${conversationText}
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
-      const intent = parsed.intent as IntentType;
+      const intent = normalizeIntentCandidate(parsed.intent);
       const confidence = typeof parsed.confidence === 'number' ? parsed.confidence : 0.7;
 
       console.log(`[Intent LLM] ${intent} (confidence: ${confidence})`);
 
-      // 验证意图类型
-      const validIntents: IntentType[] = [
-        'create', 'explore', 'manage', 'partner', 'chitchat',
-        'idle', 'unknown',
-        // New features
-        'modify', 'confirm', 'deny', 'cancel',
-        'share', 'join', 'show_activity'
-      ];
-      if (validIntents.includes(intent)) {
+      if (intent) {
         return { intent, confidence, method: 'llm' };
       }
     }
 
-    // 解析失败，降级到 explore
     console.warn('[Intent LLM] Failed to parse response:', text);
-    return { intent: 'explore', confidence: 0.5, method: 'llm' };
+    throw new Error(`模型 ${modelId} 返回了无法解析的意图分类结果`);
   } catch (error) {
     console.error('[Intent LLM] Error:', error);
-    // 降级到 explore（最常见的意图）
-    return {
-      intent: 'explore',
-      confidence: 0.5,
-      method: 'llm',
-    };
+    throw error;
   }
 }
 

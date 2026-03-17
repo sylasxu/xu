@@ -1,22 +1,47 @@
 // Auth Controller - 认证相关接口 (MVP 简化版)
-// 只保留 /auth/login 和 /auth/bindPhone
+// 提供统一登录、测试账号准备和手机号绑定能力
 import { Elysia } from 'elysia';
 import { AuthError, basePlugins, verifyAdmin, verifyAuth } from '../../setup';
-import { authModel, type ErrorResponse } from './auth.model';
-import { wxLogin, bindPhone, adminPhoneLogin, bootstrapTestUsers } from './auth.service';
+import { authModel, type ErrorResponse, type LoginRequest, type PhoneOtpLoginRequest } from './auth.model';
+import { loginWithWechatCode, bindPhone, loginWithPhoneCode, bootstrapTestUsers } from './auth.service';
+
+function isPhoneOtpLoginRequest(body: LoginRequest): body is PhoneOtpLoginRequest {
+  return typeof (body as PhoneOtpLoginRequest).phone === 'string';
+}
 
 export const authController = new Elysia({ prefix: '/auth' })
   .use(basePlugins)
   .use(authModel)
   
-  // 微信登录 (静默登录)
+  // 统一登录
   .post(
     '/login',
     async ({ body, jwt, set }) => {
       try {
-        const { user, isNewUser } = await wxLogin(body);
+        const loginBody = body as LoginRequest;
 
-        // 生成 JWT Token
+        if (isPhoneOtpLoginRequest(loginBody)) {
+          const user = await loginWithPhoneCode(loginBody);
+
+          // Token 过期时间：24小时
+          const exp = Math.floor(Date.now() / 1000) + 24 * 60 * 60;
+
+          const token = await jwt.sign({
+            id: user.id,
+            phoneNumber: user.phoneNumber,
+            role: 'admin',
+            exp,
+          });
+
+          return {
+            user,
+            token,
+            isNewUser: false,
+            exp,
+          };
+        }
+
+        const { user, isNewUser } = await loginWithWechatCode(loginBody);
         const token = await jwt.sign({
           id: user.id,
           wxOpenId: user.wxOpenId,
@@ -29,7 +54,7 @@ export const authController = new Elysia({ prefix: '/auth' })
           isNewUser,
         };
       } catch (error: any) {
-        console.error('微信登录失败:', error);
+        console.error('登录失败:', error);
         set.status = 400;
         return {
           code: 400,
@@ -40,10 +65,10 @@ export const authController = new Elysia({ prefix: '/auth' })
     {
       detail: {
         tags: ['Auth'],
-        summary: '微信登录',
-        description: '使用微信授权码静默登录，返回用户信息和 JWT Token',
+        summary: '登录',
+        description: '统一登录入口：支持微信 code 登录和受保护手机号验证码登录。',
       },
-      body: 'auth.wxLogin',
+      body: 'auth.login',
       response: {
         200: 'auth.loginResponse',
         400: 'auth.error',
@@ -51,54 +76,8 @@ export const authController = new Elysia({ prefix: '/auth' })
     }
   )
 
-  // Admin 手机号登录
   .post(
-    '/admin/login',
-    async ({ body, jwt, set }) => {
-      try {
-        const adminUser = await adminPhoneLogin(body);
-
-        // Token 过期时间：24小时
-        const exp = Math.floor(Date.now() / 1000) + 24 * 60 * 60;
-
-        // 生成 JWT Token
-        const token = await jwt.sign({
-          id: adminUser.id,
-          phoneNumber: adminUser.phoneNumber,
-          role: 'admin',
-          exp,
-        });
-
-        return {
-          user: adminUser,
-          token,
-          exp,
-        };
-      } catch (error: any) {
-        console.error('Admin 登录失败:', error);
-        set.status = 400;
-        return {
-          code: 400,
-          msg: error.message || '登录失败',
-        } satisfies ErrorResponse;
-      }
-    },
-    {
-      detail: {
-        tags: ['Auth'],
-        summary: 'Admin 手机号登录',
-        description: '管理员使用手机号 + 验证码登录',
-      },
-      body: 'auth.adminPhoneLogin',
-      response: {
-        200: 'auth.adminLoginResponse',
-        400: 'auth.error',
-      },
-    }
-  )
-
-  .post(
-    '/admin/bootstrap-test-users',
+    '/test-users/bootstrap',
     async ({ body, jwt, headers, set }) => {
       try {
         await verifyAdmin(jwt, headers);
@@ -114,7 +93,7 @@ export const authController = new Elysia({ prefix: '/auth' })
         set.status = 500;
         return {
           code: 500,
-          msg: '管理员鉴权失败',
+          msg: '权限验证失败',
         } satisfies ErrorResponse;
       }
 
@@ -149,12 +128,12 @@ export const authController = new Elysia({ prefix: '/auth' })
     {
       detail: {
         tags: ['Auth'],
-        summary: 'Admin 一键准备测试账号',
-        description: '使用管理员手机号 + 超级验证码，批量准备最多 5 个已绑手机号的测试账号，用于业务联调。',
+        summary: '准备测试账号',
+        description: '使用受保护手机号 + 超级验证码，批量准备最多 5 个已绑手机号的测试账号，用于业务联调。',
       },
-      body: 'auth.bootstrapTestUsers',
+      body: 'auth.testUsersBootstrap',
       response: {
-        200: 'auth.bootstrapTestUsersResponse',
+        200: 'auth.testUsersBootstrapResponse',
         400: 'auth.error',
         401: 'auth.error',
         403: 'auth.error',

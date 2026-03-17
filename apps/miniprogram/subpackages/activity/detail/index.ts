@@ -79,6 +79,20 @@ interface PageOptions {
   share?: string;
 }
 
+function normalizeCurrentUser(value: ReturnType<typeof useUserStore.getState>['user']): User | null {
+  if (!value?.id) {
+    return null;
+  }
+
+  return {
+    id: value.id,
+    nickname: value.nickname || undefined,
+    avatarUrl: value.avatarUrl || undefined,
+    phoneNumber: value.phoneNumber || undefined,
+    participationCount: value.participationCount,
+  };
+}
+
 const STATUS_TEXT: Record<string, string> = {
   pending: '已申请，等待审核',
   approved: '已通过审核',
@@ -213,15 +227,17 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
   async loadCurrentUser(): Promise<void> {
     const userStore = useUserStore.getState();
     const currentUser = userStore.user;
-    if (!currentUser?.id) return;
+    const normalizedUser = normalizeCurrentUser(currentUser);
+    if (!normalizedUser) return;
 
-    this.setData({ currentUser: currentUser as unknown as User });
+    this.setData({ currentUser: normalizedUser });
 
     try {
       await userStore.refreshUserInfo();
       const refreshedUser = useUserStore.getState().user;
-      if (refreshedUser?.id === currentUser.id) {
-        this.setData({ currentUser: refreshedUser as unknown as User });
+      const refreshedNormalizedUser = normalizeCurrentUser(refreshedUser);
+      if (refreshedNormalizedUser?.id === normalizedUser.id) {
+        this.setData({ currentUser: refreshedNormalizedUser });
       }
     } catch (error) {
       console.error('获取用户信息失败', error);

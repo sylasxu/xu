@@ -1,6 +1,6 @@
 // Hot Keywords Controller - 热词相关接口 (v4.8 Digital Ascension)
 import { Elysia } from 'elysia';
-import { basePlugins, verifyAuth, verifyAdmin, AuthError } from '../../setup';
+import { basePlugins, verifyAdmin, AuthError } from '../../setup';
 import { hotKeywordsModel, type ErrorResponse } from './hot-keywords.model';
 import {
   getActiveHotKeywords,
@@ -15,14 +15,28 @@ export const hotKeywordsController = new Elysia({ prefix: '/hot-keywords' })
   .use(basePlugins)
   .use(hotKeywordsModel)
 
-  // ==========================================
-  // 获取热词列表（小程序使用，公开接口）
-  // ==========================================
   .get(
     '/',
-    async ({ query, set }) => {
+    async ({ query, set, jwt, headers }) => {
+      if (query.detail) {
+        try {
+          await verifyAdmin(jwt, headers);
+        } catch (error) {
+          if (error instanceof AuthError) {
+            set.status = error.status;
+            return { code: error.status, msg: error.message } satisfies ErrorResponse;
+          }
+
+          set.status = 500;
+          return { code: 500, msg: '权限验证失败' } satisfies ErrorResponse;
+        }
+      }
+
       try {
-        const keywords = await getActiveHotKeywords(query);
+        const keywords = query.detail
+          ? await listKeywords(query)
+          : await getActiveHotKeywords(query);
+
         return { items: keywords, total: keywords.length };
       } catch (error: any) {
         set.status = 500;
@@ -36,19 +50,18 @@ export const hotKeywordsController = new Elysia({ prefix: '/hot-keywords' })
       detail: {
         tags: ['Hot Keywords'],
         summary: '获取热词列表',
-        description: '获取活跃的热词列表，用于小程序 Hot Chips 显示',
+        description: '获取热词列表。默认返回公开简版字段；detail=true 时返回完整字段并需要管理员权限。',
       },
       query: 'hotKeywords.query',
       response: {
         200: 'hotKeywords.listResponse',
+        401: 'hotKeywords.error',
+        403: 'hotKeywords.error',
         500: 'hotKeywords.error',
       },
     }
   )
 
-  // ==========================================
-  // Admin 接口（通过 guard 保护）
-  // ==========================================
   .guard(
     {
       async beforeHandle({ jwt, headers, set }) {
@@ -64,49 +77,12 @@ export const hotKeywordsController = new Elysia({ prefix: '/hot-keywords' })
     },
     (app) =>
       app
-        // ==========================================
-        // Admin API：获取所有热词
-        // ==========================================
-        .get(
-          '/all',
-          async ({ query, set }) => {
-            try {
-              const keywords = await listKeywords(query);
-              return { items: keywords, total: keywords.length };
-            } catch (error: any) {
-              set.status = 500;
-              return {
-                code: 500,
-                msg: error.message || '获取热词列表失败',
-              } satisfies ErrorResponse;
-            }
-          },
-          {
-            detail: {
-              tags: ['Hot Keywords - Admin'],
-              summary: 'Admin 获取所有热词',
-              description: '获取所有热词列表，支持筛选（需要管理员权限）',
-            },
-            query: 'hotKeywords.adminQuery',
-            response: {
-              200: 'hotKeywords.adminListResponse',
-              401: 'hotKeywords.error',
-              403: 'hotKeywords.error',
-              500: 'hotKeywords.error',
-            },
-          }
-        )
-
-        // ==========================================
-        // Admin API：创建热词
-        // ==========================================
         .post(
           '/',
           async ({ body, set, jwt, headers }) => {
             try {
-              // guard 已验证 admin 权限，这里获取用户 ID
-              const user = (await verifyAuth(jwt, headers))!;
-              const keyword = await createKeyword(body, user.id);
+              const admin = await verifyAdmin(jwt, headers);
+              const keyword = await createKeyword(body, admin.id);
               return { success: true as const, msg: '热词创建成功', id: keyword.id };
             } catch (error: any) {
               set.status = 400;
@@ -118,8 +94,8 @@ export const hotKeywordsController = new Elysia({ prefix: '/hot-keywords' })
           },
           {
             detail: {
-              tags: ['Hot Keywords - Admin'],
-              summary: 'Admin 创建热词',
+              tags: ['Hot Keywords'],
+              summary: '创建热词',
               description: '创建新的热词（需要管理员权限）',
             },
             body: 'hotKeywords.createRequest',
@@ -132,9 +108,6 @@ export const hotKeywordsController = new Elysia({ prefix: '/hot-keywords' })
           }
         )
 
-        // ==========================================
-        // Admin API：更新热词
-        // ==========================================
         .patch(
           '/:id',
           async ({ params, body, set }) => {
@@ -151,8 +124,8 @@ export const hotKeywordsController = new Elysia({ prefix: '/hot-keywords' })
           },
           {
             detail: {
-              tags: ['Hot Keywords - Admin'],
-              summary: 'Admin 更新热词',
+              tags: ['Hot Keywords'],
+              summary: '更新热词',
               description: '更新热词信息（需要管理员权限）',
             },
             params: 'hotKeywords.idParams',
@@ -166,9 +139,6 @@ export const hotKeywordsController = new Elysia({ prefix: '/hot-keywords' })
           }
         )
 
-        // ==========================================
-        // Admin API：删除热词
-        // ==========================================
         .delete(
           '/:id',
           async ({ params, set }) => {
@@ -185,8 +155,8 @@ export const hotKeywordsController = new Elysia({ prefix: '/hot-keywords' })
           },
           {
             detail: {
-              tags: ['Hot Keywords - Admin'],
-              summary: 'Admin 删除热词',
+              tags: ['Hot Keywords'],
+              summary: '删除热词',
               description: '删除热词（软删除，需要管理员权限）',
             },
             params: 'hotKeywords.idParams',
@@ -199,9 +169,6 @@ export const hotKeywordsController = new Elysia({ prefix: '/hot-keywords' })
           }
         )
 
-        // ==========================================
-        // Admin API：获取热词分析
-        // ==========================================
         .get(
           '/analytics',
           async ({ query, set }) => {
@@ -218,8 +185,8 @@ export const hotKeywordsController = new Elysia({ prefix: '/hot-keywords' })
           },
           {
             detail: {
-              tags: ['Hot Keywords - Admin'],
-              summary: 'Admin 获取热词分析',
+              tags: ['Hot Keywords'],
+              summary: '获取热词分析',
               description: '获取热词分析数据（需要管理员权限）',
             },
             query: 'hotKeywords.analyticsQuery',

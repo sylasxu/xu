@@ -18,7 +18,7 @@ let recordingTimer: number | null = null;
 // 防抖延迟时间 (ms) - Requirements: 2.6
 const DEBOUNCE_DELAY = 500;
 
-interface ComponentData {
+interface AiInputBarData {
   isExpanded: boolean;
   inputValue: string;
   isRecording: boolean;
@@ -26,12 +26,28 @@ interface ComponentData {
   placeholder: string;
 }
 
-interface ComponentProperties {
+interface AiInputBarProperties {
   placeholder: WechatMiniprogram.Component.PropertyOption;
   prefillText: WechatMiniprogram.Component.PropertyOption;
   prefillType: WechatMiniprogram.Component.PropertyOption;
   prefillLocation: WechatMiniprogram.Component.PropertyOption;
 }
+
+function readAiInputString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+function readAiInputLocation(value: unknown): number[] {
+  return Array.isArray(value) ? value.filter((item): item is number => typeof item === 'number') : [];
+}
+
+const AI_INPUT_BAR_DATA: AiInputBarData = {
+  isExpanded: false,
+  inputValue: '',
+  isRecording: false,
+  recordingDuration: 0,
+  placeholder: '本周想玩什么...',
+};
 
 Component({
   options: {
@@ -57,22 +73,18 @@ Component({
     // 预填位置 [lng, lat]
     prefillLocation: {
       type: Array,
-      value: [] as number[],
+      value: [],
     },
   },
 
   data: {
-    isExpanded: false,
-    inputValue: '',
-    isRecording: false,
-    recordingDuration: 0,
-    placeholder: '本周想玩什么...',
-  } as ComponentData,
+    ...AI_INPUT_BAR_DATA,
+  },
 
   lifetimes: {
     attached() {
       // 如果有预填文本，自动展开并填入
-      const prefillText = this.data.prefillText as string;
+      const prefillText = readAiInputString(this.properties.prefillText) || '';
       if (prefillText) {
         this.setData({
           isExpanded: true,
@@ -141,19 +153,19 @@ Component({
         return;
       }
 
-      // 防抖：500ms 后触发 AI 解析 - Requirements: 2.6
-      debounceTimer = setTimeout(() => {
-        this.triggerAIParse(value);
-      }, DEBOUNCE_DELAY) as unknown as number;
+      // 防抖：500ms 后触发输入提示事件 - Requirements: 2.6
+      debounceTimer = Number(setTimeout(() => {
+        this.emitInputAssist(value);
+      }, DEBOUNCE_DELAY));
     },
 
     /**
-     * 触发 AI 解析
+     * 触发输入提示事件
      */
-    triggerAIParse(text: string) {
-      const prefillType = this.data.prefillType as string;
-      const prefillLocation = this.data.prefillLocation as number[];
-      this.triggerEvent('parse', {
+    emitInputAssist(text: string) {
+      const prefillType = readAiInputString(this.properties.prefillType) || '';
+      const prefillLocation = readAiInputLocation(this.properties.prefillLocation);
+      this.triggerEvent('assist', {
         text,
         prefillType,
         prefillLocation,
@@ -173,7 +185,7 @@ Component({
         debounceTimer = null;
       }
 
-      this.triggerAIParse(value);
+      this.emitInputAssist(value);
     },
 
     /**
@@ -295,8 +307,8 @@ Component({
                 inputValue: res.result,
                 isExpanded: true,
               });
-              // 触发 AI 解析
-              this.triggerAIParse(res.result);
+              // 触发输入提示事件
+              this.emitInputAssist(res.result);
             } else {
               wx.showToast({ title: '识别失败，请重试', icon: 'none' });
             }
@@ -342,13 +354,13 @@ Component({
      * 设置预填数据（供外部调用）
      */
     setPrefillData(data: { text?: string; type?: string; location?: number[] }) {
-      const updates: Partial<ComponentData> = { isExpanded: true };
+      const updates: Partial<AiInputBarData> = { isExpanded: true };
       
       if (data.text) {
         updates.inputValue = data.text;
       }
       
-      this.setData(updates as ComponentData);
+      this.setData(updates);
       
       if (data.type) {
         this.setData({ prefillType: data.type });

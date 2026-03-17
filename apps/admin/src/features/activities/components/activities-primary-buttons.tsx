@@ -1,11 +1,9 @@
 import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useListContext } from '@/components/list-page'
-import { type Activity } from '../data/schema'
-import { type ActivityDialogType } from './activities-columns'
+import { useActivitiesListContext } from '../list-context'
 
 export function ActivitiesPrimaryButtons() {
-  const { setOpen } = useListContext<Activity, ActivityDialogType>()
+  const { setOpen } = useActivitiesListContext()
   return (
     <Button className='space-x-1' onClick={() => setOpen('create')}>
       <span>创建</span> <Plus size={18} />

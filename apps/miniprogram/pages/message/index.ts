@@ -107,6 +107,57 @@ interface SocketMessage {
   };
 }
 
+function isSocketMessage(value: unknown): value is SocketMessage {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  if ((record.type !== 'message' && record.type !== 'notification') || !record.data || typeof record.data !== 'object') {
+    return false;
+  }
+
+  const data = record.data as Record<string, unknown>;
+  if (data.activityId !== undefined && typeof data.activityId !== 'string') {
+    return false;
+  }
+
+  if (data.message !== undefined) {
+    if (!data.message || typeof data.message !== 'object') {
+      return false;
+    }
+
+    const message = data.message as Record<string, unknown>;
+    if (
+      typeof message.id !== 'string' ||
+      typeof message.content !== 'string' ||
+      typeof message.senderId !== 'string' ||
+      typeof message.createdAt !== 'string'
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function getErrorMessage(value: unknown, fallback: string): string {
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    if (typeof record.msg === 'string' && record.msg.trim()) {
+      return record.msg.trim();
+    }
+  }
+
+  return fallback;
+}
+
+type PromptContextOverrides = {
+  activityId?: string;
+  followUpMode?: 'review' | 'rebook' | 'kickoff';
+  entry?: string;
+}
+
 const getAppInstance = () => {
   return getApp<{
     globalData: {
@@ -346,12 +397,11 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     try {
       const response = await getPendingMatchDetail(matchId, userId);
       if (response.status !== 200) {
-        const errorData = response.data as { msg?: string };
-        throw new Error(errorData.msg || '加载匹配详情失败');
+        throw new Error(getErrorMessage(response.data, '加载匹配详情失败'));
       }
 
       this.setData({
-        selectedMatchDetail: this.mapPendingMatchDetail(response.data as PendingMatchDetailResponse),
+        selectedMatchDetail: this.mapPendingMatchDetail(response.data),
         matchDetailLoading: false,
       });
     } catch (error) {
@@ -399,7 +449,16 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
 
     socket.onMessage((result) => {
       try {
-        const data = JSON.parse(result.data as string) as SocketMessage;
+        if (typeof result.data !== 'string') {
+          return;
+        }
+
+        const parsed: unknown = JSON.parse(result.data);
+        if (!isSocketMessage(parsed)) {
+          return;
+        }
+
+        const data = parsed;
         if (data.type === 'message' && data.data.activityId && data.data.message) {
           this.handleNewMessage(data.data.activityId, data.data.message);
         }
@@ -558,7 +617,11 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     const activityRef = activityId ? `（activityId: ${activityId}）` : '';
     const prompt = `我刚结束${activityHint}${activityRef}，帮我先做一份复盘：亮点、槽点、下次优化和一句可直接发群里的总结。`;
 
-    this.openHomeWithPrompt(prompt);
+    this.openHomeWithPrompt(prompt, {
+      ...(activityId ? { activityId } : {}),
+      followUpMode: 'review',
+      entry: 'message_center_post_activity',
+    });
   },
 
   async startRebookFromNotification(activityId: string, title: string) {
@@ -569,11 +632,15 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     const activityRef = activityId ? `（activityId: ${activityId}）` : '';
     const prompt = `基于我刚结束的${activityHint}${activityRef}，帮我快速再约一场：延续合适的人、给个新时间建议，并直接生成一段可发送的招呼文案。`;
 
-    this.openHomeWithPrompt(prompt);
+    this.openHomeWithPrompt(prompt, {
+      ...(activityId ? { activityId } : {}),
+      followUpMode: 'rebook',
+      entry: 'message_center_post_activity',
+    });
   },
 
-  openHomeWithPrompt(prompt: string) {
-    useChatStore.getState().sendMessage(prompt);
+  openHomeWithPrompt(prompt: string, contextOverrides?: PromptContextOverrides) {
+    useChatStore.getState().sendMessage(prompt, contextOverrides);
     wx.switchTab({ url: '/pages/home/index' });
   },
 

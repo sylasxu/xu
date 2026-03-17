@@ -18,7 +18,6 @@ import { userController } from './modules/users/user.controller';
 import { activityController } from './modules/activities/activity.controller';
 import { aiController } from './modules/ai/ai.controller';
 import { participantController } from './modules/participants/participant.controller';
-import { dashboardController } from './modules/dashboard/dashboard.controller';
 import { chatController } from './modules/chat/chat.controller';
 import { notificationController } from './modules/notifications/notification.controller';
 import { reportController } from './modules/reports/report.controller';
@@ -58,11 +57,9 @@ const openApiPlugin = openapi({
       { name: 'AI', description: 'AI 功能' },
       { name: 'Participants', description: '参与者管理' },
       { name: 'Chat', description: '群聊消息' },
-      { name: 'Dashboard', description: '仪表板数据' },
       { name: 'Notifications', description: '通知系统' },
       { name: 'Reports', description: '内容审核' },
       { name: 'Hot Keywords', description: '全局关键词' },
-      { name: 'Hot Keywords - Admin', description: '全局关键词管理' },
       { name: 'Analytics', description: '数据分析' },
       { name: 'Content', description: '内容运营' },
     ],
@@ -131,7 +128,12 @@ const appWithBase = new Elysia()
   .use(basePlugins)
   .use(openApiPlugin);
 
-const appWithControllers = appWithBase
+export const app = appWithBase
+  // 健康检查
+  .get('/', () => 'Hello Juchang API')
+  .get('/health', () => ({ status: 'ok', timestamp: new Date().toISOString() }))
+  // 定时任务状态查询（仅供调试）
+  .get('/jobs/status', getJobsStatusHandler)
   // 核心业务模块
   .use(authController)
   .use(userController)
@@ -139,7 +141,6 @@ const appWithControllers = appWithBase
   .use(aiController)
   .use(participantController)
   .use(chatController)
-  .use(dashboardController)
   .use(notificationController)
   .use(reportController)
   .use(moderationController)
@@ -149,16 +150,6 @@ const appWithControllers = appWithBase
   .use(configController)
   .use(analyticsController)
   .use(contentController);
-
-const runtimeApp = (appWithControllers as unknown as Elysia)
-  // 健康检查
-  .get('/', () => 'Hello Juchang API')
-  .get('/health', () => ({ status: 'ok', timestamp: new Date().toISOString() }))
-  // 定时任务状态查询（仅供调试）
-  .get('/jobs/status', getJobsStatusHandler);
-
-// 创建 Elysia 应用
-export const app = runtimeApp as unknown as Elysia;
 
 if (import.meta.main) {
   // 打印启动 Banner
@@ -202,4 +193,4 @@ if (import.meta.main) {
 }
 
 // 导出类型给 Eden Treaty
-export type App = typeof appWithControllers;
+export type App = typeof app;

@@ -42,6 +42,36 @@ interface ComponentProperties {
   disabled: WechatMiniprogram.Component.PropertyOption;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function readText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function readPreferenceOption(value: unknown): PreferenceOption | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const label = readText(value.label);
+  const optionValue = readText(value.value) || label;
+  const action = readText(value.action);
+  const params = isRecord(value.params) ? value.params : undefined;
+
+  if (!label || !optionValue) {
+    return null;
+  }
+
+  return {
+    label,
+    value: optionValue,
+    ...(action ? { action } : {}),
+    ...(params ? { params } : {}),
+  };
+}
+
 Component({
   options: {
     styleIsolation: 'apply-shared',
@@ -51,7 +81,7 @@ Component({
     /** 询问类型：location=位置偏好，type=活动类型偏好 */
     questionType: {
       type: String,
-      value: 'location' as 'location' | 'type',
+      value: 'location',
     },
     /** 问题文本 */
     question: {
@@ -61,7 +91,7 @@ Component({
     /** 选项列表 */
     options: {
       type: Array,
-      value: [] as PreferenceOption[],
+      value: [],
     },
     /** 是否允许跳过 */
     allowSkip: {
@@ -71,7 +101,7 @@ Component({
     /** 已收集的信息（用于上下文传递） */
     collectedInfo: {
       type: Object,
-      value: {} as CollectedInfo,
+      value: {},
     },
     /** 是否禁用（已选择后禁用） */
     disabled: {
@@ -100,7 +130,7 @@ Component({
     onSelectOption(e: WechatMiniprogram.TouchEvent) {
       if (this.properties.disabled || this.data.isSubmitting) return;
       
-      const { option } = e.currentTarget.dataset as { option: PreferenceOption };
+      const option = readPreferenceOption(e.currentTarget.dataset?.option);
       if (!option) return;
 
       this.setData({ isSubmitting: true });

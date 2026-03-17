@@ -35,6 +35,130 @@ export const QWEN_EMBEDDING_MODEL = MODEL_IDS.QWEN_EMBEDDING;
  */
 export const QWEN_EMBEDDING_DIMENSION = EMBEDDING_DIMENSIONS.QWEN;
 
+interface QwenEmbeddingPayload {
+  data: Array<{
+    embedding: number[];
+    index: number;
+  }>;
+  usage: {
+    prompt_tokens: number;
+    total_tokens: number;
+  };
+}
+
+interface QwenRerankPayload {
+  output: {
+    results: Array<{
+      index: number;
+      relevance_score: number;
+      document: {
+        text: string;
+      };
+    }>;
+  };
+  usage: {
+    total_tokens: number;
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function readNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function readNumberArray(value: unknown): number[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const numbers: number[] = [];
+  for (const item of value) {
+    const number = readNumber(item);
+    if (number === null) {
+      return null;
+    }
+    numbers.push(number);
+  }
+
+  return numbers;
+}
+
+function readEmbeddingPayload(value: unknown): QwenEmbeddingPayload | null {
+  if (!isRecord(value) || !Array.isArray(value.data) || !isRecord(value.usage)) {
+    return null;
+  }
+
+  const data: QwenEmbeddingPayload['data'] = [];
+  for (const item of value.data) {
+    if (!isRecord(item)) {
+      return null;
+    }
+
+    const embedding = readNumberArray(item.embedding);
+    const index = readNumber(item.index);
+    if (!embedding || index === null) {
+      return null;
+    }
+
+    data.push({ embedding, index });
+  }
+
+  const promptTokens = readNumber(value.usage.prompt_tokens);
+  const totalTokens = readNumber(value.usage.total_tokens);
+  if (promptTokens === null || totalTokens === null) {
+    return null;
+  }
+
+  return {
+    data,
+    usage: {
+      prompt_tokens: promptTokens,
+      total_tokens: totalTokens,
+    },
+  };
+}
+
+function readRerankPayload(value: unknown): QwenRerankPayload | null {
+  if (!isRecord(value) || !isRecord(value.output) || !Array.isArray(value.output.results) || !isRecord(value.usage)) {
+    return null;
+  }
+
+  const results: QwenRerankPayload['output']['results'] = [];
+  for (const item of value.output.results) {
+    if (!isRecord(item) || !isRecord(item.document)) {
+      return null;
+    }
+
+    const index = readNumber(item.index);
+    const relevanceScore = readNumber(item.relevance_score);
+    const documentText = typeof item.document.text === 'string' ? item.document.text : null;
+    if (index === null || relevanceScore === null || documentText === null) {
+      return null;
+    }
+
+    results.push({
+      index,
+      relevance_score: relevanceScore,
+      document: {
+        text: documentText,
+      },
+    });
+  }
+
+  const totalTokens = readNumber(value.usage.total_tokens);
+  if (totalTokens === null) {
+    return null;
+  }
+
+  return {
+    output: { results },
+    usage: { total_tokens: totalTokens },
+  };
+}
+
 /**
  * 获取 DashScope API Key
  */
@@ -101,10 +225,10 @@ async function embed(params: EmbedParams): Promise<EmbedResponse> {
     throw new Error(`Qwen embedding failed: ${error}`);
   }
 
-  const data = await response.json() as {
-    data: Array<{ embedding: number[]; index: number }>;
-    usage: { prompt_tokens: number; total_tokens: number };
-  };
+  const data = readEmbeddingPayload(await response.json());
+  if (!data) {
+    throw new Error('Qwen embedding returned an invalid payload');
+  }
 
   // 按 index 排序确保顺序正确
   const sortedData = [...data.data].sort((a, b) => a.index - b.index);
@@ -157,16 +281,10 @@ async function rerank(params: RerankParams): Promise<RerankResponse> {
     throw new Error(`Qwen rerank failed: ${error}`);
   }
 
-  const data = await response.json() as {
-    output: {
-      results: Array<{
-        index: number;
-        relevance_score: number;
-        document: { text: string };
-      }>;
-    };
-    usage: { total_tokens: number };
-  };
+  const data = readRerankPayload(await response.json());
+  if (!data) {
+    throw new Error('Qwen rerank returned an invalid payload');
+  }
 
   return {
     results: data.output.results.map(r => ({
@@ -198,7 +316,7 @@ async function healthCheck(): Promise<boolean> {
  * Qwen 模型提供商
  */
 export const qwenProvider: ModelProvider = {
-  name: 'qwen' as any, // 扩展类型
+  name: 'qwen',
   getChatModel,
   embed,
   rerank,
@@ -220,7 +338,11 @@ export async function getQwenEmbeddings(texts: string[]): Promise<number[][]> {
  */
 export async function getQwenEmbedding(text: string): Promise<number[]> {
   const result = await embed({ texts: [text] });
-  return result.embeddings[0];
+  const embedding = result.embeddings[0];
+  if (!embedding) {
+    throw new Error('Qwen embedding result is empty');
+  }
+  return embedding;
 }
 
 /**
@@ -256,4 +378,3 @@ export function getQwenModelByIntent(intent: 'chat' | 'reasoning' | 'agent' | 'v
       return qwen.chat(ACTIVE_MODELS.CHAT_PRIMARY);
   }
 }
-

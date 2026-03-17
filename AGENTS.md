@@ -70,6 +70,12 @@ inclusion: always
   - `rag/` - 语义检索 + Rerank
 - **文件结构**: `*.controller.ts` / `*.service.ts` (纯函数) / `*.model.ts`
 - **用户态查询规则**: 统一按 `userId` 显式查询，禁止 `mine/me/scope` 语义接口
+- **客户端无关原则**:
+  - API 必须先按“没有任何客户端消费”来设计，表达稳定的领域能力，而不是为 H5 / Admin / 小程序定制接口
+  - 禁止为同一领域能力新增 `admin/*`、`web/*`、`h5/*`、`miniprogram/*` 风格的后端模块、service、route、DTO
+  - 当不同客户端有差异化消费方式时，统一通过同一领域接口的显式参数或上下文标记承接，例如 `client`、`entry`、`userId`、`activityId`
+  - Admin/H5/小程序的差异，优先体现在鉴权、字段裁剪、响应组装或前端消费层，不体现在后端按端分叉的领域建模
+  - 只有“该能力本身就是独立领域”时，才允许独立模块，例如 analytics、dashboard、wechat callback；不得因为某个端要用就反向拆后端
 - **禁止**: `export namespace`、class Service、手动定义 DB 表 Schema
 
 ---
@@ -124,6 +130,17 @@ myProcessor.processorName = 'my-processor';
 ### apps/miniprogram (小程序)
 - **Tech**: Native WeChat + TypeScript + Zustand Vanilla + LESS
 - **禁止**: `wx.request` (使用 Orval SDK)
+- **运行时边界**:
+  - 小程序不能依赖 Monorepo 里的跨端运行时实现，不要抽公共前端运行时代码给小程序复用
+  - 小程序只能消费 Orval 生成 SDK、生成协议类型、静态常量；具体的流处理、状态机、页面交互必须在 `apps/miniprogram` 内显式实现
+
+## 🚫 类型逃逸与抽象命名
+
+- **禁止新增任何 `helper/helpers` 命名的文件、目录、函数**。`helper` 不是抽象理由，这类命名会掩盖真实职责，也容易演变成类型逃逸和万能胶水层
+- **禁止用“封一个 helper 再统一处理”来回避类型错误**。遇到协议、JSON、SSE、Storage、SDK 响应等不确定输入，必须在消费边界直接做显式校验、显式分支、显式失败
+- **允许抽取的前提**：抽取后的名字必须直指领域或协议职责，例如 `parseGenUIStreamEvent`、`readWelcomePayload`、`buildPartnerMatchResult`；禁止 `eventHelper`、`typeHelper`、`responseHelper`、`commonHelper`
+- **禁止用 `as any`、`as unknown as`、宽泛 `Record<string, unknown>`、魔法默认值 来伪装“类型已解决”**
+- **如果类型没跑通，优先改模型、协议、SDK、消费分支本身，不要靠通用包装层把问题藏起来**
 
 ---
 
@@ -203,6 +220,18 @@ bun run db:migrate   # 需要保留迁移历史时执行
 bun run gen:api      # 生成 Orval SDK
 bunx <package>       # 执行包命令
 ```
+
+## 🧪 测试与回归规范
+
+- **测试栈统一使用 Bun First**：默认使用 `bun test`、`bun scripts/*.ts`、`bunx tsc`；禁止为了测试主链路额外引入 Jest / Vitest 作为默认方案
+- **API 集成测试优先走 Elysia 原生方式**：对路由、鉴权、参数校验、响应结构、状态流转的测试，优先直接调用 `app.handle(new Request(...))`，不要先起一层自定义测试服务器
+- **结果导向回归保留为 Bun 脚本**：`sandbox-regression`、`five-user-smoke`、`genui/chat regression` 这类脚本属于产品验收，不要硬塞回通用单测抽象
+- **SSE / 流式 / 协议契约必须保留黑盒验证**：像 `/ai/chat` 的 SSE 顺序、`[DONE]`、GenUI blocks、真实 HTTP 头与流式分块，必须至少有一层真实 HTTP / curl 回归，不能只靠内存态测试
+- **新增需求必须补对应回归**：只要改动影响 PRD / TAD 里的用户旅程、AI 对话、动作闸门、分享承接、post-activity 等流程，必须同步补一条能证明链路没断的测试或回归脚本
+- **测试分层要清楚**：
+  - `bun test` 负责业务规则、服务函数、API 集成
+  - `bun scripts/*.ts` 负责多用户流程、结果漏斗、发布前验收
+  - 黑盒 HTTP 回归负责流式协议、多端 GenUI 契约、真实 transport 边界
 
 ---
 

@@ -11,7 +11,7 @@
  */
 
 import { runText } from '../models/runtime';
-import { getDefaultChatModel } from '../models/router';
+import { resolveChatModelSelection } from '../models/router';
 import { getConfigValue } from '../config/config.service';
 import type { IntentType, ClassifyResult } from './types';
 
@@ -213,6 +213,44 @@ const VALID_INTENTS: IntentType[] = [
   'share', 'join', 'show_activity',
 ];
 
+const INTENT_ALIASES: Record<string, IntentType> = {
+  rent: 'create',
+  create_activity: 'create',
+  createactivity: 'create',
+  explore_nearby: 'explore',
+  explorenearby: 'explore',
+  nearby: 'explore',
+  find_partner: 'partner',
+  findpartner: 'partner',
+  partner_intent: 'partner',
+  partnerintent: 'partner',
+  showactivity: 'show_activity',
+  get_my_activities: 'show_activity',
+  getmyactivities: 'show_activity',
+  chat: 'chitchat',
+  casual_chat: 'chitchat',
+  casualchat: 'chitchat',
+  reject: 'deny',
+  approve: 'confirm',
+};
+
+function normalizeIntentCandidate(value: unknown): IntentType | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  if ((VALID_INTENTS as string[]).includes(normalized)) {
+    return normalized as IntentType;
+  }
+
+  return INTENT_ALIASES[normalized] ?? null;
+}
+
 /**
  * 构建 Few-shot prompt
  */
@@ -235,6 +273,7 @@ function buildFewShotPrompt(
     : '（无历史对话）';
 
   return `你是一个意图分类器。根据以下示例和对话历史，判断用户当前的意图。
+可用意图只能是：${VALID_INTENTS.join('、')}。
 
 示例：
 ${examplesText}
@@ -254,7 +293,7 @@ ${historyText}
  * 1. 检查编辑距离缓存，命中则直接返回
  * 2. 调用 LLM 进行 Few-shot 分类
  * 3. 将结果写入缓存
- * 4. LLM 失败时返回 { intent: 'unknown', confidence: 0, method: 'llm' }
+ * 4. LLM 失败时直接抛错，由上游决定是否终止请求
  *
  * @param input - 用户输入（已净化）
  * @param conversationHistory - 最近对话历史
@@ -265,26 +304,37 @@ export async function classifyByLLMFewShot(
   input: string,
   conversationHistory: Array<{ role: string; content: string }>,
   cache: EditDistanceCache = globalEditDistanceCache,
+  options?: {
+    modelId?: string;
+  },
 ): Promise<ClassifyResult> {
+  const shouldUseCache = !options?.modelId;
+
   // 1. 检查缓存
-  const cached = findCacheHit(input, cache);
-  if (cached) {
-    return {
-      intent: cached.intent,
-      confidence: cached.confidence,
-      method: 'llm',
-    };
+  if (shouldUseCache) {
+    const cached = findCacheHit(input, cache);
+    if (cached) {
+      return {
+        intent: cached.intent,
+        confidence: cached.confidence,
+        method: 'llm',
+      };
+    }
   }
 
   // 2. 加载 Few-shot 样例
   const examples = await loadFewShotExamples();
 
   // 3. 调用 LLM
-  try {
-    const prompt = buildFewShotPrompt(input, conversationHistory, examples);
+  const prompt = buildFewShotPrompt(input, conversationHistory, examples);
+  const { model, modelId } = await resolveChatModelSelection({
+    intent: 'chat',
+    modelId: options?.modelId,
+  });
 
+  try {
     const result = await runText({
-      model: getDefaultChatModel(),
+      model,
       prompt,
       temperature: 0,
     });
@@ -293,28 +343,30 @@ export async function classifyByLLMFewShot(
     const text = result.text.trim();
     const jsonMatch = text.match(/\{[\s\S]*\}/);
 
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      const intent = parsed.intent as IntentType;
-      const confidence = typeof parsed.confidence === 'number'
-        ? Math.max(0, Math.min(1, parsed.confidence))
-        : 0.7;
-
-      // 验证意图类型
-      if (VALID_INTENTS.includes(intent)) {
-        // 4. 写入缓存
-        writeCache(input, intent, confidence, cache);
-
-        return { intent, confidence, method: 'llm' };
-      }
+    if (!jsonMatch) {
+      console.warn('[LLM Few-shot] 无法解析 LLM 响应:', text);
+      throw new Error(`模型 ${modelId} 返回了无法解析的分类结果`);
     }
 
-    // JSON 解析失败或意图无效
-    console.warn('[LLM Few-shot] 无法解析 LLM 响应:', text);
-    return { intent: 'unknown', confidence: 0, method: 'llm' };
+    const parsed = JSON.parse(jsonMatch[0]);
+    const intent = normalizeIntentCandidate(parsed.intent);
+    const confidence = typeof parsed.confidence === 'number'
+      ? Math.max(0, Math.min(1, parsed.confidence))
+      : 0.7;
+
+    if (!intent) {
+      throw new Error(`模型 ${modelId} 返回了无效意图 ${String(parsed.intent)}`);
+    }
+
+    if (shouldUseCache) {
+      writeCache(input, intent, confidence, cache);
+    }
+
+    return { intent, confidence, method: 'llm' };
   } catch (error) {
     console.error('[LLM Few-shot] 调用失败:', error);
-    return { intent: 'unknown', confidence: 0, method: 'llm' };
+    const message = error instanceof Error ? error.message : '未知错误';
+    throw new Error(`[LLM Few-shot] ${message}`);
   }
 }
 

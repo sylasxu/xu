@@ -32,15 +32,17 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Library, Search, Trash2, ChevronLeft, ChevronRight } from 'lucide-react'
 import { useContentLibrary, useDeleteNote } from '../hooks/use-content'
-import { CONTENT_TYPE_OPTIONS, type ContentType } from '../data/schema'
+import { CONTENT_TYPE_OPTIONS, isContentType, type ContentType } from '../data/schema'
 
 const TYPE_LABEL: Record<string, string> = Object.fromEntries(
   CONTENT_TYPE_OPTIONS.map((o) => [o.value, o.label])
 )
 
+type ContentFilterValue = ContentType | 'all'
+
 export function ContentLibrary() {
   const [page, setPage] = useState(1)
-  const [contentType, setContentType] = useState<string>('all')
+  const [contentType, setContentType] = useState<ContentFilterValue>('all')
   const [keyword, setKeyword] = useState('')
   const navigate = useNavigate()
   const limit = 10
@@ -48,13 +50,13 @@ export function ContentLibrary() {
   const { data, isLoading } = useContentLibrary({
     page,
     limit,
-    contentType: contentType === 'all' ? undefined : (contentType as ContentType),
+    contentType: contentType === 'all' ? undefined : contentType,
     keyword: keyword || undefined,
   })
   const deleteMutation = useDeleteNote()
 
-  const notes = (data as any)?.data ?? []
-  const total = (data as any)?.total ?? 0
+  const notes = data?.items ?? []
+  const total = data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / limit))
 
   return (
@@ -83,9 +85,11 @@ export function ContentLibrary() {
             </div>
             <Select
               value={contentType}
-              onValueChange={(v) => {
-                setContentType(v)
-                setPage(1)
+              onValueChange={(value) => {
+                if (value === 'all' || isContentType(value)) {
+                  setContentType(value)
+                  setPage(1)
+                }
               }}
             >
               <SelectTrigger className='w-40'>
@@ -132,7 +136,7 @@ export function ContentLibrary() {
                   </TableCell>
                 </TableRow>
               ) : (
-                notes.map((note: any) => (
+                notes.map((note) => (
                   <TableRow
                     key={note.id}
                     className='cursor-pointer'

@@ -12,7 +12,7 @@ import { useChatStore } from '../../src/stores/chat';
 import { useAppStore } from '../../src/stores/app';
 import { useUserStore } from '../../src/stores/user';
 import { fetchWidgetData } from '../../src/utils/widget-fetcher';
-import type { FetchState } from '../../src/utils/widget-fetcher';
+import type { FetchState, WidgetDataSource } from '../../src/utils/widget-fetcher';
 import type { ActionState, WidgetAction } from '../../src/utils/widget-actions';
 import { submitJoinAndOpenDiscussion, type JoinFlowPayload } from '../../src/utils/join-flow';
 
@@ -52,7 +52,7 @@ interface PreviewData {
 
 // FetchConfig
 interface FetchConfig {
-  source: string;
+  source: WidgetDataSource;
   params: Record<string, unknown>;
 }
 
@@ -73,6 +73,224 @@ interface WidgetExploreProperties {
   preview?: PreviewData;
 }
 
+const DEFAULT_CENTER: CenterPoint = {
+  lat: 29.5647,
+  lng: 106.5507,
+  name: '观音桥',
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function readNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function readBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function readExploreResult(value: unknown): ExploreResult | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const id = readString(value.id);
+  const title = readString(value.title);
+  const type = readString(value.type);
+  const lat = readNumber(value.lat);
+  const lng = readNumber(value.lng);
+  const locationName = readString(value.locationName);
+  const distance = readNumber(value.distance);
+  const startAt = readString(value.startAt);
+
+  if (!id || !title || !type || lat === null || lng === null || !locationName || distance === null || !startAt) {
+    return null;
+  }
+
+  const locationHint = readString(value.locationHint) ?? undefined;
+  const currentParticipants = readNumber(value.currentParticipants) ?? undefined;
+  const maxParticipants = readNumber(value.maxParticipants) ?? undefined;
+
+  return {
+    id,
+    title,
+    type,
+    lat,
+    lng,
+    locationName,
+    locationHint,
+    distance,
+    startAt,
+    currentParticipants,
+    maxParticipants,
+  };
+}
+
+function readExploreResults(value: unknown): ExploreResult[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => readExploreResult(item))
+    .filter((item): item is ExploreResult => item !== null);
+}
+
+function readCenterPoint(value: unknown): CenterPoint {
+  if (!isRecord(value)) {
+    return DEFAULT_CENTER;
+  }
+
+  const lat = readNumber(value.lat);
+  const lng = readNumber(value.lng);
+  const name = readString(value.name);
+
+  if (lat === null || lng === null) {
+    return DEFAULT_CENTER;
+  }
+
+  return {
+    lat,
+    lng,
+    name: name ?? DEFAULT_CENTER.name,
+  };
+}
+
+function readPreviewData(value: unknown): PreviewData | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const total = readNumber(value.total);
+  const firstItem = isRecord(value.firstItem) ? value.firstItem : null;
+  if (total === null || !firstItem) {
+    return null;
+  }
+
+  const id = readString(firstItem.id);
+  const title = readString(firstItem.title);
+  const type = readString(firstItem.type);
+  const locationName = readString(firstItem.locationName);
+  const distance = readNumber(firstItem.distance);
+
+  if (!id || !title || !type || !locationName || distance === null) {
+    return null;
+  }
+
+  return {
+    total,
+    firstItem: {
+      id,
+      title,
+      type,
+      locationName,
+      distance,
+    },
+  };
+}
+
+function readWidgetDataSource(value: unknown): WidgetDataSource | null {
+  switch (value) {
+    case 'nearby_activities':
+    case 'activity_detail':
+      return value;
+    default:
+      return null;
+  }
+}
+
+function readFetchConfig(value: unknown): FetchConfig | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const source = readWidgetDataSource(value.source);
+  const params = isRecord(value.params) ? value.params : null;
+  if (!source || !params) {
+    return null;
+  }
+
+  return { source, params };
+}
+
+function readWidgetAction(value: unknown): WidgetAction | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const label = readString(value.label);
+  const params = isRecord(value.params) ? value.params : {};
+
+  switch (value.type) {
+    case 'join':
+    case 'cancel':
+    case 'share':
+    case 'detail':
+    case 'publish':
+    case 'confirm_match':
+      if (!label) {
+        return null;
+      }
+      return {
+        type: value.type,
+        label,
+        params,
+      };
+    default:
+      return null;
+  }
+}
+
+function readInteraction(value: unknown): Interaction | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const swipeable = readBoolean(value.swipeable);
+  const halfScreenDetail = readBoolean(value.halfScreenDetail);
+  const actions = Array.isArray(value.actions)
+    ? value.actions
+        .map((item) => readWidgetAction(item))
+        .filter((item): item is WidgetAction => item !== null)
+    : undefined;
+
+  return {
+    swipeable,
+    halfScreenDetail,
+    actions,
+  };
+}
+
+function readJoinPayload(value: Record<string, unknown>): JoinFlowPayload | null {
+  const activityId = readString(value.activityId);
+  if (!activityId) {
+    return null;
+  }
+
+  const payload: JoinFlowPayload = { activityId };
+  const title = readString(value.title);
+  const startAt = readString(value.startAt);
+  const locationName = readString(value.locationName);
+
+  if (title) {
+    payload.title = title;
+  }
+  if (startAt) {
+    payload.startAt = startAt;
+  }
+  if (locationName) {
+    payload.locationName = locationName;
+  }
+
+  return payload;
+}
+
 Component({
   options: {
     styleIsolation: 'apply-shared',
@@ -80,10 +298,10 @@ Component({
 
   properties: {
     // 现有（不变）
-    results: { type: Array, value: [] as ExploreResult[] },
+    results: { type: Array, value: [] },
     center: {
       type: Object,
-      value: { lat: 29.5647, lng: 106.5507, name: '观音桥' } as CenterPoint,
+      value: DEFAULT_CENTER,
     },
     title: { type: String, value: '' },
     semanticQuery: { type: String, value: '' },
@@ -115,12 +333,13 @@ Component({
       title: string,
     ) {
       // 自包含模式：直接用 results 渲染
-      const props = this.properties as unknown as WidgetExploreProperties;
-      const fetchConfig = props.fetchConfig;
+      const fetchConfig = readFetchConfig(this.properties.fetchConfig);
       if (fetchConfig) return; // 引用模式由 fetchConfig observer 处理
 
-      const displayResults = (results || []).slice(0, 3);
-      const headerTitle = title || this.generateTitle(center, results?.length || 0);
+      const displayResults = readExploreResults(results).slice(0, 3);
+      const resolvedCenter = readCenterPoint(center);
+      const headerTitle =
+        readString(title) || this.generateTitle(resolvedCenter, displayResults.length);
       this.setData({ displayResults, headerTitle });
     },
 
@@ -129,18 +348,22 @@ Component({
       interaction: Interaction | null,
       preview: PreviewData | null,
     ) {
-      if (!fetchConfig) return;
+      const resolvedFetchConfig = readFetchConfig(fetchConfig);
+      if (!resolvedFetchConfig) return;
 
       // 引用模式初始化
-      const swiperMode = !!interaction?.swipeable;
+      const resolvedInteraction = readInteraction(interaction);
+      const resolvedPreview = readPreviewData(preview);
+      const swiperMode = resolvedInteraction?.swipeable === true;
+      const title = readString(this.properties.title);
       const headerTitle =
-        this.properties.title ||
-        (preview
-          ? `为你找到附近的 ${preview.total} 个热门活动`
+        title ||
+        (resolvedPreview
+          ? `为你找到附近的 ${resolvedPreview.total} 个热门活动`
           : '正在加载附近活动...');
 
       this.setData({ swiperMode, headerTitle });
-      void this.loadReferenceData(fetchConfig);
+      void this.loadReferenceData(resolvedFetchConfig);
     },
   },
 
@@ -160,7 +383,7 @@ Component({
       const result = await fetchWidgetData(fetchConfig.source, fetchConfig.params);
 
       if (result.state === 'success' && result.data) {
-        const items = (Array.isArray(result.data) ? result.data : []) as ExploreResult[];
+        const items = readExploreResults(result.data);
         this.setData({
           fetchState: 'success',
           fetchedResults: items,
@@ -173,8 +396,7 @@ Component({
 
     /** 重试加载 */
     onRetryFetch() {
-      const props = this.properties as unknown as WidgetExploreProperties;
-      const fetchConfig = props.fetchConfig || null;
+      const fetchConfig = readFetchConfig(this.properties.fetchConfig);
       if (fetchConfig) {
         void this.loadReferenceData(fetchConfig);
       }
@@ -182,27 +404,24 @@ Component({
 
     /** 点击展开地图 */
     onExpandMap() {
-      const props = this.properties as unknown as WidgetExploreProperties;
       const results = this.data.fetchedResults.length
         ? this.data.fetchedResults
-        : (props.results || []);
-      const center = props.center || { lat: 29.5647, lng: 106.5507, name: '观音桥' };
+        : readExploreResults(this.properties.results);
+      const center = readCenterPoint(this.properties.center);
 
       this.triggerEvent('expandmap', { results, center });
 
       wx.navigateTo({
         url: `/subpackages/activity/explore/index?lat=${center.lat}&lng=${center.lng}&results=${encodeURIComponent(JSON.stringify(results))}&animate=expand`,
-        routeType: 'none',
-      } as WechatMiniprogram.NavigateToOption & { routeType?: string });
+      });
     },
 
     /** 点击活动项 */
     onActivityTap(e: WechatMiniprogram.TouchEvent) {
-      const { id } = e.currentTarget.dataset;
+      const id = readString(e.currentTarget.dataset.id);
       if (!id) return;
 
-      const props = this.properties as unknown as WidgetExploreProperties;
-      const interaction = props.interaction || null;
+      const interaction = readInteraction(this.properties.interaction);
 
       if (interaction?.halfScreenDetail) {
         // 引用模式：弹出半屏详情
@@ -295,41 +514,59 @@ Component({
     },
 
     onActionTap(e: WechatMiniprogram.TouchEvent) {
-      const { actiontype, activityid, activitytitle, startat, locationname, actionparams } =
-        e.currentTarget.dataset;
-      if (!actiontype || !activityid) return;
+      const dataset = e.currentTarget.dataset;
+      const actionType = readString(dataset.actiontype);
+      const activityId = readString(dataset.activityid);
+      const activityTitle = readString(dataset.activitytitle);
+      const startAt = readString(dataset.startat);
+      const locationName = readString(dataset.locationname);
+      const actionParams = isRecord(dataset.actionparams) ? dataset.actionparams : null;
 
-      const stateKey = `${activityid}_${actiontype}`;
+      if (!actionType || !activityId) return;
+
+      const stateKey = `${activityId}_${actionType}`;
       const currentState = this.data.actionStates[stateKey];
       if (currentState === 'loading' || currentState === 'success') return;
 
       wx.vibrateShort({ type: 'light' });
 
       const payload: Record<string, unknown> = {
-        activityId: activityid,
-        title: activitytitle,
-        startAt: startat,
-        locationName: locationname,
+        activityId: activityId,
       };
-      if (actionparams && typeof actionparams === 'object') {
-        Object.assign(payload, actionparams as Record<string, unknown>);
+      if (activityTitle) {
+        payload.title = activityTitle;
+      }
+      if (startAt) {
+        payload.startAt = startAt;
+      }
+      if (locationName) {
+        payload.locationName = locationName;
+      }
+      if (actionParams) {
+        Object.entries(actionParams).forEach(([key, value]) => {
+          payload[key] = value;
+        });
       }
 
       // 特殊处理：share 由组件层处理
-      if (actiontype === 'share') {
-        this.triggerEvent('share', { activityId: activityid, title: activitytitle });
+      if (actionType === 'share') {
+        this.triggerEvent('share', { activityId, title: activityTitle ?? '' });
         return;
       }
 
       // 特殊处理：detail 触发半屏
-      if (actiontype === 'detail') {
-        this.setData({ halfScreenVisible: true, halfScreenActivityId: activityid });
+      if (actionType === 'detail') {
+        this.setData({ halfScreenVisible: true, halfScreenActivityId: activityId });
         return;
       }
 
-      if (actiontype === 'join') {
+      if (actionType === 'join') {
+        const joinPayload = readJoinPayload(payload);
+        if (!joinPayload) {
+          return;
+        }
         this.setData({ [`actionStates.${stateKey}`]: 'loading' });
-        void this.submitJoinFromWidget(payload as unknown as JoinFlowPayload, stateKey);
+        void this.submitJoinFromWidget(joinPayload, stateKey);
         return;
       }
 
@@ -338,10 +575,10 @@ Component({
       const chatStore = useChatStore.getState();
 
       chatStore.sendAction({
-        action: this.toTurnsAction(actiontype),
+        action: this.toTurnsAction(actionType),
         payload,
         source: 'widget_explore',
-        originalText: activitytitle ? `处理「${activitytitle}」` : `执行${actiontype}`,
+        originalText: activityTitle ? `处理「${activityTitle}」` : `执行${actionType}`,
       });
 
       this.setData({ [`actionStates.${stateKey}`]: 'success' });
@@ -352,7 +589,8 @@ Component({
 
     /** 点击报名按钮 (A2UI — 自包含模式保留) */
     onJoinTap(e: WechatMiniprogram.TouchEvent) {
-      const { id, title } = e.currentTarget.dataset;
+      const id = readString(e.currentTarget.dataset.id);
+      const title = readString(e.currentTarget.dataset.title) ?? undefined;
       if (!id) return;
 
       wx.vibrateShort({ type: 'light' });
@@ -365,9 +603,8 @@ Component({
     },
 
     onCreateActivityTap() {
-      const props = this.properties as unknown as WidgetExploreProperties;
-      const center = props.center || { lat: 29.5647, lng: 106.5507, name: '附近' };
-      const semanticQuery = typeof props.semanticQuery === 'string' ? props.semanticQuery.trim() : '';
+      const center = readCenterPoint(this.properties.center);
+      const semanticQuery = readString(this.properties.semanticQuery) ?? '';
       const promptParts = [
         `附近还没有合适的局，我想在${center.name || '附近'}发起一个新的线下活动。`,
         semanticQuery ? `需求参考：${semanticQuery}。` : '',

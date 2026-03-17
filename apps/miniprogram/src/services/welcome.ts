@@ -7,77 +7,24 @@
  */
 
 import { getAiWelcome } from '../api/endpoints/ai/ai';
+import type {
+  AiWelcomeResponse,
+  AiWelcomeResponsePendingActivitiesItem,
+  AiWelcomeResponseQuickPromptsItem,
+  AiWelcomeResponseSectionsItem,
+  AiWelcomeResponseSectionsItemItemsItem,
+  AiWelcomeResponseSocialProfile,
+  GetAiWelcomeParams,
+} from '../api/model';
 
-// 快捷项类型
-export type QuickItemType = 'draft' | 'suggestion' | 'explore';
-
-// 快捷项
-export interface QuickItem {
-  type: QuickItemType;
-  icon?: string;
-  label: string;
-  prompt: string;
-  context?: Record<string, unknown>;
-}
-
-// 分组
-export interface WelcomeSection {
-  id: string;
-  icon: string;
-  title: string;
-  items: QuickItem[];
-}
-
-// 社交档案 (v4.4 新增)
-export interface SocialProfile {
-  participationCount: number;
-  activitiesCreatedCount: number;
-  preferenceCompleteness: number;
-}
-
-export interface WelcomePendingActivity {
-  id: string;
-  title: string;
-  type: string;
-  startAt: string;
-  locationName: string;
-  locationHint: string;
-  currentParticipants: number;
-  maxParticipants: number;
-  status: string;
-}
-
-// 快捷入口 (v4.4 新增)
-export interface QuickPrompt {
-  icon: string;
-  text: string;
-  prompt: string;
-}
-
-// Welcome API 响应 (v4.4 更新)
-export interface WelcomeResponse {
-  greeting: string;
-  subGreeting?: string;
-  sections: WelcomeSection[];
-  socialProfile?: SocialProfile;
-  pendingActivities?: WelcomePendingActivity[];
-  quickPrompts: QuickPrompt[];
-  ui?: {
-    composerPlaceholder?: string;
-    bottomQuickActions?: string[];
-    profileHints?: {
-      low?: string;
-      medium?: string;
-      high?: string;
-    };
-  };
-}
-
-// Welcome API 查询参数
-export interface WelcomeQuery {
-  lat?: number;
-  lng?: number;
-}
+export type QuickItem = AiWelcomeResponseSectionsItemItemsItem;
+export type QuickItemType = QuickItem['type'];
+export type WelcomeSection = AiWelcomeResponseSectionsItem;
+export type SocialProfile = AiWelcomeResponseSocialProfile;
+export type WelcomePendingActivity = AiWelcomeResponsePendingActivitiesItem;
+export type QuickPrompt = AiWelcomeResponseQuickPromptsItem;
+export type WelcomeResponse = AiWelcomeResponse;
+export type WelcomeQuery = GetAiWelcomeParams;
 
 /**
  * 获取欢迎卡片数据
@@ -91,7 +38,7 @@ export async function getWelcomeCard(params?: WelcomeQuery): Promise<WelcomeResp
   if (response.status !== 200) {
     throw new Error('获取欢迎卡片失败');
   }
-  return response.data as WelcomeResponse;
+  return response.data;
 }
 
 /**

@@ -27,7 +27,7 @@ interface Participant {
 }
 
 /** 组件属性 - 运行时数据 */
-interface ComponentPropertiesData {
+interface FeedbackDialogPropertiesData {
   /** 是否显示 */
   visible: boolean;
   /** 活动 ID */
@@ -37,7 +37,7 @@ interface ComponentPropertiesData {
 }
 
 /** 组件数据 */
-interface ComponentData {
+interface FeedbackDialogData {
   /** 问题类型选项 */
   problemOptions: ProblemOption[];
   /** 选中的问题类型 */
@@ -61,6 +61,15 @@ const PROBLEM_OPTIONS: ProblemOption[] = [
   { value: 'other', label: '其他问题', icon: 'ellipsis' },
 ];
 
+const FEEDBACK_DIALOG_DATA: FeedbackDialogData = {
+  problemOptions: PROBLEM_OPTIONS,
+  selectedProblem: null,
+  selectedTargets: [],
+  description: '',
+  submitting: false,
+  step: 1,
+}
+
 Component({
   properties: {
     visible: {
@@ -78,12 +87,7 @@ Component({
   },
 
   data: {
-    problemOptions: PROBLEM_OPTIONS,
-    selectedProblem: null as ProblemType | null,
-    selectedTargets: [] as string[],
-    description: '',
-    submitting: false,
-    step: 1,
+    ...FEEDBACK_DIALOG_DATA,
   },
 
   observers: {

@@ -43,6 +43,16 @@ function ensureDate(date: DateInput): Date {
   return normalized;
 }
 
+function readActivityTags(activity: Activity): string {
+  const activityRecord: Record<string, unknown> = activity;
+  const tags = activityRecord.tags;
+  if (!Array.isArray(tags)) {
+    return '';
+  }
+
+  return tags.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0).join(', ');
+}
+
 // ============ 日期格式化 ============
 
 /**
@@ -151,9 +161,11 @@ export function inferVibe(activity: Pick<Activity, 'type' | 'description'>): Act
   // 1. 先检查描述中的关键词
   const description = activity.description?.toLowerCase() || '';
   
-  for (const [vibe, keywords] of Object.entries(VIBE_KEYWORDS)) {
+  const vibes: ActivityVibe[] = ['热闹', '安静', '活力', '户外', '商务', '休闲', '文艺', '社交'];
+  for (const vibe of vibes) {
+    const keywords = VIBE_KEYWORDS[vibe];
     if (keywords.some(kw => description.includes(kw))) {
-      return vibe as ActivityVibe;
+      return vibe;
     }
   }
   
@@ -184,13 +196,13 @@ export function inferVibe(activity: Pick<Activity, 'type' | 'description'>): Act
  * ```
  */
 export function enrichActivityText(activity: Activity): string {
-  const startAt = ensureDate(activity.startAt as Date | string);
+  const startAt = ensureDate(activity.startAt);
   const dayOfWeek = getDayOfWeek(startAt);
   const timeOfDay = getTimeOfDay(startAt);
   const impliedVibe = inferVibe(activity);
   
   // 活动可能没有 tags 字段（MVP 精简版移除了）
-  const tags = (activity as any).tags?.join(', ') || '';
+  const tags = readActivityTags(activity);
 
   return `
 标题: ${activity.title}
@@ -230,7 +242,7 @@ export async function generateEmbeddingWithRetry(text: string): Promise<number[]
     try {
       return await getQwenEmbedding(text);
     } catch (error) {
-      lastError = error as Error;
+      lastError = error instanceof Error ? error : new Error('Embedding generation failed');
       logger.warn('Embedding generation failed', { 
         attempt: attempt + 1, 
         maxAttempts: RETRY_CONFIG.maxRetries + 1,

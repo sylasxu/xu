@@ -12,8 +12,10 @@ import type {
   FlowGraphData,
   FlowNode,
   FlowEdge,
-  FlowNodeType,
   FlowNodeStatus,
+  FlowNodeData,
+  ProcessorType,
+  ToolNodeData,
 } from '../../../types/flow'
 
 // ============ 常量 ============
@@ -26,10 +28,10 @@ const NODE_GAP = 32     // 节点间距 ≥24px
 /** 管线层配置 */
 interface LayerNodeConfig {
   nodeId: string
-  type: FlowNodeType
+  type: FlowNodeData['type']
   label: string
   traceType: string
-  processorType?: string
+  processorType?: ProcessorType
 }
 
 interface LayerConfig {
@@ -96,6 +98,159 @@ const SKIPPABLE_NODE_IDS = [
   'tool-placeholder',
 ]
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function readStepData(step: TraceStep): Record<string, unknown> {
+  return isRecord(step.data) ? step.data : {}
+}
+
+function readOptionalString(data: Record<string, unknown>, key: string): string | undefined {
+  return typeof data[key] === 'string' ? data[key] : undefined
+}
+
+function readOptionalNumber(data: Record<string, unknown>, key: string): number | undefined {
+  return typeof data[key] === 'number' && Number.isFinite(data[key]) ? data[key] : undefined
+}
+
+function readOptionalRecord(data: Record<string, unknown>, key: string): Record<string, unknown> | undefined {
+  return isRecord(data[key]) ? data[key] : undefined
+}
+
+function readStringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+}
+
+function readWidgetType(data: Record<string, unknown>): ToolNodeData['widgetType'] | undefined {
+  const value = readOptionalString(data, 'widgetType')
+  switch (value) {
+    case 'widget_draft':
+    case 'widget_explore':
+    case 'widget_share':
+    case 'widget_detail':
+    case 'widget_ask_preference':
+      return value
+    default:
+      return undefined
+  }
+}
+
+function readEvaluation(data: Record<string, unknown>): ToolNodeData['evaluation'] | undefined {
+  const evaluation = readOptionalRecord(data, 'evaluation')
+  if (!evaluation) {
+    return undefined
+  }
+
+  const passed = evaluation.passed
+  const score = evaluation.score
+  if (typeof passed !== 'boolean' || typeof score !== 'number') {
+    return undefined
+  }
+
+  const issues = readStringList(evaluation.issues)
+  const result: NonNullable<ToolNodeData['evaluation']> = {
+    passed,
+    score,
+    issues,
+  }
+
+  if (typeof evaluation.toneScore === 'number') {
+    result.toneScore = evaluation.toneScore
+  }
+  if (typeof evaluation.relevanceScore === 'number') {
+    result.relevanceScore = evaluation.relevanceScore
+  }
+  if (typeof evaluation.contextScore === 'number') {
+    result.contextScore = evaluation.contextScore
+  }
+  if (Array.isArray(evaluation.suggestions)) {
+    result.suggestions = readStringList(evaluation.suggestions)
+  }
+  if (typeof evaluation.thinking === 'string') {
+    result.thinking = evaluation.thinking
+  }
+
+  return result
+}
+
+function createFlowNode(params: {
+  id: string
+  type: string
+  position: { x: number; y: number }
+  data: FlowNodeData
+}): FlowNode {
+  return {
+    id: params.id,
+    type: params.type,
+    position: params.position,
+    draggable: false,
+    data: params.data,
+  }
+}
+
+function createPendingNodeData(cfg: LayerNodeConfig): FlowNodeData {
+  switch (cfg.type) {
+    case 'user-input':
+      return {
+        type: 'user-input',
+        status: 'pending',
+        label: cfg.label,
+        text: '',
+        charCount: 0,
+      }
+    case 'keyword-match':
+      return {
+        type: 'keyword-match',
+        status: 'pending',
+        label: cfg.label,
+        matched: false,
+      }
+    case 'intent-classify':
+      return {
+        type: 'intent-classify',
+        status: 'pending',
+        label: cfg.label,
+        intent: 'unknown',
+        method: 'regex',
+      }
+    case 'processor':
+      return {
+        type: 'processor',
+        status: 'pending',
+        label: cfg.label,
+        processorType: cfg.processorType ?? 'user-profile',
+      }
+    case 'llm':
+      return {
+        type: 'llm',
+        status: 'pending',
+        label: cfg.label,
+        model: '',
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+      }
+    case 'tool':
+      return {
+        type: 'tool',
+        status: 'pending',
+        label: cfg.label,
+        toolName: '',
+        toolDisplayName: cfg.label,
+        input: {},
+      }
+    case 'final-output':
+      return {
+        type: 'final-output',
+        status: 'pending',
+        label: cfg.label,
+        responseType: 'text',
+        totalDuration: 0,
+      }
+  }
+}
+
 // ============ buildStaticPipeline ============
 
 /**
@@ -117,19 +272,12 @@ export function buildStaticPipeline(): FlowGraphData {
     layer.nodes.forEach((cfg, nodeIndex) => {
       const x = offsetX + nodeIndex * (NODE_WIDTH + NODE_GAP)
 
-      nodes.push({
+      nodes.push(createFlowNode({
         id: cfg.nodeId,
-        type: cfg.type as string,
+        type: cfg.type,
         position: { x, y },
-        draggable: false,
-        data: {
-          type: cfg.type,
-          status: 'pending' as FlowNodeStatus,
-          label: cfg.label,
-          subtitle: undefined,
-          processorType: cfg.processorType,
-        },
-      } as FlowNode)
+        data: createPendingNodeData(cfg),
+      }))
     })
   })
 
@@ -183,20 +331,19 @@ export function applyTraceToGraph(
   for (const step of trace.steps) {
     const stepType = step.type
     const flowType = traceToFlowType[stepType] ?? stepType
-    const stepData = step.data as unknown as Record<string, unknown>
-    const processorType = stepData.processorType as string | undefined
+    const stepData = readStepData(step)
+    const processorType = readOptionalString(stepData, 'processorType')
 
     // 查找匹配的节点
     const matchedNode = nodes.find(n => {
-      const nd = n.data as Record<string, unknown>
       if (stepType === 'processor' && processorType) {
-        return nd.type === 'processor' && nd.processorType === processorType
+        return n.data.type === 'processor' && n.data.processorType === processorType
       }
       if (stepType === 'tool') {
         // tool 节点特殊处理（见下方）
         return false
       }
-      return nd.type === flowType
+      return n.data.type === flowType
     })
 
     if (matchedNode) {
@@ -225,7 +372,7 @@ export function applyTraceToGraph(
   if (p0Matched) {
     for (const node of nodes) {
       if (SKIPPABLE_NODE_IDS.includes(node.id)) {
-        node.data = { ...node.data, status: 'skipped' as FlowNodeStatus }
+        node.data = { ...node.data, status: 'skipped' }
       }
     }
   }
@@ -250,25 +397,44 @@ export function applyTraceToGraph(
     const offsetX = (canvasWidth - toolLayerWidth) / 2
 
     toolSteps.forEach((step, i) => {
-      const toolData = step.data as unknown as Record<string, unknown>
+      const toolData = readStepData(step)
       const toolId = `tool-${i}`
-      nodes.push({
+      const toolName = readOptionalString(toolData, 'toolName') || `tool-${i + 1}`
+      const toolDisplayName = readOptionalString(toolData, 'toolDisplayName') || toolName
+      const input = readOptionalRecord(toolData, 'input') || {}
+      const output = readOptionalRecord(toolData, 'output')
+      const widgetType = readWidgetType(toolData)
+      const evaluation = readEvaluation(toolData)
+      const nodeData: ToolNodeData = {
+        type: 'tool',
+        status: mapStepStatus(step.status),
+        label: toolDisplayName,
+        subtitle: extractSubtitle(step),
+        stepData: step.data,
+        duration: step.duration,
+        startedAt: step.startedAt,
+        completedAt: step.completedAt,
+        toolName,
+        toolDisplayName,
+        input,
+      }
+
+      if (output) {
+        nodeData.output = output
+      }
+      if (widgetType) {
+        nodeData.widgetType = widgetType
+      }
+      if (evaluation) {
+        nodeData.evaluation = evaluation
+      }
+
+      nodes.push(createFlowNode({
         id: toolId,
         type: 'tool',
         position: { x: offsetX + i * (NODE_WIDTH + NODE_GAP), y },
-        draggable: false,
-        data: {
-          type: 'tool' as FlowNodeType,
-          status: mapStepStatus(step.status),
-          label: (toolData.toolDisplayName as string) || (toolData.toolName as string) || 'Tool',
-          subtitle: extractSubtitle(step),
-          stepData: step.data,
-          ...toolData,
-          duration: step.duration,
-          startedAt: step.startedAt,
-          completedAt: step.completedAt,
-        },
-      } as unknown as FlowNode)
+        data: nodeData,
+      }))
 
       // LLM → Tool 边
       edges.push(createStyledEdge('llm', toolId, mapStepStatus(step.status)))
@@ -281,7 +447,7 @@ export function applyTraceToGraph(
   edges = edges.map(edge => {
     const sourceNode = nodes.find(n => n.id === edge.source)
     if (!sourceNode) return edge
-    const status = sourceNode.data.status as FlowNodeStatus
+    const status = sourceNode.data.status
     return { ...edge, ...getEdgeStyle(status) }
   })
 
@@ -289,7 +455,7 @@ export function applyTraceToGraph(
 }
 
 
-// ============ Helper Functions ============
+// ============ Flow graph operations ============
 
 function mapStepStatus(status: string): FlowNodeStatus {
   switch (status) {
@@ -303,7 +469,7 @@ function mapStepStatus(status: string): FlowNodeStatus {
 
 /** 从 step data 提取关键指标作为 subtitle */
 function extractSubtitle(step: TraceStep): string | undefined {
-  const data = step.data as unknown as Record<string, unknown>
+  const data = readStepData(step)
   const type = step.type
 
   if (step.duration !== undefined && step.duration > 0) {
@@ -312,14 +478,14 @@ function extractSubtitle(step: TraceStep): string | undefined {
       : `${(step.duration / 1000).toFixed(1)}s`
 
     if (type === 'llm') {
-      const tokens = data.totalTokens as number | undefined
+      const tokens = readOptionalNumber(data, 'totalTokens')
       return tokens ? `${tokens} tokens · ${durationStr}` : durationStr
     }
     return durationStr
   }
 
   if (type === 'input') {
-    const text = data.text as string | undefined
+    const text = readOptionalString(data, 'text')
     return text ? `${text.length} 字符` : undefined
   }
 

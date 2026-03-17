@@ -10,17 +10,20 @@
  * - models/ - 模型路由
  */
 
-import { db, users, conversations, conversationMessages, activities, participants, eq, desc, sql, inArray, and, gt } from '@juchang/db';
+import { db, users, conversations, conversationMessages, activities, participants, eq, desc, sql, inArray, and, or, gt, lt } from '@juchang/db';
 import {
   createUIMessageStream,
   createUIMessageStreamResponse,
   convertToModelMessages,
   stepCountIs,
   hasToolCall,
+  type LanguageModelUsage,
   type UIMessage,
+  type UIMessageStreamWriter,
 } from 'ai';
 import { randomUUID } from 'crypto';
 import type { ProcessorLogEntry } from '@juchang/db';
+import type { GenUIBlock } from '@juchang/genui-contract';
 
 // 新架构模块
 import { type ClassifyResult } from './intent';
@@ -28,7 +31,7 @@ import { getOrCreateThread, saveMessage, clearUserThreads, deleteThread } from '
 import { resolveToolsForIntent, getToolWidgetType, getToolDisplayName } from './tools';
 import { createPartnerIntent } from './tools/partner-tools';
 import { getSystemPrompt, type PromptContext, type ActivityDraftForPrompt } from './prompts';
-import { getModelByIntent } from './models/router';
+import { resolveChatModelSelection } from './models/router';
 import { runObject, runStream } from './models/runtime';
 // Guardrails
 import { checkRateLimit } from './guardrails/rate-limiter';
@@ -79,6 +82,34 @@ import {
 // User Action — A2UI (Action-to-UI: 结构化用户操作直接映射为 UI 响应)
 import { handleUserAction, type UserAction } from './user-action';
 import { getConfigValue } from './config/config.service';
+import { buildNextBestActions } from './next-best-action.service';
+
+type ConversationMessageRecord = typeof conversationMessages.$inferSelect;
+
+interface HydratedConversationMessage {
+  id: string;
+  userId: string;
+  userNickname: string | null;
+  role: ConversationMessageRecord['role'];
+  type: ConversationMessageRecord['messageType'];
+  content: ConversationMessageRecord['content'];
+  activityId: ConversationMessageRecord['activityId'];
+  createdAt: string;
+}
+
+interface HydratedConversationListItem {
+  id: string;
+  userId: string;
+  title: string | null;
+  messageCount: number;
+  lastMessageAt: string;
+  createdAt: string;
+  userNickname: string | null;
+  evaluationStatus: typeof conversations.$inferSelect.evaluationStatus;
+  evaluationTags: string[];
+  evaluationNote: string | null;
+  hasError: boolean;
+}
 
 // ==========================================
 // Domain Facade Exports (ai.service 总线收口)
@@ -141,7 +172,7 @@ export interface ChatRequest {
   source: 'miniprogram' | 'admin';
   draftContext?: { activityId: string; currentDraft: ActivityDraftForPrompt };
   trace?: boolean;
-  modelParams?: { temperature?: number; maxTokens?: number };
+  ai?: { model?: string; temperature?: number; maxTokens?: number };
   /** A2UI：结构化用户操作，跳过 LLM 意图识别直接执行 */
   userAction?: UserAction;
 }
@@ -153,13 +184,165 @@ export interface TraceStep {
   result?: unknown;
 }
 
+type ChatMessage = ChatRequest['messages'][number];
+type ChatMessagePart = NonNullable<ChatMessage['parts']>[number];
+type AIStreamWriter = UIMessageStreamWriter<UIMessage>;
+const CONVERSATION_MESSAGE_TYPES = new Set<string>([
+  'text',
+  'user_action',
+  'widget_dashboard',
+  'widget_launcher',
+  'widget_action',
+  'widget_draft',
+  'widget_share',
+  'widget_explore',
+  'widget_error',
+  'widget_ask_preference',
+]);
+
+interface TextChatMessagePart extends Record<string, unknown> {
+  type: 'text';
+  text: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return isRecord(value) ? value : undefined;
+}
+
+function isTextChatMessagePart(part: ChatMessagePart | undefined): part is TextChatMessagePart {
+  return isRecord(part) && part.type === 'text' && typeof part.text === 'string';
+}
+
+function getMessageTextContent(message: Pick<ChatMessage, 'content' | 'parts'>): string {
+  if (typeof message.content === 'string') {
+    return message.content;
+  }
+
+  const textPart = message.parts?.find((part): part is TextChatMessagePart => isTextChatMessagePart(part));
+  return textPart?.text ?? '';
+}
+
+function isConversationMessageType(value: string): value is ConversationMessageRecord['messageType'] {
+  return CONVERSATION_MESSAGE_TYPES.has(value);
+}
+
+function replaceMessageTextContent(message: ChatMessage, text: string): ChatMessage {
+  return {
+    ...message,
+    content: text,
+    parts: [{ type: 'text', text }],
+  };
+}
+
+function toTextUIMessageParts(message: ChatMessage): UIMessage['parts'] {
+  const text = getMessageTextContent(message);
+  return text ? [{ type: 'text', text }] : [];
+}
+
+function getToolStepPhase(step: { stepNumber: number; toolResults: unknown[] }): 'initial' | 'continue' | 'tool-result' {
+  if (step.stepNumber === 0) {
+    return 'initial';
+  }
+
+  return step.toolResults.length > 0 ? 'tool-result' : 'continue';
+}
+
+function getActivityIdFromValue(value: unknown): string | undefined {
+  const record = asRecord(value);
+  return typeof record?.activityId === 'string' ? record.activityId : undefined;
+}
+
+function getActivityIdFromTraceSteps(steps: TraceStep[]): string | undefined {
+  for (const step of steps) {
+    const activityId = getActivityIdFromValue(step.result);
+    if (activityId) {
+      return activityId;
+    }
+  }
+
+  return undefined;
+}
+
+function getTokenLimitSnapshot(data: unknown): {
+  truncated: boolean;
+  originalLength: number;
+  finalLength: number;
+} {
+  const tokenData = asRecord(data);
+  const originalLength = typeof tokenData?.originalTokens === 'number'
+    ? tokenData.originalTokens
+    : typeof tokenData?.totalTokens === 'number'
+      ? tokenData.totalTokens
+      : 0;
+  const finalLength = typeof tokenData?.truncatedTokens === 'number'
+    ? tokenData.truncatedTokens
+    : typeof tokenData?.totalTokens === 'number'
+      ? tokenData.totalTokens
+      : 0;
+
+  return {
+    truncated: tokenData?.truncated === true,
+    originalLength,
+    finalLength,
+  };
+}
+
+function writeWidgetEvent(writer: AIStreamWriter, data: Record<string, unknown>): void {
+  writer.write({
+    type: 'data-widget',
+    data,
+  });
+}
+
+function writeTraceStartEvent(writer: AIStreamWriter, data: Record<string, unknown>): void {
+  writer.write({
+    type: 'data-trace-start',
+    data,
+    transient: true,
+  });
+}
+
+function writeTraceEndEvent(writer: AIStreamWriter, data: Record<string, unknown>): void {
+  writer.write({
+    type: 'data-trace-end',
+    data,
+    transient: true,
+  });
+}
+
+function getCacheHitTokens(usage: LanguageModelUsage): number | undefined {
+  return usage.inputTokenDetails.cacheReadTokens ?? usage.cachedInputTokens;
+}
+
+function getCacheMissTokens(usage: LanguageModelUsage): number | undefined {
+  return usage.inputTokenDetails.noCacheTokens;
+}
+
+function extractToolSchema(tool: unknown): unknown {
+  const toolRecord = asRecord(tool);
+  if (!toolRecord) {
+    return {};
+  }
+
+  const inputSchema = toolRecord.inputSchema;
+  if (isRecord(inputSchema) && 'jsonSchema' in inputSchema) {
+    return inputSchema.jsonSchema;
+  }
+
+  return inputSchema ?? toolRecord.parameters ?? {};
+}
+
 // ==========================================
 // AI Chat 核心
 // ==========================================
 
 export async function handleChatStream(request: ChatRequest): Promise<Response> {
   return runWithTrace(async () => {
-  const { messages, userId, rateLimitUserId, conversationId, location, source, draftContext, trace, modelParams, userAction } = request;
+  const { messages, userId, rateLimitUserId, conversationId, location, source, draftContext, trace, ai, userAction } = request;
   let effectiveMessages = messages;
   const startTime = Date.now();
   const latestMessage = messages[messages.length - 1];
@@ -221,10 +404,7 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
       if (modifiedMessages.length > 0) {
         const lastMsg = modifiedMessages[modifiedMessages.length - 1];
         if (lastMsg.role === 'user') {
-          (lastMsg as any).content = actionResult.fallbackText;
-          if (lastMsg.parts) {
-            lastMsg.parts = [{ type: 'text', text: actionResult.fallbackText }];
-          }
+          modifiedMessages[modifiedMessages.length - 1] = replaceMessageTextContent(lastMsg, actionResult.fallbackText);
         }
       }
       effectiveMessages = modifiedMessages;
@@ -238,11 +418,12 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
   }
 
   // 0.1 提取最后一条用户消息（用于护栏检查）
-  const conversationHistory = effectiveMessages.map(m => ({
+  const conversationHistory: Array<{
+    role: ChatRequest['messages'][number]['role'];
+    content: string;
+  }> = effectiveMessages.map((m) => ({
     role: m.role,
-    content: (m.parts?.find((p): p is { type: 'text'; text: string } => p.type === 'text')?.text)
-      || (m as unknown as { content?: string })?.content
-      || '',
+    content: getMessageTextContent(m),
   }));
   const rawUserInput = conversationHistory.filter(m => m.role === 'user').pop()?.content || '';
 
@@ -297,11 +478,13 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
   // 构建初始 ProcessorContext（所有处理器间数据通过 context.metadata 传递）
   const initialContext: ProcessorContext = {
     userId,
-    messages: conversationHistory.map(m => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content })),
+    messages: conversationHistory,
     rawUserInput,
     userInput: sanitizedInput,
     systemPrompt: await getSystemPrompt(promptContext),
-    metadata: {},
+    metadata: {
+      ...(ai ? { requestAi: ai } : {}),
+    },
   };
 
   // 2.6 P0 层：keyword-match-processor（独立预检查，命中后直接返回）
@@ -350,7 +533,9 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
 
   if (!pipelineSuccess) {
     logger.warn('Pre-LLM pipeline failed', { logs: pipelineLogs.filter(l => !l.success) });
-    return createDirectResponse('处理请求时遇到问题，请稍后再试～', trace);
+    const failedLogs = pipelineLogs.filter((log) => !log.success);
+    const failureMessage = failedLogs[0]?.error || 'Pre-LLM pipeline failed';
+    throw new Error(failureMessage);
   }
 
   // 4. 从 context.metadata 提取意图分类结果
@@ -401,8 +586,7 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
   const uiMessages: UIMessage[] = effectiveMessages.map((m, i) => ({
     id: `msg-${i}`,
     role: m.role,
-    content: (m as any).content || '',
-    parts: (m as any).parts || [{ type: 'text', text: (m as any).content || '' }],
+    parts: toTextUIMessageParts(m),
   }));
   const aiMessages = await convertToModelMessages(uiMessages);
 
@@ -420,25 +604,26 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
     }
   };
   const modelType = intentToModelType(intentResult.intent);
-  const selectedModel = await getModelByIntent(modelType);
-  
-  // 确定 modelId 用于日志记录
-  const modelId = modelType === 'reasoning' ? 'qwen-plus' : 
-                  modelType === 'agent' ? 'qwen3-max' : 
-                  'qwen-flash';
+  const {
+    model: selectedModel,
+    modelId,
+  } = await resolveChatModelSelection({
+    intent: modelType,
+    modelId: ai?.model,
+  });
 
   const result = runStream({
     model: selectedModel,
     system: systemPrompt,
     messages: aiMessages,
     tools,
-    temperature: modelParams?.temperature ?? 0,
-    maxOutputTokens: modelParams?.maxTokens,
+    temperature: ai?.temperature ?? 0,
+    maxOutputTokens: ai?.maxTokens,
     stopWhen: [stepCountIs(5), hasToolCall('askPreference')],
     onStepFinish: (step) => {
       // 记录每一步的详细信息
       const stepNumber = toolCallRecords.length + 1;
-      const stepType = (step as any).stepType; // 'initial' | 'continue' | 'tool-result'
+      const stepType = getToolStepPhase(step);
 
       logger.debug('AI step finished', {
         stepNumber,
@@ -455,7 +640,7 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
           toolCallRecords.push({
             toolName: tc.toolName,
             toolCallId: tc.toolCallId,
-            args: (tc as any).input ?? (tc as any).args,
+            args: tc.input,
           });
 
           // 记录 Tool 调用日志
@@ -471,14 +656,14 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
       for (const tr of step.toolResults || []) {
         const existing = toolCallRecords.find(s => s.toolCallId === tr.toolCallId);
         if (existing) {
-          existing.result = (tr as any).output ?? (tr as any).result;
+          existing.result = tr.output;
 
           // 记录 Tool 结果日志
           logger.info('Tool result received', {
             stepNumber,
             toolName: existing.toolName,
             toolCallId: tr.toolCallId,
-            hasResult: !!((tr as any).output ?? (tr as any).result),
+            hasResult: tr.output !== undefined,
           });
         }
       }
@@ -493,11 +678,10 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
     },
     onFinish: async ({ usage, text }) => {
       aiResponseText = text || '';
-      const rawUsage = usage as any;
       // 必须 mutate 而非 reassign，因为 createTracedStreamResponse 持有同一对象引用
-      totalUsage.promptTokens = rawUsage.inputTokens ?? 0;
-      totalUsage.completionTokens = rawUsage.outputTokens ?? 0;
-      totalUsage.totalTokens = rawUsage.totalTokens ?? 0;
+      totalUsage.promptTokens = usage.inputTokens ?? 0;
+      totalUsage.completionTokens = usage.outputTokens ?? 0;
+      totalUsage.totalTokens = usage.totalTokens ?? 0;
 
       const duration = Date.now() - startTime;
       logger.info('AI request completed', {
@@ -518,7 +702,7 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
         metadata: {
           ...preLLMContext.metadata,
           conversationId: conversationId ?? undefined,
-          activityId: (toolCallRecords.find(tc => (tc.result as any)?.activityId)?.result as any)?.activityId,
+          activityId: getActivityIdFromTraceSteps(toolCallRecords),
           // record-metrics-processor 数据
           metricsData: {
             modelId,
@@ -526,8 +710,8 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
             inputTokens: totalUsage.promptTokens,
             outputTokens: totalUsage.completionTokens,
             totalTokens: totalUsage.totalTokens,
-            cacheHitTokens: rawUsage.promptCacheHitTokens,
-            cacheMissTokens: rawUsage.promptCacheMissTokens,
+            cacheHitTokens: getCacheHitTokens(usage),
+            cacheMissTokens: getCacheMissTokens(usage),
             toolCalls: toolCallRecords.map(s => ({ toolName: s.toolName })),
             source,
             intent: intentResult.intent,
@@ -631,7 +815,7 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
     },
     processorLogs,
   });
-  }) as Promise<Response>;
+  });
 }
 
 // ==========================================
@@ -644,8 +828,17 @@ function createDirectResponse(text: string, trace?: boolean): Response {
       writer.write({ type: 'text-delta', delta: text, id: randomUUID() });
       if (trace) {
         const now = new Date().toISOString();
-        writer.write({ type: 'data-trace-start' as any, data: { requestId: randomUUID(), startedAt: now, intent: 'blocked', intentMethod: 'guardrail' }, transient: true });
-        writer.write({ type: 'data-trace-end' as any, data: { completedAt: now, status: 'blocked', output: { text, toolCalls: [] } }, transient: true });
+        writeTraceStartEvent(writer, {
+          requestId: randomUUID(),
+          startedAt: now,
+          intent: 'blocked',
+          intentMethod: 'guardrail',
+        });
+        writeTraceEndEvent(writer, {
+          completedAt: now,
+          status: 'blocked',
+          output: { text, toolCalls: [] },
+        });
       }
     },
   });
@@ -683,9 +876,7 @@ async function saveUserActionConversation(params: {
     return;
   }
 
-  const data = (result.data && typeof result.data === 'object')
-    ? result.data as Record<string, unknown>
-    : undefined;
+  const data = asRecord(result.data);
   const actionMessage = resolveActionMessage(result, data);
 
   await saveMessage({
@@ -726,6 +917,7 @@ async function createKeywordResponse(
     keywordId: keyword.id,
     matchedAt: new Date().toISOString(),
   };
+  const keywordResponseContent = asRecord(keyword.responseContent);
   
   // 异步保存对话历史（不阻塞响应）
   if (userId) {
@@ -747,11 +939,16 @@ async function createKeywordResponse(
           conversationId: thread.id,
           userId,
           role: 'assistant',
-          messageType: keyword.responseType as any,
-          content: {
-            ...keyword.responseContent as Record<string, unknown>,
-            keywordContext,
-          },
+          messageType: keyword.responseType,
+          content: keyword.responseType === 'text' && typeof keyword.responseContent === 'string'
+            ? {
+                text: keyword.responseContent,
+                keywordContext,
+              }
+            : {
+                ...(keywordResponseContent ?? {}),
+                keywordContext,
+              },
         });
       } catch (err) {
         logger.error('Failed to save keyword match conversation', { error: err });
@@ -762,13 +959,10 @@ async function createKeywordResponse(
   const stream = createUIMessageStream({
     execute: ({ writer }) => {
       // 返回 widget 数据
-      writer.write({
-        type: 'data' as any,
-        data: {
-          type: keyword.responseType,
-          data: keyword.responseContent,
-          keywordContext,
-        },
+      writeWidgetEvent(writer, {
+        type: keyword.responseType,
+        payload: keyword.responseContent,
+        keywordContext,
       });
       
       // 如果是文本类型，返回文本内容
@@ -778,29 +972,21 @@ async function createKeywordResponse(
       
       if (trace) {
         const now = new Date().toISOString();
-        writer.write({ 
-          type: 'data-trace-start' as any, 
-          data: { 
-            requestId: randomUUID(), 
-            startedAt: now, 
-            intent: 'keyword_match', 
-            intentMethod: 'p0_layer',
-            keyword: keyword.keyword,
-            matchType: keyword.matchType,
-          }, 
-          transient: true 
+        writeTraceStartEvent(writer, {
+          requestId: randomUUID(),
+          startedAt: now,
+          intent: 'keyword_match',
+          intentMethod: 'p0_layer',
+          keyword: keyword.keyword,
+          matchType: keyword.matchType,
         });
-        writer.write({ 
-          type: 'data-trace-end' as any, 
-          data: { 
-            completedAt: now, 
-            status: 'completed', 
-            output: { 
-              keywordId: keyword.id,
-              responseType: keyword.responseType,
-            } 
-          }, 
-          transient: true 
+        writeTraceEndEvent(writer, {
+          completedAt: now,
+          status: 'completed',
+          output: {
+            keywordId: keyword.id,
+            responseType: keyword.responseType,
+          },
         });
       }
     },
@@ -817,9 +1003,7 @@ function createActionResponse(
   trace?: boolean,
   userAction?: UserAction
 ): Response {
-  const data = (result.data && typeof result.data === 'object')
-    ? result.data as Record<string, unknown>
-    : undefined;
+  const data = asRecord(result.data);
   const actionType = userAction?.action;
   const actionMessage = (
     typeof data?.message === 'string' && data.message.trim()
@@ -834,95 +1018,71 @@ function createActionResponse(
               ? '操作成功！'
               : '操作失败，请稍后再试'
   );
-  const nextActions = buildActionNextActions(actionType, data);
+  const nextActions = buildNextBestActions({ actionType, data });
 
   const stream = createUIMessageStream({
     execute: ({ writer }) => {
       // 返回 action 结果作为 data
-      writer.write({
-        type: 'data' as any,
-        data: {
-          type: 'action_result',
-          success: result.success,
-          data: result.data,
-          error: result.error,
-          nextActions,
-        },
+      writeWidgetEvent(writer, {
+        type: 'action_result',
+        success: result.success,
+        data: result.data,
+        error: result.error,
+        nextActions,
       });
 
       if (Array.isArray(data?.explore)) {
-        writer.write({
-          type: 'data' as any,
-          data: {
-            type: 'widget_explore',
-            payload: {
-              results: data.explore,
-              title: '帮你找到这些局，点一个就能继续',
-            },
+        writeWidgetEvent(writer, {
+          type: 'widget_explore',
+          payload: {
+            results: data.explore,
+            title: '帮你找到这些局，点一个就能继续',
           },
         });
       } else if (
         data?.explore &&
         typeof data.explore === 'object'
       ) {
-        writer.write({
-          type: 'data' as any,
-          data: {
-            type: 'widget_explore',
-            payload: data.explore,
-          },
+        writeWidgetEvent(writer, {
+          type: 'widget_explore',
+          payload: data.explore,
         });
       }
 
       if (data?.askPreference && typeof data.askPreference === 'object') {
-        writer.write({
-          type: 'data' as any,
-          data: {
-            type: 'widget_ask_preference',
-            payload: data.askPreference,
-          },
+        writeWidgetEvent(writer, {
+          type: 'widget_ask_preference',
+          payload: data.askPreference,
         });
       }
 
       if (data?.partnerIntentForm && typeof data.partnerIntentForm === 'object') {
-        writer.write({
-          type: 'data' as any,
-          data: {
-            type: 'widget_partner_intent_form',
-            payload: data.partnerIntentForm,
-          },
+        writeWidgetEvent(writer, {
+          type: 'widget_partner_intent_form',
+          payload: data.partnerIntentForm,
         });
       }
 
       if (data?.draftSettingsForm && typeof data.draftSettingsForm === 'object') {
-        writer.write({
-          type: 'data' as any,
-          data: {
-            type: 'widget_draft_settings_form',
-            payload: data.draftSettingsForm,
-          },
+        writeWidgetEvent(writer, {
+          type: 'widget_draft_settings_form',
+          payload: data.draftSettingsForm,
         });
       }
 
       if (data?.draft && typeof data.draft === 'object') {
-        writer.write({
-          type: 'data' as any,
-          data: {
-            type: 'widget_draft',
-            payload: {
-              ...(typeof data.activityId === 'string' ? { activityId: data.activityId } : {}),
-              ...(data.draft as Record<string, unknown>),
-            },
+        writeWidgetEvent(writer, {
+          type: 'widget_draft',
+          payload: {
+            ...(typeof data.activityId === 'string' ? { activityId: data.activityId } : {}),
+            ...data.draft,
           },
         });
 
         if (typeof data.message === 'string' && data.message.trim()) {
-          writer.write({
-            type: 'data' as any,
-            data: {
-              type: 'widget_success',
-              payload: { message: data.message.trim() },
-            },
+          writeWidgetEvent(writer, {
+            type: 'widget_success',
+            payload: { message: data.message.trim() },
           });
         }
       }
@@ -933,24 +1093,16 @@ function createActionResponse(
       
       if (trace) {
         const now = new Date().toISOString();
-        writer.write({ 
-          type: 'data-trace-start' as any, 
-          data: { 
-            requestId: randomUUID(), 
-            startedAt: now, 
-            intent: 'user_action', 
-            intentMethod: 'a2ui' 
-          }, 
-          transient: true 
+        writeTraceStartEvent(writer, {
+          requestId: randomUUID(),
+          startedAt: now,
+          intent: 'user_action',
+          intentMethod: 'a2ui',
         });
-        writer.write({ 
-          type: 'data-trace-end' as any, 
-          data: { 
-            completedAt: now, 
-            status: result.success ? 'completed' : 'failed', 
-            output: { actionResult: result } 
-          }, 
-          transient: true 
+        writeTraceEndEvent(writer, {
+          completedAt: now,
+          status: result.success ? 'completed' : 'failed',
+          output: { actionResult: result },
         });
       }
     },
@@ -958,263 +1110,6 @@ function createActionResponse(
   return createUIMessageStreamResponse({ stream });
 }
 
-function getDraftActivityTypeLabel(type: string): string {
-  switch (type) {
-    case 'boardgame':
-      return '桌游';
-    case 'sports':
-      return '运动';
-    case 'food':
-      return '美食';
-    case 'entertainment':
-      return '娱乐';
-    default:
-      return '其他';
-  }
-}
-
-function buildDraftActionPayload(data: Record<string, unknown> | undefined): Record<string, unknown> | null {
-  const draft = data?.draft && typeof data.draft === 'object'
-    ? data.draft as Record<string, unknown>
-    : null;
-
-  if (!draft) {
-    return null;
-  }
-
-  const location = Array.isArray(draft.location) ? draft.location : [];
-  const lng = typeof location[0] === 'number'
-    ? location[0]
-    : typeof data?.lng === 'number'
-      ? data.lng
-      : 106.52988;
-  const lat = typeof location[1] === 'number'
-    ? location[1]
-    : typeof data?.lat === 'number'
-      ? data.lat
-      : 29.58567;
-  const draftType = typeof draft.type === 'string' && draft.type.trim() ? draft.type.trim() : 'other';
-  const locationName = typeof draft.locationName === 'string' && draft.locationName.trim()
-    ? draft.locationName.trim()
-    : '观音桥';
-
-  return {
-    ...(typeof data?.activityId === 'string' ? { activityId: data.activityId } : {}),
-    title: typeof draft.title === 'string' && draft.title.trim() ? draft.title.trim() : '活动草稿',
-    type: draftType,
-    activityType: getDraftActivityTypeLabel(draftType),
-    startAt: typeof draft.startAt === 'string' && draft.startAt.trim() ? draft.startAt.trim() : '',
-    locationName,
-    locationHint: typeof draft.locationHint === 'string' && draft.locationHint.trim()
-      ? draft.locationHint.trim()
-      : locationName + '附近',
-    maxParticipants: typeof draft.maxParticipants === 'number' ? draft.maxParticipants : 6,
-    currentParticipants: typeof draft.currentParticipants === 'number' ? draft.currentParticipants : 1,
-    lat,
-    lng,
-  };
-}
-
-function buildActionNextActions(
-  actionType: UserAction['action'] | undefined,
-  data: Record<string, unknown> | undefined
-): Array<{ label: string; action: string; params?: Record<string, unknown> }> {
-  const activityId = typeof data?.activityId === 'string' ? data.activityId : undefined;
-  const locationName = typeof data?.locationName === 'string' ? data.locationName : undefined;
-  const exploreType = typeof data?.type === 'string' ? data.type : undefined;
-  const explorePayload = data?.explore && typeof data.explore === 'object'
-    ? data.explore as Record<string, unknown>
-    : null;
-  const exploreCenter = explorePayload?.center && typeof explorePayload.center === 'object'
-    ? explorePayload.center as Record<string, unknown>
-    : null;
-  const exploreLocationName = typeof exploreCenter?.name === 'string'
-    ? exploreCenter.name
-    : locationName;
-  const exploreResults = Array.isArray(explorePayload?.results) ? explorePayload.results : [];
-  const exploreSemanticQuery = typeof explorePayload?.semanticQuery === 'string'
-    ? explorePayload.semanticQuery
-    : undefined;
-
-  switch (actionType) {
-    case 'join_activity': {
-      const items: Array<{ label: string; action: string; params?: Record<string, unknown> }> = [];
-      if (activityId) {
-        items.push({
-          label: '看看活动详情',
-          action: 'view_activity',
-          params: { activityId },
-        });
-      }
-      items.push({
-        label: '继续找附近的局',
-        action: 'explore_nearby',
-        params: {
-          ...(locationName ? { locationName } : {}),
-        },
-      });
-      return items;
-    }
-    case 'create_activity':
-    case 'save_draft_settings': {
-      const draftActionPayload = buildDraftActionPayload(data);
-      if (!draftActionPayload) {
-        return [];
-      }
-
-      return [
-        {
-          label: '确认发布',
-          action: 'confirm_publish',
-          params: draftActionPayload,
-        },
-        {
-          label: '改下地点',
-          action: 'edit_draft',
-          params: { ...draftActionPayload, field: 'location' },
-        },
-        {
-          label: '改下时间',
-          action: 'edit_draft',
-          params: { ...draftActionPayload, field: 'time' },
-        },
-        {
-          label: '改下人数设置',
-          action: 'edit_draft',
-          params: { ...draftActionPayload, field: 'participants' },
-        },
-      ];
-    }
-    case 'publish_draft':
-    case 'confirm_publish': {
-      const items: Array<{ label: string; action: string; params?: Record<string, unknown> }> = [];
-      if (activityId) {
-        items.push({
-          label: '去分享这个局',
-          action: 'share_activity',
-          params: { activityId },
-        });
-      }
-      items.push({
-        label: '再看看附近活动',
-        action: 'explore_nearby',
-      });
-      return items;
-    }
-    case 'explore_nearby':
-      if (exploreResults.length === 0) {
-        const promptParts = [
-          exploreLocationName ? `附近还没有合适的局，我想在${exploreLocationName}发起一个新的线下活动。` : '附近还没有合适的局，我想自己发起一个新的线下活动。',
-          exploreSemanticQuery ? `需求参考：${exploreSemanticQuery}。` : '',
-          '先帮我判断要不要自己组，如果需要，再帮我整理成一个可发布的活动草稿。',
-        ];
-
-        return [
-          {
-            label: '那我自己组一个',
-            action: 'create_activity',
-            params: {
-              description: promptParts.filter((item) => item).join(''),
-              ...(exploreLocationName ? { locationName: exploreLocationName } : {}),
-              ...(exploreType ? { type: exploreType } : {}),
-            },
-          },
-          {
-            label: '帮我找同类搭子',
-            action: 'find_partner',
-            ...(exploreType ? { params: { type: exploreType } } : {}),
-          },
-          {
-            label: '换个关键词重搜',
-            action: 'quick_prompt',
-            params: { prompt: '换个类型再帮我找找' },
-          },
-        ];
-      }
-
-      return [
-        {
-          label: '帮我找同类搭子',
-          action: 'find_partner',
-          ...(exploreType ? { params: { type: exploreType } } : {}),
-        },
-        {
-          label: '换个关键词重搜',
-          action: 'quick_prompt',
-          params: { prompt: '换个类型再帮我找找' },
-        },
-      ];
-    case 'cancel_join':
-      return [
-        {
-          label: '重新找个局',
-          action: 'explore_nearby',
-        },
-      ];
-    case 'confirm_match': {
-      const items: Array<{ label: string; action: string; params?: Record<string, unknown> }> = [];
-      if (activityId) {
-        items.push({
-          label: '进入新局详情',
-          action: 'view_activity',
-          params: { activityId },
-        });
-      }
-      items.push({
-        label: '去群里招呼大家',
-        action: 'quick_prompt',
-        params: { prompt: '我已经确认匹配了，帮我写一句开场招呼' },
-      });
-      return items;
-    }
-    case 'cancel_match':
-      return [
-        {
-          label: '继续找搭子',
-          action: 'find_partner',
-        },
-        {
-          label: '改一下我的偏好',
-          action: 'quick_prompt',
-          params: { prompt: '我想调整找搭子的偏好' },
-        },
-      ];
-    case 'submit_partner_intent_form': {
-      const items: Array<{ label: string; action: string; params?: Record<string, unknown> }> = [];
-      if (locationName) {
-        items.push({
-          label: '看看附近同类局',
-          action: 'explore_nearby',
-          params: {
-            locationName,
-            ...(exploreType ? { type: exploreType } : {}),
-          },
-        });
-      }
-
-      items.push({
-        label: '改一下偏好',
-        action: 'find_partner',
-        params: {
-          ...(locationName ? { locationName } : {}),
-          ...(exploreType ? { type: exploreType } : {}),
-        },
-      });
-
-      if (typeof data?.matchId === 'string') {
-        items.push({
-          label: '看看我的搭子进展',
-          action: 'quick_prompt',
-          params: { prompt: '看看我的搭子进度' },
-        });
-      }
-
-      return items;
-    }
-    default:
-      return [];
-  }
-}
 
 function handleChitchat(trace: boolean | undefined, _intent: ClassifyResult): Response {
   const responses = [
@@ -1229,8 +1124,17 @@ function handleChitchat(trace: boolean | undefined, _intent: ClassifyResult): Re
       writer.write({ type: 'text-delta', delta: text, id: randomUUID() });
       if (trace) {
         const now = new Date().toISOString();
-        writer.write({ type: 'data-trace-start' as any, data: { requestId: randomUUID(), startedAt: now, intent: _intent.intent, intentMethod: _intent.method }, transient: true });
-        writer.write({ type: 'data-trace-end' as any, data: { completedAt: now, status: 'completed', output: { text, toolCalls: [] } }, transient: true });
+        writeTraceStartEvent(writer, {
+          requestId: randomUUID(),
+          startedAt: now,
+          intent: _intent.intent,
+          intentMethod: _intent.method,
+        });
+        writeTraceEndEvent(writer, {
+          completedAt: now,
+          status: 'completed',
+          output: { text, toolCalls: [] },
+        });
       }
     },
   });
@@ -1356,25 +1260,31 @@ async function handlePartnerMatchingFlow(
         writer.write({ type: 'text-delta', delta: confirmText, id: randomUUID() });
 
         if (widgetOptions.length > 0) {
-          writer.write({
-            type: 'data' as any,
-            data: {
-              type: 'widget_ask_preference',
-              payload: {
-                status: 'completed',
-                preferences: completedState.collectedPreferences,
-                questionType: 'result',
-                question: widgetQuestion,
-                options: widgetOptions,
-              },
+          writeWidgetEvent(writer, {
+            type: 'widget_ask_preference',
+            payload: {
+              status: 'completed',
+              preferences: completedState.collectedPreferences,
+              questionType: 'result',
+              question: widgetQuestion,
+              options: widgetOptions,
             },
           });
         }
 
         if (trace) {
           const now = new Date().toISOString();
-          writer.write({ type: 'data-trace-start' as any, data: { requestId: randomUUID(), startedAt: now, intent: 'partner', intentMethod: 'partner_matching' }, transient: true });
-          writer.write({ type: 'data-trace-end' as any, data: { completedAt: now, status: 'completed', output: { text: confirmText, toolCalls: traceToolCalls } }, transient: true });
+          writeTraceStartEvent(writer, {
+            requestId: randomUUID(),
+            startedAt: now,
+            intent: 'partner',
+            intentMethod: 'partner_matching',
+          });
+          writeTraceEndEvent(writer, {
+            completedAt: now,
+            status: 'completed',
+            output: { text: confirmText, toolCalls: traceToolCalls },
+          });
         }
       },
     });
@@ -1395,17 +1305,23 @@ async function handlePartnerMatchingFlow(
   const stream = createUIMessageStream({
     execute: ({ writer }) => {
       writer.write({ type: 'text-delta', delta: introText, id: randomUUID() });
-      writer.write({
-        type: 'data' as any,
-        data: {
-          type: 'widget_partner_intent_form',
-          payload: formPayload,
-        },
+      writeWidgetEvent(writer, {
+        type: 'widget_partner_intent_form',
+        payload: formPayload,
       });
       if (trace) {
         const now = new Date().toISOString();
-        writer.write({ type: 'data-trace-start' as any, data: { requestId: randomUUID(), startedAt: now, intent: 'partner', intentMethod: 'partner_matching' }, transient: true });
-        writer.write({ type: 'data-trace-end' as any, data: { completedAt: now, status: 'collecting', output: { text: introText, toolCalls: [] } }, transient: true });
+        writeTraceStartEvent(writer, {
+          requestId: randomUUID(),
+          startedAt: now,
+          intent: 'partner',
+          intentMethod: 'partner_matching',
+        });
+        writeTraceEndEvent(writer, {
+          completedAt: now,
+          status: 'collecting',
+          output: { text: introText, toolCalls: [] },
+        });
       }
     },
   });
@@ -1426,11 +1342,13 @@ async function _persistConversation(
       await saveMessage({ conversationId: threadId, userId, role: 'user', messageType: 'text', content: { text: userMessage } });
     }
 
-    const activityId = toolCalls.find(tc => (tc.result as any)?.activityId)?.result as { activityId?: string } | undefined;
-    let messageType = 'text';
+    const activityId = getActivityIdFromTraceSteps(toolCalls);
+    let messageType: typeof conversationMessages.$inferSelect.messageType = 'text';
     if (toolCalls.length > 0) {
       const widgetType = getToolWidgetType(toolCalls[toolCalls.length - 1].toolName);
-      if (widgetType) messageType = widgetType;
+      if (widgetType && isConversationMessageType(widgetType)) {
+        messageType = widgetType;
+      }
     }
 
     await saveMessage({
@@ -1439,7 +1357,7 @@ async function _persistConversation(
       role: 'assistant',
       messageType,
       content: { text: assistantResponse, toolCalls: toolCalls.map(tc => ({ toolName: tc.toolName, args: tc.args, result: tc.result })) },
-      activityId: activityId?.activityId,
+      ...(activityId ? { activityId } : {}),
     });
   } catch (error) {
     console.error('[AI] Failed to save conversation:', error);
@@ -1492,13 +1410,13 @@ function createTracedStreamResponse(result: ReturnType<typeof runStream>, ctx: {
   const getLogDuration = (name: string) => ctx.processorLogs.find(l => l.processorName === name)?.executionTime ?? 0;
   const getLogData = (name: string) => ctx.processorLogs.find(l => l.processorName === name)?.data;
 
-  const toolsInfo = Object.keys(ctx.tools).map(name => {
-    const t = (ctx.tools as any)[name];
-    let inputSchema = {};
-    if (t.inputSchema?.jsonSchema) inputSchema = t.inputSchema.jsonSchema;
-    else if (t.inputSchema) inputSchema = t.inputSchema;
-    else if (t.parameters) inputSchema = t.parameters;
-    return { name, description: t.description || '', schema: inputSchema };
+  const toolsInfo = Object.entries(ctx.tools).map(([name, tool]) => {
+    const toolRecord = asRecord(tool);
+    return {
+      name,
+      description: typeof toolRecord?.description === 'string' ? toolRecord.description : '',
+      schema: extractToolSchema(tool),
+    };
   });
 
   const stream = createUIMessageStream({
@@ -1661,6 +1579,7 @@ function createTracedStreamResponse(result: ReturnType<typeof runStream>, ctx: {
         const recallDuration = getLogDuration('semantic-recall-processor');
         const tokenStartTime = new Date(ctx.startedAt).getTime() + (ctx.inputGuard?.duration || 0) + (ctx.keywordMatch?.duration || 0) + intentDuration + profileDuration + recallDuration;
         const tokenCompletedAt = new Date(tokenStartTime + tokenDuration).toISOString();
+        const tokenSnapshot = getTokenLimitSnapshot(tokenLimitData);
         writer.write({
           type: 'data-trace-step',
           data: {
@@ -1674,9 +1593,9 @@ function createTracedStreamResponse(result: ReturnType<typeof runStream>, ctx: {
             data: {
               processorType: 'token-limit',
               output: {
-                truncated: (tokenLimitData as any)?.truncated ?? false,
-                originalLength: (tokenLimitData as any)?.originalTokens ?? (tokenLimitData as any)?.totalTokens ?? 0,
-                finalLength: (tokenLimitData as any)?.truncatedTokens ?? (tokenLimitData as any)?.totalTokens ?? 0,
+                truncated: tokenSnapshot.truncated,
+                originalLength: tokenSnapshot.originalLength,
+                finalLength: tokenSnapshot.finalLength,
               },
               config: { maxTokens: 12000, enabled: true },
             },
@@ -1811,6 +1730,239 @@ export async function listConversations(params: {
   };
 }
 
+async function hydrateConversationListItems(
+  rows: Array<{
+    id: string;
+    userId: string;
+    title: string | null;
+    messageCount: number;
+    lastMessageAt: Date | null;
+    createdAt: Date;
+    evaluationStatus: typeof conversations.$inferSelect.evaluationStatus;
+    evaluationTags: string[] | null;
+    evaluationNote: string | null;
+    hasError: boolean;
+  }>
+): Promise<HydratedConversationListItem[]> {
+  const userIds = [...new Set(rows.map((row) => row.userId))];
+  const userNicknames = userIds.length > 0
+    ? await db
+      .select({ id: users.id, nickname: users.nickname })
+      .from(users)
+      .where(inArray(users.id, userIds))
+    : [];
+  const nicknameMap = new Map(userNicknames.map((user) => [user.id, user.nickname]));
+
+  return rows.map((row) => ({
+    id: row.id,
+    userId: row.userId,
+    title: row.title,
+    messageCount: row.messageCount,
+    lastMessageAt: row.lastMessageAt?.toISOString() || row.createdAt.toISOString(),
+    createdAt: row.createdAt.toISOString(),
+    userNickname: nicknameMap.get(row.userId) || null,
+    evaluationStatus: row.evaluationStatus,
+    evaluationTags: row.evaluationTags || [],
+    evaluationNote: row.evaluationNote,
+    hasError: row.hasError,
+  }));
+}
+
+export async function listUserConversations(params: {
+  userId: string;
+  cursor?: string;
+  limit?: number;
+}) {
+  const { userId, cursor, limit = 20 } = params;
+  const conditions = [eq(conversations.userId, userId)];
+
+  if (cursor) {
+    const [cursorConversation] = await db
+      .select({
+        id: conversations.id,
+        lastMessageAt: conversations.lastMessageAt,
+        createdAt: conversations.createdAt,
+      })
+      .from(conversations)
+      .where(and(
+        eq(conversations.id, cursor),
+        eq(conversations.userId, userId),
+      ))
+      .limit(1);
+
+    if (cursorConversation) {
+      const cursorTimestamp = cursorConversation.lastMessageAt || cursorConversation.createdAt;
+      const cursorCondition = or(
+        lt(conversations.lastMessageAt, cursorTimestamp),
+        and(
+          eq(conversations.lastMessageAt, cursorTimestamp),
+          lt(conversations.id, cursorConversation.id),
+        ),
+      );
+
+      if (cursorCondition) {
+        conditions.push(cursorCondition);
+      }
+    }
+  }
+
+  const [rows, totalResult] = await Promise.all([
+    db
+      .select({
+        id: conversations.id,
+        userId: conversations.userId,
+        title: conversations.title,
+        messageCount: conversations.messageCount,
+        lastMessageAt: conversations.lastMessageAt,
+        createdAt: conversations.createdAt,
+        evaluationStatus: conversations.evaluationStatus,
+        evaluationTags: conversations.evaluationTags,
+        evaluationNote: conversations.evaluationNote,
+        hasError: conversations.hasError,
+      })
+      .from(conversations)
+      .where(and(...conditions))
+      .orderBy(desc(conversations.lastMessageAt), desc(conversations.id))
+      .limit(limit + 1),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(conversations)
+      .where(eq(conversations.userId, userId)),
+  ]);
+
+  const hasMore = rows.length > limit;
+  const visibleRows = hasMore ? rows.slice(0, limit) : rows;
+
+  return {
+    items: await hydrateConversationListItems(visibleRows),
+    total: totalResult[0]?.count || 0,
+    hasMore,
+    cursor: hasMore ? visibleRows[visibleRows.length - 1]?.id || null : null,
+  };
+}
+
+async function hydrateConversationMessages(
+  rows: Array<{
+    id: string;
+    userId: string;
+    role: ConversationMessageRecord['role'];
+    messageType: ConversationMessageRecord['messageType'];
+    content: ConversationMessageRecord['content'];
+    activityId: string | null;
+    createdAt: Date;
+  }>
+): Promise<HydratedConversationMessage[]> {
+  const userIds = [...new Set(rows.map((row) => row.userId))];
+  const userNicknames = userIds.length > 0
+    ? await db
+      .select({ id: users.id, nickname: users.nickname })
+      .from(users)
+      .where(inArray(users.id, userIds))
+    : [];
+  const nicknameMap = new Map(userNicknames.map((user) => [user.id, user.nickname]));
+
+  return rows.map((row) => ({
+    id: row.id,
+    userId: row.userId,
+    userNickname: nicknameMap.get(row.userId) || null,
+    role: row.role,
+    type: row.messageType,
+    content: row.content,
+    activityId: row.activityId,
+    createdAt: row.createdAt.toISOString(),
+  }));
+}
+
+export async function listConversationMessages(params: {
+  userId: string;
+  conversationId: string;
+  cursor?: string;
+  limit?: number;
+  role?: 'user' | 'assistant';
+  messageType?: ConversationMessageRecord['messageType'];
+}) {
+  const {
+    userId,
+    conversationId,
+    cursor,
+    limit = 20,
+    role,
+    messageType,
+  } = params;
+  const [thread] = await db
+    .select({ id: conversations.id, userId: conversations.userId })
+    .from(conversations)
+    .where(eq(conversations.id, conversationId))
+    .limit(1);
+
+  if (!thread) {
+    throw new Error('会话不存在');
+  }
+
+  if (thread.userId !== userId) {
+    throw new Error('会话与用户不匹配');
+  }
+
+  const baseConditions: Array<ReturnType<typeof eq>> = [
+    eq(conversationMessages.conversationId, conversationId),
+  ];
+  if (role) {
+    baseConditions.push(eq(conversationMessages.role, role));
+  }
+  if (messageType) {
+    baseConditions.push(eq(conversationMessages.messageType, messageType));
+  }
+
+  const messageConditions = [...baseConditions];
+  if (cursor) {
+    const [cursorMessage] = await db
+      .select({ createdAt: conversationMessages.createdAt })
+      .from(conversationMessages)
+      .where(and(
+        eq(conversationMessages.id, cursor),
+        eq(conversationMessages.conversationId, conversationId),
+      ))
+      .limit(1);
+
+    if (cursorMessage) {
+      messageConditions.push(lt(conversationMessages.createdAt, cursorMessage.createdAt));
+    }
+  }
+
+  const [rows, totalResult] = await Promise.all([
+    db
+      .select({
+        id: conversationMessages.id,
+        userId: conversationMessages.userId,
+        role: conversationMessages.role,
+        messageType: conversationMessages.messageType,
+        content: conversationMessages.content,
+        activityId: conversationMessages.activityId,
+        createdAt: conversationMessages.createdAt,
+      })
+      .from(conversationMessages)
+      .where(and(...messageConditions))
+      .orderBy(desc(conversationMessages.createdAt))
+      .limit(limit + 1),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(conversationMessages)
+      .where(and(...baseConditions)),
+  ]);
+
+  const hasMore = rows.length > limit;
+  const visibleRows = hasMore ? rows.slice(0, limit) : rows;
+  const items = await hydrateConversationMessages(visibleRows);
+
+  return {
+    conversationId,
+    items,
+    total: totalResult[0]?.count || 0,
+    hasMore,
+    cursor: hasMore ? visibleRows[visibleRows.length - 1]?.id || null : null,
+  };
+}
+
 export async function getConversationMessages(conversationId: string) {
   const [conv] = await db
     .select()
@@ -1852,6 +2004,197 @@ export async function getConversationMessages(conversationId: string) {
       createdAt: m.createdAt.toISOString(),
     })),
   };
+}
+
+function buildAssistantConversationSnapshot(blocks: GenUIBlock[]): {
+  messageType: ConversationMessageRecord['messageType'];
+  content: Record<string, unknown>;
+} | null {
+  const textBlock = blocks.find((block): block is Extract<GenUIBlock, { type: 'text' }> =>
+    block.type === 'text' && typeof block.content === 'string' && block.content.trim().length > 0
+  );
+  const choiceBlock = blocks.find((block): block is Extract<GenUIBlock, { type: 'choice' }> => block.type === 'choice');
+  const listBlock = blocks.find((block): block is Extract<GenUIBlock, { type: 'list' }> => block.type === 'list');
+  const entityBlock = blocks.find((block): block is Extract<GenUIBlock, { type: 'entity-card' }> => block.type === 'entity-card');
+  const ctaBlock = blocks.find((block): block is Extract<GenUIBlock, { type: 'cta-group' }> => block.type === 'cta-group');
+  const alertBlock = blocks.find((block): block is Extract<GenUIBlock, { type: 'alert' }> => block.type === 'alert');
+
+  if (choiceBlock) {
+    return {
+      messageType: 'widget_ask_preference',
+      content: {
+        text: textBlock?.content || choiceBlock.question,
+        question: choiceBlock.question,
+        options: choiceBlock.options,
+      },
+    };
+  }
+
+  if (listBlock) {
+    return {
+      messageType: 'widget_explore',
+      content: {
+        text: textBlock?.content || listBlock.title || '附近活动',
+        ...(typeof listBlock.title === 'string' ? { title: listBlock.title } : {}),
+        items: listBlock.items,
+      },
+    };
+  }
+
+  if (entityBlock) {
+    return {
+      messageType: 'widget_draft',
+      content: {
+        text: textBlock?.content || entityBlock.title,
+        title: entityBlock.title,
+        fields: entityBlock.fields,
+      },
+    };
+  }
+
+  if (ctaBlock) {
+    return {
+      messageType: 'widget_action',
+      content: {
+        text: textBlock?.content || '下一步操作',
+        items: ctaBlock.items,
+      },
+    };
+  }
+
+  if (alertBlock) {
+    return {
+      messageType: alertBlock.level === 'error' ? 'widget_error' : 'text',
+      content: {
+        text: textBlock?.content || alertBlock.message,
+        level: alertBlock.level,
+      },
+    };
+  }
+
+  if (textBlock) {
+    return {
+      messageType: 'text',
+      content: {
+        text: textBlock.content,
+      },
+    };
+  }
+
+  return null;
+}
+
+function extractStoredConversationText(content: unknown): string {
+  if (typeof content === 'string') {
+    return content.trim();
+  }
+
+  if (!isRecord(content)) {
+    return '';
+  }
+
+  if (typeof content.text === 'string' && content.text.trim()) {
+    return content.text.trim();
+  }
+
+  if (typeof content.message === 'string' && content.message.trim()) {
+    return content.message.trim();
+  }
+
+  return '';
+}
+
+export async function syncConversationTurnSnapshot(params: {
+  conversationId: string;
+  userId: string;
+  userText?: string;
+  blocks: GenUIBlock[];
+}) {
+  const snapshot = buildAssistantConversationSnapshot(params.blocks);
+  if (!snapshot) {
+    return;
+  }
+
+  const recentMessages = await db
+    .select({
+      id: conversationMessages.id,
+      role: conversationMessages.role,
+      content: conversationMessages.content,
+    })
+    .from(conversationMessages)
+    .where(eq(conversationMessages.conversationId, params.conversationId))
+    .orderBy(desc(conversationMessages.createdAt))
+    .limit(3);
+
+  const latestMessage = recentMessages[0];
+  const normalizedUserText = params.userText?.trim() || '';
+  const matchedUserMessage = normalizedUserText
+    ? recentMessages.find((message) =>
+      message.role === 'user' && extractStoredConversationText(message.content) === normalizedUserText
+    )
+    : undefined;
+
+  if (!latestMessage) {
+    if (normalizedUserText) {
+      await saveMessage({
+        conversationId: params.conversationId,
+        userId: params.userId,
+        role: 'user',
+        messageType: 'text',
+        content: { text: normalizedUserText },
+      });
+    }
+
+    await saveMessage({
+      conversationId: params.conversationId,
+      userId: params.userId,
+      role: 'assistant',
+      messageType: snapshot.messageType,
+      content: snapshot.content,
+    });
+    return;
+  }
+
+  if (latestMessage.role === 'assistant' && matchedUserMessage) {
+    const nextContent = isRecord(latestMessage.content)
+      ? {
+          ...latestMessage.content,
+          ...snapshot.content,
+        }
+      : snapshot.content;
+
+    await db
+      .update(conversationMessages)
+      .set({
+        messageType: snapshot.messageType,
+        content: nextContent,
+        embedding: null,
+      })
+      .where(eq(conversationMessages.id, latestMessage.id));
+    return;
+  }
+
+  const latestUserText = latestMessage.role === 'user'
+    ? extractStoredConversationText(latestMessage.content)
+    : '';
+
+  if (normalizedUserText && latestUserText !== normalizedUserText) {
+    await saveMessage({
+      conversationId: params.conversationId,
+      userId: params.userId,
+      role: 'user',
+      messageType: 'text',
+      content: { text: normalizedUserText },
+    });
+  }
+
+  await saveMessage({
+    conversationId: params.conversationId,
+    userId: params.userId,
+    role: 'assistant',
+    messageType: snapshot.messageType,
+    content: snapshot.content,
+  });
 }
 
 // ==========================================
@@ -1927,7 +2270,7 @@ export async function addMessageToConversation(params: {
   conversationId: string;
   userId: string;
   role: 'user' | 'assistant';
-  messageType: string;
+  messageType: ConversationMessageRecord['messageType'];
   content: unknown;
 }) {
   return saveMessage({
@@ -1939,33 +2282,25 @@ export async function addMessageToConversation(params: {
   });
 }
 
-export async function getMessagesByActivityId(activityId: string) {
-  const msgs = await db
+export async function getActivityConversationMessages(activityId: string) {
+  const rows = await db
     .select({
       id: conversationMessages.id,
       userId: conversationMessages.userId,
       role: conversationMessages.role,
       messageType: conversationMessages.messageType,
       content: conversationMessages.content,
+      activityId: conversationMessages.activityId,
       createdAt: conversationMessages.createdAt,
     })
     .from(conversationMessages)
     .where(eq(conversationMessages.activityId, activityId))
     .orderBy(conversationMessages.createdAt);
 
-  const userIds = [...new Set(msgs.map(m => m.userId))];
-  const userNicknames = userIds.length > 0
-    ? await db.select({ id: users.id, nickname: users.nickname }).from(users).where(inArray(users.id, userIds))
-    : [];
-  const nicknameMap = new Map(userNicknames.map(u => [u.id, u.nickname]));
-
   return {
-    items: msgs.map(m => ({
-      ...m,
-      userNickname: nicknameMap.get(m.userId) || null,
-      createdAt: m.createdAt.toISOString(),
-    })),
-    total: msgs.length,
+    activityId,
+    items: await hydrateConversationMessages(rows),
+    total: rows.length,
   };
 }
 
@@ -2112,142 +2447,126 @@ const DEFAULT_WELCOME_UI_CONFIG: WelcomeUiConfig = {
   },
 };
 
+const WELCOME_GREETING_PERIODS: WelcomeGreetingPeriod[] = [
+  'lateNight',
+  'morning',
+  'forenoon',
+  'noon',
+  'afternoon',
+  'evening',
+  'night',
+];
+
+function getNonEmptyString(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
 function normalizeWelcomeCopyConfig(raw: unknown): WelcomeCopyConfig {
-  if (!raw || typeof raw !== 'object') {
+  if (!isRecord(raw)) {
     return DEFAULT_WELCOME_COPY_CONFIG;
   }
 
-  const config = raw as Partial<WelcomeCopyConfig> & {
-    greetingTemplates?: Partial<Record<WelcomeGreetingPeriod, unknown>>;
-  };
-
   const greetingTemplates = { ...DEFAULT_WELCOME_COPY_CONFIG.greetingTemplates };
-  if (config.greetingTemplates && typeof config.greetingTemplates === 'object') {
-    for (const key of Object.keys(greetingTemplates) as WelcomeGreetingPeriod[]) {
-      const next = config.greetingTemplates[key];
-      if (typeof next === 'string' && next.trim()) {
-        greetingTemplates[key] = next.trim();
+  const greetingTemplatesInput = isRecord(raw.greetingTemplates) ? raw.greetingTemplates : null;
+  if (greetingTemplatesInput) {
+    for (const key of WELCOME_GREETING_PERIODS) {
+      const next = getNonEmptyString(greetingTemplatesInput[key]);
+      if (next) {
+        greetingTemplates[key] = next;
       }
     }
   }
 
   return {
-    fallbackNickname:
-      typeof config.fallbackNickname === 'string' && config.fallbackNickname.trim()
-        ? config.fallbackNickname.trim()
-        : DEFAULT_WELCOME_COPY_CONFIG.fallbackNickname,
-    subGreeting:
-      typeof config.subGreeting === 'string' && config.subGreeting.trim()
-        ? config.subGreeting.trim()
-        : DEFAULT_WELCOME_COPY_CONFIG.subGreeting,
+    fallbackNickname: getNonEmptyString(raw.fallbackNickname) ?? DEFAULT_WELCOME_COPY_CONFIG.fallbackNickname,
+    subGreeting: getNonEmptyString(raw.subGreeting) ?? DEFAULT_WELCOME_COPY_CONFIG.subGreeting,
     greetingTemplates,
   };
 }
 
 function normalizeWelcomeUiConfig(raw: unknown): WelcomeUiConfig {
-  if (!raw || typeof raw !== 'object') {
+  if (!isRecord(raw)) {
     return DEFAULT_WELCOME_UI_CONFIG;
   }
 
-  const config = raw as Partial<WelcomeUiConfig> & {
-    composerPlaceholder?: unknown;
-    sectionTitles?: Partial<Record<'suggestions' | 'explore', unknown>>;
-    exploreTemplates?: Partial<Record<'label' | 'prompt', unknown>>;
-    suggestionItems?: unknown;
-    quickPrompts?: unknown;
-    bottomQuickActions?: unknown;
-    profileHints?: Partial<Record<'low' | 'medium' | 'high', unknown>>;
-  };
+  const sectionTitlesInput = isRecord(raw.sectionTitles) ? raw.sectionTitles : null;
+  const exploreTemplatesInput = isRecord(raw.exploreTemplates) ? raw.exploreTemplates : null;
+  const profileHintsInput = isRecord(raw.profileHints) ? raw.profileHints : null;
 
-  const suggestionItems = Array.isArray(config.suggestionItems)
-    ? config.suggestionItems
+  const suggestionItems = Array.isArray(raw.suggestionItems)
+    ? raw.suggestionItems
       .map((item) => {
-        if (!item || typeof item !== 'object') return null;
-        const record = item as Partial<{ icon: unknown; label: unknown; prompt: unknown }>;
-        if (
-          typeof record.icon !== 'string' ||
-          typeof record.label !== 'string' ||
-          typeof record.prompt !== 'string'
-        ) {
+        if (!isRecord(item)) {
           return null;
         }
+
+        const icon = getNonEmptyString(item.icon);
+        const label = getNonEmptyString(item.label);
+        const prompt = getNonEmptyString(item.prompt);
+        if (!icon || !label || !prompt) {
+          return null;
+        }
+
         return {
-          icon: record.icon.trim(),
-          label: record.label.trim(),
-          prompt: record.prompt.trim(),
+          icon,
+          label,
+          prompt,
         };
       })
       .filter((item): item is { icon: string; label: string; prompt: string } => Boolean(item?.label && item.prompt))
     : [];
 
-  const quickPrompts = Array.isArray(config.quickPrompts)
-    ? config.quickPrompts
+  const quickPrompts = Array.isArray(raw.quickPrompts)
+    ? raw.quickPrompts
       .map((item) => {
-        if (!item || typeof item !== 'object') return null;
-        const record = item as Partial<{ icon: unknown; text: unknown; prompt: unknown }>;
-        if (
-          typeof record.icon !== 'string' ||
-          typeof record.text !== 'string' ||
-          typeof record.prompt !== 'string'
-        ) {
+        if (!isRecord(item)) {
           return null;
         }
+
+        const icon = getNonEmptyString(item.icon);
+        const text = getNonEmptyString(item.text);
+        const prompt = getNonEmptyString(item.prompt);
+        if (!icon || !text || !prompt) {
+          return null;
+        }
+
         return {
-          icon: record.icon.trim(),
-          text: record.text.trim(),
-          prompt: record.prompt.trim(),
+          icon,
+          text,
+          prompt,
         };
       })
       .filter((item): item is QuickPrompt => Boolean(item?.text && item.prompt))
     : [];
 
-  const bottomQuickActions = Array.isArray(config.bottomQuickActions)
-    ? config.bottomQuickActions
-      .map((item) => (typeof item === 'string' ? item.trim() : ''))
+  const bottomQuickActions = Array.isArray(raw.bottomQuickActions)
+    ? raw.bottomQuickActions
+      .map((item) => getNonEmptyString(item) ?? '')
       .filter(Boolean)
     : [];
 
   const profileHints = {
-    low:
-      typeof config.profileHints?.low === 'string' && config.profileHints.low.trim()
-        ? config.profileHints.low.trim()
-        : DEFAULT_WELCOME_UI_CONFIG.profileHints.low,
-    medium:
-      typeof config.profileHints?.medium === 'string' && config.profileHints.medium.trim()
-        ? config.profileHints.medium.trim()
-        : DEFAULT_WELCOME_UI_CONFIG.profileHints.medium,
-    high:
-      typeof config.profileHints?.high === 'string' && config.profileHints.high.trim()
-        ? config.profileHints.high.trim()
-        : DEFAULT_WELCOME_UI_CONFIG.profileHints.high,
+    low: getNonEmptyString(profileHintsInput?.low) ?? DEFAULT_WELCOME_UI_CONFIG.profileHints.low,
+    medium: getNonEmptyString(profileHintsInput?.medium) ?? DEFAULT_WELCOME_UI_CONFIG.profileHints.medium,
+    high: getNonEmptyString(profileHintsInput?.high) ?? DEFAULT_WELCOME_UI_CONFIG.profileHints.high,
   };
 
   const sectionTitles = {
-    suggestions:
-      typeof config.sectionTitles?.suggestions === 'string' && config.sectionTitles.suggestions.trim()
-        ? config.sectionTitles.suggestions.trim()
-        : DEFAULT_WELCOME_UI_CONFIG.sectionTitles.suggestions,
-    explore:
-      typeof config.sectionTitles?.explore === 'string' && config.sectionTitles.explore.trim()
-        ? config.sectionTitles.explore.trim()
-        : DEFAULT_WELCOME_UI_CONFIG.sectionTitles.explore,
+    suggestions: getNonEmptyString(sectionTitlesInput?.suggestions) ?? DEFAULT_WELCOME_UI_CONFIG.sectionTitles.suggestions,
+    explore: getNonEmptyString(sectionTitlesInput?.explore) ?? DEFAULT_WELCOME_UI_CONFIG.sectionTitles.explore,
   };
 
   const exploreTemplates = {
-    label:
-      typeof config.exploreTemplates?.label === 'string' && config.exploreTemplates.label.trim()
-        ? config.exploreTemplates.label.trim()
-        : DEFAULT_WELCOME_UI_CONFIG.exploreTemplates.label,
-    prompt:
-      typeof config.exploreTemplates?.prompt === 'string' && config.exploreTemplates.prompt.trim()
-        ? config.exploreTemplates.prompt.trim()
-        : DEFAULT_WELCOME_UI_CONFIG.exploreTemplates.prompt,
+    label: getNonEmptyString(exploreTemplatesInput?.label) ?? DEFAULT_WELCOME_UI_CONFIG.exploreTemplates.label,
+    prompt: getNonEmptyString(exploreTemplatesInput?.prompt) ?? DEFAULT_WELCOME_UI_CONFIG.exploreTemplates.prompt,
   };
 
-  const composerPlaceholder =
-    typeof config.composerPlaceholder === 'string' && config.composerPlaceholder.trim()
-      ? config.composerPlaceholder.trim()
-      : DEFAULT_WELCOME_UI_CONFIG.composerPlaceholder;
+  const composerPlaceholder = getNonEmptyString(raw.composerPlaceholder) ?? DEFAULT_WELCOME_UI_CONFIG.composerPlaceholder;
 
   return {
     composerPlaceholder,
@@ -2294,10 +2613,10 @@ function parseWorkingMemorySummary(rawMemory: string | null): {
   }
 
   try {
-    const parsed = JSON.parse(rawMemory) as {
-      preferences?: unknown[];
-      frequentLocations?: unknown[];
-    };
+    const parsed: unknown = JSON.parse(rawMemory);
+    if (!isRecord(parsed)) {
+      return { preferencesCount: 0, locationsCount: 0 };
+    }
 
     return {
       preferencesCount: Array.isArray(parsed.preferences) ? parsed.preferences.length : 0,
@@ -2587,7 +2906,7 @@ export async function generateContent(
 
     const result = await runObject<NoteOutput>({
       model: getQwenModelByIntent('chat'),
-      schema: jsonSchema<NoteOutput>(toJsonSchema(NoteOutputSchema) as any),
+      schema: jsonSchema<NoteOutput>(toJsonSchema(NoteOutputSchema)),
       prompt: fullPrompt,
     });
 

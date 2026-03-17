@@ -154,9 +154,12 @@ function buildFallbackBlocksForInput(
     const draftParams = {
       title: `${slotLabel}${activityType}局`,
       type: activityType === '桌游' ? 'boardgame' : activityType,
+      activityType,
+      locationName: location,
       slot,
       location,
-      activityType,
+      description: `${slotLabel}在${location}组一个${activityType}局`,
+      maxParticipants: 6,
     };
 
     return [
@@ -165,8 +168,8 @@ function buildFallbackBlocksForInput(
         traceRef: 'fallback_wizard',
         items: [
           {
-            label: '就按这个发布',
-            action: 'confirm_publish',
+            label: '先生成草稿',
+            action: 'create_activity',
             params: draftParams,
           },
           {
@@ -175,9 +178,9 @@ function buildFallbackBlocksForInput(
             params: { location, activityType, slot },
           },
           {
-            label: '改下设置',
-            action: 'edit_draft',
-            params: draftParams,
+            label: '重新选时间',
+            action: 'choose_activity_type',
+            params: { location, activityType },
           },
         ],
       }),

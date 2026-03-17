@@ -18,6 +18,7 @@
     "dev:verbose": "bun run --watch src/index.ts",
     "build": "bun build src/index.ts --outdir dist --target bun",
     "start": "bun dist/index.js",
+    "type-check": "tsc -p tsconfig.json --noEmit",
     "test": "bun test",
     "test:pbt": "bun test --test-name-pattern 'Property'",
     "genui:regression:turns": "bun ../../scripts/genui-turns-regression.ts",

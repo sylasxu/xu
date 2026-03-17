@@ -1,20 +1,20 @@
-// Notification Model - MVP 简化版 + Admin 扩展
+// Notification Model - 通知与消息中心
 import { Elysia, t, type Static } from 'elysia';
 import { selectNotificationSchema } from '@juchang/db';
 
 /**
- * Notification Model Plugin - MVP 版本 + Admin 扩展
+ * Notification Model Plugin
  * 按 userId 显式查询通知
  */
 
-// 通知列表查询参数（扩展支持 Admin 模式）
+// 通知列表查询参数（按 userId 显式查询）
 const NotificationListQuery = t.Object({
   page: t.Optional(t.Number({ minimum: 1, default: 1 })),
   limit: t.Optional(t.Number({ minimum: 1, maximum: 50, default: 20 })),
   type: t.Optional(t.String({ description: '通知类型筛选' })),
   userId: t.String({ 
     format: 'uuid',
-    description: '目标用户ID（普通用户仅可传本人）' 
+    description: '目标用户ID（请求方必须具备访问该用户通知的权限）' 
   }),
 });
 
@@ -30,7 +30,7 @@ const NotificationListResponse = t.Object({
 const MatchPendingQuery = t.Object({
   userId: t.String({
     format: 'uuid',
-    description: '目标用户ID（普通用户仅可传本人）',
+    description: '目标用户ID（请求方必须具备访问该用户匹配信息的权限）',
   }),
 });
 
@@ -49,7 +49,7 @@ const MatchPendingItem = t.Object({
 const MatchPendingDetailQuery = t.Object({
   userId: t.String({
     format: 'uuid',
-    description: '目标用户ID（普通用户仅可传本人）',
+    description: '目标用户ID（请求方必须具备访问该用户匹配详情的权限）',
   }),
 });
 
@@ -97,7 +97,7 @@ const MatchPendingResponse = t.Object({
 const MessageCenterQuery = t.Object({
   userId: t.String({
     format: 'uuid',
-    description: '目标用户ID（普通用户仅可传本人）',
+    description: '目标用户ID（请求方必须具备访问该用户消息中心的权限）',
   }),
   notificationPage: t.Optional(t.Number({ minimum: 1, default: 1 })),
   notificationLimit: t.Optional(t.Number({ minimum: 1, maximum: 50, default: 20 })),

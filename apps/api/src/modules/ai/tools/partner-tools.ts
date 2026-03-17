@@ -10,7 +10,7 @@ import { t } from 'elysia';
 import { tool, jsonSchema } from 'ai';
 import { toJsonSchema } from '@juchang/utils';
 import { db, users, partnerIntents, eq, and, sql } from '@juchang/db';
-import { detectMatchesForIntent, getPendingMatchesForUser, confirmMatch as confirmMatchService } from './helpers/match';
+import { detectMatchesForIntent, getPendingMatchesForUser, confirmMatch as confirmMatchService } from './partner-match';
 
 // ============ Schema 定义 ============
 

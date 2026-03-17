@@ -1,12 +1,13 @@
 import { Calendar } from 'lucide-react'
 import { getRouteApi } from '@tanstack/react-router'
-import { ListPage, DataTable, ListProvider } from '@/components/list-page'
+import { ListPage, DataTable } from '@/components/list-page'
 import { useActivities } from '@/hooks/use-activities'
 import { type Activity } from './data/schema'
-import { activitiesColumns, type ActivityDialogType } from './components/activities-columns'
+import { activitiesColumns } from './components/activities-columns'
 import { ActivitiesDialogs } from './components/activities-dialogs'
 import { ActivitiesPrimaryButtons } from './components/activities-primary-buttons'
 import { DataTableBulkActions } from './components/data-table-bulk-actions'
+import { ActivitiesListProvider } from './list-context'
 
 const route = getRouteApi('/_authenticated/activities/')
 
@@ -42,7 +43,7 @@ export function Activities() {
   const total = data?.total ?? 0
 
   return (
-    <ListProvider<Activity, ActivityDialogType>>
+    <ActivitiesListProvider>
       <ListPage
         title='活动管理'
         description='管理平台活动，查看活动信息和状态'
@@ -88,6 +89,6 @@ export function Activities() {
           bulkActions={(table) => <DataTableBulkActions table={table} />}
         />
       </ListPage>
-    </ListProvider>
+    </ActivitiesListProvider>
   )
 }

@@ -15,7 +15,7 @@ import { deepseekProvider } from './adapters/deepseek';
 import { qwenProvider, getQwenEmbeddings, qwenRerank } from './adapters/qwen';
 import type { ModelProvider, ModelProviderName, FallbackConfig, RerankResponse } from './types';
 import { DEFAULT_FALLBACK_CONFIG, ACTIVE_MODELS } from './types';
-import { getConfigValue } from '../config/config.service';
+import { getConfigValue, getRequiredConfigValue } from '../config/config.service';
 
 /**
  * 提供商映射
@@ -29,6 +29,40 @@ const providers: Partial<Record<ModelProviderName, ModelProvider>> = {
  * 当前降级配置
  */
 let fallbackConfig: FallbackConfig = { ...DEFAULT_FALLBACK_CONFIG };
+
+function inferProviderFromModelId(modelId?: string): ModelProviderName | undefined {
+  if (!modelId) {
+    return undefined;
+  }
+
+  const normalized = modelId.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+
+  if (normalized.startsWith('qwen')) {
+    return 'qwen';
+  }
+
+  if (normalized.startsWith('deepseek')) {
+    return 'deepseek';
+  }
+
+  if (normalized.startsWith('doubao')) {
+    return 'doubao';
+  }
+
+  if (
+    normalized.startsWith('gpt')
+    || normalized.startsWith('o1')
+    || normalized.startsWith('o3')
+    || normalized.startsWith('o4')
+  ) {
+    return 'openai';
+  }
+
+  return undefined;
+}
 
 /**
  * 设置降级配置
@@ -53,9 +87,13 @@ export async function getFallbackConfig(): Promise<FallbackConfig> {
  */
 export function getChatModel(
   modelId?: string,
-  preferredProvider?: ModelProviderName
+  preferredProvider?: ModelProviderName,
+  options?: {
+    allowFallback?: boolean;
+  }
 ): LanguageModel {
-  const primary = preferredProvider || fallbackConfig.primary;
+  const primary = preferredProvider || inferProviderFromModelId(modelId) || fallbackConfig.primary;
+  const allowFallback = options?.allowFallback ?? fallbackConfig.enableFallback;
 
   try {
     const provider = providers[primary];
@@ -64,7 +102,7 @@ export function getChatModel(
     }
     return provider.getChatModel(modelId);
   } catch (error) {
-    if (!fallbackConfig.enableFallback) {
+    if (!allowFallback) {
       throw error;
     }
 
@@ -95,35 +133,49 @@ export async function getEmbedding(text: string): Promise<number[]> {
 }
 
 /**
- * 获取默认 Chat 模型 (v4.6: 使用 Qwen Flash)
+ * 获取默认 Chat 模型（兼容旧调用）。
+ *
+ * 新主链路请优先使用 resolveChatModelSelection，从 AI 配置读取默认模型。
  */
 export function getDefaultChatModel(): LanguageModel {
   return qwenProvider.getChatModel(ACTIVE_MODELS.CHAT_PRIMARY);
 }
 
-/**
- * 默认意图→模型映射
- */
-const DEFAULT_INTENT_MAP: Record<string, string> = {
-  chat: ACTIVE_MODELS.CHAT_PRIMARY,       // qwen-flash
-  reasoning: ACTIVE_MODELS.REASONING,     // qwen-plus
-  agent: ACTIVE_MODELS.AGENT,             // qwen3-max
-  vision: ACTIVE_MODELS.VISION,           // qwen-vl-max
-};
+type IntentModelType = 'chat' | 'reasoning' | 'agent' | 'vision';
+
+export async function getModelIdByIntent(intent: IntentModelType): Promise<string> {
+  const intentMap = await getRequiredConfigValue<Record<string, unknown>>('model.intent_map');
+  const modelId = intentMap[intent];
+
+  if (typeof modelId !== 'string' || !modelId.trim()) {
+    throw new Error(`AI 配置 model.intent_map.${intent} 缺失，请在 Admin 或 seed 中补齐`);
+  }
+
+  return modelId.trim();
+}
+
+export async function resolveChatModelSelection(params?: {
+  intent?: IntentModelType;
+  modelId?: string;
+  preferredProvider?: ModelProviderName;
+}): Promise<{ modelId: string; model: LanguageModel }> {
+  const explicitModelId = params?.modelId?.trim();
+  const resolvedModelId = explicitModelId || await getModelIdByIntent(params?.intent || 'chat');
+
+  return {
+    modelId: resolvedModelId,
+    model: getChatModel(resolvedModelId, params?.preferredProvider, { allowFallback: false }),
+  };
+}
 
 /**
  * 按意图获取模型 (v4.6)
  * 
- * 通过 getConfigValue 动态读取意图→模型映射，支持后台切换：
- * - chat: qwen-flash (极速闲聊)
- * - reasoning: qwen-plus (深度思考，找搭子/复杂匹配)
- * - agent: qwen3-max (精准 Tool Calling)
- * - vision: qwen-vl-max (视觉理解)
+ * 通过 AI 配置 `model.intent_map` 读取意图→模型映射，配置缺失时直接失败。
  */
 export async function getModelByIntent(intent: 'chat' | 'reasoning' | 'agent' | 'vision'): Promise<LanguageModel> {
-  const intentMap = await getConfigValue<Record<string, string>>('model.intent_map', DEFAULT_INTENT_MAP);
-  const modelId = intentMap[intent] || DEFAULT_INTENT_MAP[intent] || ACTIVE_MODELS.CHAT_PRIMARY;
-  return getChatModel(modelId);
+  const { model } = await resolveChatModelSelection({ intent });
+  return model;
 }
 
 /**

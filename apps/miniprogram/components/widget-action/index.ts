@@ -9,7 +9,9 @@
  * - 支持深色模式
  */
 
-type ActionVariant = 'primary' | 'secondary' | 'ghost';
+function readWidgetActionString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
 
 Component({
   options: {
@@ -35,7 +37,7 @@ Component({
     // 样式变体：primary / secondary / ghost
     variant: {
       type: String,
-      value: 'secondary' as ActionVariant,
+      value: 'secondary',
     },
     // 是否禁用
     disabled: {
@@ -63,7 +65,7 @@ Component({
       this.triggerEvent('tap');
       
       // 如果有 URL，执行跳转
-      const url = this.properties.url as string;
+      const url = readWidgetActionString(this.properties.url);
       if (url) {
         this.navigateTo(url);
       }

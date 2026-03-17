@@ -10,8 +10,8 @@
  * 1. 提取最近 3 轮对话（6 条消息）作为分类上下文
  * 2. P1（Feature_Combination）：confidence ≥ 0.7 → 直接返回
  * 3. P1 confidence < 0.7 → 升级到 P2（LLM Few-shot）
- * 4. P1 异常 → 降级到 P2，标记 degraded: true
- * 5. P2 也返回 unknown → 降级到对话历史最近有效意图，最终兜底 unknown
+ * 4. P1 异常 → 直接失败，不再静默降级
+ * 5. P2 返回 unknown → 保留 unknown，不再回退历史意图
  *
  * 条件执行配置（在管线中使用）：
  * ```
@@ -26,20 +26,6 @@ import { classifyByLLMFewShot } from '../intent/llm-classifier';
 
 /** P1 → P2 升级的置信度阈值 */
 const P1_CONFIDENCE_THRESHOLD = 0.7;
-
-/**
- * 从对话历史中查找最近的有效（非 unknown）意图
- *
- * 简化版降级策略：扫描历史消息中的意图标记。
- * 当前实现直接返回 unknown，后续可通过 metadata 中存储的历史意图增强。
- */
-function findRecentValidIntent(
-  _history: Array<{ role: string; content: string }>,
-): IntentType {
-  // 简化降级：当前无法从纯文本历史中提取已分类意图
-  // 后续可通过 context.metadata.conversationSummary.recentIntents 增强
-  return 'unknown';
-}
 
 /**
  * 从 ProcessorContext 提取最近 3 轮对话（6 条消息）
@@ -59,14 +45,13 @@ function extractConversationHistory(
 /**
  * Intent Classify Processor
  *
- * 三层漏斗级联：P1（Feature_Combination）→ P2（LLM Few-shot）→ 降级兜底
+ * 三层漏斗级联：P1（Feature_Combination）→ P2（LLM Few-shot）
  *
  * - P1 confidence ≥ 0.7：直接返回，method = 'p1'
  * - P1 confidence < 0.7：升级到 P2，method = 'p2'
- * - P1 异常：降级到 P2，标记 degraded = true
- * - P2 返回 unknown：降级到最近有效意图，最终兜底 unknown
- * - 分类失败不是处理器失败，始终返回 success: true
- * - 仅在真正意外错误时返回 success: false
+ * - P1 异常：直接失败，返回 success: false
+ * - P2 模型失败/解析失败：直接失败，返回 success: false
+ * - P2 返回 unknown：保留 unknown，由后续主链路显式处理
  */
 export async function intentClassifyProcessor(
   context: ProcessorContext,
@@ -84,7 +69,7 @@ export async function intentClassifyProcessor(
     let p1Features: string[] | undefined;
     let p2FewShotUsed: boolean | undefined;
     let cachedResult = false;
-    let degraded = false;
+    const requestAi = context.metadata.requestAi;
 
     // ---- P1：Feature_Combination 规则引擎 ----
     let p1Succeeded = false;
@@ -105,39 +90,58 @@ export async function intentClassifyProcessor(
         p1Succeeded = false;
       }
     } catch (p1Error) {
-      // P1 异常，降级到 P2，标记 degraded
-      console.error('[intent-classify] P1 Feature_Combination 异常，降级到 P2:', p1Error);
-      degraded = true;
-      p1Succeeded = false;
+      const executionTime = Date.now() - startTime;
+      const errorMessage = p1Error instanceof Error
+        ? p1Error.message
+        : 'P1 Feature_Combination 异常';
+
+      console.error('[intent-classify] P1 Feature_Combination 异常:', p1Error);
+
+      return {
+        success: false,
+        context,
+        executionTime,
+        error: errorMessage,
+        data: {
+          stage: 'p1',
+          durationMs: executionTime,
+        },
+      };
     }
 
     // ---- P2：LLM Few-shot 分类（P1 未产出高置信度结果时触发） ----
     if (!p1Succeeded) {
       try {
-        const p2Result = await classifyByLLMFewShot(context.userInput, conversationHistory);
+        const p2Result = await classifyByLLMFewShot(
+          context.userInput,
+          conversationHistory,
+          undefined,
+          { modelId: requestAi?.model },
+        );
 
-        if (p2Result.intent !== 'unknown') {
-          // P2 返回有效意图
-          intent = p2Result.intent;
-          confidence = p2Result.confidence;
-          method = 'p2';
-          p2FewShotUsed = true;
-          // 检测是否命中了编辑距离缓存（P2 内部处理）
-          cachedResult = false;
-        } else {
-          // P2 也返回 unknown，降级到最近有效意图
-          intent = findRecentValidIntent(conversationHistory);
-          confidence = intent === 'unknown' ? 0 : 0.4;
-          method = 'p2';
-          p2FewShotUsed = true;
-        }
-      } catch (p2Error) {
-        // P2 也失败，最终兜底 unknown
-        console.error('[intent-classify] P2 LLM Few-shot 异常:', p2Error);
-        intent = findRecentValidIntent(conversationHistory);
-        confidence = intent === 'unknown' ? 0 : 0.3;
+        intent = p2Result.intent;
+        confidence = p2Result.confidence;
         method = 'p2';
         p2FewShotUsed = true;
+        cachedResult = false;
+      } catch (p2Error) {
+        const executionTime = Date.now() - startTime;
+        const errorMessage = p2Error instanceof Error
+          ? p2Error.message
+          : 'P2 LLM Few-shot 异常';
+
+        console.error('[intent-classify] P2 LLM Few-shot 异常:', p2Error);
+
+        return {
+          success: false,
+          context,
+          executionTime,
+          error: errorMessage,
+          data: {
+            stage: 'p2',
+            durationMs: executionTime,
+          },
+        };
       }
     }
 
@@ -157,7 +161,7 @@ export async function intentClassifyProcessor(
             p1Features,
             p2FewShotUsed,
             cachedResult,
-            degraded,
+            degraded: false,
           },
         },
       },
@@ -167,7 +171,7 @@ export async function intentClassifyProcessor(
         confidence,
         method,
         matchedPattern,
-        degraded,
+        degraded: false,
         durationMs: executionTime,
       },
     };

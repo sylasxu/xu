@@ -11,44 +11,25 @@ import {
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
-import { useListContext } from '@/components/list-page'
 import { activityStatusLabels } from '../data/data'
-import { type Activity } from '../data/schema'
-import { type ActivityDialogType } from './activities-columns'
-
-// Conversation item type
-type ConversationItem = {
-  id: string
-  userId: string
-  userNickname: string | null
-  role: 'user' | 'assistant'
-  type: string
-  content: unknown
-  activityId: string | null
-  createdAt: string
-}
+import { useActivitiesListContext } from '../list-context'
 
 export function ActivityPromptDialog() {
-  const { open, setOpen, currentRow } = useListContext<Activity, ActivityDialogType>()
+  const { open, setOpen, currentRow } = useActivitiesListContext()
 
   // 查询关联此活动的对话记录
   const { data, isLoading } = useQuery({
     queryKey: ['activity-conversations', currentRow?.id],
     queryFn: async () => {
       if (!currentRow?.id) return null
-      const response = await api.ai.conversations.get({
-        query: {
-          activityId: currentRow.id,
-          limit: 50,
-        },
-      })
+      const response = await api.ai.activities({ activityId: currentRow.id }).messages.get()
       if (response.error) throw new Error('Failed to fetch conversations')
       return response.data
     },
     enabled: open === 'prompt' && !!currentRow?.id,
   })
 
-  const conversations = (data?.items || []) as ConversationItem[]
+  const conversations = data?.items ?? []
 
   return (
     <Dialog open={open === 'prompt'} onOpenChange={(v) => setOpen(v ? 'prompt' : null)}>
@@ -97,7 +78,7 @@ export function ActivityPromptDialog() {
               </div>
             ) : (
               <div className='space-y-4'>
-                {conversations.map((conv: ConversationItem) => (
+                {conversations.map((conv) => (
                   <div
                     key={conv.id}
                     className={`flex gap-3 ${

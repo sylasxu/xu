@@ -8,8 +8,7 @@ import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Loader2, Play } from 'lucide-react'
-import { api, unwrap } from '@/lib/eden'
+import { Play } from 'lucide-react'
 import { INTENT_DISPLAY_NAMES, type IntentType } from '../../types/trace'
 
 interface ClassifyResult {
@@ -24,34 +23,12 @@ interface ClassifyResult {
 export function IntentABCompare() {
   const [input, setInput] = useState('')
   const [results, setResults] = useState<ClassifyResult[]>([])
-  const [loading, setLoading] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
 
-  const handleCompare = async () => {
-    if (!input.trim() || loading) return
-    setLoading(true)
+  const handleCompare = () => {
+    if (!input.trim()) return
     setResults([])
-
-    try {
-      // 调用 A/B 对比 API（如果存在），否则模拟
-      const data = await unwrap(
-        (api.ai as any).classify.compare.post({ input: input.trim() })
-      ).catch(() => null)
-
-      if (data && Array.isArray(data)) {
-        setResults(data as ClassifyResult[])
-      } else {
-        // 降级：显示提示
-        setResults([
-          { layer: 'P0', intent: 'unknown', confidence: 0, method: '关键词匹配', duration: 0, details: { note: '需要后端 /ai/classify/compare 端点' } },
-          { layer: 'P1', intent: 'unknown', confidence: 0, method: 'Feature_Combination', duration: 0 },
-          { layer: 'P2', intent: 'unknown', confidence: 0, method: 'LLM Few-shot', duration: 0 },
-        ])
-      }
-    } catch {
-      // 静默处理
-    } finally {
-      setLoading(false)
-    }
+    setNotice('当前后端未提供真实的意图分类对比接口，无法执行 A/B 对比。')
   }
 
   return (
@@ -61,15 +38,26 @@ export function IntentABCompare() {
       <div className="flex items-center gap-2">
         <Input
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            setInput(e.target.value)
+            if (notice) {
+              setNotice(null)
+            }
+          }}
           placeholder="输入测试文本..."
           className="h-8 text-sm flex-1"
           onKeyDown={(e) => e.key === 'Enter' && handleCompare()}
         />
-        <Button size="sm" onClick={handleCompare} disabled={loading || !input.trim()}>
-          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+        <Button size="sm" onClick={handleCompare} disabled={!input.trim()}>
+          <Play className="h-3.5 w-3.5" />
         </Button>
       </div>
+
+      {notice && (
+        <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+          {notice}
+        </div>
+      )}
 
       {results.length > 0 && (
         <div className="space-y-2">

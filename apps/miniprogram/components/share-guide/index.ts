@@ -11,7 +11,7 @@
 
 import { useAppStore } from '../../src/stores/app'
 
-interface ComponentData {
+interface ShareGuideData {
   visible: boolean
   activityTitle: string
   locationName: string
@@ -34,6 +34,17 @@ interface ComponentMethods {
   preventTap: () => void
   preventScroll: () => void
   closeGuide: () => void
+}
+
+function readNumber(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
+const SHARE_GUIDE_DATA: ShareGuideData = {
+  visible: false,
+  activityTitle: '',
+  locationName: '',
+  autoCloseTimer: null,
 }
 
 Component({
@@ -70,10 +81,7 @@ Component({
   },
 
   data: {
-    visible: false,
-    activityTitle: '',
-    locationName: '',
-    autoCloseTimer: null as number | null,
+    ...SHARE_GUIDE_DATA,
   },
 
   observers: {
@@ -144,7 +152,7 @@ Component({
       
       const timer = Number(setTimeout(() => {
         this.closeGuide()
-      }, this.properties.autoCloseDelay as number))
+      }, readNumber(this.properties.autoCloseDelay, 5000)))
       
       this.setData({ autoCloseTimer: timer })
     },

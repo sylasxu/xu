@@ -144,10 +144,20 @@ type DrawerNotice = {
   };
 };
 
+type PromptContextOverrides = {
+  activityId?: string;
+  followUpMode?: "review" | "rebook" | "kickoff";
+  entry?: string;
+};
+
 type MessageCenterDrawerProps = {
   disabled?: boolean;
   isDarkMode?: boolean;
-  onSendPrompt: (prompt: string, displayText?: string) => Promise<void>;
+  onSendPrompt: (
+    prompt: string,
+    displayText?: string,
+    contextOverrides?: PromptContextOverrides
+  ) => Promise<void>;
 };
 
 function isApiError(value: unknown): value is ApiError {
@@ -219,6 +229,14 @@ function buildKickoffPrompt(activityId?: string, activityTitle?: string): string
   const activityHint = normalizedTitle ? `「${normalizedTitle}」` : "这场活动"
   const activityRef = activityId ? `（activityId: ${activityId}）` : "";
   return `围绕${activityHint}${activityRef}，帮我生成一段讨论区开场白，再给我 3 条接下来的协同提醒。`;
+}
+
+function buildFollowUpEntry(notificationId: string, mode: NonNullable<PromptContextOverrides["followUpMode"]>): string {
+  if (mode === "kickoff") {
+    return notificationId.startsWith("chat:") ? "message_center_chat_summary" : "message_center_notification";
+  }
+
+  return "message_center_post_activity";
 }
 
 function getNotificationFallbackContent(type: NotificationType): string {
@@ -519,9 +537,14 @@ export function MessageCenterDrawer({
               : buildKickoffPrompt(notification.activityId || undefined, notification.title));
         const displayText =
           promptOverride?.label || (mode === "review" ? "去复盘" : mode === "rebook" ? "去再约" : "让 AI 帮我写开场白");
+        const contextOverrides: PromptContextOverrides = {
+          ...(notification.activityId ? { activityId: notification.activityId } : {}),
+          followUpMode: mode,
+          entry: buildFollowUpEntry(notification.id, mode),
+        };
 
         setOpen(false);
-        await onSendPrompt(prompt, displayText);
+        await onSendPrompt(prompt, displayText, contextOverrides);
         setNotice(null);
         await refreshMessageCenter({ silent: true });
       } catch (requestError) {

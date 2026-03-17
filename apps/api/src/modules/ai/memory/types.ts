@@ -106,11 +106,11 @@ export interface EnhancedUserProfile extends UserProfile {
  */
 export interface SaveMessageParams {
   conversationId: string;
-  userId: string;
-  role: 'user' | 'assistant';
-  messageType: string;
-  content: unknown;
-  activityId?: string;
+  userId: Message['userId'];
+  role: Message['role'];
+  messageType: Message['messageType'];
+  content: Message['content'];
+  activityId?: Message['activityId'];
 }
 
 /**

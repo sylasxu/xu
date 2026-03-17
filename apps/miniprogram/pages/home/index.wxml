@@ -181,8 +181,6 @@
     id="aiDock"
     placeholder="{{composerPlaceholder}}"
     bind:send="onSend"
-    bind:parse="onParse"
-    bind:paste="onPaste"
   />
   
   <!-- 手机号绑定半屏 -->

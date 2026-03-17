@@ -6,11 +6,10 @@
  */
 
 import { t } from 'elysia';
-
-/** TypeBox TObject 的轻量类型别名，避免直接依赖 @sinclair/typebox */
-type TObject = ReturnType<typeof t.Object>;
 import type { WidgetChunk } from './types';
 import type { WidgetFetchConfig, WidgetInteraction, WidgetAction } from './widget-protocol';
+
+type TObject = ReturnType<typeof t.Object>;
 
 /**
  * Widget 类型枚举（对应 conversationMessageTypeEnum）
@@ -141,7 +140,7 @@ export interface WidgetCatalogEntry {
   /** 交互能力声明（可选，描述该 Widget 支持的用户操作） */
   interactions?: Array<{
     /** 操作类型，对应 WidgetActionType */
-    action: string;
+    action: WidgetAction['type'];
     /** 操作显示文本 */
     label: string;
   }>;
@@ -275,6 +274,75 @@ export function getCatalogEntryByToolName(toolName: string): WidgetCatalogEntry 
  * 这些字段由 Tool 在返回值中显式声明，不属于业务 payload
  */
 const PROTOCOL_FIELDS = ['fetchConfig', 'interaction', 'preview', 'success', 'error'] as const;
+type ProtocolField = typeof PROTOCOL_FIELDS[number];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isProtocolField(value: string): value is ProtocolField {
+  return PROTOCOL_FIELDS.some(field => field === value);
+}
+
+function readWidgetFetchConfig(value: unknown): WidgetFetchConfig | undefined {
+  if (!isRecord(value) || typeof value.source !== 'string' || !isRecord(value.params)) {
+    return undefined;
+  }
+
+  switch (value.source) {
+    case 'nearby_activities':
+    case 'activity_detail':
+    case 'my_activities':
+    case 'partner_intents_nearby':
+    case 'activity_participants':
+      return {
+        source: value.source,
+        params: value.params,
+      };
+    default:
+      return undefined;
+  }
+}
+
+function readWidgetAction(value: unknown): WidgetAction | null {
+  if (!isRecord(value) || typeof value.type !== 'string' || typeof value.label !== 'string' || !isRecord(value.params)) {
+    return null;
+  }
+
+  switch (value.type) {
+    case 'join':
+    case 'cancel':
+    case 'share':
+    case 'detail':
+    case 'publish':
+    case 'confirm_match':
+      return {
+        type: value.type,
+        label: value.label,
+        params: value.params,
+      };
+    default:
+      return null;
+  }
+}
+
+function readWidgetInteraction(value: unknown): WidgetInteraction | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const actions = Array.isArray(value.actions)
+    ? value.actions
+        .map(readWidgetAction)
+        .filter((action): action is WidgetAction => action !== null)
+    : undefined;
+
+  return {
+    swipeable: typeof value.swipeable === 'boolean' ? value.swipeable : undefined,
+    halfScreenDetail: typeof value.halfScreenDetail === 'boolean' ? value.halfScreenDetail : undefined,
+    actions,
+  };
+}
 
 /**
  * 构建标准化 Widget Spec
@@ -293,13 +361,13 @@ export function buildWidgetSpec(
   if (!entry) return null;
 
   // 提取协议字段
-  const fetchConfig = toolResult.fetchConfig as WidgetFetchConfig | undefined;
-  const interaction = toolResult.interaction as WidgetInteraction | undefined;
+  const fetchConfig = readWidgetFetchConfig(toolResult.fetchConfig);
+  const interaction = readWidgetInteraction(toolResult.interaction);
 
   // 剩余字段作为 payload（排除协议字段）
   const payload: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(toolResult)) {
-    if (!PROTOCOL_FIELDS.includes(key as any)) {
+    if (!isProtocolField(key)) {
       payload[key] = value;
     }
   }
@@ -307,7 +375,7 @@ export function buildWidgetSpec(
   // 合并 Catalog 默认交互（Tool 返回的 interaction 优先）
   const finalInteraction = interaction ?? (
     entry.interactions
-      ? { actions: entry.interactions.map(i => ({ type: i.action as WidgetAction['type'], label: i.label, params: {} })) }
+      ? { actions: entry.interactions.map(i => ({ type: i.action, label: i.label, params: {} })) }
       : undefined
   );
 
@@ -326,16 +394,19 @@ export function buildWidgetSpec(
  * 从 TypeBox Schema 提取字段描述
  */
 function extractSchemaFields(schema: TObject): string {
-  const properties = schema.properties;
+  const properties = isRecord(schema.properties) ? schema.properties : {};
+
   return Object.entries(properties)
     .map(([key, prop]) => {
-      const typeName = (prop as any).type || 'unknown';
+      if (!isRecord(prop)) return `${key}(unknown)`;
+      if (Array.isArray(prop.anyOf) || Array.isArray(prop.oneOf)) return `${key}(union)`;
+
+      const typeName = typeof prop.type === 'string' ? prop.type : 'unknown';
       if (typeName === 'object') return `${key}(object)`;
       if (typeName === 'array') return `${key}(array)`;
       if (typeName === 'string') return `${key}(string)`;
       if (typeName === 'number') return `${key}(number)`;
       if (typeName === 'boolean') return `${key}(boolean)`;
-      if ((prop as any).anyOf || (prop as any).oneOf) return `${key}(union)`;
       return `${key}(${typeName})`;
     })
     .join(', ');

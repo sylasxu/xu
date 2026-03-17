@@ -50,7 +50,7 @@ export function useGodViewData() {
   return useQuery({
     queryKey: queryKeys.dashboard.godView(),
     queryFn: async (): Promise<GodViewData> => {
-      const data = await unwrap(api.dashboard['god-view'].get())
+      const data = await unwrap(api.analytics['platform-overview'].get())
       return data as GodViewData
     },
     staleTime: 5 * 60 * 1000,
@@ -64,7 +64,7 @@ export function useGodViewData() {
 
 // 从 Eden Treaty 推导类型 (Single Source of Truth)
 type ApiResponse<T> = T extends { get: () => Promise<{ data: infer R }> } ? R : never
-type BusinessMetricsResponse = ApiResponse<typeof api.dashboard.metrics>
+type BusinessMetricsResponse = ApiResponse<typeof api.analytics.metrics>
 
 // 导出类型供组件使用
 export type BenchmarkStatus = 'green' | 'yellow' | 'red'
@@ -78,7 +78,7 @@ export function useBusinessMetrics() {
   return useQuery({
     queryKey: queryKeys.dashboard.businessMetrics(),
     queryFn: async () => {
-      const response = await unwrap(api.dashboard.metrics.get())
+      const response = await unwrap(api.analytics.metrics.get())
       return response
     },
     staleTime: 5 * 60 * 1000,

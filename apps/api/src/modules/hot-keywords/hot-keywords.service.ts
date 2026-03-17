@@ -5,12 +5,14 @@ import type {
   HotKeywordListItem,
   CreateGlobalKeywordRequest,
   UpdateGlobalKeywordRequest,
-  AdminHotKeywordsQuery,
+  HotKeywordsQuery,
   KeywordAnalyticsItem,
 } from './hot-keywords.model';
 import { createLogger } from '../../lib/logger';
 
 const logger = createLogger('hot-keywords');
+type GlobalKeywordRow = typeof globalKeywords.$inferSelect;
+type KeywordListFilters = Pick<HotKeywordsQuery, 'isActive' | 'matchType' | 'responseType'>;
 
 // ==========================================
 // 缓存配置
@@ -21,6 +23,25 @@ const CACHE_KEY_PREFIX = 'hot_kw:';
 
 // 内存缓存（降级方案，如果 Redis 不可用）
 const memoryCache = new Map<string, { data: any; expiresAt: number }>();
+
+function toGlobalKeywordResponse(keyword: GlobalKeywordRow): GlobalKeywordResponse {
+  return {
+    id: keyword.id,
+    keyword: keyword.keyword,
+    matchType: keyword.matchType,
+    responseType: keyword.responseType,
+    responseContent: keyword.responseContent as GlobalKeywordResponse['responseContent'],
+    priority: keyword.priority,
+    validFrom: keyword.validFrom?.toISOString() || null,
+    validUntil: keyword.validUntil?.toISOString() || null,
+    isActive: keyword.isActive,
+    hitCount: keyword.hitCount,
+    conversionCount: keyword.conversionCount,
+    createdBy: keyword.createdBy,
+    createdAt: keyword.createdAt.toISOString(),
+    updatedAt: keyword.updatedAt.toISOString(),
+  };
+}
 
 /**
  * 缓存辅助函数
@@ -197,23 +218,7 @@ export async function matchKeyword(userInput: string): Promise<GlobalKeywordResp
       }
 
       if (matched) {
-        // 转换为响应格式
-        const result: GlobalKeywordResponse = {
-          id: kw.id,
-          keyword: kw.keyword,
-          matchType: kw.matchType,
-          responseType: kw.responseType,
-          responseContent: kw.responseContent as GlobalKeywordResponse['responseContent'],
-          priority: kw.priority,
-          validFrom: kw.validFrom?.toISOString() || null,
-          validUntil: kw.validUntil?.toISOString() || null,
-          isActive: kw.isActive,
-          hitCount: kw.hitCount,
-          conversionCount: kw.conversionCount,
-          createdBy: kw.createdBy,
-          createdAt: kw.createdAt.toISOString(),
-          updatedAt: kw.updatedAt.toISOString(),
-        };
+        const result = toGlobalKeywordResponse(kw);
         
         // 缓存匹配结果
         await setCache(cacheKey, result);
@@ -293,7 +298,7 @@ export async function invalidateCache(): Promise<void> {
 }
 
 // ==========================================
-// CRUD 操作（Admin 使用）
+// 受保护写操作
 // ==========================================
 
 /**
@@ -339,22 +344,7 @@ export async function createKeyword(
 
   await invalidateCache();
 
-  return {
-    id: keyword.id,
-    keyword: keyword.keyword,
-    matchType: keyword.matchType,
-    responseType: keyword.responseType,
-    responseContent: keyword.responseContent as GlobalKeywordResponse['responseContent'],
-    priority: keyword.priority,
-    validFrom: keyword.validFrom?.toISOString() || null,
-    validUntil: keyword.validUntil?.toISOString() || null,
-    isActive: keyword.isActive,
-    hitCount: keyword.hitCount,
-    conversionCount: keyword.conversionCount,
-    createdBy: keyword.createdBy,
-    createdAt: keyword.createdAt.toISOString(),
-    updatedAt: keyword.updatedAt.toISOString(),
-  };
+  return toGlobalKeywordResponse(keyword);
 }
 
 /**
@@ -396,6 +386,7 @@ export async function updateKeyword(
   if (data.responseType !== undefined) updateData.responseType = data.responseType;
   if (data.responseContent !== undefined) updateData.responseContent = data.responseContent;
   if (data.priority !== undefined) updateData.priority = data.priority;
+  if (data.isActive !== undefined) updateData.isActive = data.isActive;
   if (data.validFrom !== undefined) {
     updateData.validFrom = data.validFrom ? new Date(data.validFrom) : null;
   }
@@ -415,22 +406,7 @@ export async function updateKeyword(
 
   await invalidateCache();
 
-  return {
-    id: keyword.id,
-    keyword: keyword.keyword,
-    matchType: keyword.matchType,
-    responseType: keyword.responseType,
-    responseContent: keyword.responseContent as GlobalKeywordResponse['responseContent'],
-    priority: keyword.priority,
-    validFrom: keyword.validFrom?.toISOString() || null,
-    validUntil: keyword.validUntil?.toISOString() || null,
-    isActive: keyword.isActive,
-    hitCount: keyword.hitCount,
-    conversionCount: keyword.conversionCount,
-    createdBy: keyword.createdBy,
-    createdAt: keyword.createdAt.toISOString(),
-    updatedAt: keyword.updatedAt.toISOString(),
-  };
+  return toGlobalKeywordResponse(keyword);
 }
 
 /**
@@ -459,22 +435,7 @@ export async function getKeywordById(id: string): Promise<GlobalKeywordResponse 
     return null;
   }
 
-  return {
-    id: keyword.id,
-    keyword: keyword.keyword,
-    matchType: keyword.matchType,
-    responseType: keyword.responseType,
-    responseContent: keyword.responseContent as GlobalKeywordResponse['responseContent'],
-    priority: keyword.priority,
-    validFrom: keyword.validFrom?.toISOString() || null,
-    validUntil: keyword.validUntil?.toISOString() || null,
-    isActive: keyword.isActive,
-    hitCount: keyword.hitCount,
-    conversionCount: keyword.conversionCount,
-    createdBy: keyword.createdBy,
-    createdAt: keyword.createdAt.toISOString(),
-    updatedAt: keyword.updatedAt.toISOString(),
-  };
+  return toGlobalKeywordResponse(keyword);
 }
 
 /**
@@ -482,7 +443,7 @@ export async function getKeywordById(id: string): Promise<GlobalKeywordResponse 
  * 降级策略：数据库查询失败时返回空数组
  */
 export async function listKeywords(
-  filters: AdminHotKeywordsQuery
+  filters: KeywordListFilters
 ): Promise<GlobalKeywordResponse[]> {
   try {
     const conditions = [];
@@ -503,22 +464,7 @@ export async function listKeywords(
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(globalKeywords.createdAt));
 
-    return keywords.map(kw => ({
-      id: kw.id,
-      keyword: kw.keyword,
-      matchType: kw.matchType,
-      responseType: kw.responseType,
-      responseContent: kw.responseContent as GlobalKeywordResponse['responseContent'],
-      priority: kw.priority,
-      validFrom: kw.validFrom?.toISOString() || null,
-      validUntil: kw.validUntil?.toISOString() || null,
-      isActive: kw.isActive,
-      hitCount: kw.hitCount,
-      conversionCount: kw.conversionCount,
-      createdBy: kw.createdBy,
-      createdAt: kw.createdAt.toISOString(),
-      updatedAt: kw.updatedAt.toISOString(),
-    }));
+    return keywords.map(toGlobalKeywordResponse);
   } catch (error) {
     // 数据库查询失败，记录日志并返回空数组
     logger.error({ 
@@ -579,6 +525,20 @@ export async function getKeywordAnalytics(
  * 在活动报名/发布时调用
  * 降级策略：数据库查询失败时记录日志但不抛出错误
  */
+function readKeywordContextId(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null) {
+    return null
+  }
+
+  const keywordContext = 'keywordContext' in value ? value.keywordContext : undefined
+  if (typeof keywordContext !== 'object' || keywordContext === null) {
+    return null
+  }
+
+  const keywordId = 'keywordId' in keywordContext ? keywordContext.keywordId : undefined
+  return typeof keywordId === 'string' ? keywordId : null
+}
+
 export async function trackConversion(userId: string): Promise<void> {
   try {
     const { conversationMessages, conversations } = await import('@juchang/db');
@@ -605,14 +565,11 @@ export async function trackConversion(userId: string): Promise<void> {
 
     // 查找最近的 keywordContext
     for (const msg of recentMessages) {
-      const content = msg.content as any;
-      if (content && typeof content === 'object' && content.keywordContext) {
-        const keywordId = content.keywordContext.keywordId;
-        if (keywordId) {
-          // 找到了关键词上下文，增加转化次数
-          await incrementConversionCount(keywordId);
-          return; // 只追踪最近的一个关键词
-        }
+      const keywordId = readKeywordContextId(msg.content)
+      if (keywordId) {
+        // 找到了关键词上下文，增加转化次数
+        await incrementConversionCount(keywordId);
+        return; // 只追踪最近的一个关键词
       }
     }
   } catch (error) {

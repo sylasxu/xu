@@ -23,7 +23,7 @@ interface BootstrapResponse {
   msg: string;
 }
 
-interface AdminLoginResponse {
+interface LoginResponse {
   token: string;
 }
 
@@ -110,10 +110,11 @@ async function requestJson<T>(params: {
 }
 
 async function getAdminToken(): Promise<string> {
-  const response = await requestJson<AdminLoginResponse>({
+  const response = await requestJson<LoginResponse>({
     method: 'POST',
-    path: '/auth/admin/login',
+    path: '/auth/login',
     payload: {
+      grantType: 'phone_otp',
       phone: ADMIN_PHONE,
       code: ADMIN_CODE,
     },
@@ -147,7 +148,7 @@ async function main(): Promise<void> {
   const adminToken = await getAdminToken();
   const bootstrap = await requestJson<BootstrapResponse>({
     method: 'POST',
-    path: '/auth/admin/bootstrap-test-users',
+    path: '/auth/test-users/bootstrap',
     token: adminToken,
     payload: {
       phone: ADMIN_PHONE,

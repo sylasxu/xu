@@ -23,6 +23,110 @@ import { ThemeSwitch } from '@/components/theme-switch'
 import { ConfigDrawer } from '@/components/config-drawer'
 import { ProfileDropdown } from '@/components/profile-dropdown'
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function isIntentType(value: unknown): value is IntentType {
+  return (
+    value === 'create' ||
+    value === 'explore' ||
+    value === 'manage' ||
+    value === 'partner' ||
+    value === 'idle' ||
+    value === 'chitchat' ||
+    value === 'unknown'
+  )
+}
+
+function isTraceStatus(value: unknown): value is TraceStatus {
+  return value === 'running' || value === 'completed' || value === 'error'
+}
+
+function isTraceToolDefinition(value: unknown): value is {
+  name: string
+  description: string
+  schema: Record<string, unknown>
+} {
+  return (
+    isRecord(value) &&
+    typeof value.name === 'string' &&
+    typeof value.description === 'string' &&
+    isRecord(value.schema)
+  )
+}
+
+function isTraceStartPartData(value: unknown): value is {
+  requestId: string
+  startedAt: string
+  systemPrompt?: string
+  tools?: Array<{ name: string; description: string; schema: Record<string, unknown> }>
+  intent?: IntentType
+  intentMethod?: 'regex' | 'llm'
+} {
+  return (
+    isRecord(value) &&
+    typeof value.requestId === 'string' &&
+    typeof value.startedAt === 'string' &&
+    (value.systemPrompt === undefined || typeof value.systemPrompt === 'string') &&
+    (value.tools === undefined || (Array.isArray(value.tools) && value.tools.every(isTraceToolDefinition))) &&
+    (value.intent === undefined || isIntentType(value.intent)) &&
+    (value.intentMethod === undefined || value.intentMethod === 'regex' || value.intentMethod === 'llm')
+  )
+}
+
+function isTraceStep(value: unknown): value is TraceStep {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.type === 'string' &&
+    typeof value.name === 'string' &&
+    typeof value.startedAt === 'string' &&
+    typeof value.status === 'string' &&
+    'data' in value
+  )
+}
+
+function isTraceStepUpdate(value: unknown): value is { stepId: string } & Partial<TraceStep> {
+  return isRecord(value) && typeof value.stepId === 'string'
+}
+
+function isTraceOutput(value: unknown): value is {
+  text: string | null
+  toolCalls: Array<{ name: string; displayName: string; input: unknown; output: unknown }>
+} {
+  return (
+    isRecord(value) &&
+    (value.text === null || typeof value.text === 'string') &&
+    Array.isArray(value.toolCalls) &&
+    value.toolCalls.every((toolCall) => (
+      isRecord(toolCall) &&
+      typeof toolCall.name === 'string' &&
+      typeof toolCall.displayName === 'string' &&
+      'input' in toolCall &&
+      'output' in toolCall
+    ))
+  )
+}
+
+function isTraceEndPartData(value: unknown): value is {
+  completedAt: string
+  status: TraceStatus
+  totalCost?: number
+  output?: {
+    text: string | null
+    toolCalls: Array<{ name: string; displayName: string; input: unknown; output: unknown }>
+  }
+} {
+  return (
+    isRecord(value) &&
+    typeof value.completedAt === 'string' &&
+    isTraceStatus(value.status) &&
+    (value.totalCost === undefined || typeof value.totalCost === 'number') &&
+    (value.output === undefined || isTraceOutput(value.output))
+  )
+}
+
 export function PlaygroundLayout() {
   // Drawer 状态
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -78,38 +182,40 @@ export function PlaygroundLayout() {
   const { messages, sendMessage, stop, setMessages, status, error } = useChat({
     transport,
     onData: (dataPart) => {
-      if (dataPart && typeof dataPart === 'object' && 'type' in dataPart) {
-        const part = dataPart as { type: string; data?: unknown }
+      if (!isRecord(dataPart) || typeof dataPart.type !== 'string') {
+        return
+      }
 
-        if (part.type === 'data-trace-start') {
-          const data = part.data as {
-            requestId: string
-            startedAt: string
-            systemPrompt?: string
-            tools?: Array<{ name: string; description: string; schema: Record<string, unknown> }>
-            intent?: IntentType
-            intentMethod?: 'regex' | 'llm'
-          }
-          handleTraceStart(data.requestId, data.startedAt, data.systemPrompt, data.tools, data.intent, data.intentMethod)
-          // 新轮次开始时，自动选中最新轮次
-          setSelectedRound(0)
-        } else if (part.type === 'data-trace-step') {
-          handleTraceStep(part.data as TraceStep)
-        } else if (part.type === 'data-trace-step-update') {
-          const data = part.data as { stepId: string; [key: string]: unknown }
-          updateTraceStep(data.stepId, data as Partial<TraceStep>)
-        } else if (part.type === 'data-trace-end') {
-          const data = part.data as {
-            completedAt: string
-            status: TraceStatus
-            totalCost?: number
-            output?: {
-              text: string | null
-              toolCalls: Array<{ name: string; displayName: string; input: unknown; output: unknown }>
-            }
-          }
-          handleTraceEnd(data.completedAt, data.status, data.totalCost, data.output)
-        }
+      if (dataPart.type === 'data-trace-start' && isTraceStartPartData(dataPart.data)) {
+        handleTraceStart(
+          dataPart.data.requestId,
+          dataPart.data.startedAt,
+          dataPart.data.systemPrompt,
+          dataPart.data.tools,
+          dataPart.data.intent,
+          dataPart.data.intentMethod,
+        )
+        setSelectedRound(0)
+        return
+      }
+
+      if (dataPart.type === 'data-trace-step' && isTraceStep(dataPart.data)) {
+        handleTraceStep(dataPart.data)
+        return
+      }
+
+      if (dataPart.type === 'data-trace-step-update' && isTraceStepUpdate(dataPart.data)) {
+        updateTraceStep(dataPart.data.stepId, dataPart.data)
+        return
+      }
+
+      if (dataPart.type === 'data-trace-end' && isTraceEndPartData(dataPart.data)) {
+        handleTraceEnd(
+          dataPart.data.completedAt,
+          dataPart.data.status,
+          dataPart.data.totalCost,
+          dataPart.data.output,
+        )
       }
     },
     onError: (err) => {

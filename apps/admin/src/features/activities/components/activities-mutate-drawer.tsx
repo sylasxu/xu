@@ -9,14 +9,12 @@ import {
 } from '@/components/ui/sheet'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { useListContext } from '@/components/list-page'
-import { type Activity } from '../data/schema'
-import { type ActivityDialogType } from './activities-columns'
 import { activityTypes, statuses } from '../data/data'
+import { useActivitiesListContext } from '../list-context'
 
 // 活动详情/编辑 Drawer - 只读展示，Admin 不直接编辑活动
 export function ActivitiesMutateDrawer() {
-  const { open, setOpen, currentRow } = useListContext<Activity, ActivityDialogType>()
+  const { open, setOpen, currentRow } = useActivitiesListContext()
   const isOpen = open === 'update'
 
   if (!isOpen || !currentRow) return null

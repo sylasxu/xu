@@ -13,6 +13,26 @@ import { postAuthBindPhone } from '../../src/api/endpoints/auth/auth'
 import { useUserStore } from '../../src/stores/user'
 import { useAppStore } from '../../src/stores/app'
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function readErrorMessage(value: unknown): string | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  if (typeof value.message === 'string' && value.message.trim()) {
+    return value.message
+  }
+
+  if (typeof value.msg === 'string' && value.msg.trim()) {
+    return value.msg
+  }
+
+  return null
+}
+
 Component({
   options: {
     styleIsolation: 'apply-shared',
@@ -140,16 +160,15 @@ Component({
           }
         } else {
           // 绑定失败
-          const errorData = response.data as { message?: string; msg?: string }
           wx.showToast({
-            title: errorData?.message || errorData?.msg || '绑定失败，请重试',
+            title: readErrorMessage(response.data) || '绑定失败，请重试',
             icon: 'none',
           })
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('绑定手机号失败:', error)
         wx.showToast({
-          title: error?.message || '网络错误，请重试',
+          title: error instanceof Error ? error.message : '网络错误，请重试',
           icon: 'none',
         })
       } finally {

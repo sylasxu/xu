@@ -8,15 +8,9 @@
  * - 输入框（placeholder: "你想找什么活动？"）
  * - [📋 粘贴] 快捷按钮 + 上箭头发送按钮
  * - 键盘弹起处理（adjust-position=false + 手动计算高度）
- * - 800ms 防抖机制
  * - 按钮 Scale Down 回弹效果 + wx.vibrateShort 触感反馈
  */
 
-// 防抖定时器 (模块级变量)
-let _debounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-// 防抖延迟时间 (ms) - Requirements: 5.8
-const _DEBOUNCE_DELAY = 800;
 const _EXPAND_THRESHOLD = 10;
 
 function shouldShowAssistHint(value: string): boolean {
@@ -55,14 +49,6 @@ Component({
     attached() {
       this.initSafeArea();
       this.bindKeyboardEvents();
-    },
-
-    detached() {
-      // 清理防抖定时器
-      if (_debounceTimer) {
-        clearTimeout(_debounceTimer);
-        _debounceTimer = null;
-      }
     },
   },
 
@@ -122,7 +108,7 @@ Component({
 
     /**
      * 输入内容变化
-     * Requirements: 5.7, 5.8 - 800ms 防抖
+     * Requirements: 5.7
      */
     onInputChange(e: WechatMiniprogram.Input) {
       const value = e.detail.value;
@@ -131,21 +117,6 @@ Component({
         canSend: Boolean(value.trim()),
         showAssistHint: shouldShowAssistHint(value),
       });
-
-      // 清除之前的防抖定时器
-      if (_debounceTimer) {
-        clearTimeout(_debounceTimer);
-      }
-
-      // 如果输入为空，不触发解析
-      if (!value.trim()) {
-        return;
-      }
-
-      // 防抖：800ms 后触发 AI 解析 - Requirements: 5.8
-      _debounceTimer = setTimeout(() => {
-        this.triggerEvent('parse', { text: value });
-      }, _DEBOUNCE_DELAY);
     },
 
     /**
@@ -155,12 +126,6 @@ Component({
     onInputConfirm() {
       const value = this.data.inputValue.trim();
       if (!value) return;
-
-      // 清除防抖定时器，立即触发
-      if (_debounceTimer) {
-        clearTimeout(_debounceTimer);
-        _debounceTimer = null;
-      }
 
       // 触感反馈
       wx.vibrateShort({ type: 'light' });
@@ -196,15 +161,6 @@ Component({
               canSend: Boolean(res.data.trim()),
               showAssistHint: shouldShowAssistHint(res.data),
             });
-            this.triggerEvent('paste', { text: res.data });
-            
-            // 自动触发解析
-            if (_debounceTimer) {
-              clearTimeout(_debounceTimer);
-            }
-            _debounceTimer = setTimeout(() => {
-              this.triggerEvent('parse', { text: res.data });
-            }, _DEBOUNCE_DELAY);
           } else {
             wx.showToast({ title: '剪贴板为空', icon: 'none' });
           }
@@ -227,11 +183,6 @@ Component({
         canSend: false,
         showAssistHint: false,
       });
-      
-      if (_debounceTimer) {
-        clearTimeout(_debounceTimer);
-        _debounceTimer = null;
-      }
     },
 
     /**

@@ -50,8 +50,101 @@ interface ComponentData {
   formValues: FormValues
 }
 
+type FormValueKey = keyof FormValues
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
+}
+
+function readFieldType(value: unknown): FieldType | null {
+  switch (value) {
+    case 'single-select':
+    case 'multi-select':
+    case 'textarea':
+      return value
+    default:
+      return null
+  }
+}
+
+function readFormValueKey(value: string): FormValueKey | null {
+  switch (value) {
+    case 'rawInput':
+    case 'activityType':
+    case 'timeRange':
+    case 'location':
+    case 'budgetType':
+    case 'tags':
+    case 'note':
+      return value
+    default:
+      return null
+  }
+}
+
+function readFormTextValue(values: FormValues, fieldName: string): string {
+  const key = readFormValueKey(fieldName)
+  if (!key) {
+    return ''
+  }
+
+  const value = values[key]
+  return typeof value === 'string' ? value : ''
+}
+
+function writeFormTextValue(values: FormValues, fieldName: string, value: string): FormValues {
+  switch (fieldName) {
+    case 'rawInput':
+      return { ...values, rawInput: value }
+    case 'activityType':
+      return { ...values, activityType: value }
+    case 'timeRange':
+      return { ...values, timeRange: value }
+    case 'location':
+      return { ...values, location: value }
+    case 'budgetType':
+      return { ...values, budgetType: value }
+    case 'note':
+      return { ...values, note: value }
+    default:
+      return values
+  }
+}
+
+function readFormSchema(value: unknown): FormSchema {
+  if (!isRecord(value)) {
+    return {}
+  }
+
+  return {
+    formType: typeof value.formType === 'string' ? value.formType : undefined,
+    submitAction: typeof value.submitAction === 'string' ? value.submitAction : undefined,
+    submitLabel: typeof value.submitLabel === 'string' ? value.submitLabel : undefined,
+    fields: normalizeFields(value.fields),
+  }
+}
+
+function readFieldSelection(value: unknown): { field: string; value: string; isMulti: boolean } | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  const field = typeof value.field === 'string' ? value.field : ''
+  const selectedValue = typeof value.value === 'string' ? value.value : ''
+  const isMulti = value.multi === true || value.multi === 'true'
+  if (!field || !selectedValue) {
+    return null
+  }
+
+  return {
+    field,
+    value: selectedValue,
+    isMulti,
+  }
+}
+
+function readFieldName(value: unknown): string {
+  return isRecord(value) && typeof value.field === 'string' ? value.field : ''
 }
 
 function normalizeFields(value: unknown): FormField[] {
@@ -63,6 +156,11 @@ function normalizeFields(value: unknown): FormField[] {
 
   for (const item of value) {
     if (!isRecord(item) || typeof item.name !== 'string' || typeof item.label !== 'string' || typeof item.type !== 'string') {
+      continue
+    }
+
+    const type = readFieldType(item.type)
+    if (!type) {
       continue
     }
 
@@ -83,7 +181,7 @@ function normalizeFields(value: unknown): FormField[] {
     fields.push({
       name: item.name,
       label: item.label,
-      type: item.type as FieldType,
+      type,
       required: item.required === true,
       options,
       placeholder: typeof item.placeholder === 'string' ? item.placeholder : '',
@@ -118,9 +216,7 @@ function buildRenderFields(fields: FormField[], values: FormValues): RenderField
   return fields.map((field) => {
     const currentValue = field.type === 'multi-select'
       ? ''
-      : typeof values[field.name as keyof FormValues] === 'string'
-        ? (values[field.name as keyof FormValues] as string)
-        : ''
+      : readFormTextValue(values, field.name)
 
     const selectedTags = Array.isArray(values.tags) ? values.tags : []
     const options = (field.options || []).map((option) => ({
@@ -153,13 +249,20 @@ function validateRequired(fields: FormField[], values: FormValues): string | nul
       continue
     }
 
-    const currentValue = values[field.name as keyof FormValues]
+    const currentValue = readFormTextValue(values, field.name)
     if (typeof currentValue !== 'string' || !currentValue.trim()) {
       return field.label
     }
   }
 
   return null
+}
+
+const INITIAL_COMPONENT_DATA: ComponentData = {
+  isSubmitting: false,
+  renderFields: [],
+  submitLabel: '开始找搭子',
+  formValues: {},
 }
 
 Component({
@@ -174,11 +277,11 @@ Component({
     },
     schema: {
       type: Object,
-      value: {} as FormSchema,
+      value: {},
     },
     initialValues: {
       type: Object,
-      value: {} as FormValues,
+      value: {},
     },
     disabled: {
       type: Boolean,
@@ -186,12 +289,7 @@ Component({
     },
   },
 
-  data: {
-    isSubmitting: false,
-    renderFields: [] as RenderField[],
-    submitLabel: '开始找搭子',
-    formValues: {} as FormValues,
-  },
+  data: INITIAL_COMPONENT_DATA,
 
   lifetimes: {
     attached() {
@@ -207,8 +305,8 @@ Component({
 
   methods: {
     syncFormState() {
-      const schema = this.properties.schema as FormSchema
-      const fields = normalizeFields(schema.fields)
+      const schema = readFormSchema(this.properties.schema)
+      const fields = schema.fields ?? []
       const values = normalizeValues(this.properties.initialValues)
 
       this.setData({
@@ -226,39 +324,33 @@ Component({
         return
       }
 
-      const dataset = e.currentTarget.dataset as {
-        field?: string
-        value?: string
-        multi?: boolean | string
-      }
-      const field = dataset.field || ''
-      const value = dataset.value || ''
-      const isMulti = dataset.multi === true || dataset.multi === 'true'
-      if (!field || !value) {
+      const selection = readFieldSelection(e.currentTarget.dataset)
+      if (!selection) {
         return
       }
 
       const nextValues: FormValues = {
         ...this.data.formValues,
       }
-      const fields = normalizeFields((this.properties.schema as FormSchema).fields)
+      const schema = readFormSchema(this.properties.schema)
+      const fields = schema.fields ?? []
 
-      if (isMulti) {
+      if (selection.isMulti) {
         const currentTags = Array.isArray(nextValues.tags) ? [...nextValues.tags] : []
-        const hasValue = currentTags.includes(value)
+        const hasValue = currentTags.includes(selection.value)
         let nextTags = hasValue
-          ? currentTags.filter((item) => item !== value)
-          : [...currentTags, value]
+          ? currentTags.filter((item) => item !== selection.value)
+          : [...currentTags, selection.value]
 
-        if (value === 'NoPreference' && !hasValue) {
+        if (selection.value === 'NoPreference' && !hasValue) {
           nextTags = ['NoPreference']
-        } else if (value !== 'NoPreference') {
+        } else if (selection.value !== 'NoPreference') {
           nextTags = nextTags.filter((item) => item !== 'NoPreference')
         }
 
         nextValues.tags = nextTags
       } else {
-        nextValues[field as keyof FormValues] = value as never
+        Object.assign(nextValues, writeFormTextValue(nextValues, selection.field, selection.value))
       }
 
       this.setData({
@@ -272,17 +364,14 @@ Component({
         return
       }
 
-      const dataset = e.currentTarget.dataset as { field?: string }
-      const field = dataset.field || ''
+      const field = readFieldName(e.currentTarget.dataset)
       if (!field) {
         return
       }
 
-      const nextValues: FormValues = {
-        ...this.data.formValues,
-        [field]: e.detail.value,
-      }
-      const fields = normalizeFields((this.properties.schema as FormSchema).fields)
+      const nextValues = writeFormTextValue(this.data.formValues, field, e.detail.value)
+      const schema = readFormSchema(this.properties.schema)
+      const fields = schema.fields ?? []
 
       this.setData({
         formValues: nextValues,
@@ -295,8 +384,8 @@ Component({
         return
       }
 
-      const schema = this.properties.schema as FormSchema
-      const fields = normalizeFields(schema.fields)
+      const schema = readFormSchema(this.properties.schema)
+      const fields = schema.fields ?? []
       const values = this.data.formValues
       const missingField = validateRequired(fields, values)
       if (missingField) {

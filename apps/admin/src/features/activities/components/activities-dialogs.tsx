@@ -1,14 +1,12 @@
-import { useListContext } from '@/components/list-page'
 import { ActivitiesMutateDrawer } from './activities-mutate-drawer'
 import { ActivitiesDeleteDialog } from './activities-delete-dialog'
 import { ActivityPromptDialog } from './activity-prompt-dialog'
 import { ActivitiesCreateDialog } from './activities-create-dialog'
 import { AIModerationDialog } from './ai-moderation-dialog'
-import { type Activity } from '../data/schema'
-import { type ActivityDialogType } from './activities-columns'
+import { useActivitiesListContext } from '../list-context'
 
 export function ActivitiesDialogs() {
-  const { open, setOpen, currentRow } = useListContext<Activity, ActivityDialogType>()
+  const { open, setOpen, currentRow } = useActivitiesListContext()
 
   return (
     <>

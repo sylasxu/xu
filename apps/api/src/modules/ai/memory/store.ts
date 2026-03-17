@@ -23,6 +23,26 @@ import { DEFAULT_SESSION_WINDOW } from './types';
 
 const logger = createLogger('MemoryStore');
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function readMessageTextContent(content: Message['content']): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  if (isRecord(content) && typeof content.text === 'string') {
+    return content.text;
+  }
+
+  try {
+    return JSON.stringify(content);
+  } catch {
+    return '';
+  }
+}
+
 /**
  * 获取或创建用户的当前会话（24h 窗口）
  * 
@@ -116,6 +136,7 @@ export async function getMessages(
  */
 export async function saveMessage(params: SaveMessageParams): Promise<{ id: string }> {
   const { conversationId, userId, role, messageType, content, activityId } = params;
+  const titleSource = readMessageTextContent(content);
 
   // 1. 插入消息
   const [msg] = await db
@@ -124,7 +145,7 @@ export async function saveMessage(params: SaveMessageParams): Promise<{ id: stri
       conversationId,
       userId,
       role,
-      messageType: messageType as any,
+      messageType,
       content,
       activityId,
     })
@@ -138,7 +159,7 @@ export async function saveMessage(params: SaveMessageParams): Promise<{ id: stri
       lastMessageAt: new Date(),
       // 如果是第一条用户消息且没有标题，自动设置标题
       ...(role === 'user' ? {
-        title: sql`COALESCE(${conversations.title}, LEFT(${typeof content === 'object' && content && 'text' in content ? (content as { text: string }).text : String(content)}::text, 50))`,
+        title: sql`COALESCE(${conversations.title}, LEFT(${titleSource}::text, 50))`,
       } : {}),
     })
     .where(eq(conversations.id, conversationId));
@@ -150,9 +171,9 @@ export async function saveMessage(params: SaveMessageParams): Promise<{ id: stri
     generateAndSaveEmbedding(msg.id, content).catch(err => {
       logger.error('Embedding generation failed silently', { error: err });
     });
-  } else if (typeof content === 'object' && content && 'text' in content) {
+  } else if (isRecord(content) && typeof content.text === 'string') {
     // 兼容部分 content 为对象的场景 (如 { text: "..." })
-    const textContent = (content as { text: string }).text;
+    const textContent = content.text;
     if (textContent && textContent.length > 0) {
       generateAndSaveEmbedding(msg.id, textContent).catch(err => {
         logger.error('Embedding generation failed silently', { error: err });

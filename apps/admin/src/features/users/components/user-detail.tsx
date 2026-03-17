@@ -14,6 +14,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
+
+const UNLIMITED_AI_CREATE_QUOTA = 999
 import { useUserDetail } from '@/hooks/use-users'
 import { AIProfileTab } from './ai-profile-tab'
 
@@ -246,7 +248,9 @@ export function UserDetail() {
               <CardContent className='space-y-3'>
                 <div className='flex justify-between text-sm'>
                   <span>今日创建配额</span>
-                  <span className='font-medium'>{user.aiCreateQuotaToday || 3}</span>
+                  <span className='font-medium'>
+                    {user.aiCreateQuotaToday >= UNLIMITED_AI_CREATE_QUOTA ? '无限' : (user.aiCreateQuotaToday || 3)}
+                  </span>
                 </div>
                 {user.aiQuotaResetAt && (
                   <div className='flex justify-between text-sm'>

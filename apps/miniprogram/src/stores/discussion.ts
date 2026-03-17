@@ -47,6 +47,137 @@ interface WsServerMessage {
   ts: number
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null
+}
+
+function readNullableString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null
+}
+
+function readDiscussionType(value: unknown): DiscussionMessage['type'] | null {
+  return value === 'text' || value === 'system' ? value : null
+}
+
+function readDiscussionMessage(value: unknown): DiscussionMessage | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  const id = readString(value.id)
+  const content = readString(value.content)
+  const type = readDiscussionType(value.type)
+  const createdAt = readString(value.createdAt)
+
+  if (!id || !content || !type || !createdAt) {
+    return null
+  }
+
+  return {
+    id,
+    content,
+    senderId: readNullableString(value.senderId),
+    senderNickname: readNullableString(value.senderNickname),
+    senderAvatarUrl: readNullableString(value.senderAvatarUrl),
+    type,
+    createdAt,
+  }
+}
+
+function readDiscussionMessages(value: unknown): DiscussionMessage[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value
+    .map((item) => readDiscussionMessage(item))
+    .filter((item): item is DiscussionMessage => item !== null)
+}
+
+function readResponseMessage(value: unknown): string | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  const msg = readString(value.msg)
+  if (msg && msg.trim()) {
+    return msg.trim()
+  }
+
+  const message = readString(value.message)
+  if (message && message.trim()) {
+    return message.trim()
+  }
+
+  return null
+}
+
+function readOnlineCount(value: unknown): number | null {
+  if (!isRecord(value) || typeof value.count !== 'number' || !Number.isFinite(value.count)) {
+    return null
+  }
+
+  return value.count
+}
+
+function readWsErrorMessage(value: unknown): string | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  const message = readString(value.message)
+  return message && message.trim() ? message.trim() : null
+}
+
+function readWsServerMessage(value: unknown): WsServerMessage | null {
+  if (!isRecord(value) || typeof value.ts !== 'number' || !Number.isFinite(value.ts)) {
+    return null
+  }
+
+  switch (value.type) {
+    case 'message':
+    case 'history':
+    case 'online':
+    case 'join':
+    case 'leave':
+    case 'error':
+    case 'pong':
+      return {
+        type: value.type,
+        data: value.data,
+        ts: value.ts,
+      }
+    default:
+      return null
+  }
+}
+
+function decodeSocketText(data: string | ArrayBuffer): string | null {
+  if (typeof data === 'string') {
+    return data
+  }
+
+  if (typeof TextDecoder !== 'undefined') {
+    return new TextDecoder('utf-8').decode(data)
+  }
+
+  const bytes = new Uint8Array(data)
+  let result = ''
+  for (let index = 0; index < bytes.length; index += 1) {
+    result += String.fromCharCode(bytes[index])
+  }
+
+  try {
+    return decodeURIComponent(escape(result))
+  } catch {
+    return result
+  }
+}
+
 // ============================================================================
 // Store Definition
 // ============================================================================
@@ -198,8 +329,18 @@ export const useDiscussionStore = create<DiscussionState>()(
       // 收到消息
       socket.onMessage((res) => {
         try {
-          const msg: WsServerMessage = JSON.parse(res.data as string)
-          get()._handleMessage(msg)
+          const rawText = decodeSocketText(res.data)
+          if (!rawText) {
+            return
+          }
+
+          const parsed = readWsServerMessage(JSON.parse(rawText))
+          if (!parsed) {
+            console.warn('[Discussion] Ignore invalid message payload')
+            return
+          }
+
+          get()._handleMessage(parsed)
         } catch (e) {
           console.error('[Discussion] Parse message failed:', e)
         }
@@ -338,10 +479,11 @@ export const useDiscussionStore = create<DiscussionState>()(
           limit: 20,
         })
         if (response.status !== 200) {
-          throw new Error((response.data as { msg?: string })?.msg || '加载失败')
+          throw new Error(readResponseMessage(response.data) || '加载失败')
         }
 
         const responseData = response.data
+        const messages = readDiscussionMessages(responseData.messages)
         if (responseData.messages.length < 20) {
           set((draft) => {
             draft.hasMore = false
@@ -350,7 +492,7 @@ export const useDiscussionStore = create<DiscussionState>()(
         
         // 将新消息添加到列表开头
         set((draft) => {
-          draft.messages = [...(responseData.messages as DiscussionMessage[]), ...draft.messages]
+          draft.messages = [...messages, ...draft.messages]
           draft.isArchived = responseData.isArchived
           draft.isLoadingMore = false
         })
@@ -379,24 +521,38 @@ export const useDiscussionStore = create<DiscussionState>()(
      */
     _handleMessage: (msg: WsServerMessage) => {
       switch (msg.type) {
-        case 'history':
+        case 'history': {
+          const messages = readDiscussionMessages(msg.data)
           set((draft) => {
-            draft.messages = msg.data as DiscussionMessage[]
+            draft.messages = messages
           })
           break
-          
-        case 'message':
+        }
+
+        case 'message': {
+          const message = readDiscussionMessage(msg.data)
+          if (!message) {
+            break
+          }
+
           set((draft) => {
-            draft.messages.push(msg.data as DiscussionMessage)
+            draft.messages.push(message)
           })
           break
-          
-        case 'online':
+        }
+
+        case 'online': {
+          const count = readOnlineCount(msg.data)
+          if (count === null) {
+            break
+          }
+
           set((draft) => {
-            draft.onlineCount = (msg.data as { count: number }).count
+            draft.onlineCount = count
           })
           break
-          
+        }
+
         case 'join':
           // 可以显示加入提示
           break
@@ -405,13 +561,18 @@ export const useDiscussionStore = create<DiscussionState>()(
           // 可以显示离开提示
           break
           
-        case 'error':
-          const errorData = msg.data as { code: number; message: string }
+        case 'error': {
+          const errorMessage = readWsErrorMessage(msg.data)
+          if (!errorMessage) {
+            break
+          }
+
           set((draft) => {
-            draft.error = errorData.message
+            draft.error = errorMessage
           })
           break
-          
+        }
+
         case 'pong':
           // 心跳响应，不需要处理
           break
@@ -436,7 +597,7 @@ export const useDiscussionStore = create<DiscussionState>()(
       }, HEARTBEAT_INTERVAL)
       
       set((draft) => {
-        draft._heartbeatTimer = timer as unknown as number
+        draft._heartbeatTimer = Number(timer)
       })
     },
     
@@ -487,7 +648,7 @@ export const useDiscussionStore = create<DiscussionState>()(
       }, delay)
       
       set((draft) => {
-        draft._reconnectTimer = timer as unknown as number
+        draft._reconnectTimer = Number(timer)
       })
     },
     

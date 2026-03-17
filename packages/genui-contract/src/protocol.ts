@@ -1,4 +1,4 @@
-export const GENUI_CONTRACT_VERSION = "2026-03-03";
+export const GENUI_CONTRACT_VERSION = "2026-03-15";
 
 export const GENUI_BLOCK_TYPES = [
   "text",
@@ -21,6 +21,15 @@ export interface GenUIRequestContext {
   platformVersion?: string;
   lat?: number;
   lng?: number;
+  activityId?: string;
+  followUpMode?: "review" | "rebook" | "kickoff";
+  entry?: string;
+}
+
+export interface GenUIRequestAi {
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
 }
 
 export interface GenUITextInput {
@@ -42,6 +51,7 @@ export interface GenUIRequest {
   conversationId?: string;
   input: GenUIInput;
   context?: GenUIRequestContext;
+  ai?: GenUIRequestAi;
 }
 
 export interface GenUIBlockMeta {

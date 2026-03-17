@@ -19,6 +19,8 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form'
+
+const UNLIMITED_AI_CREATE_QUOTA = 999
 import { Input } from '@/components/ui/input'
 import { useUpdateUser } from '../hooks/use-users'
 import { type User } from '../data/schema'
@@ -109,7 +111,9 @@ export function UsersActionDialog({
               <div className='grid grid-cols-6 items-center gap-x-4 gap-y-1'>
                 <span className='col-span-2 text-end text-sm text-muted-foreground'>创建活动额度</span>
                 <span className='col-span-4 text-sm'>
-                  {currentRow.aiCreateQuotaToday}/3 次/天
+                  {currentRow.aiCreateQuotaToday >= UNLIMITED_AI_CREATE_QUOTA
+                    ? '无限'
+                    : `${currentRow.aiCreateQuotaToday}/3 次/天`}
                 </span>
               </div>
               

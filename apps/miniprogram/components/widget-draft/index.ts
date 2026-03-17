@@ -56,6 +56,81 @@ interface DraftData {
   currentParticipants?: number;
 }
 
+const DEFAULT_LOCATION: [number, number] = [106.52988, 29.58567]
+const INITIAL_DRAFT: DraftData = {
+  activityId: '',
+  title: '',
+  type: 'other',
+  startAt: '',
+  location: DEFAULT_LOCATION,
+  locationName: '',
+  locationHint: '',
+  maxParticipants: 4,
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function readText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function readNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function readLocation(value: unknown): [number, number] | null {
+  if (!Array.isArray(value) || value.length < 2) {
+    return null
+  }
+
+  const lng = readNumber(value[0])
+  const lat = readNumber(value[1])
+  if (lng === null || lat === null) {
+    return null
+  }
+
+  return [lng, lat]
+}
+
+function readDraftData(value: unknown): DraftData | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  const activityId = readText(value.activityId)
+  const title = readText(value.title)
+  const type = readText(value.type)
+  const startAt = readText(value.startAt)
+  const location = readLocation(value.location)
+  const locationName = readText(value.locationName)
+  const locationHint = readText(value.locationHint)
+  const maxParticipants = readNumber(value.maxParticipants)
+
+  if (!activityId || !title || !type || !startAt || !location || !locationName || !locationHint || maxParticipants === null) {
+    return null
+  }
+
+  const description = readText(value.description) || undefined
+  const address = readText(value.address) || undefined
+  const currentParticipants = readNumber(value.currentParticipants) ?? undefined
+
+  return {
+    activityId,
+    title,
+    ...(description ? { description } : {}),
+    type,
+    startAt,
+    location,
+    locationName,
+    ...(address ? { address } : {}),
+    locationHint,
+    maxParticipants,
+    ...(currentParticipants !== undefined ? { currentParticipants } : {}),
+  }
+}
+
 function resolveSlotFromStartAt(startAt: string): string {
   if (!startAt) {
     return 'fri_20_00';
@@ -87,7 +162,7 @@ Component({
     // 草稿数据
     draft: {
       type: Object,
-      value: {} as DraftData,
+      value: INITIAL_DRAFT,
     },
     // 是否正在加载
     loading: {
@@ -105,17 +180,18 @@ Component({
   },
 
   observers: {
-    'draft': function(draft: DraftData) {
-      if (!draft) return;
+    'draft': function(draft: unknown) {
+      const resolvedDraft = readDraftData(draft)
+      if (!resolvedDraft) return;
       
       // 更新类型信息
-      const typeConfig = TYPE_CONFIG[draft.type] || TYPE_CONFIG.other;
+      const typeConfig = TYPE_CONFIG[resolvedDraft.type] || TYPE_CONFIG.other;
       
       // 格式化时间
-      const formattedTime = this.formatTime(draft.startAt);
+      const formattedTime = this.formatTime(resolvedDraft.startAt);
       
       // 检查是否过期
-      const isExpired = this.checkExpired(draft.startAt);
+      const isExpired = this.checkExpired(resolvedDraft.startAt);
       
       this.setData({
         typeIcon: typeConfig.icon,
@@ -226,7 +302,7 @@ Component({
      * Requirements: 6.4 (零成本方案)
      */
     onLocationTap() {
-      const draft = this.properties.draft as DraftData;
+      const draft = readDraftData(this.properties.draft);
       if (!draft?.location) return;
       
       const [lng, lat] = draft.location;
@@ -245,7 +321,7 @@ Component({
      * Requirements: 6.5 (零成本方案)
      */
     async onAdjustLocation() {
-      const draft = this.properties.draft as DraftData;
+      const draft = readDraftData(this.properties.draft);
       if (!draft) return;
       
       try {
@@ -276,11 +352,11 @@ Component({
           payload,
           `位置改为${result.name || '新地点'}`
         );
-      } catch (err: any) {
+      } catch (err: unknown) {
         // 用户取消不提示
-        if (!err.message?.includes('取消')) {
+        if (!(err instanceof Error) || !err.message.includes('取消')) {
           wx.showToast({
-            title: err.message || '选择位置失败',
+            title: err instanceof Error ? err.message : '选择位置失败',
             icon: 'none',
           });
         }
@@ -292,7 +368,7 @@ Component({
      * Requirements: 6.7, 6.8
      */
     onConfirm() {
-      const draft = this.properties.draft as DraftData;
+      const draft = readDraftData(this.properties.draft);
       if (!draft) return;
       
       // 检查是否过期
@@ -312,7 +388,7 @@ Component({
      * 点击换地方按钮（A2UI）
      */
     onChangeLocation() {
-      const draft = this.properties.draft as DraftData;
+      const draft = readDraftData(this.properties.draft);
       if (!draft?.activityId) return;
 
       this.dispatchDraftAction('edit_draft', this.buildDraftActionPayload(draft, { field: 'location' }), '改下地点');
@@ -322,7 +398,7 @@ Component({
      * 点击换时间按钮（A2UI）
      */
     onChangeTime() {
-      const draft = this.properties.draft as DraftData;
+      const draft = readDraftData(this.properties.draft);
       if (!draft?.activityId) return;
 
       this.dispatchDraftAction('edit_draft', this.buildDraftActionPayload(draft, { field: 'time' }), '改下时间');
@@ -332,7 +408,7 @@ Component({
      * 点击加人按钮（A2UI）
      */
     onChangeParticipants() {
-      const draft = this.properties.draft as DraftData;
+      const draft = readDraftData(this.properties.draft);
       if (!draft?.activityId) return;
 
       this.dispatchDraftAction('edit_draft', this.buildDraftActionPayload(draft, { field: 'participants' }), '改下人数设置');

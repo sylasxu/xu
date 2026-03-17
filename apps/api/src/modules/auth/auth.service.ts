@@ -2,10 +2,11 @@
 import { db, users, eq } from '@juchang/db';
 import { getJwtSecret } from '../../setup';
 import type {
-  WxLoginRequest,
+  WechatCodeLoginRequest,
   BindPhoneRequest,
-  AdminPhoneLoginRequest,
-  BootstrapTestUsersRequest,
+  PhoneOtpLoginRequest,
+  TestUsersBootstrapRequest,
+  LoginUser,
 } from './auth.model';
 
 const TEST_USER_BLUEPRINTS = [
@@ -43,27 +44,41 @@ interface WxPhoneResponse {
 let hasWarnedLoginMock = false;
 let hasWarnedPhoneMock = false;
 
-function getAdminPhoneWhitelist(): string[] {
+function getPrivilegedPhoneWhitelist(): string[] {
   const whitelist = process.env.ADMIN_PHONE_WHITELIST
     ?.split(',')
     .map((phone) => phone.trim())
     .filter(Boolean);
 
   if (!whitelist || whitelist.length === 0) {
-    throw new Error('管理员手机号白名单未配置');
+    throw new Error('受保护手机号白名单未配置');
   }
 
   return whitelist;
 }
 
-function getAdminSuperCode(): string {
+function getPrivilegedSuperCode(): string {
   const code = process.env.ADMIN_SUPER_CODE?.trim();
 
   if (!code) {
-    throw new Error('管理员超级验证码未配置');
+    throw new Error('超级验证码未配置');
   }
 
   return code;
+}
+
+function buildPrivilegedRole(): NonNullable<LoginUser['role']> {
+  return {
+    id: 'admin-role',
+    name: '管理员',
+    permissions: [
+      { resource: 'users', actions: ['read', 'write', 'delete'] },
+      { resource: 'activities', actions: ['read', 'write', 'delete'] },
+      { resource: 'conversations', actions: ['read', 'write', 'delete'] },
+      { resource: 'analytics', actions: ['read'] },
+      { resource: 'ai-operations', actions: ['read', 'write'] },
+    ],
+  };
 }
 
 function isFlagEnabled(flag?: string): boolean {
@@ -84,7 +99,7 @@ function isWxPhoneMockEnabled(): boolean {
  * - 移除复杂的会员逻辑
  * - 只创建基础用户信息
  */
-export async function wxLogin(params: WxLoginRequest) {
+export async function loginWithWechatCode(params: WechatCodeLoginRequest) {
   const { code } = params;
 
   try {
@@ -132,14 +147,12 @@ export async function wxLogin(params: WxLoginRequest) {
 }
 
 /**
- * Admin 手机号登录
- * - 验证码校验（9999 为超级验证码）
- * - 检查是否为管理员
+ * 手机号验证码登录（受保护能力）
  */
-export async function adminPhoneLogin(params: AdminPhoneLoginRequest) {
+export async function loginWithPhoneCode(params: PhoneOtpLoginRequest): Promise<LoginUser> {
   const { phone, code } = params;
 
-  assertAdminSuperCode(phone, code);
+  assertPrivilegedSuperCode(phone, code);
 
   // 查找用户
   let user = await db
@@ -149,16 +162,16 @@ export async function adminPhoneLogin(params: AdminPhoneLoginRequest) {
     .limit(1)
     .then(rows => rows[0]);
 
-  // 如果用户不存在，创建管理员用户
+  // 如果用户不存在，创建可登录的受保护用户
   if (!user) {
     const [newUser] = await db
       .insert(users)
       .values({
-        wxOpenId: `admin_${phone}`, // 管理员使用手机号作为标识
+        wxOpenId: `admin_${phone}`, // 当前 users 表要求 wxOpenId 非空，这里用稳定占位值承接受保护登录
         phoneNumber: phone,
         nickname: '管理员',
         avatarUrl: null,
-        aiCreateQuotaToday: 999, // 管理员无限额度
+        aiCreateQuotaToday: 999, // 受保护登录账号使用高额度，便于运维联调
         activitiesCreatedCount: 0,
         participationCount: 0,
       })
@@ -167,32 +180,16 @@ export async function adminPhoneLogin(params: AdminPhoneLoginRequest) {
     user = newUser;
   }
 
-  // 构建管理员角色信息
-  const adminUser = {
-    id: user.id,
-    phoneNumber: user.phoneNumber!,
-    nickname: user.nickname,
-    avatarUrl: user.avatarUrl,
-    role: {
-      id: 'admin-role',
-      name: '管理员',
-      permissions: [
-        { resource: 'users', actions: ['read', 'write', 'delete'] },
-        { resource: 'activities', actions: ['read', 'write', 'delete'] },
-        { resource: 'conversations', actions: ['read', 'write', 'delete'] },
-        { resource: 'dashboard', actions: ['read'] },
-        { resource: 'ai-playground', actions: ['read', 'write'] },
-      ],
-    },
+  return {
+    ...user,
+    role: buildPrivilegedRole(),
   };
-
-  return adminUser;
 }
 
-export async function bootstrapTestUsers(params: BootstrapTestUsersRequest) {
+export async function bootstrapTestUsers(params: TestUsersBootstrapRequest) {
   const { phone, code, count = 5 } = params;
 
-  assertAdminSuperCode(phone, code);
+  assertPrivilegedSuperCode(phone, code);
 
   if (process.env.NODE_ENV === 'production') {
     throw new Error('生产环境不可批量创建测试账号');
@@ -403,12 +400,12 @@ export async function verifyToken(token: string): Promise<{ id: string; role: st
   }
 }
 
-function assertAdminSuperCode(phone: string, code: string): void {
-  if (code !== getAdminSuperCode()) {
+function assertPrivilegedSuperCode(phone: string, code: string): void {
+  if (code !== getPrivilegedSuperCode()) {
     throw new Error('验证码错误');
   }
 
-  if (!getAdminPhoneWhitelist().includes(phone)) {
-    throw new Error('该手机号无管理员权限');
+  if (!getPrivilegedPhoneWhitelist().includes(phone)) {
+    throw new Error('该手机号无运维权限');
   }
 }

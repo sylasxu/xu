@@ -1,4 +1,4 @@
-// Notification Controller - MVP 简化版 + Admin 扩展
+// Notification Controller - 通知与消息中心接口
 import { Elysia } from 'elysia';
 import { basePlugins, verifyAuth } from '../../setup';
 import { notificationModel, type ErrorResponse } from './notification.model';
@@ -7,7 +7,6 @@ import {
   getNotifications, 
   getPendingMatches,
   getPendingMatchDetail,
-  getNotificationsByUserId,
   markAsRead, 
   getUnreadCount,
   confirmPendingMatch,
@@ -39,19 +38,14 @@ export const notificationController = new Elysia({ prefix: '/notifications' })
         return { code: 403, msg: '无权限访问该用户通知' } satisfies ErrorResponse;
       }
 
-      if (user.role === 'admin') {
-        const result = await getNotificationsByUserId(userId, query);
-        return result;
-      }
-
-      const result = await getNotifications(user.id, query);
+      const result = await getNotifications(userId, query);
       return result;
     },
     {
       detail: {
         tags: ['Notifications'],
         summary: '获取通知列表',
-        description: `按 userId 获取通知列表（普通用户仅可查询本人，Admin 可查询任意用户）。`,
+        description: '按 userId 获取通知列表，请求方需对目标用户具备访问权限。',
       },
       query: 'notification.listQuery',
       response: {
@@ -131,7 +125,7 @@ export const notificationController = new Elysia({ prefix: '/notifications' })
       detail: {
         tags: ['Notifications'],
         summary: '获取待确认匹配',
-        description: `按 userId 获取用户待确认的搭子匹配卡片（用于确认/取消）。`,
+        description: '按 userId 获取待确认的搭子匹配卡片（用于确认/取消）。',
       },
       query: 'notification.matchPendingQuery',
       response: {

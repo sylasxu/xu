@@ -14,6 +14,7 @@
  */
 
 import { t } from 'elysia';
+import type { Activity } from '@juchang/db';
 import { createToolFactory } from './create-tool';
 import { search } from '../rag';
 import type { ScoredActivity } from '../rag';
@@ -75,21 +76,49 @@ export interface ExploreData {
   semanticQuery?: string;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function readPointCoordinate(
+  location: Record<string, unknown>,
+  key: 'x' | 'y',
+): number | null {
+  const coordinate = location[key];
+  return typeof coordinate === 'number' ? coordinate : null;
+}
+
+function readActivityPoint(location: Activity['location'] | null): {
+  lat: number;
+  lng: number;
+} | null {
+  if (!isRecord(location)) {
+    return null;
+  }
+
+  const lng = readPointCoordinate(location, 'x');
+  const lat = readPointCoordinate(location, 'y');
+
+  if (lng === null || lat === null) {
+    return null;
+  }
+
+  return { lat, lng };
+}
+
 /**
  * 将 ScoredActivity 转换为 ExploreResultItem
  */
 function toExploreResultItem(scored: ScoredActivity): ExploreResultItem {
   const { activity, score, distance, matchReason } = scored;
-  
-  // 从 PostGIS point 提取经纬度
-  const location = activity.location as unknown as { x: number; y: number } | null;
+  const point = readActivityPoint(activity.location);
   
   return {
     id: activity.id,
     title: activity.title,
     type: activity.type,
-    lat: location?.y ?? 0,
-    lng: location?.x ?? 0,
+    lat: point?.lat ?? 0,
+    lng: point?.lng ?? 0,
     locationName: activity.locationName,
     distance: distance ? Math.round(distance) : 0,
     startAt: new Date(activity.startAt).toISOString(),

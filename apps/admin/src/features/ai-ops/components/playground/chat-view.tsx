@@ -27,6 +27,71 @@ interface ChatViewProps {
   error?: Error | null
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function readTextPartText(part: UIMessage['parts'][number]): string {
+  if (part.type !== 'text' || !('text' in part) || typeof part.text !== 'string') {
+    return ''
+  }
+
+  return part.text
+}
+
+function readToolCallPart(part: UIMessage['parts'][number]): {
+  type: string
+  toolName: string
+  state: string
+  input: Record<string, unknown>
+  output?: unknown
+} | null {
+  if (
+    typeof part.type !== 'string' ||
+    !part.type.startsWith('tool-') ||
+    !('toolName' in part) ||
+    typeof part.toolName !== 'string' ||
+    !('state' in part) ||
+    typeof part.state !== 'string' ||
+    !('input' in part) ||
+    !isRecord(part.input)
+  ) {
+    return null
+  }
+
+  return {
+    type: part.type,
+    toolName: part.toolName,
+    state: part.state,
+    input: part.input,
+    ...('output' in part ? { output: part.output } : {}),
+  }
+}
+
+function readWelcomeQuickPrompts(value: unknown): Array<{ text: string; icon?: string }> {
+  if (!isRecord(value) || !Array.isArray(value.quickPrompts)) {
+    return []
+  }
+
+  return value.quickPrompts
+    .map((item) => {
+      if (!isRecord(item) || typeof item.text !== 'string') {
+        return null
+      }
+
+      const text = item.text.trim()
+      if (!text) {
+        return null
+      }
+
+      return {
+        text,
+        ...(typeof item.icon === 'string' && item.icon.trim() ? { icon: item.icon.trim() } : {}),
+      }
+    })
+    .filter((item): item is { text: string; icon?: string } => item !== null)
+}
+
 export function ChatView({ messages, onSendMessage, onClear, onStop, isLoading, error }: ChatViewProps) {
   const [input, setInput] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -129,10 +194,10 @@ export function ChatView({ messages, onSendMessage, onClear, onStop, isLoading, 
 /** 消息气泡 */
 function MessageBubble({ message, isStreaming }: { message: UIMessage; isStreaming: boolean }) {
   const isUser = message.role === 'user'
-  // 提取文本内容和 tool 调用（AI SDK v6: typed tool parts 以 'tool-' 开头）
-  const textParts = message.parts?.filter((p) => p.type === 'text') ?? []
-  const toolParts = message.parts?.filter((p) => p.type.startsWith('tool-')) ?? []
-  const textContent = textParts.map((p) => (p as { type: 'text'; text: string }).text).join('')
+  const textContent = (message.parts ?? []).map(readTextPartText).join('')
+  const toolParts = (message.parts ?? [])
+    .map(readToolCallPart)
+    .filter((part): part is NonNullable<ReturnType<typeof readToolCallPart>> => part !== null)
 
   return (
     <div className={cn('flex', isUser ? 'justify-end' : 'justify-start')}>
@@ -158,10 +223,9 @@ function MessageBubble({ message, isStreaming }: { message: UIMessage; isStreami
         {/* Tool 调用卡片 */}
         {toolParts.length > 0 && (
           <div className="mt-2 space-y-2">
-            {toolParts.map((part, i) => {
-              const toolPart = part as { type: string; toolName: string; state: string; input: Record<string, unknown>; output?: unknown }
-              return <ToolCard key={i} toolName={toolPart.toolName} state={toolPart.state} input={toolPart.input} output={toolPart.output} />
-            })}
+            {toolParts.map((part, i) => (
+              <ToolCard key={i} toolName={part.toolName} state={part.state} input={part.input} output={part.output} />
+            ))}
           </div>
         )}
       </div>
@@ -202,20 +266,31 @@ function ToolCard({
 
 /** Tool 结果预览 */
 function ToolResultPreview({ toolName, result }: { toolName: string; result: unknown }) {
-  const data = result as Record<string, unknown>
+  if (!isRecord(result)) {
+    return (
+      <div className="mt-1.5 text-xs text-muted-foreground truncate">
+        {JSON.stringify(result).slice(0, 80)}...
+      </div>
+    )
+  }
+
+  const data = result
 
   // exploreNearby: 活动列表
   if (toolName === 'exploreNearby' && Array.isArray(data.activities)) {
+    const activities = data.activities.filter((activity): activity is { title: string } => (
+      isRecord(activity) && typeof activity.title === 'string'
+    ))
     return (
       <div className="mt-1.5 space-y-1">
-        {(data.activities as Array<{ title: string }>).slice(0, 3).map((a, i) => (
+        {activities.slice(0, 3).map((activity, i) => (
           <div key={i} className="text-xs text-muted-foreground truncate">
-            • {a.title}
+            • {activity.title}
           </div>
         ))}
-        {(data.activities as unknown[]).length > 3 && (
+        {activities.length > 3 && (
           <div className="text-xs text-muted-foreground">
-            ...共 {(data.activities as unknown[]).length} 个活动
+            ...共 {activities.length} 个活动
           </div>
         )}
       </div>
@@ -242,11 +317,12 @@ function ToolResultPreview({ toolName, result }: { toolName: string; result: unk
 
   // askPreference: 选项
   if (toolName === 'askPreference' && Array.isArray(data.options)) {
+    const options = data.options.filter((option): option is string => typeof option === 'string')
     return (
       <div className="mt-1.5 flex flex-wrap gap-1">
-        {(data.options as string[]).map((opt, i) => (
+        {options.map((option, i) => (
           <Badge key={i} variant="outline" className="text-xs">
-            {opt}
+            {option}
           </Badge>
         ))}
       </div>
@@ -269,7 +345,10 @@ function WelcomeState({ onSendMessage }: { onSendMessage: (text: string) => void
     staleTime: 5 * 60 * 1000,
   })
 
-  const quickActions = (welcome as any)?.quickActions ?? [
+  const welcomeQuickPrompts = readWelcomeQuickPrompts(welcome)
+  const quickActions = welcomeQuickPrompts.length > 0
+    ? welcomeQuickPrompts
+    : [
     { text: '帮我组个局', icon: '🎯' },
     { text: '附近有什么好玩的', icon: '🗺️' },
     { text: '找个搭子', icon: '🤝' },
@@ -287,7 +366,7 @@ function WelcomeState({ onSendMessage }: { onSendMessage: (text: string) => void
         </p>
       </div>
       <div className="flex flex-wrap justify-center gap-2">
-        {(quickActions as Array<{ text: string; icon?: string }>).map((action, i) => (
+        {quickActions.map((action, i) => (
           <Button
             key={i}
             variant="outline"

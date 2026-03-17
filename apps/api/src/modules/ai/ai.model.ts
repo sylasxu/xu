@@ -29,6 +29,12 @@ const ChatInputActionSchema = t.Object({
   displayText: t.Optional(t.String({ description: '用户侧展示文本' })),
 }, { additionalProperties: true });
 
+const ChatFollowUpModeSchema = t.Union([
+  t.Literal('review'),
+  t.Literal('rebook'),
+  t.Literal('kickoff'),
+]);
+
 const ChatContextSchema = t.Object({
   client: t.Optional(t.Union([
     t.Literal('web'),
@@ -40,12 +46,22 @@ const ChatContextSchema = t.Object({
   platformVersion: t.Optional(t.String()),
   lat: t.Optional(t.Number()),
   lng: t.Optional(t.Number()),
+  activityId: t.Optional(t.String({ minLength: 1, description: '关联活动 ID，用于活动后 follow-up 等承接场景' })),
+  followUpMode: t.Optional(ChatFollowUpModeSchema),
+  entry: t.Optional(t.String({ description: '触发入口标识，如 message_center_post_activity' })),
 }, { additionalProperties: true });
+
+const ChatAiSchema = t.Object({
+  model: t.Optional(t.String({ minLength: 1, description: '本轮 AI 使用的模型 ID，如 qwen-plus / deepseek-chat' })),
+  temperature: t.Optional(t.Number({ minimum: 0, maximum: 2, description: '采样温度，默认 0' })),
+  maxTokens: t.Optional(t.Number({ minimum: 1, description: '最大输出 Token 数' })),
+}, { additionalProperties: false });
 
 const ChatRequestSchema = t.Object({
   conversationId: t.Optional(t.String({ minLength: 1, description: '会话 ID，可选续聊' })),
   input: t.Union([ChatInputTextSchema, ChatInputActionSchema]),
   context: t.Optional(ChatContextSchema),
+  ai: t.Optional(ChatAiSchema),
   stream: t.Optional(t.Boolean({ description: 'true 时返回 GenUI SSE 事件流' })),
 });
 
@@ -181,6 +197,7 @@ const ConversationRole = t.Union([
 // 消息类型
 const ConversationMessageType = t.Union([
   t.Literal('text'),
+  t.Literal('user_action'),
   t.Literal('widget_dashboard'),
   t.Literal('widget_launcher'),
   t.Literal('widget_action'),
@@ -191,29 +208,41 @@ const ConversationMessageType = t.Union([
   t.Literal('widget_ask_preference'),  // v3.5 多轮对话偏好询问卡片
 ]);
 
-// 获取对话历史查询参数 (增强版 - 按显式 ID 查询)
+// 获取用户会话列表查询参数（显式 userId）
 const ConversationsQuery = t.Object({
-  // 分页参数
+  cursor: t.Optional(t.String({ description: '分页游标（上一页最后一条会话的 ID）' })),
+  limit: t.Optional(t.Number({ minimum: 1, maximum: 100, default: 20, description: '获取数量' })),
+  userId: t.String({ description: '目标用户 ID（普通用户仅可传本人）' }),
+});
+
+// 获取指定会话消息查询参数（显式 userId + 会话 ID）
+const ConversationMessagesQuery = t.Object({
   cursor: t.Optional(t.String({ description: '分页游标（上一页最后一条消息的 ID）' })),
   limit: t.Optional(t.Number({ minimum: 1, maximum: 100, default: 20, description: '获取数量' })),
-  // 查询参数：按用户 ID 获取会话列表（activityId 查询可不传）
-  userId: t.Optional(t.String({ description: '目标用户ID；查询会话列表时必传' })),
-  activityId: t.Optional(t.String({ description: '按关联活动 ID 筛选' })),
-  messageType: t.Optional(t.String({ description: '按消息类型筛选' })),
+  userId: t.String({ description: '目标用户 ID（普通用户仅可传本人）' }),
+  messageType: t.Optional(ConversationMessageType),
   role: t.Optional(t.Union([t.Literal('user'), t.Literal('assistant')], { description: '按角色筛选' })),
 });
 
-// 对话消息响应 (增强版 - 包含用户信息)
-const ConversationMessageWithUser = t.Object({
-  id: t.String(),
-  userId: t.String(),
-  userNickname: t.Union([t.String(), t.Null()], { description: '用户昵称' }),
-  role: ConversationRole,
-  type: ConversationMessageType,
-  content: t.Any({ description: 'JSONB 内容，根据 type 不同结构不同' }),
-  activityId: t.Union([t.String(), t.Null()]),
-  createdAt: t.String(),
+const ConversationIdParams = t.Object({
+  conversationId: t.String({ description: '会话 ID' }),
 });
+
+const ActivityConversationMessageParams = t.Object({
+  activityId: t.String({ format: 'uuid', description: '活动 ID' }),
+});
+
+// 对话消息响应（DB 派生基础字段 + API 展示字段）
+const ConversationMessageItem = t.Composite([
+  t.Pick(selectMessageSchema, ['id', 'userId', 'activityId']),
+  t.Object({
+    userNickname: t.Union([t.String(), t.Null()], { description: '用户昵称' }),
+    role: ConversationRole,
+    type: ConversationMessageType,
+    content: t.Any({ description: 'JSONB 内容，根据 type 不同结构不同' }),
+    createdAt: t.String(),
+  }),
+]);
 
 // 对话列表项（listConversations 返回的会话级数据）- 从 DB 派生
 const ConversationListItem = t.Composite([
@@ -228,13 +257,27 @@ const ConversationListItem = t.Composite([
   }),
 ]);
 
-// 获取对话历史响应 (增强版)
-// items 可以是消息列表（activityId 查询）或会话列表（userId 查询）
+// 获取用户会话列表响应
 const ConversationsResponse = t.Object({
-  items: t.Union([t.Array(ConversationMessageWithUser), t.Array(ConversationListItem)]),
+  items: t.Array(ConversationListItem),
+  total: t.Number({ description: '总数量' }),
+  hasMore: t.Boolean({ description: '是否还有更多会话' }),
+  cursor: t.Union([t.String(), t.Null()], { description: '下一页游标' }),
+});
+
+// 获取指定会话消息响应
+const ConversationMessagesResponse = t.Object({
+  conversationId: t.String({ description: '会话 ID' }),
+  items: t.Array(ConversationMessageItem),
   total: t.Number({ description: '总数量' }),
   hasMore: t.Boolean({ description: '是否还有更多消息' }),
   cursor: t.Union([t.String(), t.Null()], { description: '下一页游标' }),
+});
+
+const ActivityConversationMessagesResponse = t.Object({
+  activityId: t.String({ format: 'uuid', description: '活动 ID' }),
+  items: t.Array(ConversationMessageItem),
+  total: t.Number({ description: '关联消息总数' }),
 });
 
 // 添加用户消息请求
@@ -830,9 +873,15 @@ export const aiModel = new Elysia({ name: 'aiModel' })
     // AI Chat 协议
     'ai.chatRequest': ChatRequestSchema,
     'ai.chatTurnEnvelope': ChatTurnEnvelopeSchema,
-    // 对话历史 (v3.2 新增)
+    // 用户对话消息
     'ai.conversationsQuery': ConversationsQuery,
     'ai.conversationsResponse': ConversationsResponse,
+    'ai.conversationIdParams': ConversationIdParams,
+    'ai.conversationMessagesQuery': ConversationMessagesQuery,
+    'ai.conversationMessagesResponse': ConversationMessagesResponse,
+    'ai.conversationMessageItem': ConversationMessageItem,
+    'ai.activityConversationMessageParams': ActivityConversationMessageParams,
+    'ai.activityConversationMessagesResponse': ActivityConversationMessagesResponse,
     'ai.addMessageRequest': AddMessageRequest,
     'ai.addMessageResponse': AddMessageResponse,
     'ai.clearConversationsResponse': ClearConversationsResponse,
@@ -904,7 +953,13 @@ export type ChatTurnEnvelope = Static<typeof ChatTurnEnvelopeSchema>;
 export type ConversationRole = Static<typeof ConversationRole>;
 export type ConversationMessageType = Static<typeof ConversationMessageType>;
 export type ConversationsQuery = Static<typeof ConversationsQuery>;
+export type ConversationMessagesQuery = Static<typeof ConversationMessagesQuery>;
+export type ConversationIdParams = Static<typeof ConversationIdParams>;
+export type ActivityConversationMessageParams = Static<typeof ActivityConversationMessageParams>;
+export type ConversationMessageItem = Static<typeof ConversationMessageItem>;
 export type ConversationsResponse = Static<typeof ConversationsResponse>;
+export type ConversationMessagesResponse = Static<typeof ConversationMessagesResponse>;
+export type ActivityConversationMessagesResponse = Static<typeof ActivityConversationMessagesResponse>;
 export type AddMessageRequest = Static<typeof AddMessageRequest>;
 export type AddMessageResponse = Static<typeof AddMessageResponse>;
 export type ClearConversationsResponse = Static<typeof ClearConversationsResponse>;

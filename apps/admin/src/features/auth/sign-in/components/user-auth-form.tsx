@@ -33,6 +33,70 @@ interface UserAuthFormProps extends React.HTMLAttributes<HTMLDivElement> {
   redirectTo?: string
 }
 
+interface LoginResult {
+  user: {
+    id: string
+    nickname?: string | null
+    phoneNumber?: string
+    avatarUrl?: string | null
+    role?: {
+      id: string
+      name: string
+      permissions: Array<{ resource: string; actions: string[] }>
+    }
+  }
+  token: string
+  exp: number
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function readErrorMessage(value: unknown): string | null {
+  return isRecord(value) && typeof value.msg === 'string' ? value.msg : null
+}
+
+function readLoginResult(value: unknown): LoginResult | null {
+  if (!isRecord(value) || !isRecord(value.user) || typeof value.token !== 'string' || typeof value.exp !== 'number') {
+    return null
+  }
+
+  const user = value.user
+  if (typeof user.id !== 'string') {
+    return null
+  }
+
+  const role = isRecord(user.role) &&
+    typeof user.role.id === 'string' &&
+    typeof user.role.name === 'string' &&
+    Array.isArray(user.role.permissions)
+      ? {
+          id: user.role.id,
+          name: user.role.name,
+          permissions: user.role.permissions.filter(
+            (permission): permission is { resource: string; actions: string[] } =>
+              isRecord(permission) &&
+              typeof permission.resource === 'string' &&
+              Array.isArray(permission.actions) &&
+              permission.actions.every((action) => typeof action === 'string')
+          ),
+        }
+      : undefined
+
+  return {
+    user: {
+      id: user.id,
+      nickname: typeof user.nickname === 'string' ? user.nickname : null,
+      phoneNumber: typeof user.phoneNumber === 'string' ? user.phoneNumber : undefined,
+      avatarUrl: typeof user.avatarUrl === 'string' ? user.avatarUrl : null,
+      role,
+    },
+    token: value.token,
+    exp: value.exp,
+  }
+}
+
 export function UserAuthForm({
   className,
   redirectTo,
@@ -79,45 +143,24 @@ export function UserAuthForm({
     setIsLoading(true)
 
     try {
-      const response = await api.auth.admin.login.post({
+      const response = await api.auth.login.post({
+        grantType: 'phone_otp',
         phone: data.phone,
         code: data.code,
       })
 
       if (response.error) {
-        const errorData = response.error as { msg?: string }
-        const errorMsg = errorData?.msg || '登录失败'
+        const errorMsg = readErrorMessage(response.error) || '登录失败'
         toast.error(errorMsg)
         setIsLoading(false)
         return
       }
 
-      // Eden Treaty 返回的 data - 使用 unknown 中间类型避免类型冲突
-      const result = response.data as unknown as {
-        user: {
-          id: string
-          nickname?: string | null
-          phoneNumber?: string
-          avatarUrl?: string | null
-          role?: { 
-            id: string
-            name: string
-            permissions: Array<{ resource: string; actions: string[] }>
-          }
-        }
-        token: string
-        exp: number
-      } | Response
+      const rawResult: unknown =
+        response.data instanceof Response ? await response.data.json() : response.data
+      const parsedResult = readLoginResult(rawResult)
 
-      // 如果是 Response 对象，需要解析
-      let parsedResult: typeof result
-      if (result instanceof Response) {
-        parsedResult = await result.json()
-      } else {
-        parsedResult = result
-      }
-
-      if (!parsedResult || typeof parsedResult !== 'object' || !('user' in parsedResult)) {
+      if (!parsedResult) {
         toast.error('登录失败，服务器返回数据异常')
         setIsLoading(false)
         return
@@ -146,9 +189,9 @@ export function UserAuthForm({
       // 跳转
       const targetPath = redirectTo || '/'
       navigate({ to: targetPath, replace: true })
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('登录失败:', error)
-      toast.error(error?.message || '登录失败，请稍后重试')
+      toast.error(error instanceof Error ? error.message : '登录失败，请稍后重试')
     } finally {
       setIsLoading(false)
     }

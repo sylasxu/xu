@@ -1,12 +1,12 @@
 import { Users as UsersIcon } from 'lucide-react'
 import { getRouteApi } from '@tanstack/react-router'
-import { ListPage, DataTable, ListProvider } from '@/components/list-page'
+import { ListPage, DataTable } from '@/components/list-page'
 import { useUsersList } from '@/hooks/use-users'
-import { type User } from './data/schema'
-import { usersColumns, type UserDialogType } from './components/users-columns'
+import { usersColumns } from './components/users-columns'
 import { UsersDialogs } from './components/users-dialogs'
 import { UsersPrimaryButtons } from './components/users-primary-buttons'
 import { UsersBulkActions } from './components/data-table-bulk-actions'
+import { UsersListProvider } from './list-context'
 
 const route = getRouteApi('/_authenticated/users/')
 
@@ -25,7 +25,7 @@ export function Users() {
   const total = data?.total ?? 0
 
   return (
-    <ListProvider<User, UserDialogType>>
+    <UsersListProvider>
       <ListPage
         title='用户管理'
         description='管理平台用户，查看用户信息和状态'
@@ -48,6 +48,6 @@ export function Users() {
           bulkActions={(table) => <UsersBulkActions table={table} />}
         />
       </ListPage>
-    </ListProvider>
+    </UsersListProvider>
   )
 }

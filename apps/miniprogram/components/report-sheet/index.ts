@@ -10,27 +10,18 @@
  */
 
 import { postReports } from '../../src/api/endpoints/reports/reports'
+import type { ReportCreateRequest } from '../../src/api/model'
 
 /** 举报类型 */
-type ReportType = 'activity' | 'message' | 'user'
+type ReportType = ReportCreateRequest['type']
 
 /** 举报原因 */
-type ReportReason = 'inappropriate' | 'fake' | 'harassment' | 'other'
+type ReportReason = ReportCreateRequest['reason']
 
 /** 举报原因选项 */
 interface ReasonOption {
   value: ReportReason
   label: string
-}
-
-/** 组件属性 */
-interface ReportSheetProps {
-  /** 是否显示 */
-  visible: boolean
-  /** 举报类型 */
-  type: ReportType
-  /** 被举报的目标 ID */
-  targetId: string
 }
 
 /** 组件数据 */
@@ -53,6 +44,52 @@ const REASON_OPTIONS: ReasonOption[] = [
   { value: 'other', label: '其他' },
 ]
 
+const REPORT_SHEET_DATA: ReportSheetData = {
+  reasonOptions: REASON_OPTIONS,
+  selectedReason: null,
+  description: '',
+  submitting: false,
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function readReportType(value: unknown): ReportType | null {
+  switch (value) {
+    case 'activity':
+    case 'message':
+    case 'user':
+      return value
+    default:
+      return null
+  }
+}
+
+function readReportReason(value: unknown): ReportReason | null {
+  switch (value) {
+    case 'inappropriate':
+    case 'fake':
+    case 'harassment':
+    case 'other':
+      return value
+    default:
+      return null
+  }
+}
+
+function readReportErrorMessage(value: unknown): string | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  return readString(value.msg) || readString(value.message)
+}
+
 Component({
   options: {
     styleIsolation: 'apply-shared',
@@ -65,7 +102,7 @@ Component({
     },
     type: {
       type: String,
-      value: 'activity' as ReportType,
+      value: 'activity',
     },
     targetId: {
       type: String,
@@ -74,11 +111,8 @@ Component({
   },
 
   data: {
-    reasonOptions: REASON_OPTIONS,
-    selectedReason: null as ReportReason | null,
-    description: '',
-    submitting: false,
-  } as ReportSheetData,
+    ...REPORT_SHEET_DATA,
+  },
 
   observers: {
     visible(val: boolean) {
@@ -95,7 +129,12 @@ Component({
   methods: {
     /** 选择举报原因 */
     onReasonChange(e: WechatMiniprogram.CustomEvent) {
-      this.setData({ selectedReason: e.detail.value as ReportReason })
+      const selectedReason = readReportReason(e.detail.value)
+      if (!selectedReason) {
+        return
+      }
+
+      this.setData({ selectedReason })
     },
 
     /** 输入举报说明 */
@@ -111,7 +150,8 @@ Component({
     /** 提交举报 (Requirements: 7.5, 7.6) */
     async onSubmit() {
       const { selectedReason, description, submitting } = this.data
-      const { type, targetId } = this.properties as unknown as ReportSheetProps
+      const type = readReportType(this.properties.type)
+      const targetId = readString(this.properties.targetId)
 
       if (submitting) return
 
@@ -123,6 +163,11 @@ Component({
 
       if (!targetId) {
         wx.showToast({ title: '举报目标无效', icon: 'none' })
+        return
+      }
+
+      if (!type) {
+        wx.showToast({ title: '举报类型无效', icon: 'none' })
         return
       }
 
@@ -147,16 +192,15 @@ Component({
           this.triggerEvent('close')
           this.triggerEvent('success')
         } else {
-          const errorData = response.data as { msg?: string; message?: string }
           wx.showToast({
-            title: errorData?.msg || errorData?.message || '举报失败',
+            title: readReportErrorMessage(response.data) || '举报失败',
             icon: 'none',
           })
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('举报失败:', error)
         wx.showToast({
-          title: error?.message || '网络错误，请重试',
+          title: error instanceof Error ? error.message : '网络错误，请重试',
           icon: 'none',
         })
       } finally {

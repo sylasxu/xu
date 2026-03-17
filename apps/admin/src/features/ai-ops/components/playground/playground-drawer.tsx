@@ -11,7 +11,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import type { UIMessage } from '@ai-sdk/react'
-import { type FlowNode, type FlowNodeData, type InputNodeData, getNodeChineseLabel } from '../../types/flow'
+import { type FlowNode, type FlowNodeData, getNodeChineseLabel } from '../../types/flow'
 import { DetailRow } from '../shared/detail-row'
 import { type ModelParams, type TraceOutput, formatDuration } from '../../types/trace'
 import type { MockSettings } from './mock-settings-panel'
@@ -42,6 +42,10 @@ export interface PlaygroundDrawerProps {
   traceOutput: TraceOutput | null
 }
 
+function getDrawerLabelKey(data: FlowNodeData): string {
+  return data.type === 'processor' && data.processorType ? data.processorType : data.type
+}
+
 /** 状态 Badge：复用 node-detail-view 中的映射逻辑 */
 function StatusBadge({ status }: { status: string }) {
   const labels: Record<string, string> = {
@@ -63,11 +67,8 @@ function StatusBadge({ status }: { status: string }) {
 
 /** Drawer 头部：中文节点标题 + 状态 Badge + 耗时 */
 function DrawerHeader({ node }: { node: FlowNode }) {
-  const data = node.data as FlowNodeData
-  // processor 节点用 processorType 获取具体中文标签（如"用户画像"），其他节点用 type
-  const labelKey = data.type === 'processor' && 'processorType' in data && data.processorType
-    ? (data.processorType as string)
-    : data.type
+  const data = node.data
+  const labelKey = getDrawerLabelKey(data)
   return (
     <div className="flex items-center gap-2">
       <span className="font-medium">{getNodeChineseLabel(labelKey)}</span>
@@ -81,7 +82,11 @@ function DrawerHeader({ node }: { node: FlowNode }) {
 
 /** 输入详情区块 */
 function InputDetailSection({ node }: { node: FlowNode }) {
-  const data = node.data as InputNodeData
+  const data = node.data
+  if (data.type !== 'user-input') {
+    return null
+  }
+
   return (
     <div className="space-y-3">
       <DetailRow label="输入文本">
@@ -200,7 +205,7 @@ export function PlaygroundDrawer({
   systemPrompt,
   traceOutput,
 }: PlaygroundDrawerProps) {
-  const nodeData = selectedNode?.data as FlowNodeData | undefined
+  const nodeData = selectedNode?.data
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -212,11 +217,7 @@ export function PlaygroundDrawer({
         <SheetHeader className="border-b px-4 py-3 flex-shrink-0">
           <SheetTitle className="sr-only">
             {selectedNode
-              ? getNodeChineseLabel(
-                  nodeData!.type === 'processor' && 'processorType' in nodeData! && nodeData!.processorType
-                    ? (nodeData!.processorType as string)
-                    : nodeData!.type
-                )
+              ? getNodeChineseLabel(getDrawerLabelKey(nodeData!))
               : '节点详情'}
           </SheetTitle>
           <SheetDescription className="sr-only">AI Playground 节点详情面板</SheetDescription>

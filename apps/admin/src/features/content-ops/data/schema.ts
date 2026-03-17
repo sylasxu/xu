@@ -1,12 +1,17 @@
 // 内容运营 - 前端类型定义
 
 export const CONTENT_TYPE_OPTIONS = [
-  { value: 'xiaohongshu', label: '小红书' },
-  { value: 'weibo', label: '微博' },
-  { value: 'zhihu', label: '知乎' },
+  { value: 'activity_recruit', label: '活动招募' },
+  { value: 'buddy_story', label: '搭子故事' },
+  { value: 'local_guide', label: '本地攻略' },
+  { value: 'product_seed', label: '产品种草' },
 ] as const
 
 export type ContentType = (typeof CONTENT_TYPE_OPTIONS)[number]['value']
+
+export function isContentType(value: string): value is ContentType {
+  return CONTENT_TYPE_OPTIONS.some((option) => option.value === value)
+}
 
 export interface ContentNote {
   id: string
@@ -48,9 +53,16 @@ export interface ContentFilters {
   keyword?: string
 }
 
+export interface ContentLibraryResult {
+  items: ContentNote[]
+  total: number
+  page: number
+  limit: number
+}
+
 export interface AnalyticsData {
   byType: Array<{
-    contentType: string
+    contentType: ContentType
     avgViews: number
     avgLikes: number
     avgCollects: number

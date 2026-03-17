@@ -104,7 +104,7 @@ interface StoredPartnerMatchingState {
   state: {
     workflowId: string;
     rawInput: string;
-    status: string;
+    status: PartnerMatchingState['status'];
     collectedPreferences: Record<string, unknown>;
     missingRequired: string[];
     round: number;
@@ -113,9 +113,93 @@ interface StoredPartnerMatchingState {
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function readRequiredText(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function readStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+}
+
+function readPartnerMatchingStatus(value: unknown): PartnerMatchingState['status'] | null {
+  switch (value) {
+    case 'collecting':
+    case 'searching':
+    case 'completed':
+    case 'paused':
+      return value;
+    default:
+      return null;
+  }
+}
+
+function readPartnerCollectedPreferences(
+  value: unknown,
+): PartnerMatchingState['collectedPreferences'] {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  const activityType = readRequiredText(value.activityType) ?? undefined;
+  const timeRange = readRequiredText(value.timeRange) ?? undefined;
+  const location = readRequiredText(value.location) ?? undefined;
+  const participants = readRequiredText(value.participants) ?? undefined;
+  const tags = readStringList(value.tags);
+
+  return {
+    ...(activityType ? { activityType } : {}),
+    ...(timeRange ? { timeRange } : {}),
+    ...(location ? { location } : {}),
+    ...(participants ? { participants } : {}),
+    ...(tags.length > 0 ? { tags } : {}),
+  };
+}
+
+function readStoredPartnerMatchingState(value: unknown): StoredPartnerMatchingState | null {
+  if (!isRecord(value) || value.type !== 'broker_state' || !isRecord(value.state)) {
+    return null;
+  }
+
+  const workflowId = readRequiredText(value.state.workflowId);
+  const rawInput = typeof value.state.rawInput === 'string' ? value.state.rawInput : '';
+  const status = readPartnerMatchingStatus(value.state.status);
+  const missingRequired = readStringList(value.state.missingRequired);
+  const round = typeof value.state.round === 'number' && Number.isFinite(value.state.round)
+    ? value.state.round
+    : null;
+  const createdAt = readRequiredText(value.state.createdAt);
+  const updatedAt = readRequiredText(value.state.updatedAt);
+
+  if (!workflowId || !status || round === null || !createdAt || !updatedAt) {
+    return null;
+  }
+
+  return {
+    type: 'broker_state',
+    state: {
+      workflowId,
+      rawInput,
+      status,
+      collectedPreferences: readPartnerCollectedPreferences(value.state.collectedPreferences),
+      missingRequired,
+      round,
+      createdAt,
+      updatedAt,
+    },
+  };
+}
+
 // ============ 配置 ============
 
-const REQUIRED_FIELDS = ['activityType', 'timeRange'];
+const REQUIRED_FIELDS: Array<'activityType' | 'timeRange'> = ['activityType', 'timeRange'];
 
 const PARTNER_ACTIVITY_LABELS: Record<PartnerActivityType, string> = {
   food: '美食',
@@ -391,7 +475,13 @@ export function updatePartnerMatchingState(
   };
 
   newState.missingRequired = REQUIRED_FIELDS.filter(
-    field => !newState.collectedPreferences[field as keyof typeof newState.collectedPreferences]
+    (field) => {
+      if (field === 'activityType') {
+        return !newState.collectedPreferences.activityType;
+      }
+
+      return !newState.collectedPreferences.timeRange;
+    }
   );
 
   if (newState.missingRequired.length === 0) {
@@ -584,7 +674,15 @@ export function getPartnerActivityTypeLabel(value: string | undefined): string {
 
 export function getPartnerTimeLabel(value: string | undefined): string {
   if (!value) return '待定';
-  return PARTNER_TIME_LABELS[value as PartnerTimeRange] || value;
+  switch (value) {
+    case 'tonight':
+    case 'tomorrow':
+    case 'weekend':
+    case 'next_week':
+      return PARTNER_TIME_LABELS[value];
+    default:
+      return value;
+  }
 }
 
 export function buildPartnerIntentPayload(
@@ -672,8 +770,8 @@ export async function recoverPartnerMatchingState(
     });
 
     for (const msg of messages) {
-      const content = msg.content as StoredPartnerMatchingState | null;
-      if (content?.type === 'broker_state' && content?.state) {
+      const content = readStoredPartnerMatchingState(msg.content);
+      if (content?.type === 'broker_state' && content.state) {
         const stored = content.state;
         const updatedAt = new Date(stored.updatedAt);
         if (Date.now() - updatedAt.getTime() > 30 * 60 * 1000) {
@@ -688,8 +786,8 @@ export async function recoverPartnerMatchingState(
         return {
           workflowId: stored.workflowId,
           rawInput: stored.rawInput || '',
-          status: stored.status as PartnerMatchingState['status'],
-          collectedPreferences: stored.collectedPreferences as PartnerMatchingState['collectedPreferences'],
+          status: stored.status,
+          collectedPreferences: readPartnerCollectedPreferences(stored.collectedPreferences),
           missingRequired: stored.missingRequired,
           round: stored.round,
           createdAt: new Date(stored.createdAt),

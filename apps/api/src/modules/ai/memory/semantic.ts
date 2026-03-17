@@ -5,6 +5,33 @@ import type { RecalledMessage } from './types';
 
 const logger = createLogger('MemorySemantic');
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
+}
+
+function readRecalledContent(value: unknown): string {
+    if (typeof value === 'string') {
+        return value;
+    }
+
+    if (!isRecord(value)) {
+        return '';
+    }
+
+    const text = value.text;
+    return typeof text === 'string' ? text : JSON.stringify(value);
+}
+
+function readRecalledRole(value: unknown): RecalledMessage['role'] | null {
+    switch (value) {
+        case 'user':
+        case 'assistant':
+            return value;
+        default:
+            return null;
+    }
+}
+
 /**
  * 语义召回历史消息
  * 
@@ -45,19 +72,16 @@ export async function semanticRecall(
             .orderBy(distance)
             .limit(limit);
 
-        return results.map(r => {
-            let content = '';
-            if (typeof r.content === 'string') {
-                content = r.content;
-            } else if (typeof r.content === 'object' && r.content) {
-                // 尝试提取文本内容
-                content = (r.content as any).text || JSON.stringify(r.content);
+        return results.flatMap((r) => {
+            const role = readRecalledRole(r.role);
+            if (!role) {
+                return [];
             }
 
-            return {
-                role: r.role as 'user' | 'assistant',
-                content,
-            };
+            return [{
+                role,
+                content: readRecalledContent(r.content),
+            }];
         });
 
     } catch (error) {

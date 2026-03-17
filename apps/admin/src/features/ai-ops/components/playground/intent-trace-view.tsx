@@ -13,6 +13,14 @@ interface IntentTraceViewProps {
   trace: ExecutionTrace | null
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function readNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
 export function IntentTraceView({ trace }: IntentTraceViewProps) {
   if (!trace) {
     return (
@@ -23,16 +31,16 @@ export function IntentTraceView({ trace }: IntentTraceViewProps) {
   }
 
   // 从 trace steps 中提取 P0 和 P1/P2 数据
-  const p0Step = trace.steps.find(s => (s as any).type === 'keyword-match' || s.name?.includes('keyword'))
-  const intentStep = trace.steps.find(s => (s as any).type === 'intent-classify' || s.name?.includes('intent'))
+  const p0Step = trace.steps.find((step) => step.type === 'keyword-match' || step.name.includes('keyword'))
+  const intentStep = trace.steps.find((step) => step.type === 'intent-classify' || step.name.includes('intent'))
 
   const intent = trace.intent
   const method = trace.intentMethod
   const intentLabel = intent ? (INTENT_DISPLAY_NAMES[intent as IntentType] ?? intent) : '未知'
 
   // 从 step data 提取详细信息
-  const p0Data = p0Step?.data as Record<string, unknown> | undefined
-  const intentData = intentStep?.data as Record<string, unknown> | undefined
+  const p0Data = isRecord(p0Step?.data) ? p0Step.data : undefined
+  const intentData = isRecord(intentStep?.data) ? intentStep.data : undefined
 
   return (
     <div className="space-y-3 p-4">
@@ -76,9 +84,9 @@ export function IntentTraceView({ trace }: IntentTraceViewProps) {
           layer="P1"
           label="Feature_Combination"
           matched={method === 'regex' && !p0Data?.matched}
-          duration={intentData?.p1Duration as number | undefined}
+          duration={readNumber(intentData?.p1Duration)}
           detail={intentData?.p1Features ? `命中特征: ${JSON.stringify(intentData.p1Features)}` : undefined}
-          confidence={intentData?.p1Confidence as number | undefined}
+          confidence={readNumber(intentData?.p1Confidence)}
         />
 
         {/* P2 Layer */}
@@ -86,9 +94,9 @@ export function IntentTraceView({ trace }: IntentTraceViewProps) {
           layer="P2"
           label="LLM Few-shot"
           matched={method === 'llm'}
-          duration={intentData?.p2Duration as number | undefined}
+          duration={readNumber(intentData?.p2Duration)}
           detail={intentData?.degraded ? '降级触发' : undefined}
-          confidence={intentData?.p2Confidence as number | undefined}
+          confidence={readNumber(intentData?.p2Confidence)}
         />
       </div>
 

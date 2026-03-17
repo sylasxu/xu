@@ -98,7 +98,7 @@ async function getTargetContentSnapshot(
 }
 
 /**
- * 创建举报 (小程序端)
+ * 创建举报
  */
 export async function createReport(
   data: CreateReportRequest,
@@ -125,7 +125,7 @@ export async function createReport(
 }
 
 /**
- * 获取举报列表 (Admin)
+ * 获取举报列表（受保护查询）
  */
 export async function getReports(
   query: ReportListQuery
@@ -208,7 +208,7 @@ export async function getReports(
 }
 
 /**
- * 根据 ID 获取举报详情 (Admin)
+ * 根据 ID 获取举报详情（受保护查询）
  */
 export async function getReportById(id: string): Promise<ReportResponse | null> {
   const [report] = await db
@@ -259,12 +259,12 @@ export async function getReportById(id: string): Promise<ReportResponse | null> 
 }
 
 /**
- * 更新举报状态 (Admin)
+ * 更新举报状态（受保护处理）
  */
 export async function updateReport(
   id: string,
   data: UpdateReportRequest,
-  adminId: string
+  operatorId: string
 ): Promise<ReportResponse | null> {
   // 检查举报是否存在
   const existingReport = await getReportById(id);
@@ -279,7 +279,7 @@ export async function updateReport(
       status: data.status,
       adminNote: data.adminNote || null,
       resolvedAt: new Date(),
-      resolvedBy: adminId,
+      resolvedBy: operatorId,
     })
     .where(eq(reports.id, id));
   

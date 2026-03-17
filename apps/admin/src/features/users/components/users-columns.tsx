@@ -14,8 +14,8 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { DataTableColumnHeader } from '@/components/data-table'
 import { TruncatedCell } from '@/components/truncated-cell'
-import { useListContext } from '@/components/list-page'
 import { type User } from '../data/schema'
+import { useUsersListContext } from '../list-context'
 
 // 用户弹窗类型
 export type UserDialogType = 'update' | 'delete' | 'quota' | 'import'
@@ -23,7 +23,7 @@ export type UserDialogType = 'update' | 'delete' | 'quota' | 'import'
 // 行操作组件
 function UserRowActions({ user }: { user: User }) {
   const navigate = useNavigate()
-  const { setOpen, setCurrentRow } = useListContext<User, UserDialogType>()
+  const { setOpen, setCurrentRow } = useUsersListContext()
 
   return (
     <DropdownMenu modal={false}>

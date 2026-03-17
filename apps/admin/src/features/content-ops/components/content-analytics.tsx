@@ -23,12 +23,11 @@ export function ContentAnalytics() {
     return <div className='py-12 text-center text-muted-foreground'>加载中...</div>
   }
 
-  const analytics = data as any
-  if (!analytics) {
+  if (!data) {
     return <div className='py-12 text-center text-muted-foreground'>暂无数据</div>
   }
 
-  const { byType = [], topNotes = [], totalNotes = 0, totalWithPerformance = 0 } = analytics
+  const { byType, topNotes, totalNotes, totalWithPerformance } = data
 
   return (
     <div className='space-y-6'>
@@ -58,7 +57,7 @@ export function ContentAnalytics() {
       {/* 按类型平均指标 */}
       {byType.length > 0 && (
         <div className='grid gap-4 md:grid-cols-2 lg:grid-cols-4'>
-          {byType.map((item: any) => (
+          {byType.map((item) => (
             <Card key={item.contentType}>
               <CardHeader className='pb-2'>
                 <CardTitle className='text-sm font-medium'>
@@ -97,7 +96,7 @@ export function ContentAnalytics() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {topNotes.map((note: any, idx: number) => (
+                {topNotes.map((note, idx) => (
                   <TableRow key={note.id}>
                     <TableCell className='font-mono text-muted-foreground'>
                       {idx + 1}

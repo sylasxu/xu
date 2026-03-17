@@ -19,6 +19,10 @@ interface ProcessorDetailDrawerProps {
   node: FlowNode | null
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
 /** 可配置处理器 → configKey 映射 */
 const CONFIGURABLE_PROCESSORS: Record<string, string> = {
   'semantic-recall': 'processor.semantic_recall',
@@ -30,7 +34,7 @@ const CONFIGURABLE_PROCESSORS: Record<string, string> = {
 export function ProcessorDetailDrawer({ node }: ProcessorDetailDrawerProps) {
   if (!node) return null
 
-  const processorType = (node.data as any).processorType ?? node.data.type
+  const processorType = node.data.type === 'processor' ? node.data.processorType : node.data.type
   const configKey = CONFIGURABLE_PROCESSORS[processorType]
 
   if (!configKey) return null
@@ -50,8 +54,8 @@ function ProcessorConfigForm({ configKey, processorType }: { configKey: string; 
   const [params, setParams] = useState<Record<string, unknown>>({})
 
   useEffect(() => {
-    if (data?.configValue && typeof data.configValue === 'object') {
-      setParams(data.configValue as Record<string, unknown>)
+    if (isRecord(data?.configValue)) {
+      setParams({ ...data.configValue })
     } else {
       setParams(getDefaultParams(processorType))
     }

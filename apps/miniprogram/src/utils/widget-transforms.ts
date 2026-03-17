@@ -5,10 +5,34 @@
  * 未来 H5 端可直接消费 Widget Spec，无需此转换层
  */
 
-import type { ExploreData } from '../types/global'
-
 type WidgetTransformFn = (result: unknown) => unknown
 type AskPreferenceQuestionType = 'location' | 'type'
+
+interface ExploreResultItem {
+  id: string
+  title: string
+  type: string
+  lat: number
+  lng: number
+  locationName: string
+  distance?: number
+}
+
+interface ExploreCenter {
+  lat: number
+  lng: number
+  name: string
+}
+
+interface ExploreWidgetData {
+  results: ExploreResultItem[]
+  center: ExploreCenter
+  title: string
+  semanticQuery: string
+  fetchConfig: Record<string, unknown> | null
+  interaction: Record<string, unknown> | null
+  preview: Record<string, unknown> | null
+}
 
 interface AskPreferenceOption {
   label: string
@@ -27,24 +51,30 @@ interface AskPreferenceWidgetData {
 }
 
 const DEFAULT_ASK_QUESTION = '想在哪儿组局呢？'
+const DEFAULT_EXPLORE_CENTER: ExploreCenter = {
+  lat: 29.5647,
+  lng: 106.5507,
+  name: '附近',
+}
 
 const WIDGET_TRANSFORMS: Record<string, WidgetTransformFn> = {
   widget_explore: (result: unknown) => {
     const toolOutput = isRecord(result) ? result : {}
-    const exploreData = (toolOutput.explore || toolOutput) as ExploreData
-    return {
-      results: exploreData?.results || exploreData?.activities || [],
-      center: exploreData?.center || {
-        lat: exploreData?.lat || 29.5647,
-        lng: exploreData?.lng || 106.5507,
-        name: exploreData?.locationName || '附近',
-      },
-      title: exploreData?.title || '',
-      semanticQuery: typeof exploreData?.semanticQuery === 'string' ? exploreData.semanticQuery : '',
+    const exploreSource = isRecord(toolOutput.explore) ? toolOutput.explore : toolOutput
+    const results = readExploreResults(exploreSource.results)
+    const activities = readExploreResults(exploreSource.activities)
+
+    const widgetData: ExploreWidgetData = {
+      results: results.length > 0 ? results : activities,
+      center: readExploreCenter(exploreSource),
+      title: readString(exploreSource.title) ?? '',
+      semanticQuery: readString(exploreSource.semanticQuery) ?? '',
       fetchConfig: isRecord(toolOutput.fetchConfig) ? toolOutput.fetchConfig : null,
       interaction: isRecord(toolOutput.interaction) ? toolOutput.interaction : null,
       preview: isRecord(toolOutput.preview) ? toolOutput.preview : null,
     }
+
+    return widgetData
   },
 
   widget_ask_preference: (result: unknown) => {
@@ -76,6 +106,73 @@ const WIDGET_TRANSFORMS: Record<string, WidgetTransformFn> = {
 export function transformToolResult(widgetType: string, result: unknown): unknown {
   const transform = WIDGET_TRANSFORMS[widgetType]
   return transform ? transform(result) : result
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function readNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function readExploreResult(value: unknown): ExploreResultItem | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  const id = readString(value.id)
+  const title = readString(value.title)
+  const type = readString(value.type)
+  const lat = readNumber(value.lat)
+  const lng = readNumber(value.lng)
+  const locationName = readString(value.locationName)
+
+  if (!id || !title || !type || lat === null || lng === null || !locationName) {
+    return null
+  }
+
+  const distance = readNumber(value.distance) ?? undefined
+
+  return {
+    id,
+    title,
+    type,
+    lat,
+    lng,
+    locationName,
+    ...(distance !== undefined ? { distance } : {}),
+  }
+}
+
+function readExploreResults(value: unknown): ExploreResultItem[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value
+    .map((item) => readExploreResult(item))
+    .filter((item): item is ExploreResultItem => item !== null)
+}
+
+function readExploreCenter(value: Record<string, unknown>): ExploreCenter {
+  const center = isRecord(value.center) ? value.center : null
+  const lat = readNumber(center?.lat ?? value.lat)
+  const lng = readNumber(center?.lng ?? value.lng)
+  const name = readString(center?.name ?? value.locationName)
+
+  if (lat === null || lng === null) {
+    return {
+      ...DEFAULT_EXPLORE_CENTER,
+      ...(name ? { name } : {}),
+    }
+  }
+
+  return {
+    lat,
+    lng,
+    name: name ?? DEFAULT_EXPLORE_CENTER.name,
+  }
 }
 
 function normalizeCollectedInfo(value: unknown): { location?: string; type?: string } | undefined {

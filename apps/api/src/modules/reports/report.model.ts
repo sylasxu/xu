@@ -39,7 +39,7 @@ export function isReportStatus(value: string): value is ReportStatus {
 
 // ============ 请求 Schema ============
 
-// 创建举报请求体 (小程序端)
+// 创建举报请求体
 export const CreateReportRequestSchema = t.Object({
   type: t.Union([
     t.Literal('activity'),
@@ -56,7 +56,7 @@ export const CreateReportRequestSchema = t.Object({
   targetId: t.String({ format: 'uuid', description: '被举报的目标 ID' }),
 });
 
-// 举报列表查询参数 (Admin)
+// 举报列表查询参数（受保护查询）
 export const ReportListQuerySchema = t.Object({
   page: t.Optional(t.Number({ minimum: 1, default: 1, description: '页码' })),
   limit: t.Optional(t.Number({ minimum: 1, maximum: 100, default: 20, description: '每页数量' })),
@@ -72,7 +72,7 @@ export const ReportListQuerySchema = t.Object({
   ], { description: '类型筛选' })),
 });
 
-// 更新举报请求体 (Admin)
+// 更新举报请求体（受保护处理）
 export const UpdateReportRequestSchema = t.Object({
   status: t.Union([
     t.Literal('resolved'),

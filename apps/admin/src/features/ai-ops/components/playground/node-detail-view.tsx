@@ -32,6 +32,19 @@ interface NodeDetailViewProps {
   traceOutput: TraceOutput | null
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function readNestedRecord(data: Record<string, unknown>, key: string): Record<string, unknown> | undefined {
+  const value = data[key]
+  return isRecord(value) ? value : undefined
+}
+
+function readStringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+}
+
 export function NodeDetailView({ node, systemPrompt, traceOutput }: NodeDetailViewProps) {
   if (!node) {
     return (
@@ -100,8 +113,9 @@ function NodeContent({
 
 /** Input Guard 详情 (processor type=input-guard) */
 function InputGuardDetail({ data }: { data: Record<string, unknown> }) {
-  const output = data.output as Record<string, unknown> | undefined
-  const config = data.config as Record<string, unknown> | undefined
+  const output = readNestedRecord(data, 'output')
+  const config = readNestedRecord(data, 'config')
+  const triggeredRules = readStringList(output?.triggeredRules)
 
   return (
     <div className="space-y-3">
@@ -112,13 +126,13 @@ function InputGuardDetail({ data }: { data: Record<string, unknown> }) {
       </DetailRow>
       {Boolean(output?.sanitized) && (
         <DetailRow label="净化后文本">
-          <p className="text-sm whitespace-pre-wrap">{String(output!.sanitized)}</p>
+          <p className="text-sm whitespace-pre-wrap">{String(output?.sanitized)}</p>
         </DetailRow>
       )}
-      {Array.isArray(output?.triggeredRules) && (output.triggeredRules as string[]).length > 0 && (
+      {triggeredRules.length > 0 && (
         <DetailRow label="触发规则">
           <div className="flex flex-wrap gap-1">
-            {(output.triggeredRules as string[]).map((rule, i) => (
+            {triggeredRules.map((rule, i) => (
               <Badge key={i} variant="outline" className="text-xs">{rule}</Badge>
             ))}
           </div>
@@ -135,7 +149,7 @@ function InputGuardDetail({ data }: { data: Record<string, unknown> }) {
 
 /** User Profile 详情 */
 function UserProfileDetail({ data }: { data: Record<string, unknown> }) {
-  const output = data.output as Record<string, unknown> | undefined
+  const output = readNestedRecord(data, 'output')
 
   return (
     <div className="space-y-3">
@@ -155,8 +169,8 @@ function UserProfileDetail({ data }: { data: Record<string, unknown> }) {
 
 /** Semantic Recall 详情 */
 function SemanticRecallDetail({ data }: { data: Record<string, unknown> }) {
-  const output = data.output as Record<string, unknown> | undefined
-  const config = data.config as Record<string, unknown> | undefined
+  const output = readNestedRecord(data, 'output')
+  const config = readNestedRecord(data, 'config')
 
   return (
     <div className="space-y-3">
@@ -167,7 +181,7 @@ function SemanticRecallDetail({ data }: { data: Record<string, unknown> }) {
       </DetailRow>
       {Boolean(output?.query) && (
         <DetailRow label="搜索查询">
-          <p className="text-sm">{String(output!.query)}</p>
+          <p className="text-sm">{String(output?.query)}</p>
         </DetailRow>
       )}
       {output?.resultCount !== undefined && (
@@ -186,8 +200,8 @@ function SemanticRecallDetail({ data }: { data: Record<string, unknown> }) {
 
 /** Token Limit 详情 */
 function TokenLimitDetail({ data }: { data: Record<string, unknown> }) {
-  const output = data.output as Record<string, unknown> | undefined
-  const config = data.config as Record<string, unknown> | undefined
+  const output = readNestedRecord(data, 'output')
+  const config = readNestedRecord(data, 'config')
 
   return (
     <div className="space-y-3">
@@ -246,17 +260,15 @@ function TokenLimitDetail({ data }: { data: Record<string, unknown> }) {
 
 /** Processor 详情路由 */
 function ProcessorDetail({ data }: { data: FlowNodeData & { type: 'processor' } }) {
-  const rawData = data as unknown as Record<string, unknown>
-
   switch (data.processorType) {
     case 'input-guard':
-      return <InputGuardDetail data={rawData} />
+      return <InputGuardDetail data={data} />
     case 'user-profile':
-      return <UserProfileDetail data={rawData} />
+      return <UserProfileDetail data={data} />
     case 'semantic-recall':
-      return <SemanticRecallDetail data={rawData} />
+      return <SemanticRecallDetail data={data} />
     case 'token-limit':
-      return <TokenLimitDetail data={rawData} />
+      return <TokenLimitDetail data={data} />
     default:
       return (
         <div className="space-y-3">

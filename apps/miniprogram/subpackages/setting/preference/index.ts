@@ -42,9 +42,44 @@ function parseWorkingMemory(rawValue?: string | null): {
   }
 
   try {
-    return JSON.parse(rawValue) as {
-      preferences?: Array<{ category: string; value: string; sentiment: string }>;
-      frequentLocations?: string[];
+    const parsed: unknown = JSON.parse(rawValue);
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
+
+    const record = parsed as Record<string, unknown>;
+    const preferences = Array.isArray(record.preferences)
+      ? record.preferences
+          .map((item) => {
+            if (!item || typeof item !== 'object') {
+              return null;
+            }
+
+            const preference = item as Record<string, unknown>;
+            if (
+              typeof preference.category !== 'string' ||
+              typeof preference.value !== 'string' ||
+              typeof preference.sentiment !== 'string'
+            ) {
+              return null;
+            }
+
+            return {
+              category: preference.category,
+              value: preference.value,
+              sentiment: preference.sentiment,
+            };
+          })
+          .filter((item): item is { category: string; value: string; sentiment: string } => item !== null)
+      : undefined;
+
+    const frequentLocations = Array.isArray(record.frequentLocations)
+      ? record.frequentLocations.filter((item): item is string => typeof item === 'string')
+      : undefined;
+
+    return {
+      ...(preferences ? { preferences } : {}),
+      ...(frequentLocations ? { frequentLocations } : {}),
     };
   } catch (error) {
     console.error('解析 workingMemory 失败:', error);

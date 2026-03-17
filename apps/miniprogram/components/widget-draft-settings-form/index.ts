@@ -54,8 +54,108 @@ interface ComponentData {
   formValues: FormValues
 }
 
+type FormValueKey = keyof FormValues
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
+}
+
+function readFieldType(value: unknown): FieldType | null {
+  switch (value) {
+    case 'single-select':
+    case 'textarea':
+      return value
+    default:
+      return null
+  }
+}
+
+function readFormValueKey(value: string): FormValueKey | null {
+  switch (value) {
+    case 'activityId':
+    case 'title':
+    case 'type':
+    case 'field':
+    case 'locationName':
+    case 'locationHint':
+    case 'slot':
+    case 'maxParticipants':
+    case 'startAt':
+    case 'lat':
+    case 'lng':
+      return value
+    default:
+      return null
+  }
+}
+
+function readFormTextValue(values: FormValues, fieldName: string): string {
+  const key = readFormValueKey(fieldName)
+  if (!key) {
+    return ''
+  }
+
+  const value = values[key]
+  return typeof value === 'string' ? value : ''
+}
+
+function writeFormTextValue(values: FormValues, fieldName: string, value: string): FormValues {
+  switch (fieldName) {
+    case 'activityId':
+      return { ...values, activityId: value }
+    case 'title':
+      return { ...values, title: value }
+    case 'type':
+      return { ...values, type: value }
+    case 'field':
+      return { ...values, field: value }
+    case 'locationName':
+      return { ...values, locationName: value }
+    case 'locationHint':
+      return { ...values, locationHint: value }
+    case 'slot':
+      return { ...values, slot: value }
+    case 'maxParticipants':
+      return { ...values, maxParticipants: value }
+    case 'startAt':
+      return { ...values, startAt: value }
+    default:
+      return values
+  }
+}
+
+function readFormSchema(value: unknown): FormSchema {
+  if (!isRecord(value)) {
+    return {}
+  }
+
+  return {
+    formType: typeof value.formType === 'string' ? value.formType : undefined,
+    submitAction: typeof value.submitAction === 'string' ? value.submitAction : undefined,
+    submitLabel: typeof value.submitLabel === 'string' ? value.submitLabel : undefined,
+    fields: normalizeFields(value.fields),
+  }
+}
+
+function readFieldSelection(value: unknown): { field: string; value: string } | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  const field = typeof value.field === 'string' ? value.field : ''
+  const selectedValue = typeof value.value === 'string' ? value.value : ''
+  if (!field || !selectedValue) {
+    return null
+  }
+
+  return {
+    field,
+    value: selectedValue,
+  }
+}
+
+function readFieldName(value: unknown): string {
+  return isRecord(value) && typeof value.field === 'string' ? value.field : ''
 }
 
 function toStringValue(value: unknown, fallback = ''): string {
@@ -82,6 +182,11 @@ function normalizeFields(value: unknown): FormField[] {
       continue
     }
 
+    const type = readFieldType(item.type)
+    if (!type) {
+      continue
+    }
+
     const options: FormOption[] = []
     if (Array.isArray(item.options)) {
       for (const option of item.options) {
@@ -99,7 +204,7 @@ function normalizeFields(value: unknown): FormField[] {
     fields.push({
       name: item.name,
       label: item.label,
-      type: item.type as FieldType,
+      type,
       required: item.required === true,
       options,
       placeholder: typeof item.placeholder === 'string' ? item.placeholder : '',
@@ -132,7 +237,7 @@ function normalizeValues(value: unknown): FormValues {
 
 function buildRenderFields(fields: FormField[], values: FormValues): RenderField[] {
   return fields.map((field) => {
-    const currentValue = toStringValue(values[field.name as keyof FormValues])
+    const currentValue = readFormTextValue(values, field.name)
 
     return {
       ...field,
@@ -151,13 +256,20 @@ function validateRequired(fields: FormField[], values: FormValues): string | nul
       continue
     }
 
-    const currentValue = toStringValue(values[field.name as keyof FormValues])
+    const currentValue = readFormTextValue(values, field.name)
     if (!currentValue.trim()) {
       return field.label
     }
   }
 
   return null
+}
+
+const INITIAL_COMPONENT_DATA: ComponentData = {
+  isSubmitting: false,
+  renderFields: [],
+  submitLabel: '保存草稿设置',
+  formValues: {},
 }
 
 Component({
@@ -172,11 +284,11 @@ Component({
     },
     schema: {
       type: Object,
-      value: {} as FormSchema,
+      value: {},
     },
     initialValues: {
       type: Object,
-      value: {} as FormValues,
+      value: {},
     },
     disabled: {
       type: Boolean,
@@ -184,12 +296,7 @@ Component({
     },
   },
 
-  data: {
-    isSubmitting: false,
-    renderFields: [] as RenderField[],
-    submitLabel: '保存草稿设置',
-    formValues: {} as FormValues,
-  },
+  data: INITIAL_COMPONENT_DATA,
 
   lifetimes: {
     attached() {
@@ -205,8 +312,8 @@ Component({
 
   methods: {
     syncFormState() {
-      const schema = this.properties.schema as FormSchema
-      const fields = normalizeFields(schema.fields)
+      const schema = readFormSchema(this.properties.schema)
+      const fields = schema.fields ?? []
       const values = normalizeValues(this.properties.initialValues)
 
       this.setData({
@@ -224,21 +331,14 @@ Component({
         return
       }
 
-      const dataset = e.currentTarget.dataset as {
-        field?: string
-        value?: string
-      }
-      const field = dataset.field || ''
-      const value = dataset.value || ''
-      if (!field || !value) {
+      const selection = readFieldSelection(e.currentTarget.dataset)
+      if (!selection) {
         return
       }
 
-      const nextValues: FormValues = {
-        ...this.data.formValues,
-        [field]: value,
-      }
-      const fields = normalizeFields((this.properties.schema as FormSchema).fields)
+      const nextValues = writeFormTextValue(this.data.formValues, selection.field, selection.value)
+      const schema = readFormSchema(this.properties.schema)
+      const fields = schema.fields ?? []
 
       this.setData({
         formValues: nextValues,
@@ -251,17 +351,14 @@ Component({
         return
       }
 
-      const dataset = e.currentTarget.dataset as { field?: string }
-      const field = dataset.field || ''
+      const field = readFieldName(e.currentTarget.dataset)
       if (!field) {
         return
       }
 
-      const nextValues: FormValues = {
-        ...this.data.formValues,
-        [field]: e.detail.value,
-      }
-      const fields = normalizeFields((this.properties.schema as FormSchema).fields)
+      const nextValues = writeFormTextValue(this.data.formValues, field, e.detail.value)
+      const schema = readFormSchema(this.properties.schema)
+      const fields = schema.fields ?? []
 
       this.setData({
         formValues: nextValues,
@@ -274,8 +371,8 @@ Component({
         return
       }
 
-      const schema = this.properties.schema as FormSchema
-      const fields = normalizeFields(schema.fields)
+      const schema = readFormSchema(this.properties.schema)
+      const fields = schema.fields ?? []
       const values = this.data.formValues
       const missingField = validateRequired(fields, values)
       if (missingField) {

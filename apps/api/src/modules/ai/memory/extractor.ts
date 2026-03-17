@@ -6,7 +6,8 @@
 
 import { runObject } from '../models/runtime';
 import { t } from 'elysia';
-import { getDefaultChatModel } from '../models/router';
+import { jsonSchema } from 'ai';
+import { resolveChatModelSelection } from '../models/router';
 import { toJsonSchema } from '@juchang/utils';
 import { createLogger } from '../observability/logger';
 
@@ -89,9 +90,11 @@ export async function extractPreferencesWithLLM(
   }
 
   try {
+    const { model } = await resolveChatModelSelection({ intent: 'chat' });
+
     const result = await runObject<PreferenceExtraction>({
-      model: getDefaultChatModel(),
-      schema: toJsonSchema(PreferenceExtractionSchema) as any,
+      model,
+      schema: jsonSchema<PreferenceExtraction>(toJsonSchema(PreferenceExtractionSchema)),
       prompt: `分析以下用户对话，提取用户的偏好信息。
 
 用户对话：
@@ -110,7 +113,7 @@ ${userMessages}
       temperature: 0,
     });
 
-    const extraction = result.object as PreferenceExtraction;
+    const extraction = result.object;
 
     logger.debug('Preferences extracted', {
       preferencesCount: extraction.preferences.length,

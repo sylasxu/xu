@@ -6,12 +6,11 @@ import { selectGlobalKeywordSchema } from '@juchang/db';
  * Hot Keywords Model Plugin (v4.8 Digital Ascension)
  * 
  * 接口：
- * - GET /hot-keywords - 小程序获取热词列表
- * - GET /hot-keywords/admin - Admin 获取所有热词
- * - POST /hot-keywords/admin - Admin 创建热词
- * - PATCH /hot-keywords/admin/:id - Admin 更新热词
- * - DELETE /hot-keywords/admin/:id - Admin 删除热词
- * - GET /hot-keywords/admin/analytics - Admin 获取分析数据
+ * - GET /hot-keywords - 获取热词列表（默认简版；detail=true 时返回完整字段）
+ * - POST /hot-keywords - 创建热词（需要管理员权限）
+ * - PATCH /hot-keywords/:id - 更新热词（需要管理员权限）
+ * - DELETE /hot-keywords/:id - 删除热词（需要管理员权限）
+ * - GET /hot-keywords/analytics - 获取热词分析数据（需要管理员权限）
  */
 
 // ==========================================
@@ -51,6 +50,23 @@ const HotKeywordListItem = t.Pick(selectGlobalKeywordSchema, [
   'responseType',
   'priority',
   'hitCount',
+]);
+
+const HotKeywordListEntry = t.Composite([
+  HotKeywordListItem,
+  t.Partial(
+    t.Pick(GlobalKeywordResponse, [
+      'matchType',
+      'responseContent',
+      'validFrom',
+      'validUntil',
+      'isActive',
+      'conversionCount',
+      'createdBy',
+      'createdAt',
+      'updatedAt',
+    ])
+  ),
 ]);
 
 // ==========================================
@@ -94,7 +110,7 @@ const UpdateGlobalKeywordRequest = t.Partial(
 // 查询参数 Schema（通用辅助类型，允许手动定义）
 // ==========================================
 
-// 热词列表查询参数（小程序使用）
+// 热词列表查询参数
 const HotKeywordsQuery = t.Object({
   limit: t.Optional(t.Number({ minimum: 1, maximum: 10, default: 5, description: '返回数量' })),
   lat: t.Optional(t.Number({ description: '纬度（可选）' })),
@@ -105,10 +121,7 @@ const HotKeywordsQuery = t.Object({
     t.Literal('evening'),
     t.Literal('night'),
   ], { description: '时间范围过滤' })),
-});
-
-// Admin 热词列表查询参数
-const AdminHotKeywordsQuery = t.Object({
+  detail: t.Optional(t.Boolean({ description: '是否返回完整管理字段（需要管理员权限）' })),
   isActive: t.Optional(t.Boolean({ description: '状态筛选' })),
   matchType: t.Optional(t.Union([
     t.Literal('exact'),
@@ -139,13 +152,7 @@ const KeywordAnalyticsQuery = t.Object({
 
 // 热词列表响应
 const HotKeywordsResponse = t.Object({
-  items: t.Array(HotKeywordListItem),
-  total: t.Number(),
-});
-
-// Admin 热词列表响应
-const AdminHotKeywordsResponse = t.Object({
-  items: t.Array(GlobalKeywordResponse),
+  items: t.Array(HotKeywordListEntry),
   total: t.Number(),
 });
 
@@ -167,7 +174,7 @@ const DeleteKeywordResponse = t.Object({
   msg: t.String(),
 });
 
-// 热词分析项（Admin 特有类型，允许手动定义）
+// 热词分析项（运营分析辅助类型）
 const KeywordAnalyticsItem = t.Object({
   keyword: t.String(),
   hitCount: t.Number(),
@@ -212,8 +219,8 @@ export const hotKeywordsModel = new Elysia({ name: 'hotKeywordsModel' })
     // 响应 Schema
     'hotKeywords.keywordResponse': GlobalKeywordResponse,
     'hotKeywords.listItem': HotKeywordListItem,
+    'hotKeywords.listEntry': HotKeywordListEntry,
     'hotKeywords.listResponse': HotKeywordsResponse,
-    'hotKeywords.adminListResponse': AdminHotKeywordsResponse,
     'hotKeywords.createResponse': CreateKeywordResponse,
     'hotKeywords.updateResponse': UpdateKeywordResponse,
     'hotKeywords.deleteResponse': DeleteKeywordResponse,
@@ -226,7 +233,6 @@ export const hotKeywordsModel = new Elysia({ name: 'hotKeywordsModel' })
     
     // 查询参数 Schema
     'hotKeywords.query': HotKeywordsQuery,
-    'hotKeywords.adminQuery': AdminHotKeywordsQuery,
     'hotKeywords.analyticsQuery': KeywordAnalyticsQuery,
     
     // 路径参数
@@ -242,13 +248,12 @@ export const hotKeywordsModel = new Elysia({ name: 'hotKeywordsModel' })
 
 export type GlobalKeywordResponse = Static<typeof GlobalKeywordResponse>;
 export type HotKeywordListItem = Static<typeof HotKeywordListItem>;
+export type HotKeywordListEntry = Static<typeof HotKeywordListEntry>;
 export type CreateGlobalKeywordRequest = Static<typeof CreateGlobalKeywordRequest>;
 export type UpdateGlobalKeywordRequest = Static<typeof UpdateGlobalKeywordRequest>;
 export type HotKeywordsQuery = Static<typeof HotKeywordsQuery>;
-export type AdminHotKeywordsQuery = Static<typeof AdminHotKeywordsQuery>;
 export type KeywordAnalyticsQuery = Static<typeof KeywordAnalyticsQuery>;
 export type HotKeywordsResponse = Static<typeof HotKeywordsResponse>;
-export type AdminHotKeywordsResponse = Static<typeof AdminHotKeywordsResponse>;
 export type CreateKeywordResponse = Static<typeof CreateKeywordResponse>;
 export type UpdateKeywordResponse = Static<typeof UpdateKeywordResponse>;
 export type DeleteKeywordResponse = Static<typeof DeleteKeywordResponse>;

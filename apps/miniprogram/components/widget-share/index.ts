@@ -26,6 +26,86 @@ interface ActivityData {
   shareTitle?: string; // AI 生成的骚气标题
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function readNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function readLocation(value: unknown): [number, number] | null {
+  if (!Array.isArray(value) || value.length < 2) {
+    return null;
+  }
+
+  const lng = readNumber(value[0]);
+  const lat = readNumber(value[1]);
+  if (lng === null || lat === null) {
+    return null;
+  }
+
+  return [lng, lat];
+}
+
+function readActivityData(value: unknown): ActivityData | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const id = readString(value.id);
+  const title = readString(value.title);
+  const type = readString(value.type);
+  const startAt = readString(value.startAt);
+  const location = readLocation(value.location);
+  const locationName = readString(value.locationName);
+  const maxParticipants = readNumber(value.maxParticipants);
+
+  if (!id || !title || !type || !startAt || !location || !locationName || maxParticipants === null) {
+    return null;
+  }
+
+  const activity: ActivityData = {
+    id,
+    title,
+    type,
+    startAt,
+    location,
+    locationName,
+    maxParticipants,
+  };
+
+  const locationHint = readString(value.locationHint);
+  const shareTitle = readString(value.shareTitle);
+  const currentParticipants = readNumber(value.currentParticipants);
+
+  if (locationHint) {
+    activity.locationHint = locationHint;
+  }
+  if (shareTitle) {
+    activity.shareTitle = shareTitle;
+  }
+  if (currentParticipants !== null) {
+    activity.currentParticipants = currentParticipants;
+  }
+
+  return activity;
+}
+
+const EMPTY_ACTIVITY: ActivityData = {
+  id: '',
+  title: '',
+  type: '',
+  startAt: '',
+  location: [0, 0],
+  locationName: '',
+  maxParticipants: 0,
+};
+
 Component({
   options: {
     styleIsolation: 'apply-shared',
@@ -35,7 +115,7 @@ Component({
     // 活动数据
     activity: {
       type: Object,
-      value: {} as ActivityData,
+      value: EMPTY_ACTIVITY,
     },
   },
 
@@ -54,18 +134,19 @@ Component({
   },
 
   observers: {
-    'activity': function(activity: ActivityData) {
-      if (!activity || !activity.id) return;
+    'activity': function(activity: unknown) {
+      const resolvedActivity = readActivityData(activity);
+      if (!resolvedActivity) return;
       
       // 格式化时间
-      const formattedTime = this.formatTime(activity.startAt);
+      const formattedTime = this.formatTime(resolvedActivity.startAt);
       
       // 生成骚气分享标题 - Requirements: 13.2
-      const shareTitle = this.generateShareTitle(activity);
+      const shareTitle = this.generateShareTitle(resolvedActivity);
       
       // 参与人数
-      const current = activity.currentParticipants || 1;
-      const max = activity.maxParticipants;
+      const current = resolvedActivity.currentParticipants || 1;
+      const max = resolvedActivity.maxParticipants;
       const remaining = max - current;
       const participantsText = remaining > 0 
         ? `还差 ${remaining} 人` 
@@ -151,8 +232,8 @@ Component({
      * 点击位置卡片 - 打开原生地图导航
      */
     onLocationTap() {
-      const activity = this.properties.activity as ActivityData;
-      if (!activity?.location) return;
+      const activity = readActivityData(this.properties.activity);
+      if (!activity) return;
       
       const [lng, lat] = activity.location;
       
@@ -173,8 +254,8 @@ Component({
      * 这里只需要触发事件通知父组件
      */
     onShareTap() {
-      const activity = this.properties.activity as ActivityData;
-      if (!activity || !activity.id) return;
+      const activity = readActivityData(this.properties.activity);
+      if (!activity) return;
       
       // 触感反馈
       wx.vibrateShort({ type: 'light' });
@@ -191,8 +272,8 @@ Component({
      * Requirements: 7.5, 7.6
      */
     onViewDetail() {
-      const activity = this.properties.activity as ActivityData;
-      if (!activity || !activity.id) return;
+      const activity = readActivityData(this.properties.activity);
+      if (!activity) return;
       
       // 触感反馈
       wx.vibrateShort({ type: 'light' });

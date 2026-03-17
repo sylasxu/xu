@@ -1,12 +1,12 @@
 import { Zap } from 'lucide-react'
 import { getRouteApi } from '@tanstack/react-router'
-import { ListPage, DataTable, ListProvider } from '@/components/list-page'
+import { ListPage, DataTable } from '@/components/list-page'
 import { useHotKeywordsList } from '../hooks/use-hot-keywords'
-import { type GlobalKeyword } from '../data/schema'
-import { hotKeywordsColumns, type HotKeywordDialogType } from './hot-keywords-columns'
+import { hotKeywordsColumns } from './hot-keywords-columns'
 import { HotKeywordsDialogs } from './hot-keywords-dialogs'
 import { HotKeywordsPrimaryButtons } from './hot-keywords-primary-buttons'
 import { HotKeywordsBulkActions } from './hot-keywords-bulk-actions'
+import { HotKeywordsListProvider } from './list-context'
 
 const route = getRouteApi('/_authenticated/hot-keywords/')
 
@@ -30,7 +30,7 @@ export function HotKeywordsList() {
   const total = data?.total ?? 0
 
   return (
-    <ListProvider<GlobalKeyword, HotKeywordDialogType>>
+    <HotKeywordsListProvider>
       <ListPage
         title='全局关键词管理'
         description='管理热词库，配置关键词匹配规则和响应内容'
@@ -53,6 +53,6 @@ export function HotKeywordsList() {
           bulkActions={(table) => <HotKeywordsBulkActions table={table} />}
         />
       </ListPage>
-    </ListProvider>
+    </HotKeywordsListProvider>
   )
 }

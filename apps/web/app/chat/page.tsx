@@ -45,7 +45,7 @@ import type {
   GenUIFormBlock,
   GenUIInput,
   GenUIListBlock,
-  GenUIStreamEvent,
+  GenUIRequestContext,
   GenUITextBlock,
   GenUITurnEnvelope,
 } from "@/src/gen/genui-contract";
@@ -77,6 +77,7 @@ const DEFAULT_PROFILE_HINTS = {
 const COMPOSER_EXPAND_THRESHOLD = 10;
 
 type ComposerStatus = "ready" | "submitted";
+type TurnContextOverrides = Pick<GenUIRequestContext, "activityId" | "followUpMode" | "entry">;
 
 type ChatRecord =
   | {
@@ -198,6 +199,104 @@ function createEmptyEnvelope(params: {
       blocks: [],
     },
   };
+}
+
+function isGenUIAlertLevel(value: unknown): value is GenUIAlertBlock["level"] {
+  return value === "info" || value === "warning" || value === "error" || value === "success";
+}
+
+function isGenUITurnStatus(value: unknown): value is GenUITurnEnvelope["turn"]["status"] {
+  return value === "streaming" || value === "completed" || value === "error";
+}
+
+function isGenUIChoiceOption(value: unknown): value is GenUIChoiceOption {
+  return (
+    isRecord(value) &&
+    typeof value.label === "string" &&
+    typeof value.action === "string" &&
+    (value.params === undefined || isRecord(value.params))
+  );
+}
+
+function isGenUICtaItem(value: unknown): value is GenUICtaItem {
+  return (
+    isRecord(value) &&
+    typeof value.label === "string" &&
+    typeof value.action === "string" &&
+    (value.params === undefined || isRecord(value.params))
+  );
+}
+
+function isGenUIBlock(value: unknown): value is GenUIBlock {
+  if (!isRecord(value) || typeof value.blockId !== "string") {
+    return false;
+  }
+
+  if (value.dedupeKey !== undefined && typeof value.dedupeKey !== "string") {
+    return false;
+  }
+
+  if (
+    value.replacePolicy !== undefined &&
+    value.replacePolicy !== "append" &&
+    value.replacePolicy !== "replace" &&
+    value.replacePolicy !== "ignore-if-exists"
+  ) {
+    return false;
+  }
+
+  if (value.meta !== undefined && !isRecord(value.meta)) {
+    return false;
+  }
+
+  switch (value.type) {
+    case "text":
+      return typeof value.content === "string";
+    case "choice":
+      return typeof value.question === "string" && Array.isArray(value.options) && value.options.every(isGenUIChoiceOption);
+    case "entity-card":
+      return typeof value.title === "string" && isRecord(value.fields);
+    case "list":
+      return (
+        (value.title === undefined || typeof value.title === "string") &&
+        Array.isArray(value.items) &&
+        value.items.every(isRecord)
+      );
+    case "form":
+      return (
+        (value.title === undefined || typeof value.title === "string") &&
+        isRecord(value.schema) &&
+        (value.initialValues === undefined || isRecord(value.initialValues))
+      );
+    case "cta-group":
+      return Array.isArray(value.items) && value.items.every(isGenUICtaItem);
+    case "alert":
+      return isGenUIAlertLevel(value.level) && typeof value.message === "string";
+    default:
+      return false;
+  }
+}
+
+function isGenUITextBlock(block: GenUIBlock): block is GenUITextBlock {
+  return block.type === "text";
+}
+
+function isGenUITurnEnvelope(value: unknown): value is GenUITurnEnvelope {
+  if (!isRecord(value) || typeof value.traceId !== "string" || typeof value.conversationId !== "string") {
+    return false;
+  }
+
+  if (!isRecord(value.turn)) {
+    return false;
+  }
+
+  return (
+    typeof value.turn.turnId === "string" &&
+    value.turn.role === "assistant" &&
+    isGenUITurnStatus(value.turn.status) &&
+    Array.isArray(value.turn.blocks) &&
+    value.turn.blocks.every(isGenUIBlock)
+  );
 }
 
 function extractWelcomePrompts(payload: unknown): string[] {
@@ -529,7 +628,11 @@ export default function ChatPage() {
   }, [clientLocation]);
 
   const sendTurn = useCallback(
-    async (nextInput: GenUIInput, userDisplayText: string) => {
+    async (
+      nextInput: GenUIInput,
+      userDisplayText: string,
+      contextOverrides?: TurnContextOverrides
+    ) => {
       if (isSending) {
         return;
       }
@@ -553,7 +656,9 @@ export default function ChatPage() {
       setStatus("submitted");
 
       try {
-        let currentEnvelope: GenUITurnEnvelope | null = null;
+        const streamState: { envelope: GenUITurnEnvelope | null } = {
+          envelope: null,
+        };
 
         const patchAssistantMessage = (
           updater: (message: AssistantRecord) => AssistantRecord
@@ -569,7 +674,7 @@ export default function ChatPage() {
         };
 
         const applyEnvelope = (nextEnvelope: GenUITurnEnvelope, pending = true) => {
-          currentEnvelope = nextEnvelope;
+          streamState.envelope = nextEnvelope;
           patchAssistantMessage(() => ({
             id: assistantMessageId,
             role: "assistant",
@@ -579,8 +684,8 @@ export default function ChatPage() {
         };
 
         const ensureEnvelope = () => {
-          if (currentEnvelope) {
-            return currentEnvelope;
+          if (streamState.envelope) {
+            return streamState.envelope;
           }
 
           const fallbackConversationId = conversationId ?? randomId("conv");
@@ -671,6 +776,7 @@ export default function ChatPage() {
                     lng: clientLocation.lng,
                   }
                 : {}),
+              ...(contextOverrides || {}),
             },
             stream: true,
           }),
@@ -711,7 +817,7 @@ export default function ChatPage() {
 
             let payload: unknown = parsed.dataText;
             try {
-              payload = JSON.parse(parsed.dataText) as GenUIStreamEvent;
+              payload = JSON.parse(parsed.dataText);
             } catch {
               payload = { raw: parsed.dataText };
             }
@@ -750,13 +856,13 @@ export default function ChatPage() {
               (eventName === "block-append" || eventName === "block-replace") &&
               isRecord(payload) &&
               isRecord(payload.data) &&
-              isRecord(payload.data.block)
+              isGenUIBlock(payload.data.block)
             ) {
-              const block = payload.data.block as unknown as GenUIBlock;
+              const block = payload.data.block;
               const mode = eventName === "block-replace" ? "replace" : "append";
 
-              if (block.type === "text") {
-                await typewriteTextBlock(block as GenUITextBlock, mode);
+              if (isGenUITextBlock(block)) {
+                await typewriteTextBlock(block, mode);
               } else {
                 applyBlock(block, mode);
               }
@@ -784,8 +890,8 @@ export default function ChatPage() {
               }
             }
 
-            if (eventName === "turn-complete" && isRecord(payload) && isRecord(payload.data)) {
-              const completeEnvelope = payload.data as unknown as GenUITurnEnvelope;
+            if (eventName === "turn-complete" && isRecord(payload) && isGenUITurnEnvelope(payload.data)) {
+              const completeEnvelope = payload.data;
               sawTurnComplete = true;
               setConversationId(completeEnvelope.conversationId);
               applyEnvelope(completeEnvelope, false);
@@ -803,13 +909,13 @@ export default function ChatPage() {
           }
         }
 
-        if (!sawTurnComplete && currentEnvelope) {
-          const envelope = currentEnvelope as GenUITurnEnvelope;
+        const incompleteEnvelope = !sawTurnComplete ? streamState.envelope : null;
+        if (incompleteEnvelope) {
           const completedEnvelope: GenUITurnEnvelope = {
-            traceId: envelope.traceId,
-            conversationId: envelope.conversationId,
+            traceId: incompleteEnvelope.traceId,
+            conversationId: incompleteEnvelope.conversationId,
             turn: {
-              ...envelope.turn,
+              ...incompleteEnvelope.turn,
               status: "completed",
             },
           };
@@ -991,13 +1097,14 @@ export default function ChatPage() {
             <MessageCenterDrawer
               disabled={isSending}
               isDarkMode={isDarkMode}
-              onSendPrompt={async (prompt, displayText) => {
+              onSendPrompt={async (prompt, displayText, contextOverrides) => {
                 await sendTurn(
                   {
                     type: "text",
                     text: prompt,
                   },
-                  displayText || prompt
+                  displayText || prompt,
+                  contextOverrides
                 );
               }}
             />

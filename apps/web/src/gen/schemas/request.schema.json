@@ -45,9 +45,34 @@
         "timezone": { "type": "string" },
         "platformVersion": { "type": "string" },
         "lat": { "type": "number" },
-        "lng": { "type": "number" }
+        "lng": { "type": "number" },
+        "activityId": { "type": "string", "minLength": 1 },
+        "followUpMode": {
+          "type": "string",
+          "enum": ["review", "rebook", "kickoff"]
+        },
+        "entry": { "type": "string" }
       },
       "additionalProperties": true
+    },
+    "ai": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "maxTokens": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

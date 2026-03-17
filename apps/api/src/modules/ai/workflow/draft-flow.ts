@@ -45,6 +45,31 @@ export interface DraftConfirmInput {
   modifications?: DraftModifyInput[];
 }
 
+function readDraftFieldValue(data: DraftFlowData, field: string): unknown {
+  switch (field) {
+    case 'activityId':
+      return data.activityId;
+    case 'title':
+      return data.title;
+    case 'type':
+      return data.type;
+    case 'locationName':
+      return data.locationName;
+    case 'locationHint':
+      return data.locationHint;
+    case 'startAt':
+      return data.startAt;
+    case 'maxParticipants':
+      return data.maxParticipants;
+    case 'modifications':
+      return data.modifications;
+    case 'published':
+      return data.published;
+    default:
+      return undefined;
+  }
+}
+
 /**
  * 草稿流程步骤
  */
@@ -68,7 +93,7 @@ const draftSteps: WorkflowStep[] = [
         for (const mod of input.modifications) {
           modifications.push({
             field: mod.field,
-            oldValue: (state.data as any)[mod.field],
+            oldValue: readDraftFieldValue(state.data, mod.field),
             newValue: mod.value,
             timestamp: new Date(),
           });

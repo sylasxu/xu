@@ -20,17 +20,15 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
-import { useListContext } from '@/components/list-page'
 import { useUpdateUser } from '@/hooks/use-users'
-import { type User } from '../data/schema'
-import { type UserDialogType } from './users-columns'
+import { useUsersListContext } from '../list-context'
 
 // 从 Eden Treaty 推导用户更新的 body 类型
 type UpdateUserBody = NonNullable<Parameters<ReturnType<typeof api.users>['put']>[0]>
 type UserForm = Pick<UpdateUserBody, 'nickname' | 'avatarUrl'>
 
 export function UsersMutateDrawer() {
-  const { open, setOpen, currentRow } = useListContext<User, UserDialogType>()
+  const { open, setOpen, currentRow } = useUsersListContext()
   const isOpen = open === 'update'
   const updateMutation = useUpdateUser()
 

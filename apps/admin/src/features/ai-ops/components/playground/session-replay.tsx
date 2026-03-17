@@ -12,13 +12,72 @@ import { Button } from '@/components/ui/button'
 import { Loader2, Play, Pause, SkipForward, RotateCcw } from 'lucide-react'
 import { api, unwrap } from '@/lib/eden'
 
-interface ConversationMessage {
+interface ReplayConversation {
   id: string
-  role: 'user' | 'assistant'
-  content: string
-  messageType: string
+  title: string | null
+  messageCount: number
+}
+
+interface ReplayMessage {
+  id: string
+  role: string
   createdAt: string
   activityId?: string | null
+  content: unknown
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function readConversation(value: unknown): ReplayConversation | null {
+  if (!isRecord(value) || typeof value.id !== 'string') {
+    return null
+  }
+
+  return {
+    id: value.id,
+    title: typeof value.title === 'string' ? value.title : null,
+    messageCount: typeof value.messageCount === 'number' ? value.messageCount : 0,
+  }
+}
+
+function readReplayMessage(value: unknown): ReplayMessage | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  const id = typeof value.id === 'string' ? value.id : null
+  const role = typeof value.role === 'string' ? value.role : null
+  const createdAt = typeof value.createdAt === 'string' ? value.createdAt : null
+
+  if (!id || !role || !createdAt) {
+    return null
+  }
+
+  return {
+    id,
+    role,
+    createdAt,
+    activityId: typeof value.activityId === 'string' ? value.activityId : null,
+    content: value.content,
+  }
+}
+
+function formatMessageContent(content: unknown): string {
+  if (typeof content === 'string') {
+    return content
+  }
+
+  if (content == null) {
+    return ''
+  }
+
+  try {
+    return JSON.stringify(content, null, 2)
+  } catch {
+    return String(content)
+  }
 }
 
 export function SessionReplay() {
@@ -29,22 +88,32 @@ export function SessionReplay() {
   // 获取会话列表
   const { data: conversations, isLoading: loadingConversations } = useQuery({
     queryKey: ['conversations-replay'],
-    queryFn: () => unwrap(api.ai.conversations.get({ query: { limit: 20 } })).catch(() => []),
+    queryFn: async () => {
+      const result = await unwrap(api.ai.sessions.get({ query: { page: 1, limit: 20 } })).catch(() => null)
+      return Array.isArray(result?.items)
+        ? result.items
+            .map((item) => readConversation(item))
+            .filter((item): item is ReplayConversation => item !== null)
+        : []
+    },
   })
 
   // 获取选中会话的消息
   const { data: messages, isLoading: loadingMessages } = useQuery({
     queryKey: ['conversation-messages', selectedConversationId],
-    queryFn: () => {
+    queryFn: async () => {
       if (!selectedConversationId) return []
-      return unwrap(
-        (api.ai.conversations as any)({ conversationId: selectedConversationId }).messages.get()
-      ).catch(() => [])
+      const result = await unwrap(api.ai.sessions({ id: selectedConversationId }).get()).catch(() => null)
+      return Array.isArray(result?.messages)
+        ? result.messages
+            .map((item) => readReplayMessage(item))
+            .filter((item): item is ReplayMessage => item !== null)
+        : []
     },
     enabled: !!selectedConversationId,
   })
 
-  const messageList = (Array.isArray(messages) ? messages : []) as ConversationMessage[]
+  const messageList = Array.isArray(messages) ? messages : []
   const visibleMessages = messageList.slice(0, replayIndex + 1)
 
   const handlePlay = () => {
@@ -79,7 +148,7 @@ export function SessionReplay() {
         <span className="text-xs text-muted-foreground">选择会话</span>
         {loadingConversations && <Loader2 className="h-4 w-4 animate-spin" />}
         <div className="max-h-32 overflow-y-auto space-y-1">
-          {Array.isArray(conversations) && conversations.map((conv: any) => (
+          {Array.isArray(conversations) && conversations.map((conv) => (
             <div
               key={conv.id}
               className={`rounded-md border p-2 cursor-pointer text-xs transition-colors ${selectedConversationId === conv.id ? 'border-primary bg-primary/5' : 'hover:bg-muted/30'}`}
@@ -136,7 +205,7 @@ export function SessionReplay() {
                       <Badge variant="secondary" className="text-[10px]">活动关联</Badge>
                     )}
                   </div>
-                  <p className="text-xs whitespace-pre-wrap line-clamp-4">{msg.content}</p>
+                  <p className="text-xs whitespace-pre-wrap line-clamp-4">{formatMessageContent(msg.content)}</p>
                 </div>
               ))}
             </div>

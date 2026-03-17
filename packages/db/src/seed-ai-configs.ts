@@ -50,6 +50,13 @@ const welcomeUiConfig = {
   },
 };
 
+const modelIntentMapConfig = {
+  chat: 'qwen-plus',
+  reasoning: 'qwen-plus',
+  agent: 'qwen3-max',
+  vision: 'qwen-vl-max',
+};
+
 const aiConfigSeeds = [
   {
     configKey: 'prompts.system_template',
@@ -68,6 +75,12 @@ const aiConfigSeeds = [
     configValue: welcomeUiConfig,
     category: 'welcome',
     description: 'Welcome UI 下发配置（快捷入口、底部按钮、画像提示文案）',
+  },
+  {
+    configKey: 'model.intent_map',
+    configValue: modelIntentMapConfig,
+    category: 'model',
+    description: 'AI 主链路意图到模型的映射配置（Chat/Reasoning/Agent/Vision）',
   },
 ];
 

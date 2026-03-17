@@ -1,11 +1,9 @@
-import { useListContext } from '@/components/list-page'
 import { ConfirmDialog } from '@/components/confirm-dialog'
-import { type GlobalKeyword } from '../data/schema'
-import { type HotKeywordDialogType } from './hot-keywords-columns'
 import { useDeleteHotKeyword } from '../hooks/use-hot-keywords'
+import { useHotKeywordsListContext } from './list-context'
 
 export function HotKeywordDeleteDialog() {
-  const { currentRow, setOpen } = useListContext<GlobalKeyword, HotKeywordDialogType>()
+  const { currentRow, setOpen } = useHotKeywordsListContext()
   const deleteMutation = useDeleteHotKeyword()
 
   if (!currentRow) return null

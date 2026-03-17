@@ -13,19 +13,9 @@ import { fetchWidgetData } from '../../src/utils/widget-fetcher'
 import { executeWidgetAction } from '../../src/utils/widget-actions'
 import type { ActionState } from '../../src/utils/widget-actions'
 import { handleJoinSuccess } from '../../src/utils/join-flow'
+import type { ActivityDetailResponse } from '../../src/api/model'
 
-interface ActivityDetail {
-  id: string;
-  title: string;
-  description?: string;
-  startAt: string;
-  locationName: string;
-  locationHint?: string;
-  currentParticipants?: number;
-  maxParticipants?: number;
-  type?: string;
-  status?: string;
-}
+type ActivityDetail = ActivityDetailResponse;
 
 interface ComponentData {
   activity: ActivityDetail | null;
@@ -74,7 +64,7 @@ Component({
       }
 
       this.setData({
-        activity: result.data as ActivityDetail,
+        activity: result.data,
         loading: false,
       })
     },

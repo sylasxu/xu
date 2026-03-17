@@ -13,7 +13,12 @@ import { useHomeStore } from '../../src/stores/home'
 import { useAppStore } from '../../src/stores/app'
 import { useUserStore } from '../../src/stores/user'
 import { getWelcomeCard, getUserLocation, type WelcomeResponse, type QuickItem } from '../../src/services/welcome'
-import type { ShareActivityData, SendEventDetail } from '../../src/types/global'
+import type {
+  ActivityData,
+  ActivityStatus,
+  ActivityType,
+  ShareActivityData,
+} from '../../src/types/global'
 import { getHotKeywords } from '../../src/api/endpoints/hot-keywords/hot-keywords'
 import type { HotKeywordsListResponseItemsItem } from '../../src/api/model'
 import { submitJoinAndOpenDiscussion, type JoinFlowPayload } from '../../src/utils/join-flow'
@@ -47,6 +52,178 @@ interface HomePageOptions {
   prefill?: string;
 }
 
+interface AiDockComponent {
+  setValue: (value: string) => void;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function readNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function readAiDockComponent(value: unknown): AiDockComponent | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const setValue = value.setValue;
+  if (typeof setValue !== 'function') {
+    return null;
+  }
+
+  return {
+    setValue: (nextValue: string) => {
+      setValue.call(value, nextValue);
+    },
+  };
+}
+
+function readActivityType(value: unknown): ActivityType | null {
+  switch (value) {
+    case 'food':
+    case 'entertainment':
+    case 'sports':
+    case 'boardgame':
+    case 'other':
+      return value;
+    default:
+      return null;
+  }
+}
+
+function readActivityStatus(value: unknown): ActivityStatus | null {
+  switch (value) {
+    case 'draft':
+    case 'active':
+    case 'completed':
+    case 'cancelled':
+      return value;
+    default:
+      return null;
+  }
+}
+
+function readJoinFlowPayload(value: unknown): JoinFlowPayload | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const activityId = readString(value.activityId);
+  if (!activityId) {
+    return null;
+  }
+
+  const payload: JoinFlowPayload = { activityId };
+  const title = readString(value.title);
+  const startAt = readString(value.startAt);
+  const locationName = readString(value.locationName);
+  const source = readString(value.source);
+
+  if (title) {
+    payload.title = title;
+  }
+  if (startAt) {
+    payload.startAt = startAt;
+  }
+  if (locationName) {
+    payload.locationName = locationName;
+  }
+  if (
+    source === 'activity_detail' ||
+    source === 'half_screen_detail' ||
+    source === 'activity_explore' ||
+    source === 'widget_explore' ||
+    source === 'auth_sheet'
+  ) {
+    payload.source = source;
+  }
+
+  return payload;
+}
+
+function readLocationPair(value: unknown): [number, number] | null {
+  if (!Array.isArray(value) || value.length < 2) {
+    return null;
+  }
+
+  const lng = readNumber(value[0]);
+  const lat = readNumber(value[1]);
+  if (lng === null || lat === null) {
+    return null;
+  }
+
+  return [lng, lat];
+}
+
+function readShareActivityData(value: unknown): ActivityData | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const id = readString(value.id);
+  const creatorId = readString(value.creatorId);
+  const title = readString(value.title);
+  const locationName = readString(value.locationName);
+  const locationHint = readString(value.locationHint);
+  const startAt = readString(value.startAt);
+  const type = readString(value.type);
+  const status = readString(value.status);
+  const createdAt = readString(value.createdAt);
+  const updatedAt = readString(value.updatedAt);
+  const maxParticipants = readNumber(value.maxParticipants);
+  const currentParticipants = readNumber(value.currentParticipants);
+  const location = readLocationPair(value.location);
+
+  if (
+    !id ||
+    !creatorId ||
+    !title ||
+    !location ||
+    !locationName ||
+    !locationHint ||
+    !startAt ||
+    !type ||
+    !status ||
+    !createdAt ||
+    !updatedAt ||
+    maxParticipants === null ||
+    currentParticipants === null
+  ) {
+    return null;
+  }
+
+  return {
+    id,
+    creatorId,
+    title,
+    description: readString(value.description) ?? undefined,
+    location,
+    locationName,
+    address: readString(value.address) ?? undefined,
+    locationHint,
+    startAt,
+    type: readActivityType(type) || 'other',
+    maxParticipants,
+    currentParticipants,
+    status: readActivityStatus(status) || 'active',
+    createdAt,
+    updatedAt,
+    isArchived: typeof value.isArchived === 'boolean' ? value.isArchived : undefined,
+    creator: null,
+  };
+}
+
+const INITIAL_UNSUBSCRIBE: (() => void) | null = null;
+const INITIAL_USER_LOCATION: { lat: number; lng: number } | null = null;
+const INITIAL_SHARE_ACTIVITY_DATA: ShareActivityData | null = null;
+
 Page<PageData, WechatMiniprogram.Page.CustomOption>({
   data: {
     messages: [],
@@ -63,10 +240,10 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     hotKeywords: [],
   },
 
-  unsubscribeChat: null as (() => void) | null,
-  unsubscribeApp: null as (() => void) | null,
-  unsubscribeUser: null as (() => void) | null,
-  userLocation: null as { lat: number; lng: number } | null,
+  unsubscribeChat: INITIAL_UNSUBSCRIBE,
+  unsubscribeApp: INITIAL_UNSUBSCRIBE,
+  unsubscribeUser: INITIAL_UNSUBSCRIBE,
+  userLocation: INITIAL_USER_LOCATION,
 
   onLoad(options: HomePageOptions) {
     this.subscribeChatStore()
@@ -262,7 +439,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     
     // 同时清空服务端历史
     try {
-      await useHomeStore.getState().clearMessages()
+      await useHomeStore.getState().clearConversations()
     } catch (e) {
       console.error('[Home] Failed to clear server messages:', e)
     }
@@ -275,18 +452,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
    */
   onSend(e: WechatMiniprogram.CustomEvent<{ text: string }>) {
     const { text } = e.detail
-    if (!text?.trim()) return
-    
-    const chatStore = useChatStore.getState()
-    chatStore.sendMessage(text)
-  },
-
-  onParse(_e: WechatMiniprogram.CustomEvent<{ text: string }>) {
-    // 防抖已在 ai-dock 组件中处理
-  },
-
-  onPaste(_e: WechatMiniprogram.CustomEvent<{ text: string }>) {
-    // 粘贴后自动触发解析
+    this.sendPromptText(text)
   },
 
   onDashboardActivityTap(e: WechatMiniprogram.CustomEvent<{ id: string }>) {
@@ -296,11 +462,11 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
 
   onDashboardPromptTap(e: WechatMiniprogram.CustomEvent<{ prompt: string }>) {
     const { prompt } = e.detail
-    const aiDock = this.selectComponent('#aiDock') as unknown as { setValue?: (value: string) => void } | null
-    if (aiDock?.setValue) {
+    const aiDock = readAiDockComponent(this.selectComponent('#aiDock'))
+    if (aiDock) {
       aiDock.setValue(prompt)
     }
-    this.onSend({ detail: { text: prompt } } as WechatMiniprogram.CustomEvent<SendEventDetail>)
+    this.sendPromptText(prompt)
   },
 
   applyPrefillPrompt(prefill?: string) {
@@ -316,8 +482,8 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     if (!prompt) return
 
     wx.nextTick(() => {
-      const aiDock = this.selectComponent('#aiDock') as unknown as { setValue?: (value: string) => void } | null
-      if (aiDock?.setValue) {
+      const aiDock = readAiDockComponent(this.selectComponent('#aiDock'))
+      if (aiDock) {
         aiDock.setValue(prompt)
       }
     })
@@ -361,27 +527,37 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     return 'fri_20_00'
   },
 
-  buildPublishPayloadFromDraft(draft: any): Record<string, unknown> {
-    const location = Array.isArray(draft?.location) ? draft.location : [106.52988, 29.58567]
+  buildPublishPayloadFromDraft(draft: unknown): Record<string, unknown> {
+    const draftRecord = isRecord(draft) ? draft : null
+    const location = readLocationPair(draftRecord?.location) ?? [106.52988, 29.58567]
     const [lng, lat] = location
+    const title = readString(draftRecord?.title) || '周五活动局'
+    const type = readString(draftRecord?.type) || 'other'
+    const startAt = readString(draftRecord?.startAt) || '2026-03-06T20:00:00+08:00'
+    const locationName = readString(draftRecord?.locationName) || '观音桥'
+    const locationHint =
+      readString(draftRecord?.locationHint) || `${locationName}商圈`
+    const maxParticipants = readNumber(draftRecord?.maxParticipants) || 6
+    const currentParticipants = readNumber(draftRecord?.currentParticipants) || 1
+    const activityId = readString(draftRecord?.activityId) || ''
 
     return {
-      activityId: draft?.activityId || '',
-      title: draft?.title || '周五活动局',
-      type: draft?.type || 'other',
-      activityType: draft?.type || 'other',
-      startAt: draft?.startAt || '2026-03-06T20:00:00+08:00',
-      locationName: draft?.locationName || '观音桥',
-      locationHint: draft?.locationHint || `${draft?.locationName || '观音桥'}商圈`,
-      maxParticipants: draft?.maxParticipants || 6,
-      currentParticipants: draft?.currentParticipants || 1,
+      activityId,
+      title,
+      type,
+      activityType: type,
+      startAt,
+      locationName,
+      locationHint,
+      maxParticipants,
+      currentParticipants,
       lat: Number(lat) || 29.58567,
       lng: Number(lng) || 106.52988,
-      slot: this.resolveSlotFromStartAt(draft?.startAt || ''),
+      slot: this.resolveSlotFromStartAt(startAt),
     }
   },
 
-  onExploreExpandMap(_e: WechatMiniprogram.CustomEvent<{ results: any[]; center: any }>) {
+  onExploreExpandMap(_e: WechatMiniprogram.CustomEvent<{ results: unknown[]; center: unknown }>) {
     // 由 widget-explore 组件内部处理跳转
   },
 
@@ -389,11 +565,14 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     this.loadUserInfo()
   },
 
-  async onPendingAction(e: WechatMiniprogram.CustomEvent<{ type: string; payload: any }>) {
+  async onPendingAction(e: WechatMiniprogram.CustomEvent<{ type: string; payload?: unknown }>) {
     const { type, payload } = e.detail
 
-    if (type === 'join' && payload?.activityId) {
-      const joinPayload = payload as JoinFlowPayload
+    if (type === 'join') {
+      const joinPayload = readJoinFlowPayload(payload)
+      if (!joinPayload) {
+        return
+      }
       const title = typeof joinPayload.title === 'string' && joinPayload.title.trim()
         ? joinPayload.title.trim()
         : '活动'
@@ -424,7 +603,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
       return
     }
 
-    if (type !== 'publish' || !payload?.draft) {
+    if (type !== 'publish' || !isRecord(payload) || !('draft' in payload)) {
       return
     }
 
@@ -437,11 +616,16 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     })
   },
 
-  shareActivityData: null as ShareActivityData | null,
+  shareActivityData: INITIAL_SHARE_ACTIVITY_DATA,
 
-  onWidgetShareTap(e: WechatMiniprogram.CustomEvent<{ activity: any; shareTitle: string }>) {
+  onWidgetShareTap(e: WechatMiniprogram.CustomEvent<{ activity: unknown; shareTitle: string }>) {
     const { activity, shareTitle } = e.detail
-    this.shareActivityData = { ...activity, shareTitle }
+    const resolvedActivity = readShareActivityData(activity)
+    if (!resolvedActivity) {
+      return
+    }
+
+    this.shareActivityData = { ...resolvedActivity, shareTitle }
   },
 
   onShareAppMessage(): WechatMiniprogram.Page.ICustomShareContent {
@@ -473,7 +657,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
    */
   onWidgetErrorRetry(e: WechatMiniprogram.CustomEvent) {
     const originalText = e.currentTarget.dataset.originalText
-    if (originalText) {
+    if (typeof originalText === 'string' && originalText.trim()) {
       const chatStore = useChatStore.getState()
       chatStore.sendMessage(originalText)
     }
@@ -535,9 +719,13 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
    */
   onHotChipClick(e: WechatMiniprogram.CustomEvent<{ id: string; keyword: string }>) {
     const { keyword } = e.detail
-    
-    // 发送消息到 AI
+    this.sendPromptText(keyword)
+  },
+
+  sendPromptText(text: string) {
+    if (!text?.trim()) return
+
     const chatStore = useChatStore.getState()
-    chatStore.sendMessage(keyword)
+    chatStore.sendMessage(text)
   },
 })

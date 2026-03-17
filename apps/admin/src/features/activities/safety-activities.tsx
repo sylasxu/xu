@@ -5,13 +5,14 @@
  */
 import { Calendar } from 'lucide-react'
 import { getRouteApi } from '@tanstack/react-router'
-import { ListPage, DataTable, ListProvider } from '@/components/list-page'
+import { ListPage, DataTable } from '@/components/list-page'
 import { useActivities } from '@/hooks/use-activities'
 import { type Activity } from './data/schema'
-import { activitiesColumns, type ActivityDialogType } from './components/activities-columns'
+import { activitiesColumns } from './components/activities-columns'
 import { ActivitiesDialogs } from './components/activities-dialogs'
 import { ActivitiesPrimaryButtons } from './components/activities-primary-buttons'
 import { DataTableBulkActions } from './components/data-table-bulk-actions'
+import { ActivitiesListProvider } from './list-context'
 
 const route = getRouteApi('/_authenticated/safety/activities')
 
@@ -47,7 +48,7 @@ export function SafetyActivities() {
   const total = data?.total ?? 0
 
   return (
-    <ListProvider<Activity, ActivityDialogType>>
+    <ActivitiesListProvider>
       <ListPage
         title='活动管理'
         description='查水表专用 - 管理平台活动，处理违规内容'
@@ -93,6 +94,6 @@ export function SafetyActivities() {
           bulkActions={(table) => <DataTableBulkActions table={table} />}
         />
       </ListPage>
-    </ListProvider>
+    </ActivitiesListProvider>
   )
 }

@@ -40,6 +40,10 @@ export interface ActionResult {
   resultPayload?: ActionResultPayload;
 }
 
+function readString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
 /**
  * 执行 Widget 操作
  *
@@ -52,7 +56,14 @@ export async function executeWidgetAction(
 ): Promise<ActionResult> {
   try {
     if (actionType === 'join') {
-      const activityId = params.activityId as string
+      const activityId = readString(params.activityId)
+      if (!activityId) {
+        return { state: 'error', error: '活动 ID 无效', resultPayload: undefined }
+      }
+
+      const title = readString(params.title) || '活动'
+      const startAt = readString(params.startAt) || ''
+      const locationName = readString(params.locationName) || ''
       const joinResult = await requestJoinActivity(activityId)
 
       if (joinResult.success) {
@@ -61,11 +72,11 @@ export async function executeWidgetAction(
           error: null,
           resultPayload: {
             title: '报名成功',
-            summary: `你已成功报名「${(params.title as string) || '活动'}」，接下来去讨论区打个招呼吧`,
+            summary: `你已成功报名「${title}」，接下来去讨论区打个招呼吧`,
             details: [
-              { label: '活动', value: (params.title as string) || '' },
-              { label: '时间', value: (params.startAt as string) || '' },
-              { label: '地点', value: (params.locationName as string) || '' },
+              { label: '活动', value: title },
+              { label: '时间', value: startAt },
+              { label: '地点', value: locationName },
             ].filter(d => d.value),
             nextAction: {
               type: 'detail',

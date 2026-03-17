@@ -31,6 +31,7 @@ import type {
   GenUIFormBlock,
   GenUIInput,
   GenUIListBlock,
+  GenUIRequestContext,
   GenUITurnEnvelope,
 } from '../gen/genui-contract'
 
@@ -86,8 +87,10 @@ export type ChatStatus = 'idle' | 'submitted' | 'streaming'
 /** 当前流式消息的 ID */
 export type StreamingMessageId = string | null
 
+type ChatPromptContext = Pick<GenUIRequestContext, 'activityId' | 'followUpMode' | 'entry'>
+
 // ============================================================================
-// Helper Functions
+// Protocol and message operations
 // ============================================================================
 
 /** 生成唯一 ID */
@@ -96,7 +99,8 @@ const generateId = () => `msg_${Date.now()}_${Math.random().toString(36).slice(2
 /** 从 UIMessage 提取文本内容 */
 export function getTextContent(message: UIMessage): string {
   return message.parts
-    .filter((part): part is UIMessagePart & { type: 'text'; text: string } => part.type === 'text')
+    .filter((part): part is UIMessagePart & { type: 'text'; text?: string } => isTextPart(part))
+    .filter((part): part is UIMessagePart & { type: 'text'; text: string } => typeof part.text === 'string')
     .map(part => part.text)
     .join('')
 }
@@ -135,17 +139,114 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
+function isTextPart(part: UIMessagePart | WidgetPart): part is UIMessagePart & { type: 'text'; text?: string } {
+  return part.type === 'text'
+}
+
+function isGenUITurnStatus(value: unknown): value is GenUITurnEnvelope['turn']['status'] {
+  return value === 'streaming' || value === 'completed' || value === 'error'
+}
+
+function isGenUIChoiceOption(value: unknown): value is GenUIChoiceOption {
+  return (
+    isRecord(value) &&
+    typeof value.label === 'string' &&
+    typeof value.action === 'string' &&
+    (value.params === undefined || isRecord(value.params))
+  )
+}
+
+function isGenUICtaItem(value: unknown): value is GenUICtaGroupBlock['items'][number] {
+  return (
+    isRecord(value) &&
+    typeof value.label === 'string' &&
+    typeof value.action === 'string' &&
+    (value.params === undefined || isRecord(value.params))
+  )
+}
+
+function isGenUIBlock(value: unknown): value is GenUIBlock {
+  if (!isRecord(value) || typeof value.blockId !== 'string') {
+    return false
+  }
+
+  if (value.dedupeKey !== undefined && typeof value.dedupeKey !== 'string') {
+    return false
+  }
+
+  if (
+    value.replacePolicy !== undefined &&
+    value.replacePolicy !== 'append' &&
+    value.replacePolicy !== 'replace' &&
+    value.replacePolicy !== 'ignore-if-exists'
+  ) {
+    return false
+  }
+
+  if (value.meta !== undefined && !isRecord(value.meta)) {
+    return false
+  }
+
+  switch (value.type) {
+    case 'text':
+      return typeof value.content === 'string'
+    case 'choice':
+      return typeof value.question === 'string' && Array.isArray(value.options) && value.options.every(isGenUIChoiceOption)
+    case 'entity-card':
+      return typeof value.title === 'string' && isRecord(value.fields)
+    case 'list':
+      return (
+        (value.title === undefined || typeof value.title === 'string') &&
+        Array.isArray(value.items) &&
+        value.items.every(isRecord)
+      )
+    case 'form':
+      return (
+        (value.title === undefined || typeof value.title === 'string') &&
+        isRecord(value.schema) &&
+        (value.initialValues === undefined || isRecord(value.initialValues))
+      )
+    case 'cta-group':
+      return Array.isArray(value.items) && value.items.every(isGenUICtaItem)
+    case 'alert':
+      return (
+        (value.level === 'info' || value.level === 'warning' || value.level === 'error' || value.level === 'success') &&
+        typeof value.message === 'string'
+      )
+    default:
+      return false
+  }
+}
+
+function isGenUITurnEnvelope(value: unknown): value is GenUITurnEnvelope {
+  if (!isRecord(value) || typeof value.traceId !== 'string' || typeof value.conversationId !== 'string') {
+    return false
+  }
+
+  if (!isRecord(value.turn)) {
+    return false
+  }
+
+  return (
+    typeof value.turn.turnId === 'string' &&
+    value.turn.role === 'assistant' &&
+    isGenUITurnStatus(value.turn.status) &&
+    Array.isArray(value.turn.blocks) &&
+    value.turn.blocks.every(isGenUIBlock)
+  )
+}
+
 function getAssistantText(message: UIMessage): string {
   return message.parts
-    .filter((part): part is UIMessagePart & { type: 'text'; text?: string } => part.type === 'text')
+    .filter((part): part is UIMessagePart & { type: 'text'; text?: string } => isTextPart(part))
     .map((part) => (typeof part.text === 'string' ? part.text : ''))
     .join('')
 }
 
 function upsertAssistantText(message: UIMessage, text: string): void {
-  const textPartIndex = message.parts.findIndex((part) => part.type === 'text')
-  if (textPartIndex >= 0) {
-    (message.parts[textPartIndex] as UIMessagePart).text = text
+  const textPart = message.parts.find((part): part is UIMessagePart & { type: 'text'; text?: string } => isTextPart(part))
+  if (textPart) {
+    textPart.text = text
     return
   }
 
@@ -592,6 +693,9 @@ type ChatGatewayTurnsRequest = {
     platformVersion?: string
     lat?: number
     lng?: number
+    activityId?: string
+    followUpMode?: 'review' | 'rebook' | 'kickoff'
+    entry?: string
   }
   stream?: boolean
   [key: string]: unknown
@@ -616,6 +720,9 @@ function buildChatGatewayTurnsRequest(
     timezone: string
     platformVersion: string
     location?: { lat: number; lng: number } | null
+    activityId?: string
+    followUpMode?: 'review' | 'rebook' | 'kickoff'
+    entry?: string
   }
 ): ChatGatewayTurnsRequest {
   return {
@@ -627,6 +734,9 @@ function buildChatGatewayTurnsRequest(
       timezone: context.timezone,
       platformVersion: context.platformVersion,
       ...(context.location ? { lat: context.location.lat, lng: context.location.lng } : {}),
+      ...(context.activityId ? { activityId: context.activityId } : {}),
+      ...(context.followUpMode ? { followUpMode: context.followUpMode } : {}),
+      ...(context.entry ? { entry: context.entry } : {}),
     },
   }
 }
@@ -682,11 +792,16 @@ function arrayBufferToString(buffer: ArrayBuffer): string {
   }
 }
 
+function readStorageString(key: string): string {
+  const value = wx.getStorageSync(key)
+  return typeof value === 'string' ? value : ''
+}
+
 function streamChatGatewayTurns(
   request: ChatGatewayTurnsRequest,
   callbacks: ChatGatewayStreamCallbacks
 ): SSEController {
-  const token = (wx.getStorageSync('token') || '') as string
+  const token = readStorageString('token')
   let buffer = ''
   let finished = false
 
@@ -824,7 +939,7 @@ interface ChatState {
   
   // ========== Actions ==========
   /** 发送消息 */
-  sendMessage: (text: string) => void
+  sendMessage: (text: string, contextOverrides?: ChatPromptContext) => void
   /** 停止生成 */
   stop: () => void
   /** 清空消息 */
@@ -865,7 +980,7 @@ export const useChatStore = create<ChatState>()(
        * 发送消息
        * 类似 useChat 的 sendMessage
        */
-      sendMessage: (text: string) => {
+      sendMessage: (text: string, contextOverrides?: ChatPromptContext) => {
         const normalizedText = text.trim()
         if (!normalizedText) {
           return
@@ -916,6 +1031,7 @@ export const useChatStore = create<ChatState>()(
             timezone: 'Asia/Shanghai',
             platformVersion: 'miniprogram-vnext',
             location: state.location,
+            ...(contextOverrides || {}),
           }
         )
         chatRequest.stream = true
@@ -1140,21 +1256,20 @@ export const useChatStore = create<ChatState>()(
           }
 
           if (eventName === 'turn-complete') {
-            const data = isRecord(payload) && isRecord(payload.data) ? payload.data : null
-            const turn = data && isRecord(data.turn) ? data.turn : null
-            if (!data || !turn || !Array.isArray(turn.blocks)) {
+            const data = isRecord(payload) ? payload.data : null
+            if (!isGenUITurnEnvelope(data)) {
               return
             }
 
-            currentEnvelope = data as unknown as GenUITurnEnvelope
+            currentEnvelope = data
             updateAssistantFromEnvelope(currentEnvelope, 'streaming')
             return
           }
 
           if (eventName === 'block-append' || eventName === 'block-replace') {
             const data = isRecord(payload) && isRecord(payload.data) ? payload.data : null
-            const block = data && isRecord(data.block) ? (data.block as unknown as GenUIBlock) : null
-            if (!block) {
+            const block = data ? data.block : null
+            if (!isGenUIBlock(block)) {
               return
             }
 
@@ -1550,21 +1665,20 @@ export const useChatStore = create<ChatState>()(
           }
 
           if (eventName === 'turn-complete') {
-            const data = isRecord(payload) && isRecord(payload.data) ? payload.data : null
-            const turn = data && isRecord(data.turn) ? data.turn : null
-            if (!data || !turn || !Array.isArray(turn.blocks)) {
+            const data = isRecord(payload) ? payload.data : null
+            if (!isGenUITurnEnvelope(data)) {
               return
             }
 
-            currentEnvelope = data as unknown as GenUITurnEnvelope
+            currentEnvelope = data
             updateAssistantFromEnvelope(currentEnvelope, 'streaming')
             return
           }
 
           if (eventName === 'block-append' || eventName === 'block-replace') {
             const data = isRecord(payload) && isRecord(payload.data) ? payload.data : null
-            const block = data && isRecord(data.block) ? (data.block as unknown as GenUIBlock) : null
-            if (!block) {
+            const block = data ? data.block : null
+            if (!isGenUIBlock(block)) {
               return
             }
 

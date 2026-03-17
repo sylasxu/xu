@@ -67,6 +67,185 @@ interface StoredEnhancedProfile {
   }>;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function readRequiredText(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function readOptionalText(value: unknown): string | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
+  return typeof value === 'string' ? value : undefined;
+}
+
+function readFiniteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function readDateString(value: unknown): string | null {
+  const text = readRequiredText(value);
+  if (!text) {
+    return null;
+  }
+
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : text;
+}
+
+function readPreferenceCategory(value: unknown): PreferenceCategory | null {
+  switch (value) {
+    case 'activity_type':
+    case 'time':
+    case 'location':
+    case 'food':
+    case 'social':
+      return value;
+    default:
+      return null;
+  }
+}
+
+function readPreferenceSentiment(value: unknown): PreferenceSentiment | null {
+  switch (value) {
+    case 'like':
+    case 'dislike':
+      return value;
+    default:
+      return null;
+  }
+}
+
+function readStoredLocations(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+}
+
+function readStoredEnhancedPreference(
+  value: unknown,
+): StoredEnhancedProfile['preferences'][number] | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const category = readPreferenceCategory(value.category);
+  const storedValue = readRequiredText(value.value);
+  const sentiment = readPreferenceSentiment(value.sentiment);
+  const confidence = readFiniteNumber(value.confidence);
+  const updatedAt = readDateString(value.updatedAt);
+
+  if (!category || !storedValue || !sentiment || confidence === null || !updatedAt) {
+    return null;
+  }
+
+  const mentionCount = readFiniteNumber(value.mentionCount);
+
+  return {
+    category,
+    value: storedValue,
+    sentiment,
+    confidence,
+    updatedAt,
+    ...(mentionCount !== null ? { mentionCount } : {}),
+  };
+}
+
+function readStoredActivityOutcome(
+  value: unknown,
+): NonNullable<StoredEnhancedProfile['activityOutcomes']>[number] | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const activityId = readRequiredText(value.activityId);
+  const activityTitle = readRequiredText(value.activityTitle);
+  const activityType = readRequiredText(value.activityType);
+  const locationName = readRequiredText(value.locationName);
+  const happenedAt = readDateString(value.happenedAt);
+  const updatedAt = readDateString(value.updatedAt);
+  const attended = value.attended;
+  const rebookTriggered = value.rebookTriggered;
+  const reviewSummary = readOptionalText(value.reviewSummary);
+
+  if (
+    !activityId ||
+    !activityTitle ||
+    !activityType ||
+    !locationName ||
+    !happenedAt ||
+    !updatedAt ||
+    !(
+      attended === null ||
+      typeof attended === 'boolean'
+    ) ||
+    typeof rebookTriggered !== 'boolean'
+  ) {
+    return null;
+  }
+
+  return {
+    activityId,
+    activityTitle,
+    activityType,
+    locationName,
+    attended,
+    rebookTriggered,
+    happenedAt,
+    updatedAt,
+    ...(reviewSummary !== undefined ? { reviewSummary } : {}),
+  };
+}
+
+function readStoredEnhancedProfile(value: unknown): StoredEnhancedProfile | null {
+  if (!isRecord(value) || value.version !== 2) {
+    return null;
+  }
+
+  const lastUpdated = readDateString(value.lastUpdated);
+  if (!lastUpdated) {
+    return null;
+  }
+
+  const preferences = Array.isArray(value.preferences)
+    ? value.preferences
+        .map((item) => readStoredEnhancedPreference(item))
+        .filter((item): item is StoredEnhancedProfile['preferences'][number] => item !== null)
+    : [];
+
+  const activityOutcomes = Array.isArray(value.activityOutcomes)
+    ? value.activityOutcomes
+        .map((item) => readStoredActivityOutcome(item))
+        .filter((item): item is NonNullable<StoredEnhancedProfile['activityOutcomes']>[number] => item !== null)
+    : undefined;
+
+  return {
+    version: 2,
+    preferences,
+    frequentLocations: readStoredLocations(value.frequentLocations),
+    lastUpdated,
+    ...(activityOutcomes ? { activityOutcomes } : {}),
+  };
+}
+
+function parseStoredEnhancedProfileJson(content: string): StoredEnhancedProfile | null {
+  try {
+    return readStoredEnhancedProfile(JSON.parse(content));
+  } catch {
+    return null;
+  }
+}
+
 /**
  * 空的用户画像（旧版）
  */
@@ -337,13 +516,7 @@ export async function clearWorkingMemory(userId: string): Promise<void> {
  * @internal Used by parseEnhancedProfile
  */
 export function isEnhancedFormat(content: string | null): boolean {
-  if (!content) return false;
-  try {
-    const parsed = JSON.parse(content);
-    return parsed.version === 2;
-  } catch {
-    return false;
-  }
+  return typeof content === 'string' && parseStoredEnhancedProfileJson(content) !== null;
 }
 
 /**
@@ -352,31 +525,26 @@ export function isEnhancedFormat(content: string | null): boolean {
 export function parseEnhancedProfile(content: string | null): EnhancedUserProfile {
   if (!content) return { ...EMPTY_ENHANCED_PROFILE, lastUpdated: new Date() };
 
-  try {
-    const stored = JSON.parse(content) as StoredEnhancedProfile;
-    if (stored.version !== 2) {
-      // 旧版格式，转换为增强版
-      return convertToEnhancedProfile(parseUserProfile(content));
-    }
-    return {
-      version: 2,
-      preferences: stored.preferences.map(p => ({
-        ...p,
-        updatedAt: new Date(p.updatedAt),
-        mentionCount: p.mentionCount ?? 1,
-      })),
-      frequentLocations: stored.frequentLocations,
-      lastUpdated: new Date(stored.lastUpdated),
-      activityOutcomes: stored.activityOutcomes?.map((outcome) => ({
-        ...outcome,
-        happenedAt: new Date(outcome.happenedAt),
-        updatedAt: new Date(outcome.updatedAt),
-      })) || [],
-    };
-  } catch {
-    // 解析失败，尝试作为 Markdown 解析
+  const stored = parseStoredEnhancedProfileJson(content);
+  if (!stored) {
     return convertToEnhancedProfile(parseUserProfile(content));
   }
+
+  return {
+    version: 2,
+    preferences: stored.preferences.map((preference) => ({
+      ...preference,
+      updatedAt: new Date(preference.updatedAt),
+      mentionCount: preference.mentionCount ?? 1,
+    })),
+    frequentLocations: stored.frequentLocations,
+    lastUpdated: new Date(stored.lastUpdated),
+    activityOutcomes: (stored.activityOutcomes || []).map((outcome) => ({
+      ...outcome,
+      happenedAt: new Date(outcome.happenedAt),
+      updatedAt: new Date(outcome.updatedAt),
+    })),
+  };
 }
 
 /**
@@ -926,6 +1094,94 @@ interface StoredEnhancedProfileWithVectors {
   }>;
 }
 
+function readStoredEmbedding(value: unknown): number[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const numbers: number[] = [];
+  for (const item of value) {
+    const number = readFiniteNumber(item);
+    if (number === null) {
+      return null;
+    }
+    numbers.push(number);
+  }
+
+  return numbers;
+}
+
+function readStoredInterestVector(
+  value: unknown,
+): NonNullable<StoredEnhancedProfileWithVectors['interestVectors']>[number] | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const activityId = readRequiredText(value.activityId);
+  const embedding = readStoredEmbedding(value.embedding);
+  const participatedAt = readDateString(value.participatedAt);
+
+  if (!activityId || !embedding || !participatedAt) {
+    return null;
+  }
+
+  const feedback = value.feedback;
+  const normalizedFeedback =
+    feedback === 'positive' || feedback === 'neutral' || feedback === 'negative'
+      ? feedback
+      : undefined;
+
+  return {
+    activityId,
+    embedding,
+    participatedAt,
+    ...(normalizedFeedback ? { feedback: normalizedFeedback } : {}),
+  };
+}
+
+function readStoredEnhancedProfileWithVectors(
+  value: unknown,
+): StoredEnhancedProfileWithVectors | null {
+  const baseProfile = readStoredEnhancedProfile(value);
+  if (!baseProfile || !isRecord(value)) {
+    return null;
+  }
+
+  const interestVectors = Array.isArray(value.interestVectors)
+    ? value.interestVectors
+        .map((item) => readStoredInterestVector(item))
+        .filter((item): item is NonNullable<StoredEnhancedProfileWithVectors['interestVectors']>[number] => item !== null)
+    : undefined;
+
+  return {
+    ...baseProfile,
+    ...(interestVectors ? { interestVectors } : {}),
+  };
+}
+
+function parseStoredEnhancedProfileWithVectorsJson(
+  content: string,
+): StoredEnhancedProfileWithVectors | null {
+  try {
+    return readStoredEnhancedProfileWithVectors(JSON.parse(content));
+  } catch {
+    return null;
+  }
+}
+
+function createStoredDefaultPreference(
+  value: string,
+): StoredEnhancedProfileWithVectors['preferences'][number] {
+  return {
+    category: 'activity_type',
+    value,
+    sentiment: 'like',
+    confidence: 0.5,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 /**
  * 获取带兴趣向量的增强版用户画像
  */
@@ -964,39 +1220,8 @@ function parseEnhancedProfileWithVectors(content: string | null): EnhancedUserPr
     };
   }
 
-  try {
-    const stored = JSON.parse(content) as StoredEnhancedProfileWithVectors;
-    if (stored.version !== 2) {
-      // 旧版格式，转换为增强版
-      const oldProfile = parseUserProfile(content);
-      return {
-        ...oldProfile,
-        version: 2,
-        lastUpdated: new Date(),
-        interestVectors: [],
-        activityOutcomes: [],
-      };
-    }
-    
-    return {
-      preferences: stored.preferences.map(p => p.value),
-      dislikes: stored.preferences.filter(p => p.sentiment === 'dislike').map(p => p.value),
-      frequentLocations: stored.frequentLocations,
-      behaviorPatterns: [],
-      version: 2,
-      lastUpdated: new Date(stored.lastUpdated),
-      interestVectors: stored.interestVectors?.map(v => ({
-        ...v,
-        participatedAt: new Date(v.participatedAt),
-      })) || [],
-      activityOutcomes: stored.activityOutcomes?.map((outcome) => ({
-        ...outcome,
-        happenedAt: new Date(outcome.happenedAt),
-        updatedAt: new Date(outcome.updatedAt),
-      })) || [],
-    };
-  } catch {
-    // 解析失败，尝试作为 Markdown 解析
+  const stored = parseStoredEnhancedProfileWithVectorsJson(content);
+  if (!stored) {
     const oldProfile = parseUserProfile(content);
     return {
       ...oldProfile,
@@ -1006,6 +1231,26 @@ function parseEnhancedProfileWithVectors(content: string | null): EnhancedUserPr
       activityOutcomes: [],
     };
   }
+
+  return {
+    preferences: stored.preferences.map((preference) => preference.value),
+    dislikes: stored.preferences
+      .filter((preference) => preference.sentiment === 'dislike')
+      .map((preference) => preference.value),
+    frequentLocations: stored.frequentLocations,
+    behaviorPatterns: [],
+    version: 2,
+    lastUpdated: new Date(stored.lastUpdated),
+    interestVectors: (stored.interestVectors || []).map((vector) => ({
+      ...vector,
+      participatedAt: new Date(vector.participatedAt),
+    })),
+    activityOutcomes: (stored.activityOutcomes || []).map((outcome) => ({
+      ...outcome,
+      happenedAt: new Date(outcome.happenedAt),
+      updatedAt: new Date(outcome.updatedAt),
+    })),
+  };
 }
 
 /**
@@ -1014,13 +1259,7 @@ function parseEnhancedProfileWithVectors(content: string | null): EnhancedUserPr
 function serializeEnhancedProfileWithVectors(profile: EnhancedUserProfileWithVectors): string {
   const stored: StoredEnhancedProfileWithVectors = {
     version: 2,
-    preferences: profile.preferences.map(p => ({
-      category: 'activity_type' as PreferenceCategory,
-      value: p,
-      sentiment: 'like' as PreferenceSentiment,
-      confidence: 0.5,
-      updatedAt: new Date().toISOString(),
-    })),
+    preferences: profile.preferences.map((preference) => createStoredDefaultPreference(preference)),
     frequentLocations: profile.frequentLocations,
     lastUpdated: profile.lastUpdated.toISOString(),
     interestVectors: profile.interestVectors?.map(v => ({

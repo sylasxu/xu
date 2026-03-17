@@ -26,6 +26,8 @@ function ModerationPage() {
   const approveMutation = useApproveModeration()
   const rejectMutation = useRejectModeration()
   const banMutation = useBanModeration()
+  const pendingCount = data?.pendingCount ?? 0
+  const items = data?.items ?? []
 
   const handleApprove = (id: string) => {
     if (confirm('确认通过审核？')) {
@@ -44,8 +46,6 @@ function ModerationPage() {
       banMutation.mutate(id)
     }
   }
-
-  const pendingCount = (data as any)?.pendingCount ?? 0
 
   return (
     <>
@@ -87,7 +87,7 @@ function ModerationPage() {
               <p className='text-destructive'>加载失败: {error.message}</p>
             </CardContent>
           </Card>
-        ) : !(data as any)?.items || (data as any).items.length === 0 ? (
+        ) : items.length === 0 ? (
           <Card>
             <CardContent className='flex flex-col items-center justify-center py-12'>
               <Shield className='h-12 w-12 text-muted-foreground mb-4' />
@@ -96,7 +96,7 @@ function ModerationPage() {
           </Card>
         ) : (
           <div className='space-y-4'>
-            {(data as any).items.map((item: any) => (
+            {items.map((item) => (
               <Card key={item.id} className={item.status === 'pending' ? 'border-destructive/50' : ''}>
                 <CardHeader className='pb-3'>
                   <div className='flex items-center justify-between'>

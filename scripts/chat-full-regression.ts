@@ -20,6 +20,22 @@ interface HttpResult {
   body: string;
 }
 
+interface LoginResponse {
+  token: string;
+}
+
+interface BootstrappedRegressionUser {
+  user: {
+    id: string;
+  };
+  token: string;
+}
+
+interface BootstrapResponse {
+  users: BootstrappedRegressionUser[];
+  msg: string;
+}
+
 interface TurnEnvelope {
   traceId: string;
   conversationId: string;
@@ -37,17 +53,45 @@ interface ParsedStreamEvent {
   dataText: string;
 }
 
+interface ConversationMessagesResponse {
+  conversationId: string;
+  items: Array<{
+    id: string;
+    role: 'user' | 'assistant';
+    type: string;
+    content: unknown;
+  }>;
+  total: number;
+  hasMore: boolean;
+  cursor: string | null;
+}
+
+interface TurnRequestOptions {
+  authArgs?: string[];
+  ai?: {
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+  };
+}
+
 const CHAT_URL = process.env.GENUI_CHAT_API_URL || 'http://127.0.0.1:1996/ai/chat';
-const AUTH_TOKEN = process.env.GENUI_AUTH_TOKEN?.trim() || '';
-const AUTH_ARGS = AUTH_TOKEN ? ['-H', `Authorization: Bearer ${AUTH_TOKEN}`] : [];
-const ADMIN_TOKEN = process.env.GENUI_ADMIN_TOKEN?.trim() || '';
-const ADMIN_AUTH_ARGS = ADMIN_TOKEN ? ['-H', `Authorization: Bearer ${ADMIN_TOKEN}`] : [];
+let authToken = process.env.GENUI_AUTH_TOKEN?.trim() || '';
+let adminToken = process.env.GENUI_ADMIN_TOKEN?.trim() || '';
 const HTTP_MARKER = '__HTTP_STATUS__:';
 
 const BASE_URL = CHAT_URL.endsWith('/ai/chat')
   ? CHAT_URL.slice(0, -'/ai/chat'.length)
   : CHAT_URL;
-const AUTH_USER_ID = process.env.GENUI_AUTH_USER_ID?.trim() || '';
+let authUserId = process.env.GENUI_AUTH_USER_ID?.trim() || '';
+const AUTO_ADMIN_PHONE = process.env.GENUI_ADMIN_PHONE?.trim()
+  || process.env.SMOKE_ADMIN_PHONE?.trim()
+  || process.env.ADMIN_PHONE_WHITELIST?.split(',').map((phone) => phone.trim()).find(Boolean)
+  || '';
+const AUTO_ADMIN_CODE = process.env.GENUI_ADMIN_CODE?.trim()
+  || process.env.SMOKE_ADMIN_CODE?.trim()
+  || process.env.ADMIN_SUPER_CODE?.trim()
+  || '';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -87,6 +131,14 @@ function getUserIdFromJwt(token: string): string {
   return '';
 }
 
+function getAuthArgs(): string[] {
+  return authToken ? ['-H', `Authorization: Bearer ${authToken}`] : [];
+}
+
+function getAdminAuthArgs(): string[] {
+  return adminToken ? ['-H', `Authorization: Bearer ${adminToken}`] : [];
+}
+
 function runCurl(args: string[]): HttpResult {
   const result = spawnSync('curl', args, {
     encoding: 'utf8',
@@ -124,7 +176,7 @@ function requestJson(params: {
   payload?: Record<string, unknown>;
   authArgs?: string[];
 }): HttpResult {
-  const authArgs = params.authArgs ?? AUTH_ARGS;
+  const authArgs = params.authArgs ?? getAuthArgs();
   const args = [
     '-sS',
     '-X',
@@ -150,7 +202,11 @@ function parseJson<T>(body: string, label: string): T {
   }
 }
 
-function buildTurnPayload(input: TurnInput, conversationId?: string | null): Record<string, unknown> {
+function buildTurnPayload(
+  input: TurnInput,
+  conversationId?: string | null,
+  options?: TurnRequestOptions,
+): Record<string, unknown> {
   return {
     ...(conversationId ? { conversationId } : {}),
     input,
@@ -160,14 +216,16 @@ function buildTurnPayload(input: TurnInput, conversationId?: string | null): Rec
       timezone: 'Asia/Shanghai',
       platformVersion: 'chat-full-regression',
     },
+    ...(options?.ai ? { ai: options.ai } : {}),
   };
 }
 
-function postTurn(input: TurnInput, conversationId?: string | null): TurnEnvelope {
+function postTurn(input: TurnInput, conversationId?: string | null, options?: TurnRequestOptions): TurnEnvelope {
   const response = requestJson({
     method: 'POST',
     url: CHAT_URL,
-    payload: buildTurnPayload(input, conversationId),
+    payload: buildTurnPayload(input, conversationId, options),
+    authArgs: options?.authArgs,
   });
 
   assert(response.status === 200, `turn request failed: ${response.status} body=${response.body}`);
@@ -176,20 +234,100 @@ function postTurn(input: TurnInput, conversationId?: string | null): TurnEnvelop
   return turn;
 }
 
-function postTurnStream(input: TurnInput, conversationId?: string | null): { raw: string; status: number } {
+function postTurnStream(
+  input: TurnInput,
+  conversationId?: string | null,
+  options?: TurnRequestOptions
+): { raw: string; status: number } {
   const response = requestJson({
     method: 'POST',
     url: CHAT_URL,
     payload: {
-      ...buildTurnPayload(input, conversationId),
+      ...buildTurnPayload(input, conversationId, options),
       stream: true,
     },
+    authArgs: options?.authArgs,
   });
 
   return {
     raw: response.body,
     status: response.status,
   };
+}
+
+function loginAdminForProtocolRegression(): string {
+  assert(
+    AUTO_ADMIN_PHONE.length > 0 && AUTO_ADMIN_CODE.length > 0,
+    'strict regression requires GENUI_ADMIN_TOKEN or local admin super-code env'
+  );
+
+  const response = requestJson({
+    method: 'POST',
+    url: `${BASE_URL}/auth/login`,
+    authArgs: [],
+    payload: {
+      grantType: 'phone_otp',
+      phone: AUTO_ADMIN_PHONE,
+      code: AUTO_ADMIN_CODE,
+    },
+  });
+
+  assert(response.status === 200, `admin login failed: ${response.status}`);
+  const payload = parseJson<LoginResponse>(response.body, 'admin login');
+  assert(typeof payload.token === 'string' && payload.token.length > 0, 'admin login: token missing');
+  return payload.token;
+}
+
+function bootstrapProtocolRegressionUser(adminJwt: string): { token: string; userId: string } {
+  const response = requestJson({
+    method: 'POST',
+    url: `${BASE_URL}/auth/test-users/bootstrap`,
+    authArgs: ['-H', `Authorization: Bearer ${adminJwt}`],
+    payload: {
+      phone: AUTO_ADMIN_PHONE,
+      code: AUTO_ADMIN_CODE,
+      count: 1,
+    },
+  });
+
+  assert(response.status === 200, `bootstrap regression user failed: ${response.status}`);
+  const payload = parseJson<BootstrapResponse>(response.body, 'bootstrap regression user');
+  const user = Array.isArray(payload.users) ? payload.users[0] : undefined;
+  assert(user, 'bootstrap regression user: first user missing');
+  assert(typeof user.token === 'string' && user.token.length > 0, 'bootstrap regression user: token missing');
+  assert(typeof user.user?.id === 'string' && user.user.id.length > 0, 'bootstrap regression user: id missing');
+  return {
+    token: user.token,
+    userId: user.user.id,
+  };
+}
+
+function ensureProtocolRegressionTokens(logs: string[]): void {
+  let authSource = authToken ? 'env' : 'missing';
+  let adminSource = adminToken ? 'env' : 'missing';
+
+  if (!adminToken) {
+    adminToken = loginAdminForProtocolRegression();
+    adminSource = 'auto-login';
+  }
+
+  if (!authToken) {
+    const bootstrapped = bootstrapProtocolRegressionUser(adminToken);
+    authToken = bootstrapped.token;
+    authUserId = bootstrapped.userId;
+    authSource = 'auto-bootstrap';
+  }
+
+  if (!authUserId) {
+    authUserId = getUserIdFromJwt(authToken);
+  }
+
+  assert(authToken.length > 0, 'strict regression requires GENUI_AUTH_TOKEN or local bootstrap env');
+  assert(adminToken.length > 0, 'strict regression requires GENUI_ADMIN_TOKEN or local admin super-code env');
+  assert(authUserId.length > 0, 'strict regression requires GENUI_AUTH_USER_ID or JWT payload userId');
+
+  logs.push(`auth=${authSource}`);
+  logs.push(`admin=${adminSource}`);
 }
 
 function assertTurnEnvelope(turn: TurnEnvelope, label: string): void {
@@ -266,6 +404,24 @@ function assertGenUIBlockStructure(blocks: Array<Record<string, unknown>>, label
   }
 }
 
+function hasLeakedToolCallText(value: string): boolean {
+  const normalized = value.replace(/\s+/g, '');
+  return /^\.?call[a-zA-Z0-9_]+\(/.test(normalized);
+}
+
+function assertNoLeakedToolText(turn: TurnEnvelope, label: string): void {
+  for (const block of turn.turn.blocks) {
+    if (!isRecord(block) || String(block.type) !== 'text') {
+      continue;
+    }
+
+    const content = typeof block.content === 'string' ? block.content : '';
+    if (hasLeakedToolCallText(content)) {
+      throw new Error(`${label}: leaked tool call text ${content}`);
+    }
+  }
+}
+
 function getBlockTypes(turn: TurnEnvelope): string[] {
   return turn.turn.blocks
     .map((block) => (isRecord(block) ? String(block.type || '') : ''))
@@ -277,6 +433,104 @@ function getAlertLevels(turn: TurnEnvelope): string[] {
     .filter((block) => isRecord(block) && String(block.type) === 'alert')
     .map((block) => String((block as Record<string, unknown>).level || ''))
     .filter(Boolean);
+}
+
+function getCtaActions(turn: TurnEnvelope): string[] {
+  const actions: string[] = [];
+
+  for (const block of turn.turn.blocks) {
+    if (!isRecord(block) || String(block.type) !== 'cta-group' || !Array.isArray(block.items)) {
+      continue;
+    }
+
+    for (const item of block.items) {
+      if (!isRecord(item)) {
+        continue;
+      }
+      const action = typeof item.action === 'string' ? item.action.trim() : '';
+      if (action) {
+        actions.push(action);
+      }
+    }
+  }
+
+  return actions;
+}
+
+function assertPublishTurn(turn: TurnEnvelope, label: string, isAuthenticated = authToken.length > 0): void {
+  const alertLevels = getAlertLevels(turn);
+  const entityCards = turn.turn.blocks.filter(
+    (block) => isRecord(block) && String(block.type) === 'entity-card'
+  );
+  const hasPublishedEntityCard = entityCards.some((block) => {
+    const fields = isRecord(block.fields) ? block.fields : null;
+    const activityId = fields && typeof fields.activityId === 'string' ? fields.activityId : '';
+    return activityId.length > 0 && !activityId.startsWith('draft_');
+  });
+
+  if (!isAuthenticated) {
+    assert(
+      alertLevels.includes('warning') || alertLevels.includes('error'),
+      `${label}: unauth publish should return warning/error alert`
+    );
+    assert(!hasPublishedEntityCard, `${label}: unauth publish should not return published entity card`);
+    return;
+  }
+
+  if (alertLevels.includes('success')) {
+    assert(hasPublishedEntityCard, `${label}: success publish should include published entity card`);
+  }
+}
+
+function findCtaActionInput(turn: TurnEnvelope, actionName: string, actionId: string, label: string): TurnInput {
+  for (const block of turn.turn.blocks) {
+    if (!isRecord(block) || String(block.type) !== 'cta-group' || !Array.isArray(block.items)) {
+      continue;
+    }
+
+    for (const item of block.items) {
+      if (!isRecord(item)) {
+        continue;
+      }
+
+      const action = typeof item.action === 'string' ? item.action.trim() : '';
+      const displayText = typeof item.label === 'string' ? item.label.trim() : action;
+      const params = isRecord(item.params) ? item.params : undefined;
+
+      if (action === actionName) {
+        return {
+          type: 'action',
+          action,
+          actionId,
+          displayText,
+          ...(params ? { params } : {}),
+        };
+      }
+    }
+  }
+
+  throw new Error(`${label}: missing CTA action ${actionName}`);
+}
+
+function getFormBlock(turn: TurnEnvelope, label: string): Record<string, unknown> {
+  const formBlock = turn.turn.blocks.find(
+    (block) => isRecord(block) && String(block.type) === 'form'
+  );
+  assert(formBlock && isRecord(formBlock), `${label}: form block missing`);
+  return formBlock;
+}
+
+function getConversationMessages(conversationId: string): ConversationMessagesResponse {
+  const response = requestJson({
+    method: 'GET',
+    url: `${BASE_URL}/ai/conversations/${conversationId}/messages?userId=${encodeURIComponent(authUserId)}&limit=50`,
+  });
+  assert(response.status === 200, `conversation messages failed: ${response.status}`);
+  const payload = parseJson<ConversationMessagesResponse>(response.body, 'conversation messages');
+  assert(payload.conversationId === conversationId, 'conversation messages: conversationId mismatch');
+  assert(Array.isArray(payload.items), 'conversation messages: items missing');
+  assert(typeof payload.total === 'number', 'conversation messages: total missing');
+  return payload;
 }
 
 function parseSSE(raw: string): { events: ParsedStreamEvent[]; done: boolean } {
@@ -575,10 +829,19 @@ function checkWelcome(logs: string[]): void {
 
   const payload = parseJson<Record<string, unknown>>(response.body, 'welcome response');
   const greeting = typeof payload.greeting === 'string' ? payload.greeting.trim() : '';
+  const subGreeting = typeof payload.subGreeting === 'string' ? payload.subGreeting.trim() : '';
+  const sections = Array.isArray(payload.sections) ? payload.sections : [];
   const quickPrompts = Array.isArray(payload.quickPrompts) ? payload.quickPrompts : [];
 
   assert(greeting.length > 0, 'welcome: greeting missing');
-  assert(quickPrompts.length > 0, 'welcome: quickPrompts empty');
+  assert(sections.length > 0, 'welcome: sections empty');
+
+  if (quickPrompts.length === 0) {
+    assert(subGreeting.includes('草稿'), 'welcome: quickPrompts empty without draft resume subGreeting');
+    logs.push(`welcome OK greeting='${greeting}' quickPrompts=0 draftResume=true`);
+    return;
+  }
+
   logs.push(`welcome OK greeting='${greeting}' quickPrompts=${quickPrompts.length}`);
 }
 
@@ -596,33 +859,84 @@ function checkLegacyPayloadRejected(logs: string[]): void {
 }
 
 function runCoreCreateFlow(logs: string[]): string {
+  const createTurn = postTurn({
+    type: 'action',
+    action: 'create_activity',
+    actionId: 'full_reg_create_activity_1',
+    displayText: '先生成草稿',
+    params: {
+      title: '周五桌游局',
+      type: 'boardgame',
+      activityType: '桌游',
+      locationName: '观音桥',
+      location: '观音桥',
+      description: '周五晚上在观音桥组个桌游局',
+      maxParticipants: 6,
+    },
+  });
+
+  const draftTypes = getBlockTypes(createTurn);
+  const draftAlertLevels = getAlertLevels(createTurn);
+  const draftCtaActions = getCtaActions(createTurn);
+  assert(draftTypes.includes('entity-card'), 'core#create draft should include entity-card');
+  assert(draftAlertLevels.includes('success'), 'core#create draft should include success alert');
+  assert(draftCtaActions.includes('confirm_publish'), 'core#create draft should expose confirm_publish CTA');
+  logs.push(`core#create draft blocks=[${draftTypes.join(',')}] next=[${draftCtaActions.join(',')}]`);
+
+  const publishTurn = postTurn(
+    findCtaActionInput(createTurn, 'confirm_publish', 'full_reg_confirm_publish_1', 'core#create draft'),
+    createTurn.conversationId
+  );
+  assert(publishTurn.conversationId === createTurn.conversationId, 'core#create publish conversation drift');
+
+  const publishTypes = getBlockTypes(publishTurn);
+  const publishCtaActions = getCtaActions(publishTurn);
+  assert(publishTypes.includes('text'), 'core#create publish should include text feedback');
+  assert(publishTypes.includes('cta-group'), 'core#create publish should include next action CTA');
+  assert(publishCtaActions.includes('share_activity'), 'core#create publish should expose share_activity CTA');
+  assert(publishCtaActions.includes('explore_nearby'), 'core#create publish should expose explore_nearby CTA');
+  logs.push(`core#create publish blocks=[${publishTypes.join(',')}] next=[${publishCtaActions.join(',')}]`);
+
+  return publishTurn.conversationId;
+}
+
+function runContinuousConversationFlow(logs: string[]): void {
   const steps: TurnInput[] = [
     { type: 'text', text: '想租个周五晚上的局' },
     {
       type: 'action',
       action: 'choose_location',
-      actionId: 'full_reg_choose_location_1',
+      actionId: 'full_reg_continuous_location_1',
       displayText: '观音桥',
-      params: { location: '观音桥' },
+      params: {
+        location: '观音桥',
+      },
     },
     {
       type: 'action',
       action: 'choose_activity_type',
-      actionId: 'full_reg_choose_type_1',
+      actionId: 'full_reg_continuous_type_1',
       displayText: '桌游',
-      params: { activityType: '桌游', location: '观音桥' },
+      params: {
+        activityType: '桌游',
+        location: '观音桥',
+      },
     },
     {
       type: 'action',
       action: 'choose_time_slot',
-      actionId: 'full_reg_choose_slot_1',
+      actionId: 'full_reg_continuous_slot_1',
       displayText: '周五 20:00',
-      params: { slot: 'fri_20_00', location: '观音桥', activityType: '桌游' },
+      params: {
+        slot: 'fri_20_00',
+        location: '观音桥',
+        activityType: '桌游',
+      },
     },
     {
       type: 'action',
       action: 'confirm_publish',
-      actionId: 'full_reg_confirm_publish_1',
+      actionId: 'full_reg_continuous_publish_1',
       displayText: '就按这个发布',
       params: {
         title: '周五 20:00桌游局',
@@ -639,43 +953,321 @@ function runCoreCreateFlow(logs: string[]): string {
   ];
 
   let conversationId: string | null = null;
-  let interactiveTurns = 0;
-  let finalTurn: TurnEnvelope | null = null;
+  let publishTurn: TurnEnvelope | null = null;
+  const stepSummaries: string[] = [];
 
-  for (let index = 0; index < steps.length; index += 1) {
-    const step = steps[index];
+  steps.forEach((step, index) => {
     const turn = postTurn(step, conversationId);
+    const label = `continuous#turn${index + 1}`;
+    assertTurnEnvelope(turn, label);
+    assertNoLeakedToolText(turn, label);
 
     if (conversationId) {
-      assert(turn.conversationId === conversationId, `core#create turn${index + 1}: conversation drift`);
+      assert(turn.conversationId === conversationId, `${label}: conversation drift`);
     }
 
     conversationId = turn.conversationId;
-    finalTurn = turn;
+    stepSummaries.push(`t${index + 1}=[${getBlockTypes(turn).join(',')}]`);
 
-    const types = getBlockTypes(turn);
-    if (types.some((type) => type === 'choice' || type === 'cta-group' || type === 'form')) {
-      interactiveTurns += 1;
+    if (step.type === 'action' && step.action === 'confirm_publish') {
+      assertPublishTurn(turn, label);
+      publishTurn = turn;
+    }
+  });
+
+  assert(conversationId, 'continuous flow: conversationId missing');
+  assert(publishTurn, 'continuous flow: publish turn missing');
+
+  const publishCtaActions = getCtaActions(publishTurn);
+  const exploreTurn = publishCtaActions.includes('explore_nearby')
+    ? postTurn(
+        findCtaActionInput(
+          publishTurn,
+          'explore_nearby',
+          'full_reg_continuous_explore_1',
+          'continuous publish turn'
+        ),
+        conversationId
+      )
+    : postTurn(
+        { type: 'text', text: '顺便看看附近还有没有类似的局' },
+        conversationId
+      );
+  assertTurnEnvelope(exploreTurn, 'continuous#turn6');
+  assertNoLeakedToolText(exploreTurn, 'continuous#turn6');
+  assert(exploreTurn.conversationId === conversationId, 'continuous#turn6: conversation drift');
+  stepSummaries.push(
+    `t6(${publishCtaActions.includes('explore_nearby') ? 'cta' : 'text'})=[${getBlockTypes(exploreTurn).join(',')}]`
+  );
+
+  const followUpTurn = postTurn(
+    { type: 'text', text: '那换到解放碑呢，最好离地铁近点' },
+    conversationId
+  );
+  assertTurnEnvelope(followUpTurn, 'continuous#turn7');
+  assertNoLeakedToolText(followUpTurn, 'continuous#turn7');
+  assert(followUpTurn.conversationId === conversationId, 'continuous#turn7: conversation drift');
+  stepSummaries.push(`t7=[${getBlockTypes(followUpTurn).join(',')}]`);
+
+  const messagesPayload = getConversationMessages(conversationId);
+
+  const userMessages = messagesPayload.items.filter((item) => item.role === 'user').length;
+  const assistantMessages = messagesPayload.items.filter((item) => item.role === 'assistant').length;
+  assert(userMessages >= 4, `continuous flow messages: expected >=4 user messages, got ${userMessages}`);
+  assert(
+    assistantMessages >= 4,
+    `continuous flow messages: expected >=4 assistant messages, got ${assistantMessages}`
+  );
+
+  logs.push(
+    `flow#continuous conversation=${conversationId} ${stepSummaries.join(' ')} persisted=user:${userMessages},assistant:${assistantMessages},total:${messagesPayload.total}`
+  );
+}
+
+function runGuestLongConversationFlow(logs: string[]): void {
+  const steps: TurnInput[] = [
+    { type: 'text', text: '想租个周五晚上的局' },
+    {
+      type: 'action',
+      action: 'choose_location',
+      actionId: 'full_reg_guest_long_location_1',
+      displayText: '观音桥',
+      params: {
+        location: '观音桥',
+      },
+    },
+    {
+      type: 'action',
+      action: 'choose_activity_type',
+      actionId: 'full_reg_guest_long_type_1',
+      displayText: '桌游',
+      params: {
+        activityType: '桌游',
+        location: '观音桥',
+      },
+    },
+    {
+      type: 'action',
+      action: 'choose_time_slot',
+      actionId: 'full_reg_guest_long_slot_1',
+      displayText: '周五 20:00',
+      params: {
+        slot: 'fri_20_00',
+        location: '观音桥',
+        activityType: '桌游',
+      },
+    },
+    {
+      type: 'action',
+      action: 'confirm_publish',
+      actionId: 'full_reg_guest_long_publish_1',
+      displayText: '就按这个发布',
+      params: {
+        title: '周五 20:00桌游局',
+        type: 'boardgame',
+        startAt: '2026-03-06T20:00:00+08:00',
+        locationName: '观音桥',
+        locationHint: '观音桥商圈',
+        maxParticipants: 6,
+        currentParticipants: 1,
+        lat: 29.58567,
+        lng: 106.52988,
+      },
+    },
+    { type: 'text', text: '那先看看附近还有没有类似的局' },
+    { type: 'text', text: '换到解放碑呢，最好离地铁近点' },
+    { type: 'text', text: '如果没有合适的，帮我找个一起玩桌游的搭子也行' },
+    { type: 'text', text: '周六晚上也可以' },
+  ];
+
+  let conversationId: string | null = null;
+  const stepSummaries: string[] = [];
+
+  steps.forEach((step, index) => {
+    const turn = postTurn(step, conversationId, { authArgs: [] });
+    const label = `guest-long#turn${index + 1}`;
+    assertTurnEnvelope(turn, label);
+    assertNoLeakedToolText(turn, label);
+
+    if (conversationId) {
+      assert(turn.conversationId === conversationId, `${label}: conversation drift`);
     }
 
-    logs.push(`core#create turn${index + 1} blocks=[${types.join(',')}]`);
-  }
+    if (step.type === 'action' && step.action === 'confirm_publish') {
+      assertPublishTurn(turn, label, false);
+    }
 
-  assert(conversationId, 'core#create conversationId missing');
-  assert(interactiveTurns > 0, 'core#create should include at least one interactive turn');
-  assert(finalTurn, 'core#create final turn missing');
+    conversationId = turn.conversationId;
+    stepSummaries.push(`t${index + 1}=[${getBlockTypes(turn).join(',')}]`);
+  });
 
-  const finalAlertLevels = getAlertLevels(finalTurn);
-  if (!AUTH_TOKEN) {
-    assert(
-      finalAlertLevels.some((level) => level === 'warning' || level === 'error'),
-      'core#create unauth publish should return warning/error alert'
-    );
-  } else {
-    assert(finalAlertLevels.length > 0, 'core#create publish should include alert feedback');
-  }
+  assert(conversationId, 'guest-long flow: conversationId missing');
 
-  return conversationId;
+  const stream = postTurnStream(
+    { type: 'text', text: '继续聊聊周末安排' },
+    conversationId,
+    { authArgs: [] }
+  );
+  assert(stream.status === 200, `guest-long stream failed: ${stream.status}`);
+  const parsed = parseSSE(stream.raw);
+  assertStreamEventOrder(parsed, 'guest-long#stream');
+  assertStreamGenUIStructure(parsed, 'guest-long#stream');
+
+  logs.push(`flow#guest-long conversation=${conversationId} ${stepSummaries.join(' ')} stream=ok`);
+}
+
+function runAuthCrossIntentLongFlow(logs: string[]): void {
+  const steps: TurnInput[] = [
+    { type: 'text', text: '想租个周五晚上的局' },
+    {
+      type: 'action',
+      action: 'choose_location',
+      actionId: 'full_reg_cross_location_1',
+      displayText: '观音桥',
+      params: {
+        location: '观音桥',
+      },
+    },
+    {
+      type: 'action',
+      action: 'choose_activity_type',
+      actionId: 'full_reg_cross_type_1',
+      displayText: '桌游',
+      params: {
+        activityType: '桌游',
+        location: '观音桥',
+      },
+    },
+    {
+      type: 'action',
+      action: 'choose_time_slot',
+      actionId: 'full_reg_cross_slot_1',
+      displayText: '周五 20:00',
+      params: {
+        slot: 'fri_20_00',
+        location: '观音桥',
+        activityType: '桌游',
+      },
+    },
+    {
+      type: 'action',
+      action: 'confirm_publish',
+      actionId: 'full_reg_cross_publish_1',
+      displayText: '就按这个发布',
+      params: {
+        title: '周五 20:00桌游局',
+        type: 'boardgame',
+        startAt: '2026-03-06T20:00:00+08:00',
+        locationName: '观音桥',
+        locationHint: '观音桥商圈',
+        maxParticipants: 6,
+        currentParticipants: 1,
+        lat: 29.58567,
+        lng: 106.52988,
+      },
+    },
+    { type: 'text', text: '那先看看附近还有没有类似的局' },
+  ];
+
+  let conversationId: string | null = null;
+  const stepSummaries: string[] = [];
+  let searchTurn: TurnEnvelope | null = null;
+
+  steps.forEach((step, index) => {
+    const turn = postTurn(step, conversationId);
+    const label = `cross-intent#turn${index + 1}`;
+    assertTurnEnvelope(turn, label);
+    assertNoLeakedToolText(turn, label);
+
+    if (conversationId) {
+      assert(turn.conversationId === conversationId, `${label}: conversation drift`);
+    }
+
+    if (step.type === 'action' && step.action === 'confirm_publish') {
+      assertPublishTurn(turn, label);
+    }
+
+    conversationId = turn.conversationId;
+    stepSummaries.push(`t${index + 1}=[${getBlockTypes(turn).join(',')}]`);
+
+    if (index === steps.length - 1) {
+      searchTurn = turn;
+    }
+  });
+
+  assert(conversationId, 'cross-intent flow: conversationId missing');
+  assert(searchTurn, 'cross-intent flow: search turn missing');
+
+  const findPartnerTurn = postTurn(
+    findCtaActionInput(
+      searchTurn,
+      'find_partner',
+      'full_reg_cross_find_partner_1',
+      'cross-intent#turn6'
+    ),
+    conversationId
+  );
+  assertTurnEnvelope(findPartnerTurn, 'cross-intent#turn7');
+  assertNoLeakedToolText(findPartnerTurn, 'cross-intent#turn7');
+  assert(findPartnerTurn.conversationId === conversationId, 'cross-intent#turn7: conversation drift');
+  const formBlock = getFormBlock(findPartnerTurn, 'cross-intent#turn7');
+  assert(isRecord(formBlock.schema), 'cross-intent#turn7: form schema missing');
+  assert(
+    String(formBlock.schema.formType || '') === 'partner_intent',
+    `cross-intent#turn7: unexpected formType ${JSON.stringify(formBlock.schema)}`
+  );
+  assert(
+    String(formBlock.schema.submitAction || '') === 'submit_partner_intent_form',
+    `cross-intent#turn7: unexpected submitAction ${JSON.stringify(formBlock.schema)}`
+  );
+  stepSummaries.push(`t7=[${getBlockTypes(findPartnerTurn).join(',')}]`);
+
+  const submitPartnerTurn = postTurn(
+    {
+      type: 'action',
+      action: 'submit_partner_intent_form',
+      actionId: 'full_reg_cross_submit_partner_1',
+      displayText: '开始找搭子',
+      params: {
+        rawInput: '帮我找找有没有同意向的人',
+        activityType: 'boardgame',
+        timeRange: 'weekend',
+        location: '解放碑',
+        budgetType: 'AA',
+        tags: ['Quiet'],
+        note: '想找能一起玩桌游的人',
+        lat: 29.56301,
+        lng: 106.55156,
+      },
+    },
+    conversationId
+  );
+  assertTurnEnvelope(submitPartnerTurn, 'cross-intent#turn8');
+  assertNoLeakedToolText(submitPartnerTurn, 'cross-intent#turn8');
+  assert(submitPartnerTurn.conversationId === conversationId, 'cross-intent#turn8: conversation drift');
+  stepSummaries.push(`t8=[${getBlockTypes(submitPartnerTurn).join(',')}]`);
+
+  const finalTurn = postTurn(
+    { type: 'text', text: '如果还是没有，周六晚上也可以' },
+    conversationId
+  );
+  assertTurnEnvelope(finalTurn, 'cross-intent#turn9');
+  assertNoLeakedToolText(finalTurn, 'cross-intent#turn9');
+  assert(finalTurn.conversationId === conversationId, 'cross-intent#turn9: conversation drift');
+  stepSummaries.push(`t9=[${getBlockTypes(finalTurn).join(',')}]`);
+
+  const messagesPayload = getConversationMessages(conversationId);
+  const userMessages = messagesPayload.items.filter((item) => item.role === 'user').length;
+  const assistantMessages = messagesPayload.items.filter((item) => item.role === 'assistant').length;
+  assert(userMessages >= 8, `cross-intent messages: expected >=8 user messages, got ${userMessages}`);
+  assert(
+    assistantMessages >= 8,
+    `cross-intent messages: expected >=8 assistant messages, got ${assistantMessages}`
+  );
+
+  logs.push(
+    `flow#auth-cross-intent conversation=${conversationId} ${stepSummaries.join(' ')} persisted=user:${userMessages},assistant:${assistantMessages},total:${messagesPayload.total}`
+  );
 }
 
 function runFreeTextFlow(logs: string[]): void {
@@ -696,6 +1288,27 @@ function runExploreFlow(logs: string[]): void {
   const types = getBlockTypes(turn);
   assert(types.length > 0, 'explore flow should return blocks');
   logs.push(`flow#explore blocks=[${types.join(',')}]`);
+}
+
+function runExplicitAiModelFlow(logs: string[]): void {
+  const turn = postTurn(
+    {
+      type: 'text',
+      text: '我在解放碑，帮我看看今晚附近有什么轻松一点的活动',
+    },
+    null,
+    {
+      ai: {
+        model: 'qwen-plus',
+        temperature: 0,
+        maxTokens: 1024,
+      },
+    },
+  );
+
+  const types = getBlockTypes(turn);
+  assert(types.length > 0, 'explicit ai model flow should return blocks');
+  logs.push(`flow#ai-model-override model=qwen-plus blocks=[${types.join(',')}]`);
 }
 
 function runPartnerFlow(logs: string[]): void {
@@ -793,16 +1406,9 @@ function runStreamContractCheck(logs: string[]): void {
 }
 
 function runOptionalConversationCheck(logs: string[]): void {
-  if (!AUTH_TOKEN) {
-    throw new Error('strict regression requires GENUI_AUTH_TOKEN');
-  }
-
-  const userId = AUTH_USER_ID || getUserIdFromJwt(AUTH_TOKEN);
-  assert(userId.length > 0, 'strict regression requires GENUI_AUTH_USER_ID or JWT payload userId');
-
   const response = requestJson({
     method: 'GET',
-    url: `${BASE_URL}/ai/conversations?userId=${encodeURIComponent(userId)}&limit=5`,
+    url: `${BASE_URL}/ai/conversations?userId=${encodeURIComponent(authUserId)}&limit=5`,
   });
 
   assert(response.status === 200, `conversations request failed: ${response.status}`);
@@ -812,10 +1418,6 @@ function runOptionalConversationCheck(logs: string[]): void {
 }
 
 function runOptionalAdminOpsChecks(logs: string[]): void {
-  if (!ADMIN_TOKEN) {
-    throw new Error('strict regression requires GENUI_ADMIN_TOKEN');
-  }
-
   const today = new Date();
   const sevenDaysAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
   const toDateParam = (value: Date) => value.toISOString().slice(0, 10);
@@ -824,8 +1426,8 @@ function runOptionalAdminOpsChecks(logs: string[]): void {
 
   const qualityResponse = requestJson({
     method: 'GET',
-    url: `${BASE_URL}/ai/ops/metrics/quality?startDate=${startDate}&endDate=${endDate}`,
-    authArgs: ADMIN_AUTH_ARGS,
+    url: `${BASE_URL}/ai/metrics/quality?startDate=${startDate}&endDate=${endDate}`,
+    authArgs: getAdminAuthArgs(),
   });
   assert(qualityResponse.status === 200, `ops quality metrics failed: ${qualityResponse.status}`);
   const qualityPayload = parseJson<Record<string, unknown>>(qualityResponse.body, 'ops quality metrics');
@@ -839,8 +1441,8 @@ function runOptionalAdminOpsChecks(logs: string[]): void {
 
   const conversionResponse = requestJson({
     method: 'GET',
-    url: `${BASE_URL}/ai/ops/metrics/conversion?startDate=${startDate}&endDate=${endDate}`,
-    authArgs: ADMIN_AUTH_ARGS,
+    url: `${BASE_URL}/ai/metrics/conversion?startDate=${startDate}&endDate=${endDate}`,
+    authArgs: getAdminAuthArgs(),
   });
   assert(conversionResponse.status === 200, `ops conversion metrics failed: ${conversionResponse.status}`);
   const conversionPayload = parseJson<Record<string, unknown>>(
@@ -853,8 +1455,8 @@ function runOptionalAdminOpsChecks(logs: string[]): void {
 
   const healthResponse = requestJson({
     method: 'GET',
-    url: `${BASE_URL}/ai/ops/metrics/health`,
-    authArgs: ADMIN_AUTH_ARGS,
+    url: `${BASE_URL}/ai/metrics/health`,
+    authArgs: getAdminAuthArgs(),
   });
   assert(healthResponse.status === 200, `ops health metrics failed: ${healthResponse.status}`);
   const healthPayload = parseJson<Record<string, unknown>>(healthResponse.body, 'ops health metrics');
@@ -864,7 +1466,7 @@ function runOptionalAdminOpsChecks(logs: string[]): void {
   const ragStatsResponse = requestJson({
     method: 'GET',
     url: `${BASE_URL}/ai/rag/stats`,
-    authArgs: ADMIN_AUTH_ARGS,
+    authArgs: getAdminAuthArgs(),
   });
   assert(ragStatsResponse.status === 200, `rag stats failed: ${ragStatsResponse.status}`);
   const ragStats = parseJson<Record<string, unknown>>(ragStatsResponse.body, 'rag stats');
@@ -874,7 +1476,7 @@ function runOptionalAdminOpsChecks(logs: string[]): void {
   const memoryUsersResponse = requestJson({
     method: 'GET',
     url: `${BASE_URL}/ai/memory/users?q=admin&limit=1`,
-    authArgs: ADMIN_AUTH_ARGS,
+    authArgs: getAdminAuthArgs(),
   });
   assert(memoryUsersResponse.status === 200, `memory users failed: ${memoryUsersResponse.status}`);
   const memoryUsersPayload = parseJson<Record<string, unknown>>(memoryUsersResponse.body, 'memory users');
@@ -889,7 +1491,7 @@ function runOptionalAdminOpsChecks(logs: string[]): void {
     const memoryProfileResponse = requestJson({
       method: 'GET',
       url: `${BASE_URL}/ai/memory/${userId}`,
-      authArgs: ADMIN_AUTH_ARGS,
+      authArgs: getAdminAuthArgs(),
     });
     assert(memoryProfileResponse.status === 200, `memory profile failed: ${memoryProfileResponse.status}`);
     const memoryProfile = parseJson<Record<string, unknown>>(memoryProfileResponse.body, 'memory profile');
@@ -900,7 +1502,7 @@ function runOptionalAdminOpsChecks(logs: string[]): void {
   const sessionsResponse = requestJson({
     method: 'GET',
     url: `${BASE_URL}/ai/sessions?limit=1`,
-    authArgs: ADMIN_AUTH_ARGS,
+    authArgs: getAdminAuthArgs(),
   });
   assert(sessionsResponse.status === 200, `sessions check failed: ${sessionsResponse.status}`);
   const sessionsPayload = parseJson<Record<string, unknown>>(sessionsResponse.body, 'sessions check');
@@ -915,15 +1517,18 @@ function main(): void {
   const logs: string[] = [];
 
   logs.push(`base=${CHAT_URL}`);
-  logs.push(`auth=${AUTH_TOKEN ? 'enabled' : 'disabled'}`);
-  logs.push(`admin=${ADMIN_TOKEN ? 'enabled' : 'disabled'}`);
+  ensureProtocolRegressionTokens(logs);
 
   checkWelcome(logs);
   checkLegacyPayloadRejected(logs);
 
   runCoreCreateFlow(logs);
+  runContinuousConversationFlow(logs);
+  runGuestLongConversationFlow(logs);
+  runAuthCrossIntentLongFlow(logs);
   runFreeTextFlow(logs);
   runExploreFlow(logs);
+  runExplicitAiModelFlow(logs);
   runPartnerFlow(logs);
   runManageFlow(logs);
   runChitchatFlow(logs);

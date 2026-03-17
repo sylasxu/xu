@@ -1,4 +1,3 @@
-import { useListContext } from '@/components/list-page'
 import {
   Dialog,
   DialogContent,
@@ -7,8 +6,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
-import { type GlobalKeyword } from '../data/schema'
-import { type HotKeywordDialogType } from './hot-keywords-columns'
+import { useHotKeywordsListContext } from './list-context'
 
 const matchTypeLabels: Record<string, string> = {
   exact: '完全匹配',
@@ -26,7 +24,7 @@ const responseTypeLabels: Record<string, string> = {
 }
 
 export function HotKeywordViewDialog() {
-  const { currentRow, setOpen } = useListContext<GlobalKeyword, HotKeywordDialogType>()
+  const { currentRow, setOpen } = useHotKeywordsListContext()
 
   if (!currentRow) return null
 

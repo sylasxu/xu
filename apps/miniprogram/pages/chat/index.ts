@@ -81,6 +81,29 @@ interface PageOptions {
   activityId?: string;
 }
 
+const INITIAL_POLL_TIMER: number | null = null;
+
+function readStorageString(key: string, fallback = ''): string {
+  const value = wx.getStorageSync(key);
+  return typeof value === 'string' && value.length > 0 ? value : fallback;
+}
+
+function readResponseMessage(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+
+  if ('msg' in value && typeof value.msg === 'string' && value.msg.trim()) {
+    return value.msg.trim();
+  }
+
+  if ('message' in value && typeof value.message === 'string' && value.message.trim()) {
+    return value.message.trim();
+  }
+
+  return null;
+}
+
 // 轮询间隔（毫秒）
 const POLL_INTERVAL = 5000; // 5 秒
 
@@ -103,7 +126,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
   },
 
   // 轮询定时器
-  _pollTimer: null as number | null,
+  _pollTimer: INITIAL_POLL_TIMER,
 
   onLoad(options: PageOptions) {
     const { activityId } = options;
@@ -114,7 +137,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     }
 
     // 获取当前用户 ID
-    const currentUserId = wx.getStorageSync('userId') || '';
+    const currentUserId = readStorageString('userId');
 
     this.setData({
       activityId,
@@ -290,9 +313,9 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
 
     this.setData({ isPolling: true });
     
-    this._pollTimer = setInterval(() => {
+    this._pollTimer = Number(setInterval(() => {
       this.loadMessages(true);
-    }, POLL_INTERVAL) as unknown as number;
+    }, POLL_INTERVAL));
   },
 
   /**
@@ -364,8 +387,8 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
 
         // 本地添加消息（乐观更新）
         const userInfo = {
-          nickname: wx.getStorageSync('userNickname') || '我',
-          avatarUrl: wx.getStorageSync('userAvatarUrl') || '',
+          nickname: readStorageString('userNickname', '我'),
+          avatarUrl: readStorageString('userAvatarUrl'),
         };
         
         const localMessage: ChatMessage = {
@@ -388,13 +411,12 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
         });
         this.scrollToBottom();
       } else {
-        const errorData = response.data as { msg?: string };
-        throw new Error(errorData?.msg || '发送失败');
+        throw new Error(readResponseMessage(response.data) || '发送失败');
       }
     } catch (error) {
       console.error('发送消息失败', error);
       wx.showToast({
-        title: (error as Error).message || '发送失败',
+        title: error instanceof Error ? error.message : '发送失败',
         icon: 'none',
       });
     } finally {
@@ -432,7 +454,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     // 不能举报自己的消息
     if (isSelf) return;
     
-    const token = wx.getStorageSync('token');
+    const token = readStorageString('token');
     if (!token) {
       wx.showToast({ title: '请先登录', icon: 'none' });
       return;

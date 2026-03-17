@@ -30,6 +30,10 @@ interface FlowGraphProps {
   onNodeClick: (node: FlowNode) => void;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
 const nodeTypes: NodeTypes = {
   'user-input': InputNode,
   'keyword-match': P0MatchNode,
@@ -51,8 +55,8 @@ export function FlowGraph({ data, onNodeClick }: FlowGraphProps) {
   }, [data, setNodes, setEdges]);
 
   const handleNodeClick = useCallback(
-    (_event: React.MouseEvent, node: any) => {
-      onNodeClick(node as FlowNode);
+    (_event: React.MouseEvent, node: FlowNode) => {
+      onNodeClick(node);
     },
     [onNodeClick]
   );
@@ -104,7 +108,10 @@ export function FlowGraph({ data, onNodeClick }: FlowGraphProps) {
           bgColor="var(--muted)"
           style={{ width: 160, height: 120, right: 12, bottom: 12 }}
           nodeColor={(node) => {
-            const status = (node.data as any)?.status as string | undefined;
+            const status =
+              isRecord(node.data) && typeof node.data.status === 'string'
+                ? node.data.status
+                : undefined;
             const colorMap: Record<string, string> = {
               pending: '#9ca3af',
               running: '#3b82f6',

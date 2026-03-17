@@ -47,11 +47,17 @@
     "genui:regression": "turbo run genui:regression --filter=@juchang/api",
     "arch:check": "bun scripts/architecture-consistency-check.ts",
     "--- QUALITY ---": "echo '代码质量检查'",
+    "test": "bun run test:api",
+    "test:api": "bun run --cwd apps/api test",
     "lint": "turbo run lint",
     "format": "turbo run format",
     "type-check": "turbo run type-check",
     "smoke:five-users": "bun scripts/five-user-smoke.ts",
-    "sandbox:regression": "bun scripts/sandbox-regression.ts"
+    "sandbox:regression": "bun scripts/sandbox-regression.ts",
+    "regression:flow": "bun scripts/flow-regression.ts",
+    "regression:protocol": "bun scripts/chat-curl-regression.ts",
+    "regression:protocol:snapshot": "bun scripts/genui-turns-snapshot.ts",
+    "release:gate": "bun scripts/release-gate.ts"
   },
   "keywords": [
     "社交",

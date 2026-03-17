@@ -24,8 +24,9 @@ export function useHotKeywordsList(filters: HotKeywordsFilters = {}) {
     queryKey: hotKeywordsKeys.list(filters),
     queryFn: async () => {
       const result = await unwrap(
-        api['hot-keywords'].all.get({ 
+        api['hot-keywords'].get({ 
           query: {
+            detail: true,
             isActive: filters.isActive,
             matchType: filters.matchType,
             responseType: filters.responseType,
@@ -89,7 +90,9 @@ export function useHotKeywordDetail(id: string) {
     queryKey: hotKeywordsKeys.detail(id),
     queryFn: async () => {
       // 通过列表接口获取所有数据，然后找到对应的热词
-      const result = await unwrap(api['hot-keywords'].all.get({ query: {} }))
+      const result = await unwrap(
+        api['hot-keywords'].get({ query: { detail: true } })
+      )
       if (!result) {
         throw new Error('获取热词列表失败')
       }

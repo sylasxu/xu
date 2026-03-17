@@ -10,6 +10,8 @@ import { getUsersById, putUsersById } from '../api/endpoints/users/users'
 import { postAuthLogin } from '../api/endpoints/auth/auth'
 import type { AuthLoginResponse } from '../api/model'
 
+const UNLIMITED_AI_CREATE_QUOTA = 999
+
 interface UserState {
   // 状态
   user: User | null
@@ -168,7 +170,9 @@ export const useUserStore = create<UserState>()(
             return
           }
 
-          state.user.aiCreateQuotaToday = Math.max(0, (state.user.aiCreateQuotaToday ?? 0) - 1)
+          if ((state.user.aiCreateQuotaToday ?? 0) < UNLIMITED_AI_CREATE_QUOTA) {
+            state.user.aiCreateQuotaToday = Math.max(0, (state.user.aiCreateQuotaToday ?? 0) - 1)
+          }
           state.user.activitiesCreatedCount = (state.user.activitiesCreatedCount ?? 0) + 1
           state.user.updatedAt = new Date().toISOString()
         })

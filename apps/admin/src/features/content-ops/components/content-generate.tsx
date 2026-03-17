@@ -15,7 +15,7 @@ import { Loader2, Sparkles, Copy, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import { useGenerateNotes } from '../hooks/use-content'
 import { useTrendInsights } from '@/hooks/use-growth'
-import { CONTENT_TYPE_OPTIONS, type ContentType } from '../data/schema'
+import { CONTENT_TYPE_OPTIONS, isContentType, type ContentType } from '../data/schema'
 
 interface GeneratedNote {
   id: string
@@ -32,7 +32,7 @@ function copyToClipboard(text: string) {
 
 export function ContentGenerate() {
   const [topic, setTopic] = useState('')
-  const [contentType, setContentType] = useState<ContentType>('xiaohongshu')
+  const [contentType, setContentType] = useState<ContentType>('activity_recruit')
   const [count, setCount] = useState('1')
   const [results, setResults] = useState<GeneratedNote[]>([])
 
@@ -69,7 +69,7 @@ export function ContentGenerate() {
               <Label htmlFor='topic'>主题</Label>
               <Textarea
                 id='topic'
-                placeholder='输入笔记主题，如：周末重庆搭子局、观音桥火锅约饭...'
+                placeholder='输入内容主题，如：周末重庆搭子局、观音桥火锅约饭...'
                 value={topic}
                 onChange={(e) => setTopic(e.target.value)}
                 rows={3}
@@ -79,7 +79,14 @@ export function ContentGenerate() {
 
             <div>
               <Label>内容类型</Label>
-              <Select value={contentType} onValueChange={(v) => setContentType(v as ContentType)}>
+              <Select
+                value={contentType}
+                onValueChange={(value) => {
+                  if (isContentType(value)) {
+                    setContentType(value)
+                  }
+                }}
+              >
                 <SelectTrigger className='mt-2'>
                   <SelectValue />
                 </SelectTrigger>
@@ -154,7 +161,7 @@ export function ContentGenerate() {
             <Card>
               <CardContent className='flex flex-col items-center justify-center py-12 text-muted-foreground'>
                 <FileText className='h-12 w-12 mb-4' />
-                <p>输入主题，AI 帮你写小红书笔记</p>
+                <p>输入主题，AI 帮你生成内容稿</p>
               </CardContent>
             </Card>
           ) : (

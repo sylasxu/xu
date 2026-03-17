@@ -1,6 +1,4 @@
 // WebSocket 处理器 - 活动讨论区实时通讯
-// @ts-ignore - bun types available at runtime
-import type { ServerWebSocket } from 'bun';
 import { db, activityMessages, activities, participants, users, eq, and, desc } from '@juchang/db';
 import { verifyToken } from '../auth/auth.service';
 import { validateContent } from '../content-security/content-security.service';
@@ -14,6 +12,22 @@ export interface WsData {
   userId: string;
   activityId: string;
   connId: string;
+}
+
+type ChatSocket = pool.ChatSocketConnection & object;
+
+const wsSessions = new WeakMap<ChatSocket, WsData>();
+
+function rememberWsSession(ws: ChatSocket, session: WsData): void {
+  wsSessions.set(ws, session);
+}
+
+function readWsSession(ws: ChatSocket): WsData | null {
+  return wsSessions.get(ws) ?? null;
+}
+
+function clearWsSession(ws: ChatSocket): void {
+  wsSessions.delete(ws);
 }
 
 /**
@@ -121,7 +135,7 @@ async function getUserInfo(userId: string) {
  * 处理 WebSocket 连接升级
  */
 export async function handleWsUpgrade(
-  ws: ServerWebSocket<WsData>,
+  ws: ChatSocket,
   activityId: string,
   token: string
 ): Promise<boolean> {
@@ -155,16 +169,19 @@ export async function handleWsUpgrade(
 
   // 5. 生成连接 ID 并加入连接池
   const connId = pool.generateConnId();
-  pool.addConnection(connId, {
-    ws: ws as any,
+  const session: WsData = {
     userId: user.id,
     activityId,
+    connId,
+  };
+
+  pool.addConnection(connId, {
+    ws,
+    ...session,
     connectedAt: Date.now(),
     lastPingAt: Date.now(),
   });
-
-  // 更新 ws.data
-  ws.data = { userId: user.id, activityId, connId };
+  rememberWsSession(ws, session);
 
   // 6. 发送历史消息
   const messages = await getHistoryMessages(activityId, 50);
@@ -196,10 +213,16 @@ export async function handleWsUpgrade(
  * 处理 WebSocket 消息
  */
 export async function handleWsMessage(
-  ws: ServerWebSocket<WsData>,
+  ws: ChatSocket,
   rawData: string | Buffer
 ): Promise<void> {
-  const { userId, activityId, connId } = ws.data;
+  const session = readWsSession(ws);
+  if (!session) {
+    ws.close(WsErrorCodes.UNAUTHORIZED, 'Unauthorized');
+    return;
+  }
+
+  const { userId, activityId, connId } = session;
 
   let data: { type: string; content?: string };
   try {
@@ -282,8 +305,15 @@ export async function handleWsMessage(
 /**
  * 处理 WebSocket 关闭
  */
-export async function handleWsClose(ws: ServerWebSocket<WsData>): Promise<void> {
-  const { userId, activityId, connId } = ws.data;
+export async function handleWsClose(ws: ChatSocket): Promise<void> {
+  const session = readWsSession(ws);
+  if (!session) {
+    return;
+  }
+
+  clearWsSession(ws);
+
+  const { userId, activityId, connId } = session;
 
   // 从连接池移除
   pool.removeConnection(connId);

@@ -1,16 +1,17 @@
 // AI Controller - vNext 统一 AI Chat 接口 (GenUI Protocol)
-// 瘦身后只保留用户端路由 + 少量 Admin 路由，子领域通过 .use() 挂载
+// 只承载 AI 领域能力路由，鉴权差异通过 capability 控制，子领域通过 .use() 挂载
 import { Elysia, t } from 'elysia';
 import { basePlugins, verifyAuth, verifyAdmin, AuthError } from '../../setup';
-import { aiModel, type ErrorResponse, type ConversationMessageType } from './ai.model';
+import { aiModel, type ErrorResponse } from './ai.model';
 import {
   clearConversations,
   getWelcomeCard,
-  // v3.8：两层会话结构
-  listConversations,
-  getMessagesByActivityId,
+  listUserConversations,
+  listConversationMessages,
+  getActivityConversationMessages,
   addMessageToConversation,
   getOrCreateCurrentConversation,
+  syncConversationTurnSnapshot,
 } from './ai.service';
 import { getSystemPrompt, getPromptTemplateConfig, getPromptTemplateMetadata } from './prompts';
 import {
@@ -19,7 +20,7 @@ import {
   getToolCallStats,
 } from './observability/metrics';
 import type { GenUIRequest } from '@juchang/genui-contract';
-import { db, users, eq } from '@juchang/db';
+import { db, users, activities, eq } from '@juchang/db';
 import {
   buildAiChatTurn,
   buildAiChatStreamEvents,
@@ -33,6 +34,29 @@ import { aiRagController } from './ai-rag.controller';
 import { aiMemoryController } from './ai-memory.controller';
 import { aiSecurityController } from './ai-security.controller';
 import { aiMetricsController } from './ai-metrics.controller';
+
+function resolveConversationUserText(input: GenUIRequest['input']): string {
+  if (input.type === 'text') {
+    return input.text.trim();
+  }
+
+  if (typeof input.displayText === 'string' && input.displayText.trim()) {
+    return input.displayText.trim();
+  }
+
+  const params = input.params && typeof input.params === 'object' ? input.params : null;
+  const candidates = params
+    ? [params.location, params.value, params.activityType, params.type, params.slot, params.title]
+    : [];
+
+  for (const value of candidates) {
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return input.action.trim();
+}
 
 export const aiController = new Elysia({ prefix: '/ai' })
   .use(basePlugins)
@@ -115,6 +139,15 @@ export const aiController = new Elysia({ prefix: '/ai' })
           traces: result.traces,
         });
 
+        if (viewer) {
+          await syncConversationTurnSnapshot({
+            conversationId: normalized.envelope.conversationId,
+            userId: viewer.id,
+            userText: resolveConversationUserText(request.input),
+            blocks: normalized.envelope.turn.blocks,
+          });
+        }
+
         if (request.stream) {
           const events = buildAiChatStreamEvents(normalized.envelope, normalized.traces);
           return createAiChatSSEStreamResponse(events);
@@ -145,10 +178,7 @@ export const aiController = new Elysia({ prefix: '/ai' })
   // 对话历史管理 (v3.2 新增，v3.5 重构为显式参数)
   // ==========================================
 
-  // 获取对话历史（分页）
-  // 显式参数模式：
-  // - userId：按用户 ID 查询该用户会话
-  // - activityId：按活动 ID 查询关联消息
+  // 获取用户会话列表（分页）
   .get(
     '/conversations',
     async ({ query, set, jwt, headers }) => {
@@ -161,38 +191,8 @@ export const aiController = new Elysia({ prefix: '/ai' })
         } satisfies ErrorResponse;
       }
 
-      const { userId, activityId } = query;
-
       try {
-        // 如果指定了 activityId，查询关联此活动的消息
-        if (activityId) {
-          const result = await getMessagesByActivityId(activityId);
-          return {
-            items: result.items.map(m => ({
-              id: m.id,
-              userId: m.userId,
-              userNickname: m.userNickname,
-              role: m.role,
-              type: m.messageType as ConversationMessageType,
-              content: m.content,
-              activityId: activityId,
-              createdAt: m.createdAt,
-            })),
-            total: result.total,
-            hasMore: false,
-            cursor: null,
-          };
-        }
-
-        if (!userId) {
-          set.status = 400;
-          return {
-            code: 400,
-            msg: '缺少 userId 参数',
-          } satisfies ErrorResponse;
-        }
-
-        if (user.role !== 'admin' && user.id !== userId) {
+        if (user.role !== 'admin' && user.id !== query.userId) {
           set.status = 403;
           return {
             code: 403,
@@ -200,35 +200,163 @@ export const aiController = new Elysia({ prefix: '/ai' })
           } satisfies ErrorResponse;
         }
 
-        const result = await listConversations({ userId, limit: query.limit });
-        return {
-          items: result.items,
-          total: result.total,
-          hasMore: false,
-          cursor: null,
-        };
+        return await listUserConversations(query);
       } catch (error: any) {
         set.status = 500;
         return {
           code: 500,
-          msg: error.message || '获取对话历史失败',
+          msg: error.message || '获取会话列表失败',
         } satisfies ErrorResponse;
       }
     },
     {
       detail: {
         tags: ['AI'],
-        summary: '获取 AI 对话历史',
-        description: `获取对话历史，使用显式 ID 参数：
-- userId 参数：获取指定用户的对话（普通用户仅可查本人）
-- activityId 参数：获取关联某活动的对话消息`,
+        summary: '获取用户 AI 会话列表',
+        description: `获取指定用户的 AI 会话列表。
+
+- userId 必传，普通用户仅可查询本人
+- 返回值固定为会话集合，不再混用消息明细`,
       },
       query: 'ai.conversationsQuery',
       response: {
         200: 'ai.conversationsResponse',
-        400: 'ai.error',
-        403: 'ai.error',
         401: 'ai.error',
+        403: 'ai.error',
+        500: 'ai.error',
+      },
+    }
+  )
+
+  // 获取指定会话的消息列表
+  .get(
+    '/conversations/:conversationId/messages',
+    async ({ params, query, set, jwt, headers }) => {
+      const user = await verifyAuth(jwt, headers);
+      if (!user) {
+        set.status = 401;
+        return {
+          code: 401,
+          msg: '未授权',
+        } satisfies ErrorResponse;
+      }
+
+      try {
+        if (user.role !== 'admin' && user.id !== query.userId) {
+          set.status = 403;
+          return {
+            code: 403,
+            msg: '无权限访问该用户会话',
+          } satisfies ErrorResponse;
+        }
+
+        return await listConversationMessages({
+          ...query,
+          conversationId: params.conversationId,
+        });
+      } catch (error: any) {
+        if (error instanceof Error && error.message === '会话不存在') {
+          set.status = 404;
+          return {
+            code: 404,
+            msg: error.message,
+          } satisfies ErrorResponse;
+        }
+
+        if (error instanceof Error && error.message === '会话与用户不匹配') {
+          set.status = 403;
+          return {
+            code: 403,
+            msg: '无权限访问该会话',
+          } satisfies ErrorResponse;
+        }
+
+        set.status = 500;
+        return {
+          code: 500,
+          msg: error.message || '获取对话消息失败',
+        } satisfies ErrorResponse;
+      }
+    },
+    {
+      detail: {
+        tags: ['AI'],
+        summary: '获取指定 AI 会话消息',
+        description: `获取指定会话的消息历史。
+
+- conversationId 通过路径显式指定
+- userId 必传，普通用户仅可查询本人
+- 支持按 role / messageType / cursor 分页过滤`,
+      },
+      params: 'ai.conversationIdParams',
+      query: 'ai.conversationMessagesQuery',
+      response: {
+        200: 'ai.conversationMessagesResponse',
+        401: 'ai.error',
+        403: 'ai.error',
+        404: 'ai.error',
+        500: 'ai.error',
+      },
+    }
+  )
+
+  // 获取活动关联的 AI 对话消息
+  .get(
+    '/activities/:activityId/messages',
+    async ({ params, set, jwt, headers }) => {
+      const user = await verifyAuth(jwt, headers);
+      if (!user) {
+        set.status = 401;
+        return {
+          code: 401,
+          msg: '未授权',
+        } satisfies ErrorResponse;
+      }
+
+      const [activity] = await db
+        .select({ creatorId: activities.creatorId })
+        .from(activities)
+        .where(eq(activities.id, params.activityId))
+        .limit(1);
+
+      if (!activity) {
+        set.status = 404;
+        return {
+          code: 404,
+          msg: '活动不存在',
+        } satisfies ErrorResponse;
+      }
+
+      if (user.role !== 'admin' && activity.creatorId !== user.id) {
+        set.status = 403;
+        return {
+          code: 403,
+          msg: '无权限访问该活动的 AI 对话记录',
+        } satisfies ErrorResponse;
+      }
+
+      try {
+        return await getActivityConversationMessages(params.activityId);
+      } catch (error: any) {
+        set.status = 500;
+        return {
+          code: 500,
+          msg: error.message || '获取活动关联 AI 对话失败',
+        } satisfies ErrorResponse;
+      }
+    },
+    {
+      detail: {
+        tags: ['AI'],
+        summary: '获取活动关联 AI 对话消息',
+        description: '按 activityId 获取与该活动关联的 AI 对话消息，用于查看活动创建/修改过程中的 AI 记录。',
+      },
+      params: 'ai.activityConversationMessageParams',
+      response: {
+        200: 'ai.activityConversationMessagesResponse',
+        401: 'ai.error',
+        403: 'ai.error',
+        404: 'ai.error',
         500: 'ai.error',
       },
     }

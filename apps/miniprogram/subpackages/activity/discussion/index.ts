@@ -2,7 +2,7 @@
  * 活动讨论区页面
  * 基于 WebSocket 的实时通讯
  */
-import { useDiscussionStore, type DiscussionMessage } from '../../../src/stores/discussion'
+import { useDiscussionStore, type ConnectionStatus, type DiscussionMessage } from '../../../src/stores/discussion'
 import { getJoinGuideTitle, getJoinQuickStarters } from '../../../src/utils/join-flow'
 import { useUserStore } from '../../../src/stores/user'
 
@@ -10,7 +10,7 @@ interface DiscussionPageData {
   activityId: string
   messages: (DiscussionMessage & { formattedTime: string })[]
   onlineCount: number
-  connectionStatus: string
+  connectionStatus: ConnectionStatus
   isArchived: boolean
   error: string | null
   isLoadingMore: boolean
@@ -75,14 +75,19 @@ function formatTime(dateStr: string): string {
   return `${date.getMonth() + 1}/${date.getDate()} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`
 }
 
+const INITIAL_MESSAGES: DiscussionPageData['messages'] = []
+const INITIAL_CONNECTION_STATUS: ConnectionStatus = 'disconnected'
+const INITIAL_ERROR: string | null = null
+const INITIAL_UNSUBSCRIBE: (() => void) | null = null
+
 Page<DiscussionPageData, WechatMiniprogram.Page.CustomOption>({
   data: {
     activityId: '',
-    messages: [] as (DiscussionMessage & { formattedTime: string })[],
+    messages: INITIAL_MESSAGES,
     onlineCount: 0,
-    connectionStatus: 'disconnected' as string,
+    connectionStatus: INITIAL_CONNECTION_STATUS,
     isArchived: false,
-    error: null as string | null,
+    error: INITIAL_ERROR,
     isLoadingMore: false,
     hasMore: true,
     inputValue: '',
@@ -96,7 +101,7 @@ Page<DiscussionPageData, WechatMiniprogram.Page.CustomOption>({
   },
 
   // Store 订阅取消函数
-  _unsubscribe: null as (() => void) | null,
+  _unsubscribe: INITIAL_UNSUBSCRIBE,
 
   onLoad(options: DiscussionPageOptions) {
     const activityId = options.id

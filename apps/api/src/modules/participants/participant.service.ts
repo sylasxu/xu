@@ -227,10 +227,7 @@ export async function confirmActivityFulfillment(
   };
 }
 
-export async function markActivityRebookFollowUp(
-  userId: string,
-  activityId: string,
-): Promise<ActionResponse> {
+async function getActivityOutcomeContext(userId: string, activityId: string) {
   const [activity] = await db
     .select({
       id: activities.id,
@@ -266,6 +263,15 @@ export async function markActivityRebookFollowUp(
     throw new Error('只有活动发起人或参与成员可以标记再约');
   }
 
+  return activity;
+}
+
+export async function markActivityRebookFollowUp(
+  userId: string,
+  activityId: string,
+): Promise<ActionResponse> {
+  const activity = await getActivityOutcomeContext(userId, activityId);
+
   await markActivityOutcomeRebookTriggered(userId, {
     activityId,
     activityTitle: activity.title,
@@ -278,4 +284,27 @@ export async function markActivityRebookFollowUp(
     code: 200,
     msg: '已记录这次再约意愿，后续推荐会更懂你',
   };
+}
+
+export async function saveActivityReviewSummary(
+  userId: string,
+  activityId: string,
+  reviewSummary: string,
+): Promise<void> {
+  const normalizedSummary = reviewSummary.trim();
+  if (!normalizedSummary) {
+    return;
+  }
+
+  const activity = await getActivityOutcomeContext(userId, activityId);
+
+  await upsertActivityOutcomeMemory(userId, {
+    activityId,
+    activityTitle: activity.title,
+    activityType: activity.type,
+    locationName: activity.locationName,
+    attended: null,
+    reviewSummary: normalizedSummary,
+    happenedAt: activity.startAt,
+  });
 }

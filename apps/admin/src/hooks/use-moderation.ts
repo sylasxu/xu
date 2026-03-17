@@ -14,7 +14,7 @@ interface ModerationQuery {
 export function useModerationQueue(query: ModerationQuery = {}) {
   return useQuery({
     queryKey: ['moderation', 'queue', query],
-    queryFn: () => unwrap((api.ai.ops as any).security.moderation.queue.get({ query })),
+    queryFn: () => unwrap(api.ai.security.moderation.queue.get({ query })),
     refetchInterval: 30000, // 30秒自动刷新
   })
 }
@@ -26,7 +26,7 @@ export function useApproveModeration() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => 
-      unwrap((api.ai.ops as any).security.moderation({ id }).approve.post()),
+      unwrap(api.ai.security.moderation({ id }).approve.post()),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['moderation', 'queue'] })
       toast.success('已通过审核')
@@ -42,7 +42,7 @@ export function useRejectModeration() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => 
-      unwrap((api.ai.ops as any).security.moderation({ id }).reject.post()),
+      unwrap(api.ai.security.moderation({ id }).reject.post()),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['moderation', 'queue'] })
       toast.success('已删除内容')
@@ -58,7 +58,7 @@ export function useBanModeration() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => 
-      unwrap((api.ai.ops as any).security.moderation({ id }).ban.post()),
+      unwrap(api.ai.security.moderation({ id }).ban.post()),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['moderation', 'queue'] })
       toast.success('已删除内容并封禁用户')

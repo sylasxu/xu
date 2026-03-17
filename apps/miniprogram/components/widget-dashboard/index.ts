@@ -11,53 +11,19 @@
  * - 待参加活动列表（最多 3 个）
  */
 
-// 活动类型
-interface Activity {
-  id: string;
-  title: string;
-  type: string;
-  startAt: string;
-  locationName?: string;
-  locationHint?: string;
-  currentParticipants?: number;
-  maxParticipants?: number;
-}
+import type {
+  QuickItem,
+  QuickPrompt,
+  SocialProfile,
+  WelcomePendingActivity,
+  WelcomeResponse,
+  WelcomeSection,
+} from '../../src/services/welcome';
 
-// 快捷项类型 (v3.10)
-type QuickItemType = 'draft' | 'suggestion' | 'explore';
+type Activity = WelcomePendingActivity;
+type WelcomeUi = WelcomeResponse['ui'];
 
-// 快捷项
-interface QuickItem {
-  type: QuickItemType;
-  icon?: string;
-  label: string;
-  prompt: string;
-  context?: Record<string, unknown>;
-}
-
-// 分组
-interface WelcomeSection {
-  id: string;
-  icon: string;
-  title: string;
-  items: QuickItem[];
-}
-
-// 社交档案 (v4.4 新增)
-interface SocialProfile {
-  participationCount: number;
-  activitiesCreatedCount: number;
-  preferenceCompleteness: number;
-}
-
-// 快捷入口 (v4.4 新增)
-interface QuickPrompt {
-  icon: string;
-  text: string;
-  prompt: string;
-}
-
-interface ComponentData {
+interface WidgetDashboardData {
   greeting: string;
   subGreeting: string;
   sections: WelcomeSection[];
@@ -65,21 +31,158 @@ interface ComponentData {
   hasActivities: boolean;
   hasSections: boolean;
   // v4.4 新增
-  socialProfile: SocialProfile | null;
-  quickPrompts: QuickPrompt[];
+  displaySocialProfile: SocialProfile | null;
+  displayQuickPrompts: QuickPrompt[];
   hasSocialProfile: boolean;
   hasQuickPrompts: boolean;
   // 从 properties 同步
   nickname: string;
-  ui: {
-    bottomQuickActions?: string[];
-    profileHints?: {
-      low?: string;
-      medium?: string;
-      high?: string;
-    };
-  } | null;
+  displayUi: WelcomeUi | null;
 }
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function readNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function readSocialProfile(value: unknown): SocialProfile | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const participationCount = readNumber(value.participationCount);
+  const activitiesCreatedCount = readNumber(value.activitiesCreatedCount);
+  const preferenceCompleteness = readNumber(value.preferenceCompleteness);
+
+  if (
+    participationCount === null ||
+    activitiesCreatedCount === null ||
+    preferenceCompleteness === null
+  ) {
+    return null;
+  }
+
+  return {
+    participationCount,
+    activitiesCreatedCount,
+    preferenceCompleteness,
+  };
+}
+
+function readQuickPrompt(value: unknown): QuickPrompt | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const icon = readString(value.icon);
+  const text = readString(value.text);
+  const prompt = readString(value.prompt);
+
+  if (!icon || !text || !prompt) {
+    return null;
+  }
+
+  return { icon, text, prompt };
+}
+
+function readQuickPrompts(value: unknown): QuickPrompt[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => readQuickPrompt(item))
+    .filter((item): item is QuickPrompt => item !== null);
+}
+
+function readQuickItem(value: unknown): QuickItem | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const label = readString(value.label);
+  const prompt = readString(value.prompt);
+  const icon = readString(value.icon) ?? undefined;
+  const context = value.context;
+
+  switch (value.type) {
+    case 'draft':
+    case 'suggestion':
+    case 'explore':
+      if (!label || !prompt) {
+        return null;
+      }
+      return {
+        type: value.type,
+        icon,
+        label,
+        prompt,
+        context,
+      };
+    default:
+      return null;
+  }
+}
+
+function readActivityIdFromContext(context: unknown): string | null {
+  if (!isRecord(context)) {
+    return null;
+  }
+
+  return readString(context.activityId);
+}
+
+function readWelcomeUi(value: unknown): WelcomeUi | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const composerPlaceholder = readString(value.composerPlaceholder);
+  const bottomQuickActions = Array.isArray(value.bottomQuickActions)
+    ? value.bottomQuickActions.filter((item): item is string => typeof item === 'string')
+    : [];
+  const profileHints = isRecord(value.profileHints) ? value.profileHints : null;
+
+  if (!composerPlaceholder || !profileHints) {
+    return null;
+  }
+
+  const low = readString(profileHints.low);
+  const medium = readString(profileHints.medium);
+  const high = readString(profileHints.high);
+
+  if (!low || !medium || !high) {
+    return null;
+  }
+
+  return {
+    composerPlaceholder,
+    bottomQuickActions,
+    profileHints: { low, medium, high },
+  };
+}
+
+const WIDGET_DASHBOARD_DATA: WidgetDashboardData = {
+  greeting: '',
+  subGreeting: '',
+  sections: [],
+  displayActivities: [],
+  hasActivities: false,
+  hasSections: false,
+  displaySocialProfile: null,
+  displayQuickPrompts: [],
+  hasSocialProfile: false,
+  hasQuickPrompts: false,
+  nickname: '搭子',
+  displayUi: null,
+};
 
 Component({
   options: {
@@ -95,7 +198,7 @@ Component({
     // 待参加活动列表
     activities: {
       type: Array,
-      value: [] as Activity[],
+      value: [],
     },
     // v3.10: API 返回的问候语
     greeting: {
@@ -110,39 +213,27 @@ Component({
     // v3.10: 分组列表
     sections: {
       type: Array,
-      value: [] as WelcomeSection[],
+      value: [],
     },
     // v4.4: 社交档案
     socialProfile: {
       type: Object,
-      value: {} as any,
+      value: {},
     },
     // v4.4: 快捷入口
     quickPrompts: {
       type: Array,
-      value: [] as QuickPrompt[],
+      value: [],
     },
     ui: {
       type: Object,
-      value: {} as any,
+      value: {},
     },
   },
 
   data: {
-    greeting: '',
-    subGreeting: '',
-    sections: [] as WelcomeSection[],
-    displayActivities: [] as Activity[],
-    hasActivities: false,
-    hasSections: false,
-    // v4.4 新增
-    socialProfile: null as SocialProfile | null,
-    quickPrompts: [] as QuickPrompt[],
-    hasSocialProfile: false,
-    hasQuickPrompts: false,
-    nickname: '搭子',
-    ui: null,
-  } as ComponentData,
+    ...WIDGET_DASHBOARD_DATA,
+  },
 
   observers: {
     'activities': function(activities: Activity[]) {
@@ -164,22 +255,22 @@ Component({
     },
     // v4.4 新增
     'socialProfile': function(profile: SocialProfile | null) {
-      // 检查是否有有效数据（空对象视为无数据）
-      const hasValidProfile = profile && typeof profile === 'object' && 'participationCount' in profile;
+      const resolvedProfile = readSocialProfile(profile);
       this.setData({
-        socialProfile: hasValidProfile ? profile : null,
-        hasSocialProfile: !!hasValidProfile,
+        displaySocialProfile: resolvedProfile,
+        hasSocialProfile: resolvedProfile !== null,
       });
     },
-    'quickPrompts': function(prompts: QuickPrompt[]) {
+    'quickPrompts': function(prompts: unknown) {
+      const resolvedPrompts = readQuickPrompts(prompts);
       this.setData({
-        quickPrompts: prompts || [],
-        hasQuickPrompts: (prompts || []).length > 0,
+        displayQuickPrompts: resolvedPrompts,
+        hasQuickPrompts: resolvedPrompts.length > 0,
       });
     },
-    'ui': function(ui: ComponentData['ui']) {
+    'ui': function(ui: unknown) {
       this.setData({
-        ui: ui && typeof ui === 'object' ? ui : null,
+        displayUi: readWelcomeUi(ui),
       });
     },
   },
@@ -196,8 +287,8 @@ Component({
      * v3.10: 使用 welcome API 返回的问候语字段
      */
     updateGreeting() {
-      const apiGreeting = this.properties.greeting as string;
-      const apiSubGreeting = this.properties.subGreeting as string;
+      const apiGreeting = readString(this.properties.greeting);
+      const apiSubGreeting = readString(this.properties.subGreeting);
 
       this.setData({
         greeting: apiGreeting || '你好～',
@@ -223,7 +314,7 @@ Component({
      * v3.10: 统一处理所有类型的快捷项
      */
     onQuickItemTap(e: WechatMiniprogram.TouchEvent) {
-      const item = e.currentTarget.dataset.item as QuickItem;
+      const item = readQuickItem(e.currentTarget.dataset.item);
       if (!item) return;
 
       // 触发通用事件
@@ -233,7 +324,7 @@ Component({
       switch (item.type) {
         case 'draft': {
           // 继续草稿 → 发送 prompt 或跳转
-          const activityId = item.context?.activityId as string;
+          const activityId = readActivityIdFromContext(item.context);
           if (activityId) {
             wx.navigateTo({
               url: `/subpackages/activity/confirm/index?activityId=${activityId}`,

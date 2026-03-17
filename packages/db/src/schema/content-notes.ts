@@ -5,12 +5,16 @@ import { createInsertSchema, createSelectSchema } from "drizzle-typebox";
 // 自媒体内容运营 - 小红书笔记表
 // ==========================================
 
-export const contentTypeEnum = pgEnum("content_type", [
+export const CONTENT_TYPE_VALUES = [
   "activity_recruit",   // 活动招募
   "buddy_story",        // 搭子故事
   "local_guide",        // 本地攻略
   "product_seed",       // 产品种草
-]);
+] as const;
+
+export type ContentType = typeof CONTENT_TYPE_VALUES[number];
+
+export const contentTypeEnum = pgEnum("content_type", CONTENT_TYPE_VALUES);
 
 export const contentNotes = pgTable("content_notes", {
   id: uuid("id").primaryKey().defaultRandom(),

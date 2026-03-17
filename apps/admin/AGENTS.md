@@ -62,6 +62,18 @@ export function useUpdateUser() {
 }
 ```
 
+### 禁止 `helper/helpers` 与类型逃逸
+
+- 禁止新增 `helper/helpers` 命名的文件、目录、函数
+- Admin 里的协议消费、调试数据、配置数据，必须在当前 feature 内显式校验，不能靠 `helper` / `any` / `as unknown as` 混过去
+- 如果 Eden Treaty 类型没跑通，优先修 API 契约、Eden 推导、当前组件分支，不要写一个通用 helper 层来掩盖错误
+
+### 测试与回归
+
+- 默认沿用 Bun First，不为 Admin 常规回归额外引入 Jest / Vitest 作为默认测试栈
+- 影响 PRD / TAD 主流程的 Admin 改动，必须补对应的 `bun scripts/*.ts` 或现有回归脚本，确保真实接口链路没断
+- 不要用脱离真实接口契约的 mock shape、魔法默认值、断言灌类型来让测试“看起来正确”
+
 ### Toast 规范
 
 ```typescript

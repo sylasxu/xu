@@ -16,6 +16,8 @@ interface Scenario {
   id: string;
   description: string;
   steps: InputStep[];
+  authMode?: "anonymous" | "authenticated";
+  expectedBlockTypes?: string[][];
 }
 
 interface HttpResult {
@@ -40,13 +42,29 @@ const BASE_URL =
   process.env.GENUI_TURNS_API_URL ||
   "http://127.0.0.1:1996/ai/chat";
 const DEFAULT_TEST_MODEL = process.env.GENUI_TEST_MODEL?.trim() || "deepseek-chat";
-const AUTH_TOKEN = process.env.GENUI_AUTH_TOKEN?.trim() || "";
-const AUTH_HEADER_ARGS = AUTH_TOKEN ? ["-H", `Authorization: Bearer ${AUTH_TOKEN}`] : [];
+const CURL_TIMEOUT_MS = Number.parseInt(process.env.GENUI_CURL_TIMEOUT_MS || "45000", 10);
+const ROOT_API_URL = BASE_URL.endsWith("/ai/chat")
+  ? BASE_URL.slice(0, -"/ai/chat".length)
+  : BASE_URL;
+let authToken = process.env.GENUI_AUTH_TOKEN?.trim() || "";
+let adminToken = process.env.GENUI_ADMIN_TOKEN?.trim() || "";
+const AUTO_ADMIN_PHONE = process.env.GENUI_ADMIN_PHONE?.trim()
+  || process.env.SMOKE_ADMIN_PHONE?.trim()
+  || process.env.ADMIN_PHONE_WHITELIST?.split(",").map((phone) => phone.trim()).find(Boolean)
+  || "";
+const AUTO_ADMIN_CODE = process.env.GENUI_ADMIN_CODE?.trim()
+  || process.env.SMOKE_ADMIN_CODE?.trim()
+  || process.env.ADMIN_SUPER_CODE?.trim()
+  || "";
+
+function readAuthHeaderArgs(token?: string): string[] {
+  return token ? ["-H", `Authorization: Bearer ${token}`] : [];
+}
 
 function execCurl(args: string[]): HttpResult {
   const result = spawnSync("curl", args, {
     encoding: "utf8",
-    timeout: 15000,
+    timeout: CURL_TIMEOUT_MS,
     maxBuffer: 1024 * 1024 * 5,
   });
 
@@ -69,6 +87,85 @@ function assert(condition: unknown, message: string): void {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function parseJson<T>(value: string, label: string): T {
+  try {
+    return JSON.parse(value) as T;
+  } catch (error) {
+    throw new Error(`${label}: invalid JSON ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function assertLocalBootstrapEnv(): void {
+  assert(
+    AUTO_ADMIN_PHONE.length > 0 && AUTO_ADMIN_CODE.length > 0,
+    "authenticated genui regression requires GENUI_AUTH_TOKEN or local admin bootstrap env"
+  );
+}
+
+function requestJsonWithOptionalAuth<T>(params: {
+  url: string;
+  payload: Record<string, unknown>;
+  token?: string;
+  label: string;
+}): T {
+  const result = execCurl([
+    "-sS",
+    "-X",
+    "POST",
+    params.url,
+    "-H",
+    "Content-Type: application/json",
+    ...readAuthHeaderArgs(params.token),
+    "-d",
+    JSON.stringify(params.payload),
+  ]);
+
+  if (result.status !== 0) {
+    throw new Error(`${params.label} failed: ${result.stderr}`);
+  }
+
+  return parseJson<T>(result.stdout, params.label);
+}
+
+function ensureAuthenticatedRegressionToken(): string {
+  if (authToken) {
+    return authToken;
+  }
+
+  assertLocalBootstrapEnv();
+
+  if (!adminToken) {
+    const adminLogin = requestJsonWithOptionalAuth<{ token?: string }>({
+      url: `${ROOT_API_URL}/auth/login`,
+      payload: {
+        grantType: "phone_otp",
+        phone: AUTO_ADMIN_PHONE,
+        code: AUTO_ADMIN_CODE,
+      },
+      label: "genui admin login",
+    });
+
+    assert(typeof adminLogin.token === "string" && adminLogin.token.length > 0, "genui admin login: token missing");
+    adminToken = adminLogin.token;
+  }
+
+  const bootstrap = requestJsonWithOptionalAuth<{ users?: Array<{ token?: string }> }>({
+    url: `${ROOT_API_URL}/auth/test-users/bootstrap`,
+    token: adminToken,
+    payload: {
+      phone: AUTO_ADMIN_PHONE,
+      code: AUTO_ADMIN_CODE,
+      count: 1,
+    },
+    label: "genui bootstrap user",
+  });
+
+  const user = Array.isArray(bootstrap.users) ? bootstrap.users[0] : undefined;
+  assert(typeof user?.token === "string" && user.token.length > 0, "genui bootstrap user: token missing");
+  authToken = user.token;
+  return authToken;
 }
 
 function readTurnCompleteEnvelopeFromStream(streamOutput: string): TurnEnvelope | null {
@@ -108,7 +205,7 @@ function readTurnCompleteEnvelopeFromStream(streamOutput: string): TurnEnvelope 
   return null;
 }
 
-function postTurn(conversationId: string | null, input: InputStep): TurnEnvelope {
+function postTurn(conversationId: string | null, input: InputStep, token?: string): TurnEnvelope {
   const body = {
     ...(conversationId ? { conversationId } : {}),
     input,
@@ -130,7 +227,7 @@ function postTurn(conversationId: string | null, input: InputStep): TurnEnvelope
     BASE_URL,
     "-H",
     "Content-Type: application/json",
-    ...AUTH_HEADER_ARGS,
+    ...readAuthHeaderArgs(token),
     "-d",
     JSON.stringify(body),
   ]);
@@ -142,7 +239,7 @@ function postTurn(conversationId: string | null, input: InputStep): TurnEnvelope
   return JSON.parse(result.stdout) as TurnEnvelope;
 }
 
-function postTurnStream(conversationId: string | null, input: InputStep): string {
+function postTurnStream(conversationId: string | null, input: InputStep, token?: string): string {
   const body = {
     ...(conversationId ? { conversationId } : {}),
     input,
@@ -166,7 +263,7 @@ function postTurnStream(conversationId: string | null, input: InputStep): string
     BASE_URL,
     "-H",
     "Content-Type: application/json",
-    ...AUTH_HEADER_ARGS,
+    ...readAuthHeaderArgs(token),
     "-d",
     JSON.stringify(body),
   ]);
@@ -242,7 +339,7 @@ function assertTurnEnvelope(turn: TurnEnvelope, label: string): void {
   }
 }
 
-function assertPublishTurn(turn: TurnEnvelope, label: string): void {
+function assertPublishTurn(turn: TurnEnvelope, label: string, token?: string): void {
   const alertBlocks = turn.turn.blocks.filter(
     (block) => isRecord(block) && String(block.type) === "alert"
   );
@@ -261,7 +358,7 @@ function assertPublishTurn(turn: TurnEnvelope, label: string): void {
     typeof block.level === "string" ? block.level : ""
   );
 
-  if (!AUTH_TOKEN) {
+  if (!token) {
     assert(
       alertLevels.includes("warning") || alertLevels.includes("error"),
       `${label}: unauth publish should return warning/error alert`
@@ -305,6 +402,40 @@ function renderForWeb(turn: TurnEnvelope): void {
 
     if (block.type === "form") {
       assert(isRecord(block.schema), "web renderer: form schema invalid");
+      const schema = block.schema as Record<string, unknown>;
+
+      if (schema.fields !== undefined) {
+        assert(Array.isArray(schema.fields), "web renderer: form fields invalid");
+        const fields = schema.fields as Array<Record<string, unknown>>;
+
+        for (const field of fields) {
+          assert(typeof field.name === "string" && field.name.length > 0, "web renderer: form field name invalid");
+          assert(typeof field.label === "string" && field.label.length > 0, "web renderer: form field label invalid");
+          assert(
+            field.type === "single-select" || field.type === "multi-select" || field.type === "textarea",
+            `web renderer: unsupported form field type ${String(field.type)}`
+          );
+
+          if (field.type === "single-select" || field.type === "multi-select") {
+            assert(Array.isArray(field.options), "web renderer: select form options invalid");
+            const options = field.options as Array<Record<string, unknown>>;
+            assert(options.length > 0, "web renderer: select form options empty");
+
+            for (const option of options) {
+              assert(typeof option.label === "string" && option.label.length > 0, "web renderer: form option label invalid");
+              assert(typeof option.value === "string" && option.value.length > 0, "web renderer: form option value invalid");
+            }
+          }
+        }
+      }
+
+      if (schema.submitAction !== undefined) {
+        assert(typeof schema.submitAction === "string" && schema.submitAction.length > 0, "web renderer: form submitAction invalid");
+      }
+
+      if (block.initialValues !== undefined) {
+        assert(isRecord(block.initialValues), "web renderer: form initialValues invalid");
+      }
       continue;
     }
 
@@ -491,21 +622,32 @@ function renderForMiniProgram(turn: TurnEnvelope): void {
 function runScenario(scenario: Scenario): string[] {
   const logs: string[] = [];
   let conversationId: string | null = null;
+  const scenarioToken = scenario.authMode === "authenticated"
+    ? ensureAuthenticatedRegressionToken()
+    : "";
 
   logs.push(`\n=== ${scenario.id} ===`);
   logs.push(`说明: ${scenario.description}`);
-  logs.push(`auth: ${AUTH_TOKEN ? "enabled" : "disabled"}`);
+  logs.push(`auth: ${scenarioToken ? "enabled" : "disabled"}`);
 
   scenario.steps.forEach((step, index) => {
-    const turn = postTurn(conversationId, step);
+    const turn = postTurn(conversationId, step, scenarioToken);
     const label = `${scenario.id}#turn${index + 1}`;
 
     assertTurnEnvelope(turn, label);
     renderForWeb(turn);
     renderForMiniProgram(turn);
 
+    const expectedBlockTypes = scenario.expectedBlockTypes?.[index];
+    if (expectedBlockTypes && expectedBlockTypes.length > 0) {
+      const actualBlockTypes = new Set(turn.turn.blocks.map((block) => String(block.type)));
+      for (const expectedType of expectedBlockTypes) {
+        assert(actualBlockTypes.has(expectedType), `${label}: expected block type ${expectedType}, got [${Array.from(actualBlockTypes).join(",")}]`);
+      }
+    }
+
     if (step.type === "action" && step.action === "confirm_publish") {
-      assertPublishTurn(turn, label);
+      assertPublishTurn(turn, label, scenarioToken);
     }
 
     if (conversationId) {
@@ -521,7 +663,7 @@ function runScenario(scenario: Scenario): string[] {
   const streamOutput = postTurnStream(conversationId, {
     type: "text",
     text: "继续",
-  });
+  }, scenarioToken);
 
   assert(streamOutput.includes("event: turn-start"), `${scenario.id}: stream missing turn-start`);
   const hasBlockAppend = streamOutput.includes("event: block-append");
@@ -605,6 +747,50 @@ function main(): void {
             lng: 106.52988,
           },
           displayText: "改下人数设置",
+        },
+      ],
+    },
+    {
+      id: "partner-intent-form",
+      description: "正式结构化动作 find_partner 返回可被 H5 提交的搭子偏好表单",
+      steps: [
+        {
+          type: "action",
+          action: "find_partner",
+          actionId: "act_partner_form_reg_1",
+          params: {
+            type: "boardgame",
+            activityType: "boardgame",
+            locationName: "观音桥",
+            location: "观音桥",
+            rawInput: "观音桥周围有人打麻将没得？",
+            lat: 29.58567,
+            lng: 106.52988,
+          },
+          displayText: "开始找搭子",
+        },
+      ],
+    },
+    {
+      id: "partner-intent-form-authenticated",
+      description: "登录态 find_partner 必须返回真实 form，而不是只返回 auth_required",
+      authMode: "authenticated",
+      expectedBlockTypes: [["form"]],
+      steps: [
+        {
+          type: "action",
+          action: "find_partner",
+          actionId: "act_partner_form_reg_auth_1",
+          params: {
+            type: "boardgame",
+            activityType: "boardgame",
+            locationName: "观音桥",
+            location: "观音桥",
+            rawInput: "观音桥这周想找人打桌游",
+            lat: 29.58567,
+            lng: 106.52988,
+          },
+          displayText: "开始找搭子",
         },
       ],
     },

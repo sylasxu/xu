@@ -1,5 +1,5 @@
 // Notification Service - 通知与消息中心业务逻辑
-import { db, notifications, users, participants, intentMatches, partnerIntents, matchMessages, eq, count, and, desc, inArray, sql } from '@juchang/db';
+import { db, notifications, users, participants, intentMatches, partnerIntents, matchMessages, agentTasks, eq, count, and, desc, inArray, sql } from '@juchang/db';
 import type {
   MessageCenterQuery,
   MessageCenterResponse,
@@ -23,6 +23,7 @@ const ACTIVITY_TYPE_NAMES: Record<string, string> = {
   boardgame: '桌游',
   other: '其他',
 };
+const OPEN_TASK_STATUSES = ['active', 'waiting_auth', 'waiting_async_result'] as const;
 
 function toTemplateValue(value: string, maxLength = 20): string {
   const normalized = value.replace(/\s+/g, ' ').trim();
@@ -140,17 +141,23 @@ export async function getPendingMatches(userId: string): Promise<MatchPendingRes
     ))
     .orderBy(desc(intentMatches.matchedAt));
 
+  const items = await Promise.all(rows.map(async (row) => ({
+    id: row.id,
+    activityType: row.activityType,
+    typeName: ACTIVITY_TYPE_NAMES[row.activityType] || row.activityType,
+    matchScore: row.matchScore,
+    commonTags: Array.isArray(row.commonTags) ? row.commonTags : [],
+    locationHint: row.centerLocationHint,
+    confirmDeadline: row.confirmDeadline.toISOString(),
+    taskId: await findLatestPartnerTaskIdForMatch({
+      userId,
+      matchId: row.id,
+    }) ?? null,
+    isTempOrganizer: row.tempOrganizerId === userId,
+  })));
+
   return {
-    items: rows.map((row) => ({
-      id: row.id,
-      activityType: row.activityType,
-      typeName: ACTIVITY_TYPE_NAMES[row.activityType] || row.activityType,
-      matchScore: row.matchScore,
-      commonTags: Array.isArray(row.commonTags) ? row.commonTags : [],
-      locationHint: row.centerLocationHint,
-      confirmDeadline: row.confirmDeadline.toISOString(),
-      isTempOrganizer: row.tempOrganizerId === userId,
-    })),
+    items,
   };
 }
 
@@ -359,6 +366,7 @@ interface CreateNotificationParams {
   title: string;
   content?: string;
   activityId?: string;
+  taskId?: string;
 }
 
 interface DispatchNotificationParams extends CreateNotificationParams {
@@ -374,7 +382,7 @@ interface DispatchNotificationParams extends CreateNotificationParams {
  * 创建通知（内部调用）
  */
 export async function createNotification(params: CreateNotificationParams) {
-  const { userId, type, title, content, activityId } = params;
+  const { userId, type, title, content, activityId, taskId } = params;
 
   const [notification] = await db
     .insert(notifications)
@@ -384,6 +392,7 @@ export async function createNotification(params: CreateNotificationParams) {
       title,
       content: content || null,
       activityId: activityId || null,
+      taskId: taskId || null,
       isRead: false,
     })
     .returning();
@@ -430,6 +439,62 @@ async function dispatchNotificationWithFallback(params: DispatchNotificationPara
   return notification;
 }
 
+async function findLatestOpenJoinTaskIdForActivity(params: {
+  userId: string;
+  activityId: string;
+}): Promise<string | undefined> {
+  const [task] = await db
+    .select({ id: agentTasks.id })
+    .from(agentTasks)
+    .where(and(
+      eq(agentTasks.userId, params.userId),
+      eq(agentTasks.taskType, 'join_activity'),
+      inArray(agentTasks.status, OPEN_TASK_STATUSES),
+      eq(agentTasks.activityId, params.activityId),
+    ))
+    .orderBy(desc(agentTasks.updatedAt))
+    .limit(1);
+
+  return task?.id;
+}
+
+async function findLatestOpenCreateTaskIdForActivity(params: {
+  userId: string;
+  activityId: string;
+}): Promise<string | undefined> {
+  const [task] = await db
+    .select({ id: agentTasks.id })
+    .from(agentTasks)
+    .where(and(
+      eq(agentTasks.userId, params.userId),
+      eq(agentTasks.taskType, 'create_activity'),
+      inArray(agentTasks.status, OPEN_TASK_STATUSES),
+      eq(agentTasks.activityId, params.activityId),
+    ))
+    .orderBy(desc(agentTasks.updatedAt))
+    .limit(1);
+
+  return task?.id;
+}
+
+async function findLatestPartnerTaskIdForMatch(params: {
+  userId: string;
+  matchId: string;
+}): Promise<string | undefined> {
+  const [task] = await db
+    .select({ id: agentTasks.id })
+    .from(agentTasks)
+    .where(and(
+      eq(agentTasks.userId, params.userId),
+      eq(agentTasks.taskType, 'find_partner'),
+      eq(agentTasks.intentMatchId, params.matchId),
+    ))
+    .orderBy(desc(agentTasks.updatedAt))
+    .limit(1);
+
+  return task?.id;
+}
+
 /**
  * 创建加入通知 - 有人报名活动
  */
@@ -445,6 +510,10 @@ export async function notifyJoin(
     title: '新成员加入',
     content: `${applicantName} 加入了「${activityTitle}」`,
     activityId,
+    taskId: await findLatestOpenCreateTaskIdForActivity({
+      userId: organizerId,
+      activityId,
+    }),
   });
 }
 
@@ -463,6 +532,10 @@ export async function notifyQuit(
     title: '成员退出',
     content: `${memberName} 退出了「${activityTitle}」`,
     activityId,
+    taskId: await findLatestOpenCreateTaskIdForActivity({
+      userId: organizerId,
+      activityId,
+    }),
   });
 }
 
@@ -480,6 +553,10 @@ export async function notifyActivityStart(
     title: '活动即将开始',
     content: `「${activityTitle}」即将开始`,
     activityId,
+    taskId: await findLatestOpenJoinTaskIdForActivity({
+      userId,
+      activityId,
+    }),
   });
 }
 
@@ -497,6 +574,10 @@ export async function notifyCompleted(
     title: '活动成局',
     content: `「${activityTitle}」已成局`,
     activityId,
+    taskId: await findLatestOpenJoinTaskIdForActivity({
+      userId,
+      activityId,
+    }),
   });
 }
 
@@ -514,6 +595,10 @@ export async function notifyCancelled(
     title: '活动取消',
     content: `「${activityTitle}」已取消`,
     activityId,
+    taskId: await findLatestOpenJoinTaskIdForActivity({
+      userId,
+      activityId,
+    }),
   });
 }
 
@@ -550,6 +635,10 @@ export async function notifyNewParticipant(
       title: `${newMemberName} 也来了！`,
       content: `「${activityTitle}」又多了一位小伙伴`,
       activityId,
+      taskId: await findLatestOpenJoinTaskIdForActivity({
+        userId: p.userId,
+        activityId,
+      }),
     }).catch(err => console.error('Failed to create new_participant notification:', err));
   }
 }
@@ -569,21 +658,25 @@ export async function notifyPostActivity(
       eq(participants.status, 'joined'),
     ));
 
-  const tasks = joinedParticipants.map((p) => dispatchNotificationWithFallback({
+  const tasks = joinedParticipants.map(async (p) => dispatchNotificationWithFallback({
+    userId: p.userId,
+    type: 'post_activity',
+    title: `活动后反馈：${activityTitle}`,
+    content: `「${activityTitle}」结束了，来聊聊感受吧～`,
+    activityId,
+    taskId: await findLatestOpenJoinTaskIdForActivity({
       userId: p.userId,
-      type: 'post_activity',
-      title: `活动后反馈：${activityTitle}`,
-      content: `「${activityTitle}」结束了，来聊聊感受吧～`,
       activityId,
-      serviceNotification: {
-        scene: 'post_activity',
-        pagePath: `subpackages/activity/detail/index?id=${activityId}`,
-        data: {
-          thing1: toTemplateValue(activityTitle),
-          thing2: toTemplateValue('活动结束了，来聊聊感受吧'),
-        },
+    }),
+    serviceNotification: {
+      scene: 'post_activity',
+      pagePath: `subpackages/activity/detail/index?id=${activityId}`,
+      data: {
+        thing1: toTemplateValue(activityTitle),
+        thing2: toTemplateValue('活动结束了，来聊聊感受吧'),
       },
-    }));
+    },
+  }));
 
   const results = await Promise.allSettled(tasks);
   for (const result of results) {
@@ -609,21 +702,25 @@ export async function notifyActivityReminder(
       eq(participants.status, 'joined'),
     ));
 
-  const tasks = joinedParticipants.map((p) => dispatchNotificationWithFallback({
+  const tasks = joinedParticipants.map(async (p) => dispatchNotificationWithFallback({
+    userId: p.userId,
+    type: 'activity_reminder',
+    title: '活动马上开始啦！',
+    content: `「${activityTitle}」还有 1 小时开始，地点：${locationName}`,
+    activityId,
+    taskId: await findLatestOpenJoinTaskIdForActivity({
       userId: p.userId,
-      type: 'activity_reminder',
-      title: '活动马上开始啦！',
-      content: `「${activityTitle}」还有 1 小时开始，地点：${locationName}`,
       activityId,
-      serviceNotification: {
-        scene: 'activity_reminder',
-        pagePath: `subpackages/activity/detail/index?id=${activityId}`,
-        data: {
-          thing1: toTemplateValue(activityTitle),
-          thing2: toTemplateValue(`${locationName}，1 小时后开始`),
-        },
+    }),
+    serviceNotification: {
+      scene: 'activity_reminder',
+      pagePath: `subpackages/activity/detail/index?id=${activityId}`,
+      data: {
+        thing1: toTemplateValue(activityTitle),
+        thing2: toTemplateValue(`${locationName}，1 小时后开始`),
       },
-    }));
+    },
+  }));
 
   const results = await Promise.allSettled(tasks);
   for (const result of results) {
@@ -640,6 +737,7 @@ export async function notifyTempOrganizerReassigned(
   userId: string,
   activityType: string,
   locationHint: string,
+  matchId?: string,
 ) {
   const typeName = ACTIVITY_TYPE_NAMES[activityType] || activityType;
   return dispatchNotificationWithFallback({
@@ -647,6 +745,14 @@ export async function notifyTempOrganizerReassigned(
     type: 'join',
     title: '新的成局确认任务',
     content: `你已成为「${typeName}」匹配的临时召集人，请在截止前确认是否发起活动（地点：${locationHint}）。`,
+    ...(matchId
+      ? {
+          taskId: await findLatestPartnerTaskIdForMatch({
+            userId,
+            matchId,
+          }),
+        }
+      : {}),
     serviceNotification: {
       scene: 'match_reassigned',
       pagePath: 'pages/message/index',

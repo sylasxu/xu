@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
   ChevronRight,
@@ -75,11 +75,99 @@ const DEFAULT_PROFILE_HINTS = {
   high: "社交画像已较完整，可直接让小聚给你安排",
 };
 const COMPOSER_EXPAND_THRESHOLD = 10;
+const PENDING_AGENT_ACTION_STORAGE_KEY = "juchang:web:pending-agent-action";
 
 type ComposerStatus = "ready" | "submitted";
 type TurnContextOverrides = Pick<GenUIRequestContext, "activityId" | "followUpMode" | "entry">;
 type GenUITransientTurn = NonNullable<GenUIRequestContext["transientTurns"]>[number];
 const MAX_TRANSIENT_TURNS = 8;
+type CurrentTaskActionKind = "structured_action" | "navigate" | "switch_tab";
+type PendingActionAuthMode = "login" | "bind_phone";
+
+type CurrentTaskAction = {
+  kind: CurrentTaskActionKind;
+  label: string;
+  action?: string;
+  payload?: Record<string, unknown>;
+  source?: string;
+  originalText?: string;
+  url?: string;
+};
+
+type CurrentTaskItem = {
+  id: string;
+  taskType: "join_activity" | "find_partner" | "create_activity";
+  taskTypeLabel: string;
+  currentStage: string;
+  stageLabel: string;
+  status: string;
+  goalText: string;
+  headline: string;
+  summary: string;
+  updatedAt: string;
+  activityId?: string;
+  activityTitle?: string;
+  primaryAction?: CurrentTaskAction;
+  secondaryAction?: CurrentTaskAction;
+};
+
+type StructuredPendingAction = {
+  type: "structured_action";
+  action: string;
+  payload: Record<string, unknown>;
+  source?: string;
+  originalText?: string;
+  authMode?: PendingActionAuthMode;
+};
+
+type PendingAgentActionState = {
+  action: StructuredPendingAction;
+  message?: string;
+};
+
+type TaskChatPromptPayload = {
+  prompt: string;
+  activityId?: string;
+  followUpMode?: "review" | "rebook" | "kickoff";
+  entry?: string;
+};
+
+type MessageCenterFocusIntent = {
+  taskId?: string;
+  matchId?: string;
+};
+
+type DiscussionNavigationPayload = {
+  activityId: string;
+  title?: string;
+  startAt?: string;
+  locationName?: string;
+  source?: string;
+};
+
+type GenUIFormFieldType = "single-select" | "multi-select" | "textarea";
+
+type GenUIFormOption = {
+  label: string;
+  value: string;
+};
+
+type GenUIFormField = {
+  name: string;
+  label: string;
+  type: GenUIFormFieldType;
+  required?: boolean;
+  options?: GenUIFormOption[];
+  placeholder?: string;
+  maxLength?: number;
+};
+
+type GenUIFormSchemaConfig = {
+  formType?: string;
+  submitAction?: string;
+  submitLabel?: string;
+  fields: GenUIFormField[];
+};
 
 type ChatRecord =
   | {
@@ -157,6 +245,357 @@ function syncComposerHeight(element: HTMLTextAreaElement, value: string) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readPendingActionAuthMode(value: unknown): PendingActionAuthMode | null {
+  return value === "login" || value === "bind_phone" ? value : null;
+}
+
+function readStructuredPendingAction(value: unknown): StructuredPendingAction | null {
+  if (!isRecord(value) || value.type !== "structured_action") {
+    return null;
+  }
+
+  const action = readString(value.action);
+  const payload = isRecord(value.payload) ? value.payload : null;
+  if (!action || !payload) {
+    return null;
+  }
+
+  const authMode = readPendingActionAuthMode(value.authMode);
+
+  return {
+    type: "structured_action",
+    action,
+    payload,
+    ...(typeof value.source === "string" ? { source: value.source } : {}),
+    ...(typeof value.originalText === "string" ? { originalText: value.originalText } : {}),
+    ...(authMode ? { authMode } : {}),
+  };
+}
+
+function readPendingAgentActionState(value: unknown): PendingAgentActionState | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const action = readStructuredPendingAction(value.action);
+  if (!action) {
+    return null;
+  }
+
+  return {
+    action,
+    ...(typeof value.message === "string" && value.message.trim()
+      ? { message: value.message.trim() }
+      : {}),
+  };
+}
+
+function readPendingAgentActionStateFromStorage(): PendingAgentActionState | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(PENDING_AGENT_ACTION_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+
+    return readPendingAgentActionState(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+function persistPendingAgentActionState(state: PendingAgentActionState | null): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (!state) {
+    window.sessionStorage.removeItem(PENDING_AGENT_ACTION_STORAGE_KEY);
+    return;
+  }
+
+  window.sessionStorage.setItem(PENDING_AGENT_ACTION_STORAGE_KEY, JSON.stringify(state));
+}
+
+function readCurrentTaskAction(value: unknown): CurrentTaskAction | null {
+  if (!isRecord(value) || typeof value.kind !== "string" || typeof value.label !== "string") {
+    return null;
+  }
+
+  if (value.kind !== "structured_action" && value.kind !== "navigate" && value.kind !== "switch_tab") {
+    return null;
+  }
+
+  return {
+    kind: value.kind,
+    label: value.label,
+    ...(typeof value.action === "string" ? { action: value.action } : {}),
+    ...(isRecord(value.payload) ? { payload: value.payload } : {}),
+    ...(typeof value.source === "string" ? { source: value.source } : {}),
+    ...(typeof value.originalText === "string" ? { originalText: value.originalText } : {}),
+    ...(typeof value.url === "string" ? { url: value.url } : {}),
+  };
+}
+
+function readCurrentTaskItem(value: unknown): CurrentTaskItem | null {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    typeof value.taskType !== "string" ||
+    typeof value.taskTypeLabel !== "string" ||
+    typeof value.currentStage !== "string" ||
+    typeof value.stageLabel !== "string" ||
+    typeof value.status !== "string" ||
+    typeof value.goalText !== "string" ||
+    typeof value.headline !== "string" ||
+    typeof value.summary !== "string" ||
+    typeof value.updatedAt !== "string"
+  ) {
+    return null;
+  }
+
+  if (
+    value.taskType !== "join_activity" &&
+    value.taskType !== "find_partner" &&
+    value.taskType !== "create_activity"
+  ) {
+    return null;
+  }
+
+  return {
+    id: value.id,
+    taskType: value.taskType,
+    taskTypeLabel: value.taskTypeLabel,
+    currentStage: value.currentStage,
+    stageLabel: value.stageLabel,
+    status: value.status,
+    goalText: value.goalText,
+    headline: value.headline,
+    summary: value.summary,
+    updatedAt: value.updatedAt,
+    ...(typeof value.activityId === "string" ? { activityId: value.activityId } : {}),
+    ...(typeof value.activityTitle === "string" ? { activityTitle: value.activityTitle } : {}),
+    ...(value.primaryAction ? { primaryAction: readCurrentTaskAction(value.primaryAction) ?? undefined } : {}),
+    ...(value.secondaryAction ? { secondaryAction: readCurrentTaskAction(value.secondaryAction) ?? undefined } : {}),
+  };
+}
+
+function readTaskChatPromptPayload(value: unknown): TaskChatPromptPayload | null {
+  if (!isRecord(value) || typeof value.prompt !== "string" || !value.prompt.trim()) {
+    return null;
+  }
+
+  const followUpMode =
+    value.followUpMode === "review" || value.followUpMode === "rebook" || value.followUpMode === "kickoff"
+      ? value.followUpMode
+      : undefined;
+
+  return {
+    prompt: value.prompt.trim(),
+    ...(typeof value.activityId === "string" ? { activityId: value.activityId } : {}),
+    ...(followUpMode ? { followUpMode } : {}),
+    ...(typeof value.entry === "string" ? { entry: value.entry } : {}),
+  };
+}
+
+function readMessageCenterFocusIntent(value: unknown): MessageCenterFocusIntent | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const taskId = readString(value.taskId) ?? undefined;
+  const matchId = readString(value.matchId) ?? undefined;
+  if (!taskId && !matchId) {
+    return null;
+  }
+
+  return {
+    ...(taskId ? { taskId } : {}),
+    ...(matchId ? { matchId } : {}),
+  };
+}
+
+function readDiscussionNavigationPayload(value: unknown): DiscussionNavigationPayload | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const activityId = readString(value.activityId);
+  if (!activityId) {
+    return null;
+  }
+
+  return {
+    activityId,
+    ...(typeof value.title === "string" ? { title: value.title } : {}),
+    ...(typeof value.startAt === "string" ? { startAt: value.startAt } : {}),
+    ...(typeof value.locationName === "string" ? { locationName: value.locationName } : {}),
+    ...(typeof value.source === "string" ? { source: value.source } : {}),
+  };
+}
+
+function readGenUIFormFieldType(value: unknown): GenUIFormFieldType | null {
+  return value === "single-select" || value === "multi-select" || value === "textarea" ? value : null;
+}
+
+function readGenUIFormSchema(value: unknown): GenUIFormSchemaConfig {
+  if (!isRecord(value)) {
+    return { fields: [] };
+  }
+
+  const fields = Array.isArray(value.fields)
+    ? value.fields.reduce<GenUIFormField[]>((result, item) => {
+          if (!isRecord(item) || typeof item.name !== "string" || typeof item.label !== "string") {
+            return result;
+          }
+
+          const fieldType = readGenUIFormFieldType(item.type);
+          if (!fieldType) {
+            return result;
+          }
+
+          const options = Array.isArray(item.options)
+            ? item.options
+                .map((option) => {
+                  if (!isRecord(option) || typeof option.label !== "string" || typeof option.value !== "string") {
+                    return null;
+                  }
+
+                  return {
+                    label: option.label,
+                    value: option.value,
+                  };
+                })
+                .filter((option): option is GenUIFormOption => option !== null)
+            : [];
+
+          result.push({
+            name: item.name,
+            label: item.label,
+            type: fieldType,
+            required: item.required === true,
+            options,
+            ...(typeof item.placeholder === "string" ? { placeholder: item.placeholder } : {}),
+            ...(typeof item.maxLength === "number" ? { maxLength: item.maxLength } : {}),
+          });
+
+          return result;
+        }, [])
+    : [];
+
+  return {
+    ...(typeof value.formType === "string" ? { formType: value.formType } : {}),
+    ...(typeof value.submitAction === "string" ? { submitAction: value.submitAction } : {}),
+    ...(typeof value.submitLabel === "string" ? { submitLabel: value.submitLabel } : {}),
+    fields,
+  };
+}
+
+function buildGenUIFormValues(initialValues: Record<string, unknown>, schema: GenUIFormSchemaConfig): Record<string, unknown> {
+  const nextValues: Record<string, unknown> = {};
+
+  for (const field of schema.fields) {
+    if (field.type === "multi-select") {
+      const currentValue = initialValues[field.name];
+      nextValues[field.name] = Array.isArray(currentValue)
+        ? currentValue.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+        : [];
+      continue;
+    }
+
+    nextValues[field.name] = typeof initialValues[field.name] === "string" ? initialValues[field.name] : "";
+  }
+
+  return nextValues;
+}
+
+function readGenUIFormTextValue(values: Record<string, unknown>, fieldName: string): string {
+  const value = values[fieldName];
+  return typeof value === "string" ? value : "";
+}
+
+function readGenUIFormMultiValue(values: Record<string, unknown>, fieldName: string): string[] {
+  const value = values[fieldName];
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : [];
+}
+
+function validateGenUIFormRequiredFields(schema: GenUIFormSchemaConfig, values: Record<string, unknown>): string | null {
+  for (const field of schema.fields) {
+    if (!field.required) {
+      continue;
+    }
+
+    if (field.type === "multi-select") {
+      if (readGenUIFormMultiValue(values, field.name).length === 0) {
+        return field.label;
+      }
+      continue;
+    }
+
+    if (!readGenUIFormTextValue(values, field.name).trim()) {
+      return field.label;
+    }
+  }
+
+  return null;
+}
+
+function extractActivityIdFromMiniProgramUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url, GROUP_INVITE_URL);
+    return readString(parsed.searchParams.get("id"));
+  } catch {
+    return null;
+  }
+}
+
+function resolveWebTaskNavigation(action: CurrentTaskAction): { url?: string; focusIntent?: MessageCenterFocusIntent } {
+  if (!action.url) {
+    return {};
+  }
+
+  if (action.kind === "switch_tab" && action.url === "/pages/message/index") {
+    return {
+      focusIntent: readMessageCenterFocusIntent(action.payload) ?? undefined,
+    };
+  }
+
+  if (action.url.startsWith("/subpackages/activity/discussion/index")) {
+    const activityId = extractActivityIdFromMiniProgramUrl(action.url);
+    if (!activityId) {
+      return {};
+    }
+
+    return {
+      url: `/invite/${activityId}?entry=task_runtime_panel`,
+    };
+  }
+
+  if (action.url.startsWith("/subpackages/activity/detail/index")) {
+    const activityId = extractActivityIdFromMiniProgramUrl(action.url);
+    if (!activityId) {
+      return {};
+    }
+
+    return {
+      url: `/invite/${activityId}`,
+    };
+  }
+
+  return {
+    url: action.url,
+  };
 }
 
 function parseSSEPacket(packet: string): { eventName: string; dataText: string } | null {
@@ -602,6 +1041,42 @@ function formatWelcomeActivityTime(startAt: string): string {
   }).format(date);
 }
 
+function formatRelativeTime(dateString: string | null | undefined): string {
+  if (!dateString) {
+    return "刚刚";
+  }
+
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) {
+    return dateString;
+  }
+
+  const now = new Date();
+  const diff = now.getTime() - date.getTime();
+  if (diff < 60 * 1000) {
+    return "刚刚";
+  }
+
+  if (diff < 60 * 60 * 1000) {
+    return `${Math.floor(diff / (60 * 1000))} 分钟前`;
+  }
+
+  if (date.toDateString() === now.toDateString()) {
+    return `${date.getHours().toString().padStart(2, "0")}:${date
+      .getMinutes()
+      .toString()
+      .padStart(2, "0")}`;
+  }
+
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) {
+    return "昨天";
+  }
+
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
 function getProfileHint(
   completeness: number,
   profileHints: WelcomeUiPayload["profileHints"] = DEFAULT_PROFILE_HINTS
@@ -640,6 +1115,7 @@ export default function ChatPage() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<ComposerStatus>("ready");
+  const [authToken, setAuthToken] = useState<string | null>(null);
   const [quickPrompts, setQuickPrompts] = useState<string[]>(DEFAULT_PROMPTS);
   const [welcomeProfile, setWelcomeProfile] = useState<WelcomeSocialProfile | null>(null);
   const [welcomePendingActivities, setWelcomePendingActivities] = useState<WelcomePendingActivity[]>([]);
@@ -652,10 +1128,45 @@ export default function ChatPage() {
     profileHints: DEFAULT_PROFILE_HINTS,
   });
   const [clientLocation, setClientLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [currentTasks, setCurrentTasks] = useState<CurrentTaskItem[]>([]);
+  const [pendingAgentAction, setPendingAgentAction] = useState<PendingAgentActionState | null>(null);
+  const [taskPanelNotice, setTaskPanelNotice] = useState<string | null>(null);
+  const [messageCenterOpenSignal, setMessageCenterOpenSignal] = useState(0);
+  const [messageCenterFocusMatchId, setMessageCenterFocusMatchId] = useState<string | null>(null);
   const isDarkMode = false;
+  const hasResumedPendingActionRef = useRef(false);
 
   const isSending = status === "submitted";
   const showComposerHint = shouldExpandComposer(input);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const syncAuth = () => {
+      setAuthToken(readClientToken());
+    };
+
+    syncAuth();
+    window.addEventListener("focus", syncAuth);
+    window.addEventListener("storage", syncAuth);
+    document.addEventListener("visibilitychange", syncAuth);
+
+    return () => {
+      window.removeEventListener("focus", syncAuth);
+      window.removeEventListener("storage", syncAuth);
+      document.removeEventListener("visibilitychange", syncAuth);
+    };
+  }, []);
+
+  useEffect(() => {
+    setPendingAgentAction(readPendingAgentActionStateFromStorage());
+  }, []);
+
+  useEffect(() => {
+    persistPendingAgentActionState(pendingAgentAction);
+  }, [pendingAgentAction]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !("geolocation" in navigator)) {
@@ -725,6 +1236,105 @@ export default function ChatPage() {
       controller.abort();
     };
   }, [clientLocation]);
+
+  const loadCurrentTasks = useCallback(async () => {
+    if (!authToken) {
+      setCurrentTasks([]);
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE}/ai/tasks/current`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        setCurrentTasks([]);
+        return;
+      }
+
+      const payload = (await response.json()) as unknown;
+      if (!isRecord(payload) || !Array.isArray(payload.items)) {
+        setCurrentTasks([]);
+        return;
+      }
+
+      setCurrentTasks(
+        payload.items
+          .map((item) => readCurrentTaskItem(item))
+          .filter((item): item is CurrentTaskItem => item !== null)
+      );
+    } catch {
+      setCurrentTasks([]);
+    }
+  }, [authToken]);
+
+  useEffect(() => {
+    void loadCurrentTasks();
+  }, [loadCurrentTasks]);
+
+  const recordRebookFollowUp = useCallback(
+    async (activityId?: string) => {
+      if (!activityId || !authToken) {
+        return;
+      }
+
+      try {
+        await fetch(`${API_BASE}/participants/rebook-follow-up`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ activityId }),
+        });
+      } catch {
+        // best effort only
+      }
+    },
+    [authToken]
+  );
+
+  const applyCompletionEffectsFromBlocks = useCallback((blocks: GenUIBlock[]) => {
+    for (const block of blocks) {
+      if (block.type !== "alert") {
+        continue;
+      }
+
+      const meta = isRecord(block.meta) ? block.meta : null;
+      const authRequiredMeta = isRecord(meta?.authRequired) ? meta.authRequired : null;
+      if (authRequiredMeta) {
+        const pendingAction = readStructuredPendingAction(authRequiredMeta.pendingAction);
+        const authMode = readPendingActionAuthMode(authRequiredMeta.mode);
+        if (pendingAction) {
+          setPendingAgentAction({
+            action: {
+              ...pendingAction,
+              ...(authMode ? { authMode } : {}),
+            },
+            ...(block.message.trim() ? { message: block.message.trim() } : {}),
+          });
+          setTaskPanelNotice(null);
+        }
+        return;
+      }
+
+      if (meta?.navigationIntent === "open_discussion") {
+        const payload = readDiscussionNavigationPayload(meta.navigationPayload);
+        if (payload && typeof window !== "undefined") {
+          window.setTimeout(() => {
+            window.location.href = `/invite/${payload.activityId}?entry=join_success`;
+          }, 360);
+        }
+        return;
+      }
+    }
+  }, []);
+
 
   const sendTurn = useCallback(
     async (
@@ -850,13 +1460,12 @@ export default function ChatPage() {
           }
         };
 
-        const token = readClientToken();
-        const transientTurns = !token ? buildTransientTurns(messages) : undefined;
+        const transientTurns = !authToken ? buildTransientTurns(messages) : undefined;
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
         };
-        if (token) {
-          headers.Authorization = `Bearer ${token}`;
+        if (authToken) {
+          headers.Authorization = `Bearer ${authToken}`;
         }
 
         const response = await fetch(`${API_BASE}/ai/chat`, {
@@ -1000,6 +1609,7 @@ export default function ChatPage() {
               sawTurnComplete = true;
               setConversationId(completeEnvelope.conversationId);
               applyEnvelope(completeEnvelope, false);
+              applyCompletionEffectsFromBlocks(completeEnvelope.turn.blocks);
             }
 
             if (eventName === "turn-error" && isRecord(payload) && isRecord(payload.data)) {
@@ -1025,6 +1635,7 @@ export default function ChatPage() {
             },
           };
           applyEnvelope(completedEnvelope, false);
+          applyCompletionEffectsFromBlocks(completedEnvelope.turn.blocks);
         }
       } catch (error) {
         const errorMessage =
@@ -1044,9 +1655,118 @@ export default function ChatPage() {
         );
       } finally {
         setStatus("ready");
+        if (authToken) {
+          void loadCurrentTasks();
+        }
       }
     },
-    [clientLocation, conversationId, isSending, messages]
+    [applyCompletionEffectsFromBlocks, authToken, clientLocation, conversationId, isSending, loadCurrentTasks, messages]
+  );
+
+  const resumeStructuredPendingAction = useCallback(async () => {
+    const nextToken = readClientToken();
+    if (!pendingAgentAction) {
+      return;
+    }
+
+    if (!nextToken) {
+      setTaskPanelNotice(
+        pendingAgentAction.action.authMode === "bind_phone"
+          ? "先完成绑定手机号，再回到这里继续这一步。"
+          : "先完成登录，再回到这里继续这一步。"
+      );
+      return;
+    }
+
+    setAuthToken(nextToken);
+    const actionToResume = pendingAgentAction.action;
+    setPendingAgentAction(null);
+    setTaskPanelNotice(null);
+
+    await sendTurn(
+      {
+        type: "action",
+        action: actionToResume.action,
+        actionId: randomId("action"),
+        params: actionToResume.payload,
+        displayText: actionToResume.originalText || "继续刚才那步",
+      },
+      actionToResume.originalText || "继续刚才那步"
+    );
+  }, [pendingAgentAction, sendTurn]);
+
+  useEffect(() => {
+    if (!authToken || !pendingAgentAction || isSending || hasResumedPendingActionRef.current) {
+      return;
+    }
+
+    hasResumedPendingActionRef.current = true;
+    void resumeStructuredPendingAction().finally(() => {
+      hasResumedPendingActionRef.current = false;
+    });
+  }, [authToken, isSending, pendingAgentAction, resumeStructuredPendingAction]);
+
+  const executeCurrentTaskAction = useCallback(
+    async (action: CurrentTaskAction) => {
+      if (isSending) {
+        return;
+      }
+
+      if (action.kind === "structured_action") {
+        if (!action.action) {
+          return;
+        }
+
+        if (action.action === "start_follow_up_chat") {
+          const promptPayload = readTaskChatPromptPayload(action.payload);
+          if (!promptPayload) {
+            return;
+          }
+
+          if (promptPayload.followUpMode === "rebook" && promptPayload.activityId) {
+            await recordRebookFollowUp(promptPayload.activityId);
+          }
+
+          await sendTurn(
+            {
+              type: "text",
+              text: promptPayload.prompt,
+            },
+            action.originalText || action.label,
+            {
+              ...(promptPayload.activityId ? { activityId: promptPayload.activityId } : {}),
+              ...(promptPayload.followUpMode ? { followUpMode: promptPayload.followUpMode } : {}),
+              ...(promptPayload.entry ? { entry: promptPayload.entry } : {}),
+            }
+          );
+          return;
+        }
+
+        await sendTurn(
+          {
+            type: "action",
+            action: action.action,
+            actionId: randomId("action"),
+            params: action.payload,
+            displayText: action.originalText || action.label,
+          },
+          action.originalText || action.label
+        );
+        return;
+      }
+
+      const navigation = resolveWebTaskNavigation(action);
+      if (navigation.focusIntent) {
+        setMessageCenterFocusMatchId(navigation.focusIntent.matchId ?? null);
+        setMessageCenterOpenSignal((value) => value + 1);
+        return;
+      }
+
+      if (navigation.url && typeof window !== "undefined") {
+        window.location.href = navigation.url;
+      }
+    },
+    [isSending, recordRebookFollowUp, sendTurn]
   );
 
   const handleSubmit = useCallback(
@@ -1202,6 +1922,8 @@ export default function ChatPage() {
             <MessageCenterDrawer
               disabled={isSending}
               isDarkMode={isDarkMode}
+              openSignal={messageCenterOpenSignal}
+              focusPendingMatchId={messageCenterFocusMatchId}
               onSendPrompt={async (prompt, displayText, contextOverrides) => {
                 await sendTurn(
                   {
@@ -1279,6 +2001,121 @@ export default function ChatPage() {
             </div>
           </div>
         </header>
+
+        {pendingAgentAction || currentTasks.length > 0 ? (
+          <div className="shrink-0 space-y-2 px-3 pb-2">
+            {pendingAgentAction ? (
+              <section
+                className={cn(
+                  "rounded-[24px] border px-4 py-3 shadow-[0_18px_36px_-30px_rgba(120,94,16,0.55)]",
+                  isDarkMode
+                    ? "border-amber-400/30 bg-amber-400/10 text-amber-50"
+                    : "border-amber-200 bg-[linear-gradient(180deg,#fff8eb_0%,#fff4dc_100%)] text-amber-900"
+                )}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <p className="text-[12px] font-semibold tracking-wide">待恢复动作</p>
+                    <p className="text-sm font-medium">
+                      {pendingAgentAction.message || "这一步已经挂起，登录后会继续替你办完。"}
+                    </p>
+                    <p className={cn("text-xs leading-5", isDarkMode ? "text-amber-100/80" : "text-amber-700")}>
+                      {pendingAgentAction.action.authMode === "bind_phone"
+                        ? "完成绑定手机号后回到这里，我会自动继续。"
+                        : "完成登录后回到这里，我会自动继续。"}
+                    </p>
+                    {taskPanelNotice ? (
+                      <p className={cn("text-xs", isDarkMode ? "text-amber-100/80" : "text-amber-700")}>{taskPanelNotice}</p>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void resumeStructuredPendingAction();
+                    }}
+                    disabled={isSending}
+                    className={cn(
+                      "shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition disabled:opacity-45",
+                      isDarkMode ? "bg-white/10 text-white hover:bg-white/15" : "bg-white text-[#8a5c12] hover:bg-white/90"
+                    )}
+                  >
+                    我已完成，继续
+                  </button>
+                </div>
+              </section>
+            ) : null}
+
+            {currentTasks.map((task) => (
+              <section
+                key={task.id}
+                className={cn(
+                  "rounded-[24px] border px-4 py-3 shadow-[0_18px_34px_-30px_rgba(52,72,158,0.5)]",
+                  isDarkMode
+                    ? "border-[#334185] bg-[#141c45]/88 text-[#eef2ff]"
+                    : "border-white/70 bg-white/72 text-[#1b2558]"
+                )}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "rounded-full px-2 py-0.5 text-[11px] font-medium",
+                          isDarkMode ? "bg-white/10 text-[#dce1ff]" : "bg-[#eef2ff] text-[#4250a7]"
+                        )}
+                      >
+                        {task.taskTypeLabel}
+                      </span>
+                      <span className={cn("text-[11px]", isDarkMode ? "text-[#aeb7e7]" : "text-[#6d78a8]")}>
+                        {task.stageLabel}
+                      </span>
+                    </div>
+                    <p className="truncate text-[15px] font-semibold">{task.headline}</p>
+                    <p className={cn("text-xs leading-5", isDarkMode ? "text-[#c6cef5]" : "text-[#5f6b9d]")}>{task.summary}</p>
+                  </div>
+                  <span className={cn("shrink-0 text-[11px]", isDarkMode ? "text-[#9ca8df]" : "text-[#7280b0]")}>
+                    {formatRelativeTime(task.updatedAt)}
+                  </span>
+                </div>
+
+                {task.primaryAction || task.secondaryAction ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {task.primaryAction ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void executeCurrentTaskAction(task.primaryAction!);
+                        }}
+                        disabled={isSending}
+                        className={cn(
+                          "rounded-full px-3 py-1.5 text-xs font-medium transition disabled:opacity-45",
+                          isDarkMode ? "bg-[#5b67f4] text-white hover:bg-[#6a75ff]" : "bg-[#5b67f4] text-white hover:bg-[#4d59ec]"
+                        )}
+                      >
+                        {task.primaryAction.label}
+                      </button>
+                    ) : null}
+                    {task.secondaryAction ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void executeCurrentTaskAction(task.secondaryAction!);
+                        }}
+                        disabled={isSending}
+                        className={cn(
+                          "rounded-full px-3 py-1.5 text-xs font-medium transition disabled:opacity-45",
+                          isDarkMode ? "bg-white/10 text-white hover:bg-white/15" : "bg-[#edf1ff] text-[#33407c] hover:bg-[#e4eaff]"
+                        )}
+                      >
+                        {task.secondaryAction.label}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </section>
+            ))}
+          </div>
+        ) : null}
 
         <Conversation className="relative">
           <ConversationContent className="w-full gap-4 px-3 pb-4 pt-1">
@@ -1591,7 +2428,13 @@ function TurnBlockRenderer({
   }
 
   if (block.type === "form") {
-    return <FormBlockCard block={block} />;
+    return (
+      <FormBlockCard
+        block={block}
+        disabled={disabled}
+        onActionSelect={onActionSelect}
+      />
+    );
   }
 
   if (block.type === "cta-group") {
@@ -1834,20 +2677,210 @@ function ListBlockCard({ block }: { block: GenUIListBlock }) {
   );
 }
 
-function FormBlockCard({ block }: { block: GenUIFormBlock }) {
-  const initial = block.initialValues || {};
+function FormBlockCard({
+  block,
+  disabled,
+  onActionSelect,
+}: {
+  block: GenUIFormBlock;
+  disabled: boolean;
+  onActionSelect: (option: ActionOption) => Promise<void>;
+}) {
+  const schema = useMemo(() => readGenUIFormSchema(block.schema), [block.schema]);
+  const initialValues = useMemo(
+    () => buildGenUIFormValues(isRecord(block.initialValues) ? block.initialValues : {}, schema),
+    [block.initialValues, schema]
+  );
+  const [formValues, setFormValues] = useState<Record<string, unknown>>(initialValues);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setFormValues(initialValues);
+    setFormError(null);
+  }, [initialValues]);
+
+  const submitLabel =
+    typeof schema.submitLabel === "string" && schema.submitLabel.trim()
+      ? schema.submitLabel.trim()
+      : "提交";
+
+  const handleSingleSelect = useCallback((fieldName: string, value: string) => {
+    setFormValues((current) => ({
+      ...current,
+      [fieldName]: value,
+    }));
+    setFormError(null);
+  }, []);
+
+  const handleMultiSelect = useCallback((fieldName: string, value: string) => {
+    setFormValues((current) => {
+      const currentValues = readGenUIFormMultiValue(current, fieldName);
+      const hasValue = currentValues.includes(value);
+      const nextValues = hasValue
+        ? currentValues.filter((item) => item !== value)
+        : [...currentValues, value];
+
+      return {
+        ...current,
+        [fieldName]:
+          value === "NoPreference" && !hasValue
+            ? ["NoPreference"]
+            : value !== "NoPreference"
+              ? nextValues.filter((item) => item !== "NoPreference")
+              : nextValues,
+      };
+    });
+    setFormError(null);
+  }, []);
+
+  const handleSubmit = useCallback(async () => {
+    const submitAction =
+      typeof schema.submitAction === "string" && schema.submitAction.trim()
+        ? schema.submitAction.trim()
+        : null;
+
+    if (!submitAction) {
+      setFormError("这张表单暂时还不能直接提交。");
+      return;
+    }
+
+    const missingField = validateGenUIFormRequiredFields(schema, formValues);
+    if (missingField) {
+      setFormError(`请先补充${missingField}`);
+      return;
+    }
+
+    await onActionSelect({
+      label: submitLabel,
+      action: submitAction,
+      params: formValues,
+    });
+  }, [formValues, onActionSelect, schema, submitLabel]);
+
+  const fields = schema.fields;
+  const showFallbackPreview = fields.length === 0;
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white/85 p-3">
       <p className="text-sm font-semibold text-slate-800">{block.title || "参数设置"}</p>
-      <div className="mt-2 space-y-2">
-        {Object.entries(initial).map(([key, value]) => (
-          <div key={key} className="rounded-lg bg-slate-50/90 px-3 py-2">
-            <p className="text-[11px] text-slate-500">{prettyFieldLabel(key)}</p>
-            <p className="text-sm text-slate-800">{renderFieldValue(value)}</p>
-          </div>
-        ))}
-      </div>
+
+      {showFallbackPreview ? (
+        <div className="mt-2 space-y-2">
+          {Object.entries(initialValues).map(([key, value]) => (
+            <div key={key} className="rounded-lg bg-slate-50/90 px-3 py-2">
+              <p className="text-[11px] text-slate-500">{prettyFieldLabel(key)}</p>
+              <p className="text-sm text-slate-800">{renderFieldValue(value)}</p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-3 space-y-3">
+          {fields.map((field) => {
+            if (field.type === "textarea") {
+              const currentValue = readGenUIFormTextValue(formValues, field.name);
+              return (
+                <div key={field.name} className="space-y-1.5">
+                  <div className="flex items-center gap-1">
+                    <p className="text-[12px] font-medium text-slate-600">{field.label}</p>
+                    {field.required ? <span className="text-[11px] text-rose-500">*</span> : null}
+                  </div>
+                  <textarea
+                    value={currentValue}
+                    onChange={(event) => {
+                      setFormValues((current) => ({
+                        ...current,
+                        [field.name]: event.target.value,
+                      }));
+                      setFormError(null);
+                    }}
+                    disabled={disabled}
+                    maxLength={typeof field.maxLength === "number" ? field.maxLength : 120}
+                    rows={3}
+                    placeholder={field.placeholder || `补充${field.label}`}
+                    className="min-h-[84px] w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-slate-300 disabled:opacity-45"
+                  />
+                </div>
+              );
+            }
+
+            if (field.type === "multi-select") {
+              const currentValues = readGenUIFormMultiValue(formValues, field.name);
+              return (
+                <div key={field.name} className="space-y-1.5">
+                  <div className="flex items-center gap-1">
+                    <p className="text-[12px] font-medium text-slate-600">{field.label}</p>
+                    {field.required ? <span className="text-[11px] text-rose-500">*</span> : null}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {(field.options || []).map((option) => {
+                      const selected = currentValues.includes(option.value);
+                      return (
+                        <button
+                          key={`${field.name}-${option.value}`}
+                          type="button"
+                          onClick={() => handleMultiSelect(field.name, option.value)}
+                          disabled={disabled}
+                          className={cn(
+                            "rounded-full px-3 py-1.5 text-xs transition disabled:opacity-45",
+                            selected
+                              ? "bg-slate-800 text-white"
+                              : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                          )}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            }
+
+            const currentValue = readGenUIFormTextValue(formValues, field.name);
+            return (
+              <div key={field.name} className="space-y-1.5">
+                <div className="flex items-center gap-1">
+                  <p className="text-[12px] font-medium text-slate-600">{field.label}</p>
+                  {field.required ? <span className="text-[11px] text-rose-500">*</span> : null}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {(field.options || []).map((option) => (
+                    <button
+                      key={`${field.name}-${option.value}`}
+                      type="button"
+                      onClick={() => handleSingleSelect(field.name, option.value)}
+                      disabled={disabled}
+                      className={cn(
+                        "rounded-full px-3 py-1.5 text-xs transition disabled:opacity-45",
+                        currentValue === option.value
+                          ? "bg-[#5b67f4] text-white"
+                          : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      )}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+
+          {formError ? (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">{formError}</p>
+          ) : null}
+
+          <button
+            type="button"
+            onClick={() => {
+              void handleSubmit();
+            }}
+            disabled={disabled}
+            className="w-full rounded-2xl bg-[#5b67f4] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#4d59ec] disabled:opacity-45"
+          >
+            {submitLabel}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

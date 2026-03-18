@@ -135,7 +135,7 @@ export async function getMessages(
  * @returns 保存的消息 ID
  */
 export async function saveMessage(params: SaveMessageParams): Promise<{ id: string }> {
-  const { conversationId, userId, role, messageType, content, activityId } = params;
+  const { conversationId, userId, role, messageType, content, activityId, taskId } = params;
   const titleSource = readMessageTextContent(content);
 
   // 1. 插入消息
@@ -148,6 +148,7 @@ export async function saveMessage(params: SaveMessageParams): Promise<{ id: stri
       messageType,
       content,
       activityId,
+      taskId,
     })
     .returning({ id: conversationMessages.id });
 

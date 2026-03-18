@@ -16,6 +16,10 @@ import {
   updateActivity,
 } from '../../activities/activity.service';
 import { getQuota } from '../../users/user.service';
+import {
+  recordCreateTaskDraftReady,
+  recordCreateTaskPublished,
+} from '../task-runtime/agent-task.service';
 
 // ============ Schema 定义 ============
 
@@ -280,6 +284,17 @@ export async function createActivityDraftRecord(userId: string, params: CreateDr
     const { summary: _summary, ...draftData } = params;
     const result = await createDraftActivity(draftData, userId);
 
+    await recordCreateTaskDraftReady({
+      userId,
+      activityId: result.id,
+      title: params.title,
+      type: params.type,
+      locationName: params.locationName,
+      startAt: params.startAt,
+      maxParticipants: params.maxParticipants,
+      source: 'activity_draft_created',
+    });
+
     return {
       success: true as const,
       activityId: result.id,
@@ -423,6 +438,17 @@ export async function updateActivityDraftRecord(
       .where(eq(activities.id, activityId))
       .limit(1);
 
+    await recordCreateTaskDraftReady({
+      userId,
+      activityId,
+      title: updatedActivity.title,
+      type: updatedActivity.type,
+      locationName: updatedActivity.locationName,
+      startAt: updatedActivity.startAt.toISOString(),
+      maxParticipants: updatedActivity.maxParticipants,
+      source: 'activity_draft_updated',
+    });
+
     return {
       success: true as const,
       activityId,
@@ -459,12 +485,21 @@ export function refineDraftTool(userId: string | null) {
 export async function publishActivityRecord(userId: string, activityId: string) {
   try {
     const [existingActivity] = await db
-      .select({ title: activities.title })
+      .select({
+        title: activities.title,
+        locationName: activities.locationName,
+      })
       .from(activities)
       .where(eq(activities.id, activityId))
       .limit(1);
 
     await publishDraftActivity(activityId, userId);
+    await recordCreateTaskPublished({
+      userId,
+      activityId,
+      title: existingActivity?.title || '活动',
+      locationName: existingActivity?.locationName || null,
+    });
     const quota = await getQuota(userId);
 
     return {

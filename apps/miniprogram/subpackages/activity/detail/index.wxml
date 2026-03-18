@@ -285,6 +285,7 @@
   <auth-sheet 
     visible="{{isAuthSheetVisible}}" 
     bind:success="onAuthSuccess"
+    bind:pendingaction="onPendingAction"
     bind:close="onAuthClose"
   />
   

@@ -10,11 +10,11 @@
  */
 
 import { getActivitiesNearby } from '../../../src/api/endpoints/activities/activities'
-import { useUserStore } from '../../../src/stores/user'
+import { useChatStore } from '../../../src/stores/chat'
 import { useAppStore } from '../../../src/stores/app'
 import type { ActivityNearbyResponseDataItem } from '../../../src/api/model'
 import type { ActivityType } from '../../../src/types/global'
-import { submitJoinAndOpenDiscussion, type JoinFlowPayload } from '../../../src/utils/join-flow'
+import { buildJoinStructuredAction, type JoinFlowPayload } from '../../../src/utils/join-flow'
 
 // 活动类型
 interface Activity {
@@ -327,31 +327,22 @@ Page({
   },
 
   async submitJoin(payload: JoinFlowPayload) {
-    const joinResult = await submitJoinAndOpenDiscussion(
-      {
-        ...payload,
-        source: payload.source || 'activity_explore',
-      },
-      {
-        onBeforeNavigate: () => {
-          this.setData({
-            showPreview: false,
-            selectedActivity: null,
-            isJoined: true,
-          })
+    const pendingAction = buildJoinStructuredAction({
+      ...payload,
+      source: payload.source || 'activity_explore',
+    })
 
-          this.loadNearbyActivities()
-        },
-      },
-    )
+    this.setData({
+      showPreview: false,
+      selectedActivity: null,
+    })
 
-    if (!joinResult.success) {
-      wx.showToast({
-        title: joinResult.msg || '报名失败',
-        icon: 'none',
-      })
-      return
-    }
+    useChatStore.getState().sendAction({
+      action: pendingAction.action,
+      payload: pendingAction.payload,
+      source: pendingAction.source,
+      originalText: pendingAction.originalText,
+    })
   },
 
   /**
@@ -379,23 +370,6 @@ Page({
       return
     }
 
-    const userStore = useUserStore.getState()
-    const user = userStore.user
-
-    if (!user?.phoneNumber) {
-      useAppStore.getState().showAuthSheet({
-        type: 'join',
-        payload: {
-          activityId: activity.id,
-          title: activity.title,
-          startAt: activity.startAt,
-          locationName: activity.locationName,
-          source: 'activity_explore',
-        },
-      })
-      return
-    }
-
     await this.submitJoin({
       activityId: activity.id,
       title: activity.title,
@@ -409,15 +383,18 @@ Page({
     // Auth Sheet 内部已刷新用户信息，这里保持静默即可
   },
 
-  async onPendingAction(e: WechatMiniprogram.CustomEvent<{ type: string; payload: JoinFlowPayload }>) {
-    const { type, payload } = e.detail
-    if (type !== 'join' || !payload?.activityId) {
+  onPendingAction(e: WechatMiniprogram.CustomEvent<{ type: 'structured_action'; action: string; payload: Record<string, unknown>; source?: string; originalText?: string }>) {
+    const pendingAction = e.detail
+    if (pendingAction?.type !== 'structured_action' || typeof pendingAction.action !== 'string') {
       return
     }
 
-    await this.submitJoin({
-      ...payload,
-      source: payload.source || 'auth_sheet',
+    useAppStore.getState().clearPendingAction()
+    useChatStore.getState().sendAction({
+      action: pendingAction.action,
+      payload: pendingAction.payload,
+      source: pendingAction.source,
+      originalText: pendingAction.originalText,
     })
   },
 

@@ -1,0 +1,39 @@
+<view class="agent-task-panel">
+  <view class="agent-task-panel__header">
+    <text class="agent-task-panel__eyebrow">{{eyebrow}}</text>
+    <text class="agent-task-panel__title">{{title}}</text>
+  </view>
+
+  <view class="agent-task-panel__list">
+    <view wx:for="{{tasks}}" wx:key="id" class="agent-task-card">
+      <view class="agent-task-card__meta">
+        <text class="agent-task-card__type">{{item.taskTypeLabel}}</text>
+        <text class="agent-task-card__dot">·</text>
+        <text class="agent-task-card__stage">{{item.stageLabel}}</text>
+      </view>
+
+      <text class="agent-task-card__headline">{{item.headline}}</text>
+      <text wx:if="{{item.activityTitle}}" class="agent-task-card__activity">{{item.activityTitle}}</text>
+      <text class="agent-task-card__summary">{{item.summary}}</text>
+
+      <view wx:if="{{item.primaryAction || item.secondaryAction}}" class="agent-task-card__actions">
+        <view
+          wx:if="{{item.primaryAction}}"
+          class="agent-task-card__action agent-task-card__action--primary"
+          data-task-index="{{index}}"
+          bindtap="onPrimaryTap"
+        >
+          <text>{{item.primaryAction.label}}</text>
+        </view>
+        <view
+          wx:if="{{item.secondaryAction}}"
+          class="agent-task-card__action agent-task-card__action--secondary"
+          data-task-index="{{index}}"
+          bindtap="onSecondaryTap"
+        >
+          <text>{{item.secondaryAction.label}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+</view>

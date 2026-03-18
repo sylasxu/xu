@@ -31,6 +31,12 @@
     enhanced
     show-scrollbar="{{false}}"
   >
+    <agent-task-panel
+      wx:if="{{currentTasks.length > 0}}"
+      tasks="{{currentTasks}}"
+      bind:actiontap="onCurrentTaskActionTap"
+    />
+
     <!-- Hot Chips 热词快捷入口 (v4.7) -->
     <hot-chips 
       keywords="{{hotKeywords}}"
@@ -148,6 +154,15 @@
                     initialValues="{{part.data.initialValues}}"
                     disabled="{{part.data.disabled}}"
                     bind:submit="onDraftSettingsFormSubmit"
+                  />
+                </block>
+
+                <block wx:elif="{{part.widgetType === 'auth_required'}}">
+                  <widget-auth-required
+                    message="{{part.data.message}}"
+                    mode="{{part.data.mode}}"
+                    pendingAction="{{part.data.pendingAction}}"
+                    bind:continue="onAuthRequiredContinue"
                   />
                 </block>
                 

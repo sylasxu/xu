@@ -20,6 +20,10 @@ export * from "./conversations";      // AI 对话历史
 // 4. Notification System
 export * from "./notifications";
 
+// 4.5 Agent Task Runtime (v5.4)
+export * from "./agent-tasks";
+export * from "./agent-task-events";
+
 // 5. Report System (内容审核)
 export * from "./reports";
 

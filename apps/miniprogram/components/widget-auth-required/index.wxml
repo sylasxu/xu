@@ -1,0 +1,11 @@
+<view class="auth-required-card">
+  <view class="auth-required-card__badge">
+    <text>{{mode === 'bind_phone' ? '还差一步' : '需要登录'}}</text>
+  </view>
+
+  <text class="auth-required-card__message">{{message || '这个操作需要先完成账号验证'}}</text>
+
+  <button class="auth-required-card__button" bindtap="onContinue">
+    {{mode === 'bind_phone' ? '去绑定手机号' : '先去登录'}}
+  </button>
+</view>

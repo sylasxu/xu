@@ -4,9 +4,10 @@
  */
 import { getActivitiesById, deleteActivitiesById, patchActivitiesByIdStatus } from '../../../src/api/endpoints/activities/activities';
 import { getActivitiesByIdPublic } from '../../../src/api/endpoints/activities/activities';
+import { useChatStore } from '../../../src/stores/chat';
 import { useAppStore } from '../../../src/stores/app';
 import { useUserStore } from '../../../src/stores/user';
-import { submitJoinAndOpenDiscussion } from '../../../src/utils/join-flow'
+import { buildJoinStructuredAction } from '../../../src/utils/join-flow'
 import type { ActivityDetailResponse, ActivityPublicResponseRecentMessagesItem as RecentMessage } from '../../../src/api/model';
 
 interface User {
@@ -67,7 +68,6 @@ interface PageData {
   manageActions: ManageAction[];
   // Auth sheet
   isAuthSheetVisible: boolean;
-  pendingAction: 'join' | null;
   // 举报弹窗
   showReportSheet: boolean;
   // v5.0: 讨论区预览
@@ -118,7 +118,6 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     manageActions: [],
     // Auth sheet
     isAuthSheetVisible: false,
-    pendingAction: null,
     // 举报弹窗
     showReportSheet: false,
     // v5.0: 讨论区预览
@@ -270,13 +269,10 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
   },
 
   onJoinTap() {
-    const token = wx.getStorageSync('token');
-    if (!token) {
-      wx.navigateTo({ url: '/pages/login/login' });
+    const { activity, participantStatus, isCreator } = this.data;
+    if (!activity) {
       return;
     }
-
-    const { activity, currentUser, participantStatus, isCreator } = this.data;
 
     if (isCreator) {
       wx.showToast({ title: '你是活动发起人', icon: 'none' });
@@ -287,33 +283,36 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
       wx.showToast({ title: STATUS_TEXT[participantStatus] || '已报名', icon: 'none' });
       return;
     }
-    
-    // CP-9: 未绑定手机号的用户不能报名活动
-    if (!currentUser?.phoneNumber) {
-      this.setData({ pendingAction: 'join' });
-      useAppStore.getState().showAuthSheet({ type: 'join' });
-      return;
-    }
 
     this.setData({ showJoinDialog: true });
   },
   
   /** 手机号绑定成功回调 */
   onAuthSuccess() {
-    useAppStore.getState().hideAuthSheet();
     // 重新加载用户信息
-    this.loadCurrentUser().then(() => {
-      // 如果有待执行的操作，继续执行
-      if (this.data.pendingAction === 'join') {
-        this.setData({ pendingAction: null, showJoinDialog: true });
-      }
+    this.loadCurrentUser();
+  },
+
+  onPendingAction(e: WechatMiniprogram.CustomEvent<{ type: 'structured_action'; action: string; payload: Record<string, unknown>; source?: string; originalText?: string }>) {
+    const pendingAction = e.detail;
+    if (pendingAction?.type !== 'structured_action' || typeof pendingAction.action !== 'string') {
+      return;
+    }
+
+    useAppStore.getState().clearPendingAction();
+    this.setData({ showJoinDialog: false, joinMessage: '' });
+    useChatStore.getState().sendAction({
+      action: pendingAction.action,
+      payload: pendingAction.payload,
+      source: pendingAction.source,
+      originalText: pendingAction.originalText,
     });
   },
   
   /** 关闭 auth sheet */
   onAuthClose() {
     useAppStore.getState().hideAuthSheet();
-    this.setData({ pendingAction: null });
+    useAppStore.getState().clearPendingAction();
   },
   
   /** 打开活动管理面板 - Requirements: 16.1-16.6 */
@@ -510,32 +509,25 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     this.setData({ isJoining: true });
 
     try {
-      const joinResult = await submitJoinAndOpenDiscussion(
-        {
-          activityId,
-          title: activity?.title,
-          startAt: activity?.startAt,
-          locationName: activity?.locationName,
-          source: 'activity_detail',
-        },
-        {
-          onBeforeNavigate: () => {
-            this.setData({
-              showJoinDialog: false,
-              joinMessage: '',
-              participantStatus: 'joined',
-            });
+      const pendingAction = buildJoinStructuredAction({
+        activityId,
+        title: activity?.title,
+        startAt: activity?.startAt,
+        locationName: activity?.locationName,
+        source: 'activity_detail',
+      });
 
-            this.loadActivityDetail(activityId);
-          },
-        },
-      )
+      this.setData({
+        showJoinDialog: false,
+        joinMessage: '',
+      });
 
-      if (joinResult.success) {
-        return
-      } else {
-        throw new Error(joinResult.msg || '报名失败')
-      }
+      useChatStore.getState().sendAction({
+        action: pendingAction.action,
+        payload: pendingAction.payload,
+        source: pendingAction.source,
+        originalText: pendingAction.originalText,
+      });
     } catch (error) {
       console.error('报名失败', error);
       wx.showToast({ title: (error as Error).message || '报名失败', icon: 'none' });

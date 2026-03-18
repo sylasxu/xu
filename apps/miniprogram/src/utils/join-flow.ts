@@ -1,4 +1,4 @@
-import { postActivitiesByIdJoin } from '../api/endpoints/activities/activities'
+import type { StructuredPendingAction } from '../stores/app'
 
 export type JoinFlowSource =
   | 'activity_detail'
@@ -15,59 +15,27 @@ export interface JoinFlowPayload {
   source?: JoinFlowSource
 }
 
-export interface JoinActivityResult {
-  success: boolean
-  msg: string
-}
+export function buildJoinStructuredAction(payload: JoinFlowPayload): StructuredPendingAction {
+  const source = payload.source || 'auth_sheet'
 
-export interface JoinSuccessOptions {
-  delayMs?: number
-  successMessage?: string
-  onBeforeNavigate?: () => void
-}
-
-function readResponseMessage(value: unknown): string | null {
-  if (typeof value !== 'object' || value === null) {
-    return null
+  return {
+    type: 'structured_action',
+    action: 'join_activity',
+    payload: {
+      activityId: payload.activityId,
+      ...(payload.title ? { title: payload.title } : {}),
+      ...(payload.startAt ? { startAt: payload.startAt } : {}),
+      ...(payload.locationName ? { locationName: payload.locationName } : {}),
+      source,
+    },
+    source,
+    originalText: payload.title ? `报名「${payload.title}」` : '报名这个活动',
   }
-
-  if ('msg' in value && typeof value.msg === 'string' && value.msg.trim()) {
-    return value.msg.trim()
-  }
-
-  if ('message' in value && typeof value.message === 'string' && value.message.trim()) {
-    return value.message.trim()
-  }
-
-  return null
 }
 
 function normalizeJoinTitle(title?: string): string {
   const normalized = typeof title === 'string' ? title.trim() : ''
   return normalized || '这场活动'
-}
-
-export async function requestJoinActivity(activityId: string): Promise<JoinActivityResult> {
-  try {
-    const response = await postActivitiesByIdJoin(activityId)
-
-    if (response.status !== 200) {
-      return {
-        success: false,
-        msg: readResponseMessage(response.data) || '报名失败，请重试',
-      }
-    }
-
-    return {
-      success: true,
-      msg: '报名成功',
-    }
-  } catch (error) {
-    return {
-      success: false,
-      msg: error instanceof Error ? error.message : '报名失败，请重试',
-    }
-  }
 }
 
 export function buildDiscussionEntryUrl(payload: JoinFlowPayload): string {
@@ -86,40 +54,6 @@ export function buildDiscussionEntryUrl(payload: JoinFlowPayload): string {
   }
 
   return `/subpackages/activity/discussion/index?${params.join('&')}`
-}
-
-export function openDiscussionAfterJoin(payload: JoinFlowPayload, delayMs = 800) {
-  const url = buildDiscussionEntryUrl(payload)
-
-  setTimeout(() => {
-    wx.navigateTo({ url })
-  }, delayMs)
-}
-
-export function handleJoinSuccess(payload: JoinFlowPayload, options: JoinSuccessOptions = {}) {
-  options.onBeforeNavigate?.()
-
-  wx.showToast({
-    title: options.successMessage || '报名成功',
-    icon: 'success',
-  })
-
-  openDiscussionAfterJoin(payload, options.delayMs)
-}
-
-export async function submitJoinAndOpenDiscussion(
-  payload: JoinFlowPayload,
-  options: JoinSuccessOptions = {},
-): Promise<JoinActivityResult> {
-  const joinResult = await requestJoinActivity(payload.activityId)
-
-  if (!joinResult.success) {
-    return joinResult
-  }
-
-  handleJoinSuccess(payload, options)
-
-  return joinResult
 }
 
 export function getJoinQuickStarters(title?: string): string[] {

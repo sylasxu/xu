@@ -1,5 +1,7 @@
 import { postAuthLogin } from '../../src/api/endpoints/auth/auth'
 import type { AuthLoginResponse } from '../../src/api/model'
+import { useUserStore } from '../../src/stores/user'
+import type { User } from '../../src/types/global'
 
 interface LoginPageData {
   phoneNumber: string
@@ -157,6 +159,14 @@ Page<LoginPageData, WechatMiniprogram.Page.CustomOption>({
       // 4. 保存登录信息
       wx.setStorageSync('token', result.token)
       wx.setStorageSync('userInfo', result.user)
+      wx.setStorageSync('userId', result.user.id)
+
+      useUserStore.setState({
+        user: result.user as User,
+        token: result.token,
+        isLoggedIn: true,
+        isLoading: false,
+      })
 
       console.log('登录成功:', result.user)
 

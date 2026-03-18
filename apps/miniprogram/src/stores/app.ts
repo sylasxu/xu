@@ -8,10 +8,21 @@ import { immer } from 'zustand/middleware/immer'
 // AI 思考状态类型
 type AIThinkingState = 'idle' | 'thinking' | 'rendering_widget'
 
-// 待执行操作类型（用于手机号绑定后继续执行）
-interface PendingAction {
-  type: 'publish' | 'join' | 'other'
-  payload?: any
+export type PendingActionAuthMode = 'login' | 'bind_phone'
+
+// 待执行结构化动作（用于登录/手机号绑定后继续执行）
+export interface StructuredPendingAction {
+  type: 'structured_action'
+  action: string
+  payload: Record<string, unknown>
+  source?: string
+  originalText?: string
+  authMode?: PendingActionAuthMode
+}
+
+export interface MessageCenterFocusIntent {
+  taskId?: string
+  matchId?: string
 }
 
 interface AppState {
@@ -32,7 +43,10 @@ interface AppState {
   aiThinkingState: AIThinkingState
   
   // 待执行操作（手机号绑定成功后继续执行）
-  pendingAction: PendingAction | null
+  pendingAction: StructuredPendingAction | null
+
+  // 消息中心聚焦意图（例如从任务面板直接打开某条待确认匹配）
+  messageCenterFocus: MessageCenterFocusIntent | null
   
   // 分享引导数据
   shareGuideData: {
@@ -48,12 +62,15 @@ interface AppState {
   setCurrentTab: (index: number) => void
   
   // UI 状态控制 Actions
-  showAuthSheet: (pendingAction?: PendingAction) => void
+  showAuthSheet: (pendingAction?: StructuredPendingAction) => void
   hideAuthSheet: () => void
   showShareGuide: (data: { activityId?: string; title?: string; locationName?: string }) => void
   hideShareGuide: () => void
   setAIThinkingState: (state: AIThinkingState) => void
+  setPendingAction: (pendingAction: StructuredPendingAction | null) => void
   clearPendingAction: () => void
+  setMessageCenterFocus: (intent: MessageCenterFocusIntent | null) => void
+  clearMessageCenterFocus: () => void
 }
 
 export const useAppStore = create<AppState>()(
@@ -70,6 +87,7 @@ export const useAppStore = create<AppState>()(
     isShareGuideVisible: false,
     aiThinkingState: 'idle',
     pendingAction: null,
+    messageCenterFocus: null,
     shareGuideData: null,
 
     // 设置系统信息
@@ -138,11 +156,29 @@ export const useAppStore = create<AppState>()(
         state.aiThinkingState = thinkingState
       })
     },
+
+    setPendingAction: (pendingAction) => {
+      set((state) => {
+        state.pendingAction = pendingAction
+      })
+    },
     
     // 清除待执行操作
     clearPendingAction: () => {
       set((state) => {
         state.pendingAction = null
+      })
+    },
+
+    setMessageCenterFocus: (intent) => {
+      set((state) => {
+        state.messageCenterFocus = intent
+      })
+    },
+
+    clearMessageCenterFocus: () => {
+      set((state) => {
+        state.messageCenterFocus = null
       })
     },
   }))

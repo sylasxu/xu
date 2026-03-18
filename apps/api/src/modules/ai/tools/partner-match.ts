@@ -22,6 +22,11 @@ import {
   type PartnerIntent,
   type IntentMatch,
 } from '@juchang/db';
+import {
+  recordPartnerTaskMatchCancelled,
+  recordPartnerTaskMatchConfirmed,
+  recordPartnerTaskMatchReady,
+} from '../task-runtime/agent-task.service';
 
 type MatchQueryExecutor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -269,6 +274,12 @@ async function createMatch(
     await sendIcebreaker(transactionResult.match, transactionResult.intents);
   }
 
+  await recordPartnerTaskMatchReady({
+    matchId: transactionResult.match.id,
+    activityType: transactionResult.match.activityType,
+    locationHint: transactionResult.match.centerLocationHint,
+  });
+
   return transactionResult.match;
 }
 
@@ -397,6 +408,11 @@ export async function confirmMatch(matchId: string, userId: string): Promise<{
     .set({ status: 'matched', updatedAt: new Date() })
     .where(inArray(partnerIntents.id, intentIds));
 
+  await recordPartnerTaskMatchConfirmed({
+    matchId,
+    activityId: activity.id,
+  });
+
   return { success: true, activityId: activity.id };
 }
 
@@ -432,6 +448,10 @@ export async function cancelMatch(matchId: string, userId: string): Promise<{
   await db.update(intentMatches)
     .set({ outcome: 'cancelled' })
     .where(eq(intentMatches.id, matchId));
+
+  await recordPartnerTaskMatchCancelled({
+    matchId,
+  });
 
   return { success: true };
 }

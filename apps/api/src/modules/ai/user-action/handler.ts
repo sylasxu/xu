@@ -26,6 +26,50 @@ function getErrorMessage(error: unknown, fallback = '操作失败'): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
+function buildPendingStructuredAction(action: StructuredAction): Record<string, unknown> {
+  const payloadSource = typeof action.payload.source === 'string' ? action.payload.source.trim() : '';
+  return {
+    type: 'structured_action',
+    action: action.action,
+    payload: action.payload,
+    ...(action.source ? { source: action.source } : payloadSource ? { source: payloadSource } : {}),
+    ...(action.originalText ? { originalText: action.originalText } : {}),
+  };
+}
+
+function normalizeAuthRequiredResult(
+  result: StructuredActionResult,
+  action: StructuredAction
+): StructuredActionResult {
+  const data = isRecord(result.data) ? result.data : {};
+  const errorText = typeof result.error === 'string' ? result.error : '';
+  const requiresPhoneBinding =
+    data.requiresPhoneBinding === true ||
+    errorText.includes('绑定手机号');
+  const requiresLogin =
+    !requiresPhoneBinding &&
+    (data.requiresAuth === true || errorText.includes('请先登录'));
+
+  if (!requiresPhoneBinding && !requiresLogin) {
+    return result;
+  }
+
+  const authMode = requiresPhoneBinding ? 'bind_phone' : 'login';
+
+  return {
+    ...result,
+    data: {
+      ...data,
+      requiresAuth: true,
+      ...(requiresPhoneBinding ? { requiresPhoneBinding: true } : {}),
+      pendingAction: {
+        ...buildPendingStructuredAction(action),
+        authMode,
+      },
+    },
+  };
+}
+
 /**
  * Action 到 Tool 的映射表
  */
@@ -189,11 +233,11 @@ export async function handleStructuredAction(
   // 检查认证
   if (handlerConfig.requiresAuth && !userId) {
     logger.warn('Action requires auth', { actionType });
-    return {
+    return normalizeAuthRequiredResult({
       success: false,
       error: '请先登录',
       data: { requiresAuth: true },
-    };
+    }, structuredAction);
   }
   
   try {
@@ -212,23 +256,23 @@ export async function handleStructuredAction(
       fallbackToLLM: result.fallbackToLLM,
     });
     
-    return {
+    return normalizeAuthRequiredResult({
       ...result,
       durationMs: duration,
-    };
+    }, structuredAction);
   } catch (error) {
     logger.error('Structured action failed', { 
       actionType, 
       error: getErrorMessage(error),
     });
     
-    return {
+    return normalizeAuthRequiredResult({
       success: false,
       error: getErrorMessage(error),
       durationMs: Date.now() - startTime,
       fallbackToLLM: true,
       fallbackText: structuredAction.originalText,
-    };
+    }, structuredAction);
   }
 }
 
@@ -613,6 +657,14 @@ async function handleJoinActivity(
         activityId,
         activityTitle: activity?.title,
         message: `报名成功！「${activity?.title || '活动'}」等你来～`,
+        navigationIntent: 'open_discussion',
+        navigationPayload: {
+          activityId,
+          ...(activity?.title ? { title: activity.title } : {}),
+          ...(typeof payload.source === 'string' && payload.source.trim()
+            ? { source: payload.source.trim() }
+            : {}),
+        },
       },
     };
   } catch (error) {

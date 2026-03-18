@@ -11,12 +11,14 @@ import {
   postNotificationsPendingMatchesByIdCancel,
   postNotificationsPendingMatchesByIdConfirm,
 } from '../../src/api/endpoints/notifications/notifications';
+import { getAiTasksCurrent as getCurrentAgentTasks } from '../../src/api/endpoints/ai/ai';
 import type {
   NotificationMessageCenterResponsePendingMatchesItem,
   NotificationMessageCenterResponseSystemNotificationsItemsItemType,
 } from '../../src/api/model';
 import { useUserStore } from '../../src/stores/user';
 import { useChatStore } from '../../src/stores/chat';
+import { useAppStore, type MessageCenterFocusIntent } from '../../src/stores/app';
 import { postActivityRebookFollowUp } from '../../src/services/activity-outcome';
 import { getPendingMatchDetail, type PendingMatchDetailResponse } from '../../src/services/pending-match';
 
@@ -28,6 +30,7 @@ interface SystemNotification {
   title: string;
   content: string;
   activityId: string;
+  taskId?: string;
   read: boolean;
   createdAt: string;
   source: 'system' | 'match';
@@ -80,7 +83,59 @@ interface PendingMatchDetailView {
   } | null;
 }
 
+function readMessageCenterFocusIntent(value: unknown): MessageCenterFocusIntent | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const taskId = typeof value.taskId === 'string' && value.taskId.trim() ? value.taskId.trim() : undefined;
+  const matchId = typeof value.matchId === 'string' && value.matchId.trim() ? value.matchId.trim() : undefined;
+
+  if (!taskId && !matchId) {
+    return null;
+  }
+
+  return {
+    ...(taskId ? { taskId } : {}),
+    ...(matchId ? { matchId } : {}),
+  };
+}
+
+type CurrentTaskActionKind = 'structured_action' | 'navigate' | 'switch_tab';
+
+interface TaskChatPromptPayload {
+  prompt: string;
+  activityId?: string;
+  followUpMode?: 'review' | 'rebook' | 'kickoff';
+  entry?: string;
+}
+
+interface CurrentTaskAction {
+  kind: CurrentTaskActionKind;
+  label: string;
+  action?: string;
+  payload?: Record<string, unknown>;
+  source?: string;
+  originalText?: string;
+  url?: string;
+}
+
+interface CurrentTaskItem {
+  id: string;
+  taskType: 'join_activity' | 'find_partner' | 'create_activity';
+  taskTypeLabel: string;
+  status: string;
+  stageLabel: string;
+  currentStage: string;
+  headline: string;
+  summary: string;
+  primaryAction?: CurrentTaskAction;
+  secondaryAction?: CurrentTaskAction;
+}
+
 interface MessagePageData {
+  currentTasksNeedsAction: CurrentTaskItem[];
+  currentTasksInProgress: CurrentTaskItem[];
   notifications: SystemNotification[];
   chatList: ChatItem[];
   loading: boolean;
@@ -152,6 +207,124 @@ function getErrorMessage(value: unknown, fallback: string): string {
   return fallback;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function readCurrentTaskAction(value: unknown): CurrentTaskAction | null {
+  if (!isRecord(value) || typeof value.kind !== 'string' || typeof value.label !== 'string') {
+    return null;
+  }
+
+  if (value.kind !== 'structured_action' && value.kind !== 'navigate' && value.kind !== 'switch_tab') {
+    return null;
+  }
+
+  return {
+    kind: value.kind,
+    label: value.label,
+    ...(typeof value.action === 'string' ? { action: value.action } : {}),
+    ...(isRecord(value.payload) ? { payload: value.payload } : {}),
+    ...(typeof value.source === 'string' ? { source: value.source } : {}),
+    ...(typeof value.originalText === 'string' ? { originalText: value.originalText } : {}),
+    ...(typeof value.url === 'string' ? { url: value.url } : {}),
+  };
+}
+
+function readCurrentTaskItem(value: unknown): CurrentTaskItem | null {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== 'string' ||
+    typeof value.taskType !== 'string' ||
+    typeof value.taskTypeLabel !== 'string' ||
+    typeof value.stageLabel !== 'string' ||
+    typeof value.currentStage !== 'string' ||
+    typeof value.headline !== 'string' ||
+    typeof value.summary !== 'string'
+  ) {
+    return null;
+  }
+
+  if (value.taskType !== 'join_activity' && value.taskType !== 'find_partner' && value.taskType !== 'create_activity') {
+    return null;
+  }
+
+  const primaryAction = readCurrentTaskAction(value.primaryAction);
+  const secondaryAction = readCurrentTaskAction(value.secondaryAction);
+
+  return {
+    id: value.id,
+    taskType: value.taskType,
+    taskTypeLabel: value.taskTypeLabel,
+    status: typeof value.status === 'string' ? value.status : 'active',
+    stageLabel: value.stageLabel,
+    currentStage: value.currentStage,
+    headline: value.headline,
+    summary: value.summary,
+    ...(primaryAction ? { primaryAction } : {}),
+    ...(secondaryAction ? { secondaryAction } : {}),
+  };
+}
+
+function readTaskChatPromptPayload(value: unknown): TaskChatPromptPayload | null {
+  if (!isRecord(value) || typeof value.prompt !== 'string' || !value.prompt.trim()) {
+    return null;
+  }
+
+  const followUpMode = value.followUpMode === 'review' || value.followUpMode === 'rebook' || value.followUpMode === 'kickoff'
+    ? value.followUpMode
+    : undefined;
+
+  return {
+    prompt: value.prompt.trim(),
+    ...(typeof value.activityId === 'string' && value.activityId.trim() ? { activityId: value.activityId.trim() } : {}),
+    ...(followUpMode ? { followUpMode } : {}),
+    ...(typeof value.entry === 'string' && value.entry.trim() ? { entry: value.entry.trim() } : {}),
+  };
+}
+
+function needsAttentionFromInbox(task: CurrentTaskItem): boolean {
+  if (task.status === 'waiting_auth') {
+    return true;
+  }
+
+  if (task.taskType === 'find_partner') {
+    return task.currentStage === 'match_ready' || task.currentStage === 'auth_gate';
+  }
+
+  if (task.taskType === 'join_activity') {
+    return task.currentStage === 'post_activity'
+      || task.currentStage === 'action_selected'
+      || task.currentStage === 'auth_gate';
+  }
+
+  if (task.taskType === 'create_activity') {
+    return task.currentStage === 'draft_ready'
+      || task.currentStage === 'auth_gate';
+  }
+
+  return Boolean(task.primaryAction);
+}
+
+function splitMessageInboxTasks(tasks: CurrentTaskItem[]): {
+  needsAction: CurrentTaskItem[];
+  inProgress: CurrentTaskItem[];
+} {
+  const needsAction: CurrentTaskItem[] = [];
+  const inProgress: CurrentTaskItem[] = [];
+
+  tasks.forEach((task) => {
+    if (needsAttentionFromInbox(task)) {
+      needsAction.push(task);
+      return;
+    }
+
+    inProgress.push(task);
+  });
+
+  return { needsAction, inProgress };
+}
+
 type PromptContextOverrides = {
   activityId?: string;
   followUpMode?: 'review' | 'rebook' | 'kickoff';
@@ -183,6 +356,8 @@ function normalizeNotificationActivityTitle(title: string): string {
 
 Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
   data: {
+    currentTasksNeedsAction: [],
+    currentTasksInProgress: [],
     notifications: [],
     chatList: [],
     loading: true,
@@ -198,7 +373,9 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
 
   onLoad() {
     this.loadData();
+    this.loadCurrentTasks();
     this.setupWebSocket();
+    void this.consumeMessageCenterFocus();
   },
 
   onShow() {
@@ -206,10 +383,12 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
       this.getTabBar().setData({ value: 'message' });
     }
     this.loadData();
+    this.loadCurrentTasks();
+    void this.consumeMessageCenterFocus();
   },
 
   onPullDownRefresh() {
-    this.loadData().finally(() => {
+    Promise.all([this.loadData(), this.loadCurrentTasks()]).finally(() => {
       wx.stopPullDownRefresh();
     });
   },
@@ -233,6 +412,44 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
       console.error('加载消息数据失败', error);
       this.setData({ loading: false });
       wx.showToast({ title: '加载失败', icon: 'none' });
+    }
+  },
+
+  async loadCurrentTasks(): Promise<void> {
+    const userId = this.getCurrentUserId();
+    if (!userId) {
+      this.setData({
+        currentTasksNeedsAction: [],
+        currentTasksInProgress: [],
+      });
+      return;
+    }
+
+    try {
+      const response = await getCurrentAgentTasks();
+      if (response.status !== 200 || !response.data || !Array.isArray(response.data.items)) {
+        this.setData({
+          currentTasksNeedsAction: [],
+          currentTasksInProgress: [],
+        });
+        return;
+      }
+
+      const currentTasks = response.data.items
+        .map((item) => readCurrentTaskItem(item))
+        .filter((item): item is CurrentTaskItem => item !== null);
+      const inboxTasks = splitMessageInboxTasks(currentTasks);
+
+      this.setData({
+        currentTasksNeedsAction: inboxTasks.needsAction,
+        currentTasksInProgress: inboxTasks.inProgress,
+      });
+    } catch (error) {
+      console.error('加载当前任务失败', error);
+      this.setData({
+        currentTasksNeedsAction: [],
+        currentTasksInProgress: [],
+      });
     }
   },
 
@@ -275,6 +492,7 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
         title: item.title,
         content: item.content || this.getNotificationFallbackContent(item.type),
         activityId: item.activityId || '',
+        ...(typeof item.taskId === 'string' && item.taskId.trim() ? { taskId: item.taskId.trim() } : {}),
         read: !!item.isRead,
         createdAt: this.formatTime(createdAtRaw),
         source: 'system' as const,
@@ -319,6 +537,7 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
       title: `找到合拍搭子（${item.typeName}）`,
       content,
       activityId: '',
+      ...(typeof item.taskId === 'string' && item.taskId.trim() ? { taskId: item.taskId.trim() } : {}),
       read: false,
       createdAt: this.formatTime(item.confirmDeadline),
       source: 'match',
@@ -413,6 +632,17 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     }
   },
 
+  async consumeMessageCenterFocus() {
+    const appStore = useAppStore.getState();
+    const focus = appStore.messageCenterFocus;
+    if (!focus?.matchId) {
+      return;
+    }
+
+    appStore.clearMessageCenterFocus();
+    await this.openPendingMatchDetail(focus.matchId);
+  },
+
   closeMatchDetail() {
     this.setData({
       showMatchDetail: false,
@@ -479,14 +709,30 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     this.setData({ notificationExpanded: !this.data.notificationExpanded });
   },
 
+  getAllCurrentTasks(): CurrentTaskItem[] {
+    return [
+      ...this.data.currentTasksNeedsAction,
+      ...this.data.currentTasksInProgress,
+    ];
+  },
+
+  findCurrentTaskById(taskId: string): CurrentTaskItem | null {
+    if (!taskId) {
+      return null;
+    }
+
+    return this.getAllCurrentTasks().find((task: CurrentTaskItem) => task.id === taskId) || null;
+  },
+
   async onNotificationTap(e: WechatMiniprogram.TouchEvent) {
-    const { id, type, activityId, source, isTempOrganizer, matchId } = e.currentTarget.dataset as {
+    const { id, type, activityId, source, isTempOrganizer, matchId, taskId } = e.currentTarget.dataset as {
       id: string;
       type: NotificationType;
       activityId?: string;
       source: 'system' | 'match';
       isTempOrganizer?: boolean | string;
       matchId?: string;
+      taskId?: string;
     };
     const canConfirm = isTempOrganizer === true || isTempOrganizer === 'true';
 
@@ -510,6 +756,17 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
       }
 
       await this.openPendingMatchDetail(matchId);
+      return;
+    }
+
+    const currentTask = taskId ? this.findCurrentTaskById(taskId) : null;
+    if (currentTask?.primaryAction) {
+      await this.executeCurrentTaskAction(currentTask.primaryAction);
+      return;
+    }
+
+    if (currentTask?.secondaryAction) {
+      await this.executeCurrentTaskAction(currentTask.secondaryAction);
       return;
     }
 
@@ -551,6 +808,7 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
       wx.showToast({ title: response.data.msg || '确认成功', icon: 'none' });
       this.closeMatchDetail();
       await this.loadData();
+      await this.loadCurrentTasks();
 
       if (response.data.activityId) {
         wx.navigateTo({
@@ -585,6 +843,7 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
       wx.showToast({ title: response.data.msg || '已取消匹配', icon: 'none' });
       this.closeMatchDetail();
       await this.loadData();
+      await this.loadCurrentTasks();
     } catch (error) {
       console.error('取消待处理匹配失败', error);
       wx.showToast({
@@ -642,6 +901,72 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
   openHomeWithPrompt(prompt: string, contextOverrides?: PromptContextOverrides) {
     useChatStore.getState().sendMessage(prompt, contextOverrides);
     wx.switchTab({ url: '/pages/home/index' });
+  },
+
+  async executeCurrentTaskAction(action: CurrentTaskAction) {
+    if (action.kind === 'structured_action') {
+      if (!action.action) {
+        return;
+      }
+
+      if (action.action === 'start_follow_up_chat') {
+        const promptPayload = readTaskChatPromptPayload(action.payload);
+        if (!promptPayload) {
+          return;
+        }
+
+        if (promptPayload.followUpMode === 'rebook' && promptPayload.activityId) {
+          await this.recordRebookFollowUp(promptPayload.activityId);
+        }
+
+        this.openHomeWithPrompt(promptPayload.prompt, {
+          ...(promptPayload.activityId ? { activityId: promptPayload.activityId } : {}),
+          ...(promptPayload.followUpMode ? { followUpMode: promptPayload.followUpMode } : {}),
+          ...(promptPayload.entry ? { entry: promptPayload.entry } : {}),
+        });
+        return;
+      }
+
+      useChatStore.getState().sendAction({
+        action: action.action,
+        payload: action.payload || {},
+        source: action.source,
+        originalText: action.originalText,
+      });
+      return;
+    }
+
+    if (!action.url) {
+      return;
+    }
+
+    if (action.kind === 'switch_tab' && action.url === '/pages/message/index') {
+      const focusIntent = readMessageCenterFocusIntent(action.payload);
+      if (focusIntent?.matchId) {
+        await this.openPendingMatchDetail(focusIntent.matchId);
+        return;
+      }
+
+      useAppStore.getState().setMessageCenterFocus(focusIntent);
+      wx.switchTab({ url: action.url });
+      return;
+    }
+
+    if (action.kind === 'switch_tab') {
+      wx.switchTab({ url: action.url });
+      return;
+    }
+
+    wx.navigateTo({ url: action.url });
+  },
+
+  onCurrentTaskActionTap(e: WechatMiniprogram.CustomEvent<{ action?: CurrentTaskAction }>) {
+    const action = readCurrentTaskAction(e.detail?.action);
+    if (!action) {
+      return;
+    }
+
+    void this.executeCurrentTaskAction(action);
   },
 
   onChatTap(e: WechatMiniprogram.TouchEvent) {

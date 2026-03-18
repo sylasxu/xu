@@ -6,6 +6,11 @@ import {
   markActivityOutcomeRebookTriggered,
   upsertActivityOutcomeMemory,
 } from '../ai/memory';
+import {
+  recordJoinTaskFulfillmentOutcome,
+  recordJoinTaskRebookOutcome,
+  recordJoinTaskReviewOutcome,
+} from '../ai/task-runtime/agent-task.service';
 import type {
   ActionResponse,
   ParticipantInfo,
@@ -218,6 +223,28 @@ export async function confirmActivityFulfillment(
     }
   }
 
+  const taskOutcomeTasks: Promise<void>[] = [
+    recordJoinTaskFulfillmentOutcome({
+      userId: creatorId,
+      activityId,
+      attended: true,
+      summary: outcomeSummary,
+    }),
+    ...confirmations.map((item) => recordJoinTaskFulfillmentOutcome({
+      userId: item.userId,
+      activityId,
+      attended: item.fulfilled,
+      summary: outcomeSummary,
+    })),
+  ];
+
+  const taskOutcomeResults = await Promise.allSettled(taskOutcomeTasks);
+  for (const result of taskOutcomeResults) {
+    if (result.status === 'rejected') {
+      console.error('写入 agent task outcome 失败:', result.reason);
+    }
+  }
+
   return {
     activityId,
     attendedCount,
@@ -280,6 +307,11 @@ export async function markActivityRebookFollowUp(
     happenedAt: activity.startAt,
   });
 
+  await recordJoinTaskRebookOutcome({
+    userId,
+    activityId,
+  });
+
   return {
     code: 200,
     msg: '已记录这次再约意愿，后续推荐会更懂你',
@@ -306,5 +338,11 @@ export async function saveActivityReviewSummary(
     attended: null,
     reviewSummary: normalizedSummary,
     happenedAt: activity.startAt,
+  });
+
+  await recordJoinTaskReviewOutcome({
+    userId,
+    activityId,
+    reviewSummary: normalizedSummary,
   });
 }

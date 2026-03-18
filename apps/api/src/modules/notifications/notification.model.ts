@@ -43,6 +43,9 @@ const MatchPendingItem = t.Object({
   commonTags: t.Array(t.String(), { description: '共同标签' }),
   locationHint: t.String({ description: '地点提示' }),
   confirmDeadline: t.String({ description: '确认截止时间 ISO' }),
+  taskId: t.Union([t.String({ format: 'uuid' }), t.Null()], {
+    description: '关联任务 ID（用于恢复同一条找搭子任务）',
+  }),
   isTempOrganizer: t.Boolean({ description: '是否当前用户可确认/取消' }),
 });
 

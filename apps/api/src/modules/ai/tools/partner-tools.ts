@@ -11,6 +11,7 @@ import { tool, jsonSchema } from 'ai';
 import { toJsonSchema } from '@juchang/utils';
 import { db, users, partnerIntents, eq, and, sql } from '@juchang/db';
 import { detectMatchesForIntent, getPendingMatchesForUser, confirmMatch as confirmMatchService } from './partner-match';
+import { recordPartnerTaskIntentPosted } from '../task-runtime/agent-task.service';
 
 // ============ Schema 定义 ============
 
@@ -151,6 +152,16 @@ export async function createPartnerIntent(
     }).returning();
 
     const matchResult = await detectMatchesForIntent(intent.id);
+
+    await recordPartnerTaskIntentPosted({
+      userId,
+      partnerIntentId: intent.id,
+      rawInput: params.rawInput.trim() || `想找${TYPE_NAMES[params.activityType]}搭子`,
+      activityType: params.activityType,
+      locationHint: normalizedLocationHint,
+      ...(params.timePreference?.trim() ? { timePreference: params.timePreference.trim() } : {}),
+      ...(matchResult ? { intentMatchId: matchResult.id } : {}),
+    });
 
     if (matchResult) {
       return {

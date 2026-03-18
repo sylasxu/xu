@@ -26,6 +26,22 @@
     refresher-triggered="{{loading}}"
     bindrefresherrefresh="loadData"
   >
+    <agent-task-panel
+      wx:if="{{currentTasksNeedsAction.length > 0}}"
+      eyebrow="任务收件箱"
+      title="这些事现在等你点一下"
+      tasks="{{currentTasksNeedsAction}}"
+      bind:actiontap="onCurrentTaskActionTap"
+    />
+
+    <agent-task-panel
+      wx:if="{{currentTasksInProgress.length > 0}}"
+      eyebrow="继续推进中"
+      title="这些事我还在替你盯着"
+      tasks="{{currentTasksInProgress}}"
+      bind:actiontap="onCurrentTaskActionTap"
+    />
+
     <!-- 系统通知区域 -->
     <view class="section-card">
       <view 
@@ -36,7 +52,7 @@
           <view class="section-icon section-icon--amber">
             <t-icon name="notification" size="36rpx" />
           </view>
-          <text>系统通知</text>
+          <text>结果更新</text>
           <t-badge
             wx:if="{{unreadNotificationCount > 0}}"
             count="{{unreadNotificationCount}}"
@@ -58,6 +74,7 @@
             data-id="{{item.id}}"
             data-type="{{item.type}}"
             data-activity-id="{{item.activityId}}"
+            data-task-id="{{item.taskId}}"
             data-source="{{item.source}}"
             data-match-id="{{item.matchId}}"
             data-is-temp-organizer="{{item.isTempOrganizer}}"
@@ -105,6 +122,12 @@
             </view>
             <view wx:elif="{{item.type === 'match_pending' && !item.isTempOrganizer}}" class="notification-tag">
               等召集人确认
+            </view>
+            <view
+              wx:elif="{{item.taskId}}"
+              class="notification-tag"
+            >
+              回到任务
             </view>
             <view wx:else class="notification-arrow">
               <t-icon name="chevron-right" size="36rpx" color="#9CA3AF" />

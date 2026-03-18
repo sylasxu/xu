@@ -80,6 +80,56 @@ export const intentMatchOutcomeEnum = pgEnum("intent_match_outcome", [
 ]);
 
 // ==========================================
+// 5.5 🤖 Agent Task Runtime (v5.4)
+// ==========================================
+
+export const agentTaskTypeEnum = pgEnum("agent_task_type", [
+  "join_activity",
+  "find_partner",
+  "create_activity"
+]);
+
+export const agentTaskStatusEnum = pgEnum("agent_task_status", [
+  "active",
+  "waiting_auth",
+  "waiting_async_result",
+  "completed",
+  "cancelled",
+  "expired"
+]);
+
+export const agentTaskStageEnum = pgEnum("agent_task_stage", [
+  "intent_captured",
+  "explore",
+  "preference_collecting",
+  "draft_collecting",
+  "action_selected",
+  "auth_gate",
+  "draft_ready",
+  "joined",
+  "intent_posted",
+  "awaiting_match",
+  "match_ready",
+  "activity_created",
+  "published",
+  "discussion",
+  "post_activity",
+  "done"
+]);
+
+export const agentTaskEventTypeEnum = pgEnum("agent_task_event_type", [
+  "task_created",
+  "context_updated",
+  "action_selected",
+  "auth_blocked",
+  "auth_resumed",
+  "stage_changed",
+  "discussion_entered",
+  "outcome_recorded",
+  "task_completed"
+]);
+
+// ==========================================
 // 6. 🔥 全局关键词 (Global Keywords Domain)
 // ==========================================
 

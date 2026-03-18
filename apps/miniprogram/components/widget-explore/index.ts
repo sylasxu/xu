@@ -9,12 +9,10 @@
  */
 
 import { useChatStore } from '../../src/stores/chat';
-import { useAppStore } from '../../src/stores/app';
-import { useUserStore } from '../../src/stores/user';
 import { fetchWidgetData } from '../../src/utils/widget-fetcher';
 import type { FetchState, WidgetDataSource } from '../../src/utils/widget-fetcher';
 import type { ActionState, WidgetAction } from '../../src/utils/widget-actions';
-import { submitJoinAndOpenDiscussion, type JoinFlowPayload } from '../../src/utils/join-flow';
+import { buildJoinStructuredAction, type JoinFlowPayload } from '../../src/utils/join-flow';
 
 // 探索结果类型
 interface ExploreResult {
@@ -456,57 +454,20 @@ Component({
     },
 
     async submitJoinFromWidget(payload: JoinFlowPayload, stateKey?: string) {
-      const currentUser = useUserStore.getState().user;
-
-      if (!currentUser?.phoneNumber) {
-        if (stateKey) {
-          this.setData({ [`actionStates.${stateKey}`]: 'idle' });
-        }
-
-        useAppStore.getState().showAuthSheet({
-          type: 'join',
-          payload: {
-            ...payload,
-            source: payload.source || 'widget_explore',
-          },
-        });
-        return;
-      }
-
-      const resolvedPayload = {
+      const pendingAction = buildJoinStructuredAction({
         ...payload,
         source: payload.source || 'widget_explore',
-      };
-
-      const joinResult = await submitJoinAndOpenDiscussion(resolvedPayload, {
-        onBeforeNavigate: () => {
-          if (stateKey) {
-            this.setData({ [`actionStates.${stateKey}`]: 'success' });
-          }
-
-          const title = payload.title || '活动';
-          useChatStore.getState().appendActionResult(
-            'join',
-            { activityId: payload.activityId, title },
-            true,
-            `你已成功报名「${title}」，一起去讨论区打个招呼吧`,
-          );
-        },
       });
 
-      if (!joinResult.success) {
-        if (stateKey) {
-          this.setData({ [`actionStates.${stateKey}`]: 'idle' });
-        }
-
-        wx.showToast({
-          title: joinResult.msg || '报名失败，请重试',
-          icon: 'none',
-        });
-        return;
-      }
+      useChatStore.getState().sendAction({
+        action: pendingAction.action,
+        payload: pendingAction.payload,
+        source: pendingAction.source,
+        originalText: pendingAction.originalText,
+      });
 
       if (stateKey) {
+        this.setData({ [`actionStates.${stateKey}`]: 'success' });
         setTimeout(() => {
           this.setData({ [`actionStates.${stateKey}`]: 'idle' });
         }, 900);
@@ -581,10 +542,9 @@ Component({
         originalText: activityTitle ? `处理「${activityTitle}」` : `执行${actionType}`,
       });
 
-      this.setData({ [`actionStates.${stateKey}`]: 'success' });
       setTimeout(() => {
         this.setData({ [`actionStates.${stateKey}`]: 'idle' });
-      }, 900);
+      }, 600);
     },
 
     /** 点击报名按钮（结构化动作链路，自包含模式保留） */

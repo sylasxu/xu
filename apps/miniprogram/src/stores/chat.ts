@@ -22,6 +22,7 @@ import { immer } from 'zustand/middleware/immer'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import type { SSEController, UIMessagePart } from '../utils/sse-request'
 import { API_CONFIG } from '../config'
+import { useAppStore, type PendingActionAuthMode, type StructuredPendingAction } from './app'
 import type {
   GenUIBlock,
   GenUIChoiceBlock,
@@ -35,6 +36,7 @@ import type {
   GenUITurnContext,
   GenUITurnEnvelope,
 } from '../gen/genui-contract'
+import { buildDiscussionEntryUrl, type JoinFlowPayload } from '../utils/join-flow'
 
 // ============================================================================
 // Types - 与 AI SDK v6 UIMessage 保持一致，扩展 Widget 支持
@@ -52,7 +54,7 @@ export type MessageRole = 'user' | 'assistant'
  */
 export interface WidgetPart {
   type: 'widget'
-  widgetType: 'dashboard' | 'draft' | 'explore' | 'share' | 'ask_preference' | 'partner_intent_form' | 'draft_settings_form' | 'error'
+  widgetType: 'dashboard' | 'draft' | 'explore' | 'share' | 'ask_preference' | 'partner_intent_form' | 'draft_settings_form' | 'auth_required' | 'error'
   data: unknown
 }
 
@@ -305,6 +307,7 @@ function readMessagePrimaryBlockType(message: UIMessage): GenUITransientTurn['pr
     case 'partner_intent_form':
     case 'draft_settings_form':
       return 'form'
+    case 'auth_required':
     case 'error':
       return 'alert'
     case 'dashboard':
@@ -498,6 +501,145 @@ function toNumberValue(value: unknown, fallback: number): number {
   }
 
   return fallback
+}
+
+function readPendingActionAuthMode(value: unknown): PendingActionAuthMode | null {
+  return value === 'login' || value === 'bind_phone' ? value : null
+}
+
+function readJoinFlowSource(value: unknown): JoinFlowPayload['source'] | undefined {
+  switch (value) {
+    case 'activity_detail':
+    case 'half_screen_detail':
+    case 'activity_explore':
+    case 'widget_explore':
+    case 'auth_sheet':
+      return value
+    default:
+      return undefined
+  }
+}
+
+function readStructuredPendingAction(value: unknown): StructuredPendingAction | null {
+  if (!isRecord(value) || value.type !== 'structured_action' || typeof value.action !== 'string' || !isRecord(value.payload)) {
+    return null
+  }
+
+  const authMode = readPendingActionAuthMode(value.authMode)
+
+  return {
+    type: 'structured_action',
+    action: value.action,
+    payload: value.payload,
+    ...(typeof value.source === 'string' ? { source: value.source } : {}),
+    ...(typeof value.originalText === 'string' ? { originalText: value.originalText } : {}),
+    ...(authMode ? { authMode } : {}),
+  }
+}
+
+function readDiscussionNavigationPayload(value: unknown): JoinFlowPayload | null {
+  if (!isRecord(value) || typeof value.activityId !== 'string' || !value.activityId.trim()) {
+    return null
+  }
+
+  return {
+    activityId: value.activityId.trim(),
+    ...(typeof value.title === 'string' && value.title.trim() ? { title: value.title.trim() } : {}),
+    ...(typeof value.startAt === 'string' && value.startAt.trim() ? { startAt: value.startAt.trim() } : {}),
+    ...(typeof value.locationName === 'string' && value.locationName.trim() ? { locationName: value.locationName.trim() } : {}),
+    ...(readJoinFlowSource(value.source) ? { source: readJoinFlowSource(value.source) } : {}),
+  }
+}
+
+function readCurrentRoute(): string {
+  const pages = getCurrentPages()
+  const currentPage = pages[pages.length - 1]
+  return typeof currentPage?.route === 'string' ? currentPage.route : ''
+}
+
+function isHomeRoute(route: string): boolean {
+  return route === 'pages/home/index' || route === '/pages/home/index'
+}
+
+function isLoginRoute(route: string): boolean {
+  return route === 'pages/login/login' || route === '/pages/login/login'
+}
+
+function applyCompletionEffectsFromBlocks(blocks: GenUIBlock[]): void {
+  const currentRoute = readCurrentRoute()
+  const onHomePage = isHomeRoute(currentRoute)
+
+  for (const block of blocks) {
+    if (block.type !== 'alert') {
+      continue
+    }
+
+    const meta = isRecord(block.meta) ? block.meta : null
+    const authRequiredMeta = isRecord(meta?.authRequired) ? meta.authRequired : null
+    if (authRequiredMeta) {
+      const pendingAction = readStructuredPendingAction(authRequiredMeta.pendingAction)
+      const authMode = readPendingActionAuthMode(authRequiredMeta.mode)
+
+      if (!onHomePage && pendingAction && authMode) {
+        const appStore = useAppStore.getState()
+        const resumableAction: StructuredPendingAction = {
+          ...pendingAction,
+          authMode,
+        }
+
+        if (authMode === 'login') {
+          appStore.setPendingAction(resumableAction)
+          if (!isLoginRoute(currentRoute)) {
+            wx.navigateTo({ url: '/pages/login/login' })
+          }
+        } else {
+          appStore.showAuthSheet(resumableAction)
+        }
+      }
+      return
+    }
+
+    if (meta && meta.navigationIntent === 'open_discussion') {
+      const payload = readDiscussionNavigationPayload(meta.navigationPayload)
+      if (!payload) {
+        return
+      }
+
+      if (!onHomePage && block.message.trim()) {
+        wx.showToast({
+          title: block.message.trim(),
+          icon: 'success',
+        })
+      }
+
+      setTimeout(() => {
+        wx.navigateTo({
+          url: buildDiscussionEntryUrl(payload),
+        })
+      }, onHomePage ? 320 : 900)
+      return
+    }
+
+    if (onHomePage || !block.message.trim()) {
+      continue
+    }
+
+    if (block.level === 'success') {
+      wx.showToast({
+        title: block.message.trim(),
+        icon: 'success',
+      })
+      return
+    }
+
+    if (block.level === 'warning' || block.level === 'error') {
+      wx.showToast({
+        title: block.message.trim(),
+        icon: 'none',
+      })
+      return
+    }
+  }
 }
 
 function normalizeDraftType(value: string): string {
@@ -780,6 +922,24 @@ function buildAssistantPartsFromBlocks(blocks: GenUIBlock[]): (UIMessagePart | W
     }
 
     if (block.type === 'alert') {
+      const meta = isRecord(block.meta) ? block.meta : null
+      const authRequiredMeta = isRecord(meta?.authRequired) ? meta.authRequired : null
+      const pendingAction = authRequiredMeta ? readStructuredPendingAction(authRequiredMeta.pendingAction) : null
+      const authMode = authRequiredMeta ? readPendingActionAuthMode(authRequiredMeta.mode) : null
+
+      if (pendingAction && authMode) {
+        parts.push({
+          type: 'widget',
+          widgetType: 'auth_required',
+          data: {
+            message: block.message,
+            mode: authMode,
+            pendingAction,
+          },
+        })
+        continue
+      }
+
       if (block.level === 'success' || block.level === 'info') {
         const content = block.message.trim()
         if (content) {
@@ -1321,6 +1481,10 @@ export const useChatStore = create<ChatState>()(
               draft._controller = null
             }
           })
+
+          if (currentEnvelope) {
+            applyCompletionEffectsFromBlocks(currentEnvelope.turn.blocks)
+          }
         }
 
         const completeError = (errorMessage: string) => {
@@ -1606,6 +1770,7 @@ export const useChatStore = create<ChatState>()(
             timezone: 'Asia/Shanghai',
             platformVersion: 'miniprogram-vnext',
             location: state.location,
+            ...(action.source ? { entry: action.source } : {}),
             ...(transientTurns && transientTurns.length > 0 ? { transientTurns } : {}),
           }
         )
@@ -1753,6 +1918,10 @@ export const useChatStore = create<ChatState>()(
               draft._controller = null
             }
           })
+
+          if (currentEnvelope) {
+            applyCompletionEffectsFromBlocks(currentEnvelope.turn.blocks)
+          }
         }
 
         const completeError = (errorMessage: string) => {

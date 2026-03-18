@@ -9,9 +9,6 @@
  * - 点击 [直接报名] → 检查手机号 → 报名
  */
 
-import { useUserStore } from '../../src/stores/user'
-import { useAppStore } from '../../src/stores/app'
-
 // 活动类型映射
 const TYPE_CONFIG: Record<string, { icon: string; label: string; colorClass: string }> = {
   food: { icon: '🍲', label: '美食', colorClass: 'amber' },
@@ -188,21 +185,7 @@ Component({
       
       // 触感反馈
       wx.vibrateShort({ type: 'light' })
-      
-      // 检查是否已绑定手机号
-      const userStore = useUserStore.getState()
-      const user = userStore.user
-      
-      if (!user?.phoneNumber) {
-        // 未绑定手机号，显示绑定弹窗
-        const appStore = useAppStore.getState()
-        appStore.showAuthSheet({
-          type: 'join',
-          payload: { activityId: activity.id },
-        })
-        return
-      }
-      
+
       // 触发报名事件
       this.triggerEvent('join', { activityId: activity.id })
     },

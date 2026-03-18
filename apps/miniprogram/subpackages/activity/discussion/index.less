@@ -64,6 +64,27 @@
   background: fade(@color-warning, 10%);
 }
 
+.task-stage-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  padding: 20rpx 24rpx 16rpx;
+  background: linear-gradient(180deg, fade(@color-brand, 10%), fade(@color-brand, 4%));
+  border-bottom: 1rpx solid fade(@color-brand, 12%);
+}
+
+.task-stage-banner__eyebrow {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: @color-brand;
+}
+
+.task-stage-banner__hint {
+  font-size: 24rpx;
+  line-height: 1.6;
+  color: @color-text-secondary;
+}
+
 /* 消息列表 */
 .message-list {
   flex: 1;

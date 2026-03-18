@@ -38,6 +38,26 @@ const AUTH_REQUIRED_ACTIONS = new Set([
   'cancel_match',
 ]);
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function buildPendingStructuredAction(params: {
+  action: string;
+  payload: Record<string, unknown>;
+  source?: string;
+  originalText?: string;
+}): Record<string, unknown> {
+  return {
+    type: 'structured_action',
+    action: params.action,
+    payload: params.payload,
+    ...(params.source ? { source: params.source } : {}),
+    ...(params.originalText ? { originalText: params.originalText } : {}),
+    authMode: 'login',
+  };
+}
+
 function getAuthRequiredMessage(action: string): string {
   if (action.includes('publish') || action.includes('create') || action === 'edit_draft' || action === 'save_draft_settings') {
     return '这个操作会创建或修改活动，先登录后我再继续帮你完成。';
@@ -61,6 +81,24 @@ export function applyAiChatTurnPolicies(
   const resolvedActionName =
     params.executionPath === 'structured_action' ? params.resolvedStructuredAction?.action || '' : '';
   const effectiveActionName = resolvedActionName || directInputActionName;
+  const actionPayload =
+    params.executionPath === 'structured_action'
+      ? params.resolvedStructuredAction?.payload ?? {}
+      : params.request.input.type === 'action' && isRecord(params.request.input.params)
+        ? params.request.input.params
+        : {};
+  const actionSource =
+    params.executionPath === 'structured_action'
+      ? params.resolvedStructuredAction?.source
+      : typeof params.request.context?.entry === 'string'
+        ? params.request.context.entry
+        : undefined;
+  const actionOriginalText =
+    params.executionPath === 'structured_action'
+      ? params.resolvedStructuredAction?.originalText
+      : params.request.input.type === 'action' && typeof params.request.input.displayText === 'string'
+        ? params.request.input.displayText
+        : undefined;
 
   const unauthenticatedActionName = !params.viewer ? effectiveActionName : '';
   const isUnauthenticatedWriteAction = AUTH_REQUIRED_ACTIONS.has(unauthenticatedActionName);
@@ -73,6 +111,17 @@ export function applyAiChatTurnPolicies(
         message: getAuthRequiredMessage(unauthenticatedActionName),
         dedupeKey: 'auth_required_for_action',
         traceRef: 'auth_guard',
+        meta: {
+          authRequired: {
+            mode: 'login',
+            pendingAction: buildPendingStructuredAction({
+              action: unauthenticatedActionName,
+              payload: actionPayload,
+              source: actionSource,
+              originalText: actionOriginalText,
+            }),
+          },
+        },
       })
     );
 

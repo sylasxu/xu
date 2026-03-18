@@ -19,6 +19,13 @@ import {
   getTokenUsageSummary,
   getToolCallStats,
 } from './observability/metrics';
+import {
+  listCurrentAgentTaskSnapshots,
+  syncCreateTaskFromChatTurn,
+  markJoinTaskDiscussionEntered,
+  syncPartnerTaskFromChatTurn,
+  syncJoinTaskFromChatTurn,
+} from './task-runtime/agent-task.service';
 import type { GenUIRequest } from '@juchang/genui-contract';
 import { db, users, activities, eq } from '@juchang/db';
 import {
@@ -161,6 +168,24 @@ export const aiController = new Elysia({ prefix: '/ai' })
         ];
 
         if (viewer) {
+          await syncJoinTaskFromChatTurn({
+            userId: viewer.id,
+            conversationId: normalized.envelope.conversationId,
+            request,
+            blocks: normalized.envelope.turn.blocks,
+          });
+          await syncPartnerTaskFromChatTurn({
+            userId: viewer.id,
+            conversationId: normalized.envelope.conversationId,
+            request,
+            blocks: normalized.envelope.turn.blocks,
+          });
+          await syncCreateTaskFromChatTurn({
+            userId: viewer.id,
+            conversationId: normalized.envelope.conversationId,
+            request,
+            blocks: normalized.envelope.turn.blocks,
+          });
           await syncConversationTurnSnapshot({
             conversationId: normalized.envelope.conversationId,
             userId: viewer.id,
@@ -176,11 +201,11 @@ export const aiController = new Elysia({ prefix: '/ai' })
 
         return normalized.envelope;
       } catch (error: any) {
-        console.error('AI Chat 失败:', error);
         if (error instanceof Error && error.message === '无权限访问该会话') {
           set.status = 403;
           return { code: 403, msg: error.message } satisfies ErrorResponse;
         }
+        console.error('AI Chat 失败:', error);
         set.status = 500;
         return { code: 500, msg: error.message || 'AI 服务暂时不可用' } satisfies ErrorResponse;
       }
@@ -192,6 +217,68 @@ export const aiController = new Elysia({ prefix: '/ai' })
         description: `统一的 GenUI Chat 网关：\n\n- 请求体固定为 conversationId + input + context\n- 全部请求统一走 AI Workflow（Processor/Intent/RAG/Tools）\n- stream=false 返回 GenUI turn envelope\n- stream=true 返回 GenUI SSE 事件序列`,
       },
       body: 'ai.chatRequest',
+    }
+  )
+
+  .post(
+    '/tasks/discussion-entered',
+    async ({ body, set, jwt, headers }) => {
+      const user = await verifyAuth(jwt, headers);
+      if (!user) {
+        set.status = 401;
+        return { code: 401, msg: '未授权' } satisfies ErrorResponse;
+      }
+
+      await markJoinTaskDiscussionEntered({
+        userId: user.id,
+        activityId: body.activityId,
+        entry: typeof body.entry === 'string' ? body.entry : undefined,
+        source: 'discussion_page',
+      });
+
+      return {
+        code: 200,
+        msg: '已记录进入讨论区',
+      };
+    },
+    {
+      detail: {
+        tags: ['AI'],
+        summary: '标记进入活动讨论区',
+        description: '小程序进入讨论区后回写 join_activity 任务阶段，用于持续推进同一条 agent 任务链。',
+      },
+      body: 'ai.discussionEnteredRequest',
+      response: {
+        200: 'ai.discussionEnteredResponse',
+        401: 'ai.error',
+      },
+    }
+  )
+
+  .get(
+    '/tasks/current',
+    async ({ set, jwt, headers }) => {
+      const user = await verifyAuth(jwt, headers);
+      if (!user) {
+        set.status = 401;
+        return { code: 401, msg: '未登录' } satisfies ErrorResponse;
+      }
+
+      return {
+        items: await listCurrentAgentTaskSnapshots(user.id),
+        serverTime: new Date().toISOString(),
+      };
+    },
+    {
+      detail: {
+        tags: ['AI'],
+        summary: '获取当前 Agent 任务',
+        description: '返回当前用户仍在推进中的 agent 任务快照，用于首页持续承接“这件事现在到哪了”。',
+      },
+      response: {
+        200: 'ai.currentTasksResponse',
+        401: 'ai.error',
+      },
     }
   )
 

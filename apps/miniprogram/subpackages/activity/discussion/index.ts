@@ -2,6 +2,7 @@
  * 活动讨论区页面
  * 基于 WebSocket 的实时通讯
  */
+import { postAiTasksDiscussionEntered } from '../../../src/api/endpoints/ai/ai'
 import { useDiscussionStore, type ConnectionStatus, type DiscussionMessage } from '../../../src/stores/discussion'
 import { getJoinGuideTitle, getJoinQuickStarters } from '../../../src/utils/join-flow'
 import { useUserStore } from '../../../src/stores/user'
@@ -23,10 +24,13 @@ interface DiscussionPageData {
   joinGuideTitle: string
   joinGuideHint: string
   quickStarters: string[]
+  taskStageTitle: string
+  taskStageHint: string
 }
 
 interface DiscussionPageOptions {
   id?: string
+  activityId?: string
   entry?: string
   title?: string
 }
@@ -79,6 +83,8 @@ const INITIAL_MESSAGES: DiscussionPageData['messages'] = []
 const INITIAL_CONNECTION_STATUS: ConnectionStatus = 'disconnected'
 const INITIAL_ERROR: string | null = null
 const INITIAL_UNSUBSCRIBE: (() => void) | null = null
+const INITIAL_REPORTED_ENTRY = false
+const INITIAL_ENTRY = ''
 
 Page<DiscussionPageData, WechatMiniprogram.Page.CustomOption>({
   data: {
@@ -98,21 +104,27 @@ Page<DiscussionPageData, WechatMiniprogram.Page.CustomOption>({
     joinGuideTitle: '',
     joinGuideHint: '先打个招呼吧，大家更容易接住你。',
     quickStarters: [],
+    taskStageTitle: '当前进度：讨论中',
+    taskStageHint: '这件事已经进入协作阶段，活动后小聚还会继续帮你承接结果。',
   },
 
   // Store 订阅取消函数
   _unsubscribe: INITIAL_UNSUBSCRIBE,
+  _hasReportedDiscussionEntry: INITIAL_REPORTED_ENTRY,
+  _entry: INITIAL_ENTRY,
 
   onLoad(options: DiscussionPageOptions) {
-    const activityId = options.id
+    const activityId = options.id || options.activityId
     if (!activityId) {
       wx.showToast({ title: '活动ID缺失', icon: 'none' })
       setTimeout(() => wx.navigateBack(), 1500)
       return
     }
 
-    const isJoinSuccessEntry = options.entry === 'join_success'
+    const entry = decodeOption(options.entry)
+    const isJoinSuccessEntry = entry === 'join_success'
     const title = decodeOption(options.title)
+    this._entry = entry
 
     // 获取当前用户 ID
     const userStore = useUserStore.getState()
@@ -124,6 +136,10 @@ Page<DiscussionPageData, WechatMiniprogram.Page.CustomOption>({
       showJoinGuide: isJoinSuccessEntry,
       joinGuideTitle: isJoinSuccessEntry ? getJoinGuideTitle(title) : '',
       quickStarters: isJoinSuccessEntry ? getJoinQuickStarters(title) : [],
+      taskStageTitle: isJoinSuccessEntry ? '当前进度：报名完成，已进入讨论' : '当前进度：讨论中',
+      taskStageHint: isJoinSuccessEntry
+        ? '这还是刚才那条报名任务，接下来先破冰、再协作，活动后我还会继续跟进。'
+        : '这条任务现在已经进入讨论协作阶段，活动后我还会继续帮你跟进结果。',
     })
 
     // 订阅 store 变化
@@ -214,8 +230,29 @@ Page<DiscussionPageData, WechatMiniprogram.Page.CustomOption>({
       return
     }
 
+    void this._reportDiscussionEntered()
+
     const store = useDiscussionStore.getState()
     store.connect(this.data.activityId, token)
+  },
+
+  async _reportDiscussionEntered() {
+    if (this._hasReportedDiscussionEntry || !this.data.activityId) {
+      return
+    }
+
+    try {
+      const response = await postAiTasksDiscussionEntered({
+        activityId: this.data.activityId,
+        ...(this._entry ? { entry: this._entry } : {}),
+      })
+
+      if (response.status === 200) {
+        this._hasReportedDiscussionEntry = true
+      }
+    } catch (error) {
+      console.warn('回写 discussion entered 失败', error)
+    }
   },
 
   /**

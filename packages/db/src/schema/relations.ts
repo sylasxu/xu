@@ -5,6 +5,8 @@ import { participants } from "./participants";
 import { notifications } from "./notifications";
 import { activityMessages } from "./activity_messages";
 import { conversations, conversationMessages } from "./conversations";
+import { agentTasks } from "./agent-tasks";
+import { agentTaskEvents } from "./agent-task-events";
 import { reports } from "./reports";
 import { partnerIntents } from "./partner-intents";
 import { intentMatches } from "./intent-matches";
@@ -20,6 +22,8 @@ export const usersRelations = relations(users, ({ many }) => ({
   activityMessages: many(activityMessages),
   conversations: many(conversations),
   conversationMessages: many(conversationMessages),
+  agentTasks: many(agentTasks),
+  agentTaskEvents: many(agentTaskEvents),
   reportsSubmitted: many(reports, { relationName: "reporter" }),
   reportsResolved: many(reports, { relationName: "resolver" }),
   // v4.0 Partner Intent
@@ -40,6 +44,8 @@ export const activitiesRelations = relations(activities, ({ one, many }) => ({
   activityMessages: many(activityMessages),
   notifications: many(notifications),
   conversationMessages: many(conversationMessages),
+  agentTasks: many(agentTasks),
+  agentTaskEvents: many(agentTaskEvents),
 }));
 
 // ==========================================
@@ -68,6 +74,71 @@ export const notificationsRelations = relations(notifications, ({ one }) => ({
     fields: [notifications.activityId],
     references: [activities.id],
   }),
+  task: one(agentTasks, {
+    fields: [notifications.taskId],
+    references: [agentTasks.id],
+  }),
+}));
+
+// ==========================================
+// Agent Task Relations
+// ==========================================
+export const agentTasksRelations = relations(agentTasks, ({ one, many }) => ({
+  user: one(users, {
+    fields: [agentTasks.userId],
+    references: [users.id],
+  }),
+  activity: one(activities, {
+    fields: [agentTasks.activityId],
+    references: [activities.id],
+  }),
+  partnerIntent: one(partnerIntents, {
+    fields: [agentTasks.partnerIntentId],
+    references: [partnerIntents.id],
+  }),
+  intentMatch: one(intentMatches, {
+    fields: [agentTasks.intentMatchId],
+    references: [intentMatches.id],
+  }),
+  entryConversation: one(conversations, {
+    fields: [agentTasks.entryConversationId],
+    references: [conversations.id],
+    relationName: "agent_task_entry_conversation",
+  }),
+  latestConversation: one(conversations, {
+    fields: [agentTasks.latestConversationId],
+    references: [conversations.id],
+    relationName: "agent_task_latest_conversation",
+  }),
+  conversationMessages: many(conversationMessages),
+  notifications: many(notifications),
+  events: many(agentTaskEvents),
+}));
+
+// ==========================================
+// Agent Task Event Relations
+// ==========================================
+export const agentTaskEventsRelations = relations(agentTaskEvents, ({ one }) => ({
+  task: one(agentTasks, {
+    fields: [agentTaskEvents.taskId],
+    references: [agentTasks.id],
+  }),
+  user: one(users, {
+    fields: [agentTaskEvents.userId],
+    references: [users.id],
+  }),
+  activity: one(activities, {
+    fields: [agentTaskEvents.activityId],
+    references: [activities.id],
+  }),
+  conversation: one(conversations, {
+    fields: [agentTaskEvents.conversationId],
+    references: [conversations.id],
+  }),
+  notification: one(notifications, {
+    fields: [agentTaskEvents.notificationId],
+    references: [notifications.id],
+  }),
 }));
 
 // ==========================================
@@ -93,6 +164,12 @@ export const conversationsRelations = relations(conversations, ({ one, many }) =
     references: [users.id],
   }),
   messages: many(conversationMessages),
+  entryAgentTasks: many(agentTasks, {
+    relationName: "agent_task_entry_conversation",
+  }),
+  latestAgentTasks: many(agentTasks, {
+    relationName: "agent_task_latest_conversation",
+  }),
 }));
 
 // ==========================================
@@ -110,6 +187,10 @@ export const conversationMessagesRelations = relations(conversationMessages, ({ 
   activity: one(activities, {
     fields: [conversationMessages.activityId],
     references: [activities.id],
+  }),
+  task: one(agentTasks, {
+    fields: [conversationMessages.taskId],
+    references: [agentTasks.id],
   }),
 }));
 
@@ -137,6 +218,10 @@ export const partnerIntentsRelations = relations(partnerIntents, ({ one }) => ({
     fields: [partnerIntents.userId],
     references: [users.id],
   }),
+  agentTask: one(agentTasks, {
+    fields: [partnerIntents.id],
+    references: [agentTasks.partnerIntentId],
+  }),
 }));
 
 // ==========================================
@@ -151,6 +236,7 @@ export const intentMatchesRelations = relations(intentMatches, ({ one, many }) =
     fields: [intentMatches.activityId],
     references: [activities.id],
   }),
+  agentTasks: many(agentTasks),
   messages: many(matchMessages),
 }));
 

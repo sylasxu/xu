@@ -4,7 +4,8 @@ import { resolveThemeConfig } from "@/lib/themes"
 import { ThemeBackground } from "@/components/invite/theme-background"
 import { ActivityCard } from "@/components/invite/activity-card"
 import type { PublicActivity } from "@/components/invite/activity-card"
-import { DiscussionPreview } from "@/components/invite/discussion-preview"
+import { DiscussionEntryTracker } from "@/components/invite/discussion-entry-tracker"
+import { DiscussionRuntimePanel } from "@/components/invite/discussion-runtime-panel"
 import { WechatRedirect } from "@/components/invite/wechat-redirect"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:1996"
@@ -98,6 +99,8 @@ export default async function InvitePage({
 
   return (
     <div className="relative min-h-screen overflow-hidden">
+      <DiscussionEntryTracker activityId={id} />
+
       {/* 动态背景 */}
       <ThemeBackground config={themeConfig} />
 
@@ -106,10 +109,12 @@ export default async function InvitePage({
         <div className="w-full space-y-4">
           <ActivityCard activity={activity} themeConfig={themeConfig} />
 
-          {/* 讨论区预览 */}
-          {activity.recentMessages.length > 0 && (
-            <DiscussionPreview messages={activity.recentMessages} />
-          )}
+          <DiscussionRuntimePanel
+            activityId={id}
+            activityTitle={activity.title}
+            initialMessages={activity.recentMessages}
+            isArchived={activity.isArchived}
+          />
         </div>
       </div>
 

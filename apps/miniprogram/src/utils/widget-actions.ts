@@ -1,11 +1,9 @@
 /**
  * Widget Action Handler — Widget 卡内操作处理器
  *
- * 集中处理 Widget 内的用户操作（报名、分享等）。
- * 禁止使用 wx.request，所有请求通过 Orval SDK 发起。
+ * 集中定义 Widget 内的用户操作类型。
+ * 报名等高价值写操作已经统一收敛到 /ai/chat 结构化动作链路，这里不再直连业务 API。
  */
-
-import { requestJoinActivity } from './join-flow'
 
 export type ActionState = 'idle' | 'loading' | 'success' | 'error';
 
@@ -52,51 +50,13 @@ function readString(value: unknown): string | null {
  */
 export async function executeWidgetAction(
   actionType: string,
-  params: Record<string, unknown>,
+  _params: Record<string, unknown>,
 ): Promise<ActionResult> {
-  try {
-    if (actionType === 'join') {
-      const activityId = readString(params.activityId)
-      if (!activityId) {
-        return { state: 'error', error: '活动 ID 无效', resultPayload: undefined }
-      }
+  const actionLabel = readString(actionType) || '这个操作'
 
-      const title = readString(params.title) || '活动'
-      const startAt = readString(params.startAt) || ''
-      const locationName = readString(params.locationName) || ''
-      const joinResult = await requestJoinActivity(activityId)
-
-      if (joinResult.success) {
-        return {
-          state: 'success',
-          error: null,
-          resultPayload: {
-            title: '报名成功',
-            summary: `你已成功报名「${title}」，接下来去讨论区打个招呼吧`,
-            details: [
-              { label: '活动', value: title },
-              { label: '时间', value: startAt },
-              { label: '地点', value: locationName },
-            ].filter(d => d.value),
-            nextAction: {
-              type: 'detail',
-              label: '查看活动详情',
-              params: { activityId },
-            },
-          },
-        }
-      }
-      return { state: 'error', error: joinResult.msg, resultPayload: undefined }
-    }
-
-    // share: 由组件层调用 wx.shareAppMessage
-    // detail: 由组件层触发半屏详情
-    return { state: 'error', error: `未支持的操作: ${actionType}`, resultPayload: undefined };
-  } catch (err) {
-    return {
-      state: 'error',
-      error: err instanceof Error ? err.message : '操作失败',
-      resultPayload: undefined,
-    };
+  return {
+    state: 'error',
+    error: `${actionLabel}现在需要走小聚的连续对话链路，请从卡片入口继续`,
+    resultPayload: undefined,
   }
 }

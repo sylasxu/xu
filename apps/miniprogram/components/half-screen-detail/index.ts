@@ -7,12 +7,9 @@
  */
 
 import { useChatStore } from '../../src/stores/chat'
-import { useUserStore } from '../../src/stores/user'
-import { useAppStore } from '../../src/stores/app'
 import { fetchWidgetData } from '../../src/utils/widget-fetcher'
-import { executeWidgetAction } from '../../src/utils/widget-actions'
 import type { ActionState } from '../../src/utils/widget-actions'
-import { handleJoinSuccess } from '../../src/utils/join-flow'
+import { buildJoinStructuredAction } from '../../src/utils/join-flow'
 import type { ActivityDetailResponse } from '../../src/api/model'
 
 type ActivityDetail = ActivityDetailResponse;
@@ -89,56 +86,26 @@ Component({
       const activity = this.data.activity
       if (!activity || this.data.joinState === 'loading') return
 
-      const currentUser = useUserStore.getState().user
-      if (!currentUser?.phoneNumber) {
-        this.close()
-        useAppStore.getState().showAuthSheet({
-          type: 'join',
-          payload: {
-            activityId: activity.id,
-            title: activity.title,
-            startAt: activity.startAt,
-            locationName: activity.locationName,
-            source: 'half_screen_detail',
-          },
-        })
-        return
-      }
-
-      wx.vibrateShort({ type: 'light' })
-      this.setData({ joinState: 'loading' })
-
-      const result = await executeWidgetAction('join', {
+      const pendingAction = buildJoinStructuredAction({
         activityId: activity.id,
         title: activity.title,
         startAt: activity.startAt,
         locationName: activity.locationName,
+        source: 'half_screen_detail',
       })
 
-      if (result.state === 'success') {
-        this.setData({ joinState: 'success' })
+      wx.vibrateShort({ type: 'light' })
+      this.setData({ joinState: 'loading' })
+      this.close()
 
-        useChatStore.getState().appendActionResult(
-          'join',
-          { activityId: activity.id, title: activity.title },
-          true,
-          `你已成功报名「${activity.title}」，一起去讨论区打个招呼吧`,
-        )
-
-        handleJoinSuccess({
-          activityId: activity.id,
-          title: activity.title,
-          source: 'half_screen_detail',
-        }, {
-          onBeforeNavigate: () => {
-            this.close()
-          },
-        })
-        return
-      }
+      useChatStore.getState().sendAction({
+        action: pendingAction.action,
+        payload: pendingAction.payload,
+        source: pendingAction.source,
+        originalText: pendingAction.originalText,
+      })
 
       this.setData({ joinState: 'idle' })
-      wx.showToast({ title: result.error || '报名失败', icon: 'none' })
     },
 
     /** 分享 */

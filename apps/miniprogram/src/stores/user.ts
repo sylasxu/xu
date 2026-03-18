@@ -76,6 +76,7 @@ export const useUserStore = create<UserState>()(
           // 同步到微信存储
           wx.setStorageSync('token', result.token)
           wx.setStorageSync('userInfo', result.user)
+          wx.setStorageSync('userId', result.user.id)
 
         } catch (error: unknown) {
           set((state) => {
@@ -96,6 +97,7 @@ export const useUserStore = create<UserState>()(
         // 清除微信存储
         wx.removeStorageSync('token')
         wx.removeStorageSync('userInfo')
+        wx.removeStorageSync('userId')
       },
 
       // 更新用户资料
@@ -124,6 +126,7 @@ export const useUserStore = create<UserState>()(
 
           // 同步到微信存储
           wx.setStorageSync('userInfo', updatedUser)
+          wx.setStorageSync('userId', updatedUser.id)
 
         } catch (error: unknown) {
           set((state) => {
@@ -153,6 +156,7 @@ export const useUserStore = create<UserState>()(
           })
 
           wx.setStorageSync('userInfo', userInfo)
+          wx.setStorageSync('userId', (userInfo as User).id)
         } catch (error: unknown) {
           console.error('刷新用户信息失败:', error)
           // 如果是认证错误，自动退出登录
@@ -180,6 +184,7 @@ export const useUserStore = create<UserState>()(
         const currentUser = get().user
         if (currentUser) {
           wx.setStorageSync('userInfo', currentUser)
+          wx.setStorageSync('userId', currentUser.id)
         }
       },
 

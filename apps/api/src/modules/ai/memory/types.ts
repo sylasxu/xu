@@ -111,6 +111,7 @@ export interface SaveMessageParams {
   messageType: Message['messageType'];
   content: Message['content'];
   activityId?: Message['activityId'];
+  taskId?: Message['taskId'];
 }
 
 /**

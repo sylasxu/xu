@@ -82,6 +82,7 @@ export function createAlertBlock(params: {
   message: string;
   dedupeKey: string;
   traceRef: string;
+  meta?: Record<string, unknown>;
 }): GenUIBlock {
   return {
     blockId: createBlockId(),
@@ -90,7 +91,10 @@ export function createAlertBlock(params: {
     message: params.message,
     dedupeKey: params.dedupeKey,
     replacePolicy: 'replace',
-    meta: { traceRef: params.traceRef },
+    meta: {
+      ...(params.meta ?? {}),
+      traceRef: params.traceRef,
+    },
   };
 }
 

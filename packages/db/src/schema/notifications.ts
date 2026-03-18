@@ -1,6 +1,7 @@
 import { pgTable, uuid, varchar, text, timestamp, boolean, index } from "drizzle-orm/pg-core";
 import { users } from "./users";
 import { activities } from "./activities";
+import { agentTasks } from "./agent-tasks";
 import { notificationTypeEnum } from "./enums";
 import { createInsertSchema, createSelectSchema } from "drizzle-typebox";
 
@@ -25,6 +26,7 @@ export const notifications = pgTable("notifications", {
   
   // --- 关联 ---
   activityId: uuid("activity_id").references(() => activities.id),
+  taskId: uuid("task_id").references(() => agentTasks.id),
   
   isRead: boolean("is_read").default(false).notNull(),
   
@@ -32,6 +34,7 @@ export const notifications = pgTable("notifications", {
 }, (t) => [
   index("notifications_user_idx").on(t.userId),
   index("notifications_unread_idx").on(t.userId, t.isRead),
+  index("notifications_task_idx").on(t.taskId),
 ]);
 
 export const insertNotificationSchema = createInsertSchema(notifications);

@@ -1,6 +1,7 @@
 import { pgTable, uuid, jsonb, timestamp, index, pgEnum, text, integer, boolean } from "drizzle-orm/pg-core";
 import { users } from "./users";
 import { activities } from "./activities";
+import { agentTasks } from "./agent-tasks";
 import { vector } from "./custom-types";
 import { createInsertSchema, createSelectSchema } from "drizzle-typebox";
 
@@ -115,6 +116,7 @@ export const conversationMessages = pgTable("conversation_messages", {
 
   // 关联：如果消息对应真实活动
   activityId: uuid("activity_id").references(() => activities.id),
+  taskId: uuid("task_id").references(() => agentTasks.id),
 
   // v4.7 语义搜索：向量字段 (Qwen text-embedding-v4, 1536 维)
   embedding: vector('embedding', { dimensions: 1536 }),
@@ -125,6 +127,7 @@ export const conversationMessages = pgTable("conversation_messages", {
   index("conversation_messages_user_idx").on(t.userId),
   index("conversation_messages_created_idx").on(t.createdAt),
   index("conversation_messages_activity_idx").on(t.activityId),
+  index("conversation_messages_task_idx").on(t.taskId),
 ]);
 
 // ==========================================

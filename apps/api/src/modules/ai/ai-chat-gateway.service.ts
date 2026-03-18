@@ -14,6 +14,7 @@ import type {
 import {
   getConversationMessages,
   handleChatStream,
+  isUuidLike,
   syncConversationTurnSnapshot,
   type ChatRequest,
 } from './ai.service';
@@ -34,6 +35,14 @@ import {
   pushBlock,
 } from './shared/genui-blocks';
 import { saveActivityReviewSummary } from '../participants/participant.service';
+import {
+  resolveOpenCreateTaskForConversation,
+  resolveOpenJoinTaskForConversation,
+  resolveOpenPartnerTaskForConversation,
+  syncCreateTaskFromChatTurn,
+  syncJoinTaskFromChatTurn,
+  syncPartnerTaskFromChatTurn,
+} from './task-runtime/agent-task.service';
 
 const ID_PREFIX = {
   conversation: 'conv',
@@ -60,6 +69,9 @@ const EXPLORE_TEXT_PATTERN = /(附近.*(局|活动|好玩的)|有什么(局|活�
 const EXPLORE_FOLLOWUP_PATTERN = /(有没有|还有|那|换成|改成|最好|预算|今晚|明天|周末|八点|8点|不吃辣|别太闹|安静|AA|清淡|轻松|都可以|都行|随便)/;
 const CREATE_FROM_EXPLORE_PATTERN = /(我来组|我想自己组|我自己组|我来发|我自己发|帮我组一个|那就我来组|那我自己发)/;
 const CREATE_ACTIVITY_PATTERN = /(组|租|约).{0,8}局|想.*局|周五.*局/;
+const CREATE_PUBLISH_PATTERN = /(发吧|发布吧|就这样发|确认发布|发出去|直接发)/;
+const CREATE_DRAFT_UPDATE_PATTERN = /(改成|换成|地点|位置|时间|人数|几个人|今晚|明天|周末|观音桥|解放碑|南坪|江北嘴|杨家坪|大坪|沙坪坝|\d+\s*人)/;
+const PARTNER_FOLLOWUP_PATTERN = /(找搭子|搭子|一起|同去|桌游|吃饭|火锅|羽毛球|运动|今晚|明天|周末|下周|观音桥|解放碑|南坪|AA|安静|不喝酒|女生友好|都可以|随便)/;
 const REVIEW_SUMMARY_MAX_LENGTH = 280;
 
 
@@ -741,6 +753,322 @@ function buildCreatePromptFromExplore(params: {
   return parts.filter(Boolean).join('');
 }
 
+function buildTaskFirstSemanticQuery(params: {
+  inputText: string;
+  taskSemanticQuery?: string;
+  locationName: string;
+  activityType?: string;
+}): string {
+  const normalizedInput = params.inputText.trim();
+  if (!normalizedInput) {
+    return params.taskSemanticQuery
+      || buildExploreSemanticQuery(params.locationName, params.activityType);
+  }
+
+  const hasConcreteSignal = /(附近|有什么|推荐|找个局|找局|约饭|吃饭|火锅|羽毛球|桌游|咖啡)/.test(normalizedInput);
+  if (hasConcreteSignal) {
+    return normalizedInput;
+  }
+
+  if (params.taskSemanticQuery && !params.taskSemanticQuery.includes(normalizedInput)) {
+    return `${params.taskSemanticQuery}，${normalizedInput}`;
+  }
+
+  return params.taskSemanticQuery
+    || `${buildExploreSemanticQuery(params.locationName, params.activityType)}，${normalizedInput}`;
+}
+
+function buildTaskFirstRawInput(existingRawInput: string | undefined, inputText: string): string {
+  const normalizedInput = inputText.trim();
+  if (!existingRawInput?.trim()) {
+    return normalizedInput;
+  }
+
+  if (!normalizedInput) {
+    return existingRawInput.trim();
+  }
+
+  if (existingRawInput.includes(normalizedInput)) {
+    return existingRawInput.trim();
+  }
+
+  return `${existingRawInput.trim()}，${normalizedInput}`;
+}
+
+function inferDraftSlotFromText(text: string): string | undefined {
+  if (/周末/.test(text)) {
+    return /(20点|8点|晚上|夜里)/.test(text) ? 'weekend_20_00' : 'weekend_14_00';
+  }
+
+  if (/明天/.test(text)) {
+    return /(20点|8点|晚上|夜里)/.test(text) ? 'tomorrow_20_00' : 'tomorrow_19_00';
+  }
+
+  if (/(今晚|今夜)/.test(text)) {
+    return /(20点|8点)/.test(text) ? 'tonight_20_00' : 'tonight_19_00';
+  }
+
+  return undefined;
+}
+
+function inferMaxParticipantsFromText(text: string): number | undefined {
+  const match = text.match(/(\d{1,2})\s*个?\s*人/);
+  if (!match?.[1]) {
+    return undefined;
+  }
+
+  const value = Number(match[1]);
+  return Number.isFinite(value) && value >= 2 ? value : undefined;
+}
+
+async function inferStructuredActionFromOpenJoinTask(params: {
+  userId: string;
+  conversationId: string;
+  activityId?: string;
+  inputText: string;
+}): Promise<ChatRequest['structuredAction'] | undefined> {
+  const normalized = params.inputText.trim();
+  if (!normalized) {
+    return undefined;
+  }
+
+  const task = await resolveOpenJoinTaskForConversation({
+    userId: params.userId,
+    conversationId: params.conversationId,
+    activityId: params.activityId,
+  });
+  if (!task) {
+    return undefined;
+  }
+
+  if (!['intent_captured', 'explore', 'action_selected', 'auth_gate'].includes(task.currentStage)) {
+    return undefined;
+  }
+
+  const currentCenter = findKnownLocationCenter(normalized);
+  const center = currentCenter || (task.context.location?.name ? {
+    name: task.context.location.name,
+    lat: task.context.location.lat ?? 0,
+    lng: task.context.location.lng ?? 0,
+  } : null);
+  const activityType = inferActivityTypeFromText(normalized) || task.context.activityType;
+  const isBareLocationReply = Boolean(
+    currentCenter
+      && normalized.replace(/附近$/, '') === currentCenter.name
+      && !/[，。,.!?？！；;:：]/.test(normalized)
+      && normalized.length <= 12
+  );
+
+  if (CREATE_FROM_EXPLORE_PATTERN.test(normalized) && center) {
+    return {
+      action: 'create_activity',
+      payload: {
+        description: buildCreatePromptFromExplore({
+          locationName: center.name,
+          originalText: normalized,
+          activityType,
+        }),
+        locationName: center.name,
+        ...(activityType ? { type: activityType } : {}),
+      },
+      source: 'task_runtime_inference',
+      originalText: normalized,
+    };
+  }
+
+  if (currentCenter && isBareLocationReply) {
+    if (!activityType) {
+      return {
+        action: 'ask_preference',
+        payload: buildTypePreferencePayload({
+          center: currentCenter,
+          semanticQuery: buildTaskFirstSemanticQuery({
+            inputText: normalized,
+            taskSemanticQuery: task.context.semanticQuery,
+            locationName: currentCenter.name,
+          }),
+        }),
+        source: 'task_runtime_inference',
+        originalText: normalized,
+      };
+    }
+
+    return {
+      action: 'explore_nearby',
+      payload: {
+        locationName: currentCenter.name,
+        lat: currentCenter.lat,
+        lng: currentCenter.lng,
+        radiusKm: 5,
+        semanticQuery: buildTaskFirstSemanticQuery({
+          inputText: normalized,
+          taskSemanticQuery: task.context.semanticQuery,
+          locationName: currentCenter.name,
+          activityType,
+        }),
+        ...(activityType ? { type: activityType } : {}),
+      },
+      source: 'task_runtime_inference',
+      originalText: normalized,
+    };
+  }
+
+  const shouldContinueExplore = Boolean(
+    center
+      && (
+        EXPLORE_FOLLOWUP_PATTERN.test(normalized)
+        || EXPLORE_TEXT_PATTERN.test(normalized)
+      )
+  );
+
+  if (!shouldContinueExplore || !center) {
+    return undefined;
+  }
+
+  if (!activityType && !(currentCenter || task.context.location?.name)) {
+    return {
+      action: 'ask_preference',
+      payload: buildLocationPreferencePayload(normalized, activityType),
+      source: 'task_runtime_inference',
+      originalText: normalized,
+    };
+  }
+
+  return {
+    action: 'explore_nearby',
+    payload: {
+      locationName: center.name,
+      ...(center.lat ? { lat: center.lat } : {}),
+      ...(center.lng ? { lng: center.lng } : {}),
+      radiusKm: 5,
+      semanticQuery: buildTaskFirstSemanticQuery({
+        inputText: normalized,
+        taskSemanticQuery: task.context.semanticQuery,
+        locationName: center.name,
+        activityType,
+      }),
+      ...(activityType ? { type: activityType } : {}),
+    },
+    source: 'task_runtime_inference',
+    originalText: normalized,
+  };
+}
+
+async function inferStructuredActionFromOpenPartnerTask(params: {
+  userId: string;
+  conversationId: string;
+  inputText: string;
+}): Promise<ChatRequest['structuredAction'] | undefined> {
+  const normalized = params.inputText.trim();
+  if (!normalized) {
+    return undefined;
+  }
+
+  const task = await resolveOpenPartnerTaskForConversation({
+    userId: params.userId,
+    conversationId: params.conversationId,
+  });
+  if (!task) {
+    return undefined;
+  }
+
+  if (!['intent_captured', 'preference_collecting', 'auth_gate'].includes(task.currentStage)) {
+    return undefined;
+  }
+
+  const hasExplicitSignal = PARTNER_FOLLOWUP_PATTERN.test(normalized);
+  const isShortReply = normalized.length <= 18 && !/[。！？!?]/.test(normalized);
+  if (!hasExplicitSignal && !isShortReply) {
+    return undefined;
+  }
+
+  return {
+    action: 'find_partner',
+    payload: {
+      rawInput: buildTaskFirstRawInput(task.goalText, normalized),
+      ...(task.context.activityType ? { type: task.context.activityType } : {}),
+      ...(task.context.locationHint ? { locationName: task.context.locationHint } : {}),
+    },
+    source: 'task_runtime_inference',
+    originalText: normalized,
+  };
+}
+
+async function inferStructuredActionFromOpenCreateTask(params: {
+  userId: string;
+  conversationId: string;
+  activityId?: string;
+  inputText: string;
+}): Promise<ChatRequest['structuredAction'] | undefined> {
+  const normalized = params.inputText.trim();
+  if (!normalized) {
+    return undefined;
+  }
+
+  const task = await resolveOpenCreateTaskForConversation({
+    userId: params.userId,
+    conversationId: params.conversationId,
+    activityId: params.activityId,
+  });
+  if (!task) {
+    return undefined;
+  }
+
+  if (!['intent_captured', 'draft_collecting', 'draft_ready', 'auth_gate'].includes(task.currentStage)) {
+    return undefined;
+  }
+
+  if (task.activityId && CREATE_PUBLISH_PATTERN.test(normalized)) {
+    return {
+      action: 'confirm_publish',
+      payload: {
+        activityId: task.activityId,
+      },
+      source: 'task_runtime_inference',
+      originalText: normalized,
+    };
+  }
+
+  if (task.activityId && CREATE_DRAFT_UPDATE_PATTERN.test(normalized)) {
+    const location = findKnownLocationCenter(normalized);
+    const slot = inferDraftSlotFromText(normalized);
+    const maxParticipants = inferMaxParticipantsFromText(normalized);
+
+    return {
+      action: 'save_draft_settings',
+      payload: {
+        activityId: task.activityId,
+        ...(location?.name ? { locationName: location.name } : {}),
+        ...(location?.lat !== undefined ? { lat: location.lat } : {}),
+        ...(location?.lng !== undefined ? { lng: location.lng } : {}),
+        ...(slot ? { slot } : {}),
+        ...(maxParticipants !== undefined ? { maxParticipants } : {}),
+        ...(task.context.startAt ? { startAt: task.context.startAt } : {}),
+      },
+      source: 'task_runtime_inference',
+      originalText: normalized,
+    };
+  }
+
+  if (task.currentStage === 'intent_captured' || task.currentStage === 'auth_gate') {
+    const location = findKnownLocationCenter(normalized);
+    const activityType = inferActivityTypeFromText(normalized) || task.context.type;
+
+    return {
+      action: 'create_activity',
+      payload: {
+        description: buildTaskFirstRawInput(task.goalText, normalized),
+        ...(location?.name ? { locationName: location.name } : task.context.locationName ? { locationName: task.context.locationName } : {}),
+        ...(activityType ? { type: activityType } : {}),
+      },
+      source: 'task_runtime_inference',
+      originalText: normalized,
+    };
+  }
+
+  return undefined;
+}
+
 function inferStructuredActionFromText(
   inputText: string,
   historyMessages: ChatRequest['messages']
@@ -860,7 +1188,8 @@ function parseStructuredActionLocation(structuredAction: ChatRequest['structured
 function resolveStructuredActionFromInput(
   input: GenUIRequest['input'],
   historyMessages: ChatRequest['messages'],
-  latestAssistantTurnContext?: GenUITurnContext
+  latestAssistantTurnContext?: GenUITurnContext,
+  source?: string
 ): ChatRequest['structuredAction'] | undefined {
   if (input.type === 'action') {
     if (!isStructuredActionType(input.action)) {
@@ -870,7 +1199,7 @@ function resolveStructuredActionFromInput(
     return {
       action: input.action,
       payload: isRecord(input.params) ? input.params : {},
-      source: 'genui',
+      source: source || 'genui',
       originalText: typeof input.displayText === 'string' ? input.displayText : undefined,
     };
   }
@@ -1020,8 +1349,11 @@ async function resolveConversationContext(
   }
 
   if (requestedConversationId) {
-    const conversation = await getConversationMessages(requestedConversationId);
-    if (conversation.conversation) {
+    const conversation = isUuidLike(requestedConversationId)
+      ? await getConversationMessages(requestedConversationId)
+      : null;
+
+    if (conversation?.conversation) {
       const ownerId = conversation.conversation.userId;
       const isAdmin = viewer.role === 'admin';
       if (ownerId !== viewer.id && !isAdmin) {
@@ -1082,9 +1414,38 @@ async function resolveAiChatExecution(
   const turnContextResolution = request.input.type === 'text'
     ? resolveContinuationFromTurnContext(request.input.text, conversation.latestAssistantTurnContext)
     : undefined;
+  const requestActivityId =
+    typeof request.context?.activityId === 'string' && request.context.activityId.trim()
+      ? request.context.activityId.trim()
+      : undefined;
+  const taskFirstStructuredAction = request.input.type === 'text' && viewer
+    ? await inferStructuredActionFromOpenJoinTask({
+        userId: viewer.id,
+        conversationId: conversation.conversationId,
+        activityId: requestActivityId,
+        inputText: request.input.text,
+      })
+      || await inferStructuredActionFromOpenPartnerTask({
+        userId: viewer.id,
+        conversationId: conversation.conversationId,
+        inputText: request.input.text,
+      })
+      || await inferStructuredActionFromOpenCreateTask({
+        userId: viewer.id,
+        conversationId: conversation.conversationId,
+        activityId: requestActivityId,
+        inputText: request.input.text,
+      })
+    : undefined;
   const resolvedStructuredAction = request.input.type === 'action'
-    ? resolveStructuredActionFromInput(request.input, conversation.historyMessages, conversation.latestAssistantTurnContext)
+    ? resolveStructuredActionFromInput(
+        request.input,
+        conversation.historyMessages,
+        conversation.latestAssistantTurnContext,
+        typeof request.context?.entry === 'string' ? request.context.entry : undefined
+      )
     : turnContextResolution?.structuredAction
+      || taskFirstStructuredAction
       || inferStructuredActionFromText(request.input.text, conversation.historyMessages);
   const location = parseRequestLocation(request) || parseStructuredActionLocation(resolvedStructuredAction);
   const ai = parseRequestAiParams(request);
@@ -1112,6 +1473,18 @@ async function resolveAiChatExecution(
             },
           },
         }
+      : taskFirstStructuredAction
+        ? {
+            resolutionTrace: {
+              stage: 'task_runtime_resolved',
+              detail: {
+                inputText: userText,
+                action: taskFirstStructuredAction.action,
+                source: taskFirstStructuredAction.source ?? 'task_runtime_inference',
+                conversationId: conversation.conversationId,
+              },
+            },
+          }
       : {}),
     defaultExecutionPath: resolvedStructuredAction ? 'structured_action' : 'llm_orchestrated',
     chatRequest: {
@@ -1651,6 +2024,24 @@ function mapWidgetDataToBlock(params: {
     return null;
   }
 
+  const alertMeta = (() => {
+    const meta: Record<string, unknown> = {};
+
+    if (isRecord(payload.authRequired)) {
+      meta.authRequired = payload.authRequired;
+    }
+
+    if (typeof payload.navigationIntent === 'string') {
+      meta.navigationIntent = payload.navigationIntent;
+    }
+
+    if (isRecord(payload.navigationPayload)) {
+      meta.navigationPayload = payload.navigationPayload;
+    }
+
+    return Object.keys(meta).length > 0 ? meta : undefined;
+  })();
+
   if (widgetType === 'widget_ask_preference') {
     return mapAskPreferencePayloadToBlock(payload, assistantText, traceRef, 'ask_preference');
   }
@@ -1674,6 +2065,18 @@ function mapWidgetDataToBlock(params: {
       message,
       dedupeKey: 'widget_error',
       traceRef,
+      ...(alertMeta ? { meta: alertMeta } : {}),
+    });
+  }
+
+  if (widgetType === 'widget_auth_required') {
+    const message = toStringValue(payload.message, '这个操作需要先完成账号验证');
+    return createAlertBlock({
+      level: 'warning',
+      message,
+      dedupeKey: 'widget_auth_required',
+      traceRef,
+      ...(alertMeta ? { meta: alertMeta } : {}),
     });
   }
 
@@ -1684,6 +2087,7 @@ function mapWidgetDataToBlock(params: {
       message,
       dedupeKey: 'widget_success',
       traceRef,
+      ...(alertMeta ? { meta: alertMeta } : {}),
     });
   }
 
@@ -2579,6 +2983,24 @@ export async function createAiChatBridgeStreamResponse(
         }
 
         if (viewer) {
+          await syncJoinTaskFromChatTurn({
+            userId: viewer.id,
+            conversationId: normalized.envelope.conversationId,
+            request,
+            blocks: normalized.envelope.turn.blocks,
+          });
+          await syncPartnerTaskFromChatTurn({
+            userId: viewer.id,
+            conversationId: normalized.envelope.conversationId,
+            request,
+            blocks: normalized.envelope.turn.blocks,
+          });
+          await syncCreateTaskFromChatTurn({
+            userId: viewer.id,
+            conversationId: normalized.envelope.conversationId,
+            request,
+            blocks: normalized.envelope.turn.blocks,
+          });
           await syncConversationTurnSnapshot({
             conversationId: normalized.envelope.conversationId,
             userId: viewer.id,

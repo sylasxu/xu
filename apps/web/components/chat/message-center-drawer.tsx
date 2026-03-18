@@ -153,6 +153,8 @@ type PromptContextOverrides = {
 type MessageCenterDrawerProps = {
   disabled?: boolean;
   isDarkMode?: boolean;
+  openSignal?: number;
+  focusPendingMatchId?: string | null;
   onSendPrompt: (
     prompt: string,
     displayText?: string,
@@ -257,6 +259,8 @@ function getNotificationFallbackContent(type: NotificationType): string {
 export function MessageCenterDrawer({
   disabled = false,
   isDarkMode = false,
+  openSignal = 0,
+  focusPendingMatchId = null,
   onSendPrompt,
 }: MessageCenterDrawerProps) {
   const [open, setOpen] = useState(false);
@@ -457,6 +461,20 @@ export function MessageCenterDrawer({
       closePendingMatchDetail();
     }
   }, [closePendingMatchDetail, open]);
+
+  useEffect(() => {
+    if (openSignal > 0) {
+      setOpen(true);
+    }
+  }, [openSignal]);
+
+  useEffect(() => {
+    if (!open || !focusPendingMatchId) {
+      return;
+    }
+
+    void openPendingMatchDetail(focusPendingMatchId);
+  }, [focusPendingMatchId, open, openPendingMatchDetail]);
 
   const recordRebookFollowUp = useCallback(
     async (activityId: string | null) => {

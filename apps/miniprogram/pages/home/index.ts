@@ -10,9 +10,15 @@
  */
 import { useChatStore, type UIMessage } from '../../src/stores/chat'
 import { useHomeStore } from '../../src/stores/home'
-import { useAppStore } from '../../src/stores/app'
+import {
+  useAppStore,
+  type MessageCenterFocusIntent,
+  type PendingActionAuthMode,
+  type StructuredPendingAction,
+} from '../../src/stores/app'
 import { useUserStore } from '../../src/stores/user'
 import { getWelcomeCard, getUserLocation, type WelcomeResponse, type QuickItem } from '../../src/services/welcome'
+import { postActivityRebookFollowUp } from '../../src/services/activity-outcome'
 import type {
   ActivityData,
   ActivityStatus,
@@ -20,10 +26,39 @@ import type {
   ShareActivityData,
 } from '../../src/types/global'
 import { getHotKeywords } from '../../src/api/endpoints/hot-keywords/hot-keywords'
+import { getAiTasksCurrent } from '../../src/api/endpoints/ai/ai'
 import type { HotKeywordsListResponseItemsItem } from '../../src/api/model'
-import { submitJoinAndOpenDiscussion, type JoinFlowPayload } from '../../src/utils/join-flow'
 
 const DEFAULT_COMPOSER_PLACEHOLDER = '你想找什么活动？'
+
+type CurrentTaskActionKind = 'structured_action' | 'navigate' | 'switch_tab'
+
+interface CurrentTaskAction {
+  kind: CurrentTaskActionKind
+  label: string
+  action?: string
+  payload?: Record<string, unknown>
+  source?: string
+  originalText?: string
+  url?: string
+}
+
+interface CurrentTaskItem {
+  id: string
+  taskType: 'join_activity' | 'find_partner' | 'create_activity'
+  taskTypeLabel: string
+  currentStage: string
+  stageLabel: string
+  status: string
+  goalText: string
+  headline: string
+  summary: string
+  updatedAt: string
+  activityId?: string
+  activityTitle?: string
+  primaryAction?: CurrentTaskAction
+  secondaryAction?: CurrentTaskAction
+}
 
 // 页面数据类型
 interface PageData {
@@ -46,6 +81,9 @@ interface PageData {
   
   // 热词列表 (v4.7 全局关键词系统)
   hotKeywords: HotKeywordsListResponseItemsItem[]
+
+  // 当前 Agent 任务承接
+  currentTasks: CurrentTaskItem[]
 }
 
 interface HomePageOptions {
@@ -54,6 +92,31 @@ interface HomePageOptions {
 
 interface AiDockComponent {
   setValue: (value: string) => void;
+}
+
+interface TaskChatPromptPayload {
+  prompt: string
+  activityId?: string
+  followUpMode?: 'review' | 'rebook' | 'kickoff'
+  entry?: string
+}
+
+function readMessageCenterFocusIntent(value: unknown): MessageCenterFocusIntent | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  const taskId = typeof value.taskId === 'string' && value.taskId.trim() ? value.taskId.trim() : undefined
+  const matchId = typeof value.matchId === 'string' && value.matchId.trim() ? value.matchId.trim() : undefined
+
+  if (!taskId && !matchId) {
+    return null
+  }
+
+  return {
+    ...(taskId ? { taskId } : {}),
+    ...(matchId ? { matchId } : {}),
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -110,42 +173,25 @@ function readActivityStatus(value: unknown): ActivityStatus | null {
   }
 }
 
-function readJoinFlowPayload(value: unknown): JoinFlowPayload | null {
-  if (!isRecord(value)) {
-    return null;
+function readPendingActionAuthMode(value: unknown): PendingActionAuthMode | null {
+  return value === 'login' || value === 'bind_phone' ? value : null
+}
+
+function readStructuredPendingAction(value: unknown): StructuredPendingAction | null {
+  if (!isRecord(value) || value.type !== 'structured_action' || typeof value.action !== 'string' || !isRecord(value.payload)) {
+    return null
   }
 
-  const activityId = readString(value.activityId);
-  if (!activityId) {
-    return null;
-  }
+  const authMode = readPendingActionAuthMode(value.authMode)
 
-  const payload: JoinFlowPayload = { activityId };
-  const title = readString(value.title);
-  const startAt = readString(value.startAt);
-  const locationName = readString(value.locationName);
-  const source = readString(value.source);
-
-  if (title) {
-    payload.title = title;
+  return {
+    type: 'structured_action',
+    action: value.action,
+    payload: value.payload,
+    ...(typeof value.source === 'string' ? { source: value.source } : {}),
+    ...(typeof value.originalText === 'string' ? { originalText: value.originalText } : {}),
+    ...(authMode ? { authMode } : {}),
   }
-  if (startAt) {
-    payload.startAt = startAt;
-  }
-  if (locationName) {
-    payload.locationName = locationName;
-  }
-  if (
-    source === 'activity_detail' ||
-    source === 'half_screen_detail' ||
-    source === 'activity_explore' ||
-    source === 'widget_explore' ||
-    source === 'auth_sheet'
-  ) {
-    payload.source = source;
-  }
-
-  return payload;
 }
 
 function readLocationPair(value: unknown): [number, number] | null {
@@ -160,6 +206,86 @@ function readLocationPair(value: unknown): [number, number] | null {
   }
 
   return [lng, lat];
+}
+
+function readCurrentTaskAction(value: unknown): CurrentTaskAction | null {
+  if (!isRecord(value) || typeof value.kind !== 'string' || typeof value.label !== 'string') {
+    return null
+  }
+
+  if (value.kind !== 'structured_action' && value.kind !== 'navigate' && value.kind !== 'switch_tab') {
+    return null
+  }
+
+  return {
+    kind: value.kind,
+    label: value.label,
+    ...(typeof value.action === 'string' ? { action: value.action } : {}),
+    ...(isRecord(value.payload) ? { payload: value.payload } : {}),
+    ...(typeof value.source === 'string' ? { source: value.source } : {}),
+    ...(typeof value.originalText === 'string' ? { originalText: value.originalText } : {}),
+    ...(typeof value.url === 'string' ? { url: value.url } : {}),
+  }
+}
+
+function readCurrentTaskItem(value: unknown): CurrentTaskItem | null {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== 'string' ||
+    typeof value.taskType !== 'string' ||
+    typeof value.taskTypeLabel !== 'string' ||
+    typeof value.currentStage !== 'string' ||
+    typeof value.stageLabel !== 'string' ||
+    typeof value.status !== 'string' ||
+    typeof value.goalText !== 'string' ||
+    typeof value.headline !== 'string' ||
+    typeof value.summary !== 'string' ||
+    typeof value.updatedAt !== 'string'
+  ) {
+    return null
+  }
+
+  if (value.taskType !== 'join_activity' && value.taskType !== 'find_partner' && value.taskType !== 'create_activity') {
+    return null
+  }
+
+  const primaryAction = readCurrentTaskAction(value.primaryAction)
+  const secondaryAction = readCurrentTaskAction(value.secondaryAction)
+
+  return {
+    id: value.id,
+    taskType: value.taskType,
+    taskTypeLabel: value.taskTypeLabel,
+    currentStage: value.currentStage,
+    stageLabel: value.stageLabel,
+    status: value.status,
+    goalText: value.goalText,
+    headline: value.headline,
+    summary: value.summary,
+    updatedAt: value.updatedAt,
+    ...(typeof value.activityId === 'string' ? { activityId: value.activityId } : {}),
+    ...(typeof value.activityTitle === 'string' ? { activityTitle: value.activityTitle } : {}),
+    ...(primaryAction ? { primaryAction } : {}),
+    ...(secondaryAction ? { secondaryAction } : {}),
+  }
+}
+
+function readTaskChatPromptPayload(value: unknown): TaskChatPromptPayload | null {
+  if (!isRecord(value) || typeof value.prompt !== 'string' || !value.prompt.trim()) {
+    return null
+  }
+
+  const followUpMode =
+    value.followUpMode === 'review' || value.followUpMode === 'rebook' || value.followUpMode === 'kickoff'
+      ? value.followUpMode
+      : undefined
+
+  return {
+    prompt: value.prompt.trim(),
+    ...(typeof value.activityId === 'string' && value.activityId.trim() ? { activityId: value.activityId.trim() } : {}),
+    ...(followUpMode ? { followUpMode } : {}),
+    ...(typeof value.entry === 'string' && value.entry.trim() ? { entry: value.entry.trim() } : {}),
+  }
 }
 
 function readShareActivityData(value: unknown): ActivityData | null {
@@ -238,12 +364,15 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     isWelcomeLoading: false,
     composerPlaceholder: DEFAULT_COMPOSER_PLACEHOLDER,
     hotKeywords: [],
+    currentTasks: [],
   },
 
   unsubscribeChat: INITIAL_UNSUBSCRIBE,
   unsubscribeApp: INITIAL_UNSUBSCRIBE,
   unsubscribeUser: INITIAL_UNSUBSCRIBE,
   userLocation: INITIAL_USER_LOCATION,
+  lastChatStatus: 'idle' as PageData['status'],
+  lastUserId: '',
 
   onLoad(options: HomePageOptions) {
     this.subscribeChatStore()
@@ -251,12 +380,15 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     this.subscribeUserStore()
     this.initChat()
     this.loadUserInfo()
+    this.loadCurrentTasks()
     this.loadHotKeywords()
     this.applyPrefillPrompt(options.prefill)
   },
 
   onShow() {
     this.loadUserInfo()
+    this.loadCurrentTasks()
+    this.resumePendingActionIfReady()
   },
 
   onUnload() {
@@ -277,6 +409,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
    */
   subscribeChatStore() {
     const chatStore = useChatStore.getState()
+    this.lastChatStatus = chatStore.status
     this.setData({
       messages: chatStore.messages,
       status: chatStore.status,
@@ -289,6 +422,11 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
         status: state.status,
         streamingMessageId: state.streamingMessageId,
       })
+
+      if (this.lastChatStatus !== 'idle' && state.status === 'idle') {
+        this.loadCurrentTasks()
+      }
+      this.lastChatStatus = state.status
       
       // 自动滚动到最新消息
       if (state.messages.length > 0) {
@@ -316,12 +454,21 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
 
   subscribeUserStore() {
     const userStore = useUserStore.getState()
+    this.lastUserId = userStore.user?.id || ''
     if (userStore.user) {
       this.setData({ userNickname: userStore.user.nickname || '搭子' })
     }
     this.unsubscribeUser = useUserStore.subscribe((state) => {
       if (state.user) {
         this.setData({ userNickname: state.user.nickname || '搭子' })
+      } else {
+        this.setData({ currentTasks: [] })
+      }
+
+      const nextUserId = state.user?.id || ''
+      if (this.lastUserId !== nextUserId) {
+        this.lastUserId = nextUserId
+        this.loadCurrentTasks()
       }
     })
   },
@@ -350,6 +497,31 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     const userStore = useUserStore.getState()
     if (userStore.user) {
       this.setData({ userNickname: userStore.user.nickname || '搭子' })
+    }
+  },
+
+  async loadCurrentTasks() {
+    const userStore = useUserStore.getState()
+    if (!userStore.isLoggedIn || !userStore.user?.id) {
+      this.setData({ currentTasks: [] })
+      return
+    }
+
+    try {
+      const response = await getAiTasksCurrent()
+      if (response.status !== 200 || !response.data || !Array.isArray(response.data.items)) {
+        this.setData({ currentTasks: [] })
+        return
+      }
+
+      const currentTasks = response.data.items
+        .map((item) => readCurrentTaskItem(item))
+        .filter((item): item is CurrentTaskItem => item !== null)
+
+      this.setData({ currentTasks })
+    } catch (error) {
+      console.error('[Home] Failed to load current tasks:', error)
+      this.setData({ currentTasks: [] })
     }
   },
 
@@ -563,56 +735,130 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
 
   onAuthSuccess(_e: WechatMiniprogram.CustomEvent<{ phoneNumber: string }>) {
     this.loadUserInfo()
+    this.loadCurrentTasks()
   },
 
-  async onPendingAction(e: WechatMiniprogram.CustomEvent<{ type: string; payload?: unknown }>) {
-    const { type, payload } = e.detail
-
-    if (type === 'join') {
-      const joinPayload = readJoinFlowPayload(payload)
-      if (!joinPayload) {
+  async executeCurrentTaskAction(action: CurrentTaskAction) {
+    if (action.kind === 'structured_action') {
+      if (!action.action) {
         return
       }
-      const title = typeof joinPayload.title === 'string' && joinPayload.title.trim()
-        ? joinPayload.title.trim()
-        : '活动'
 
-      const joinResult = await submitJoinAndOpenDiscussion(
-        {
-          ...joinPayload,
-          source: joinPayload.source || 'auth_sheet',
-        },
-        {
-          onBeforeNavigate: () => {
-            useChatStore.getState().appendActionResult(
-              'join',
-              { activityId: joinPayload.activityId, title },
-              true,
-              `你已成功报名「${title}」，一起去讨论区打个招呼吧`,
-            )
-          },
-        },
-      )
+      if (action.action === 'start_follow_up_chat') {
+        const promptPayload = readTaskChatPromptPayload(action.payload)
+        if (!promptPayload) {
+          return
+        }
 
-      if (!joinResult.success) {
-        wx.showToast({
-          title: joinResult.msg || '报名失败，请重试',
-          icon: 'none',
+        if (promptPayload.followUpMode === 'rebook' && promptPayload.activityId) {
+          try {
+            await postActivityRebookFollowUp(promptPayload.activityId)
+          } catch (error) {
+            console.warn('记录再约意愿失败', error)
+          }
+        }
+
+        useChatStore.getState().sendMessage(promptPayload.prompt, {
+          ...(promptPayload.activityId ? { activityId: promptPayload.activityId } : {}),
+          ...(promptPayload.followUpMode ? { followUpMode: promptPayload.followUpMode } : {}),
+          ...(promptPayload.entry ? { entry: promptPayload.entry } : {}),
         })
+        return
       }
+
+      useChatStore.getState().sendAction({
+        action: action.action,
+        payload: action.payload || {},
+        source: action.source,
+        originalText: action.originalText,
+      })
       return
     }
 
-    if (type !== 'publish' || !isRecord(payload) || !('draft' in payload)) {
+    if (!action.url) {
       return
     }
 
-    const chatStore = useChatStore.getState()
-    chatStore.sendAction({
-      action: 'confirm_publish',
-      payload: this.buildPublishPayloadFromDraft(payload.draft),
-      source: 'auth_sheet',
-      originalText: '确认发布',
+    if (action.kind === 'switch_tab' && action.url === '/pages/message/index') {
+      const focusIntent = readMessageCenterFocusIntent(action.payload)
+      useAppStore.getState().setMessageCenterFocus(focusIntent)
+      wx.switchTab({ url: action.url })
+      return
+    }
+
+    if (action.kind === 'switch_tab') {
+      wx.switchTab({ url: action.url })
+      return
+    }
+
+    wx.navigateTo({ url: action.url })
+  },
+
+  onCurrentTaskActionTap(e: WechatMiniprogram.CustomEvent<{ action?: CurrentTaskAction }>) {
+    const action = readCurrentTaskAction(e.detail?.action)
+    if (!action) {
+      return
+    }
+
+    void this.executeCurrentTaskAction(action)
+  },
+
+  continueStructuredPendingAction(pendingAction: StructuredPendingAction) {
+    useChatStore.getState().sendAction({
+      action: pendingAction.action,
+      payload: pendingAction.payload,
+      source: pendingAction.source,
+      originalText: pendingAction.originalText,
+    })
+  },
+
+  resumePendingActionIfReady() {
+    const appStore = useAppStore.getState()
+    const pendingAction = appStore.pendingAction
+    const token = wx.getStorageSync('token')
+    if (!pendingAction || pendingAction.authMode !== 'login' || !token) {
+      return
+    }
+
+    appStore.clearPendingAction()
+    this.continueStructuredPendingAction({
+      ...pendingAction,
+      authMode: undefined,
+    })
+  },
+
+  onAuthRequiredContinue(e: WechatMiniprogram.CustomEvent<{ pendingAction?: StructuredPendingAction }>) {
+    const pendingAction = readStructuredPendingAction(e.detail?.pendingAction)
+    if (!pendingAction) {
+      return
+    }
+
+    const appStore = useAppStore.getState()
+    if (pendingAction.authMode === 'bind_phone') {
+      appStore.showAuthSheet(pendingAction)
+      return
+    }
+
+    appStore.setPendingAction({
+      ...pendingAction,
+      authMode: 'login',
+    })
+
+    wx.navigateTo({
+      url: '/pages/login/login',
+    })
+  },
+
+  onPendingAction(e: WechatMiniprogram.CustomEvent<StructuredPendingAction>) {
+    const pendingAction = readStructuredPendingAction(e.detail)
+    if (!pendingAction) {
+      return
+    }
+
+    useAppStore.getState().clearPendingAction()
+    this.continueStructuredPendingAction({
+      ...pendingAction,
+      authMode: undefined,
     })
   },
 

@@ -126,6 +126,63 @@ const ChatRequestSchema = t.Object({
   stream: t.Optional(t.Boolean({ description: 'true 时返回 GenUI SSE 事件流' })),
 });
 
+const DiscussionEnteredRequestSchema = t.Object({
+  activityId: t.String({ minLength: 1, description: '活动 ID' }),
+  entry: t.Optional(t.String({ description: '讨论区进入来源，如 join_success' })),
+});
+
+const DiscussionEnteredResponseSchema = t.Object({
+  code: t.Number(),
+  msg: t.String(),
+});
+
+const CurrentTaskActionSchema = t.Object({
+  kind: t.Union([
+    t.Literal('structured_action'),
+    t.Literal('navigate'),
+    t.Literal('switch_tab'),
+  ]),
+  label: t.String({ minLength: 1 }),
+  action: t.Optional(t.String({ minLength: 1 })),
+  payload: t.Optional(GenericObjectSchema),
+  source: t.Optional(t.String()),
+  originalText: t.Optional(t.String()),
+  url: t.Optional(t.String({ minLength: 1 })),
+});
+
+const CurrentTaskSnapshotSchema = t.Object({
+  id: t.String({ minLength: 1 }),
+  taskType: t.Union([
+    t.Literal('join_activity'),
+    t.Literal('find_partner'),
+    t.Literal('create_activity'),
+  ]),
+  taskTypeLabel: t.String({ minLength: 1 }),
+  currentStage: t.String({ minLength: 1 }),
+  stageLabel: t.String({ minLength: 1 }),
+  status: t.Union([
+    t.Literal('active'),
+    t.Literal('waiting_auth'),
+    t.Literal('waiting_async_result'),
+    t.Literal('completed'),
+    t.Literal('cancelled'),
+    t.Literal('expired'),
+  ]),
+  goalText: t.String({ minLength: 1 }),
+  headline: t.String({ minLength: 1 }),
+  summary: t.String({ minLength: 1 }),
+  updatedAt: t.String({ minLength: 1 }),
+  activityId: t.Optional(t.String({ minLength: 1 })),
+  activityTitle: t.Optional(t.String({ minLength: 1 })),
+  primaryAction: t.Optional(CurrentTaskActionSchema),
+  secondaryAction: t.Optional(CurrentTaskActionSchema),
+});
+
+const CurrentTasksResponseSchema = t.Object({
+  items: t.Array(CurrentTaskSnapshotSchema),
+  serverTime: t.String({ minLength: 1 }),
+});
+
 const GenUIReplacePolicySchema = t.Union([
   t.Literal('append'),
   t.Literal('replace'),
@@ -944,6 +1001,9 @@ export const aiModel = new Elysia({ name: 'aiModel' })
     // AI Chat 协议
     'ai.chatRequest': ChatRequestSchema,
     'ai.chatTurnEnvelope': ChatTurnEnvelopeSchema,
+    'ai.discussionEnteredRequest': DiscussionEnteredRequestSchema,
+    'ai.discussionEnteredResponse': DiscussionEnteredResponseSchema,
+    'ai.currentTasksResponse': CurrentTasksResponseSchema,
     // 用户对话消息
     'ai.conversationsQuery': ConversationsQuery,
     'ai.conversationsResponse': ConversationsResponse,
@@ -1019,6 +1079,11 @@ export const aiModel = new Elysia({ name: 'aiModel' })
 export type ChatInputText = Static<typeof ChatInputTextSchema>;
 export type ChatInputAction = Static<typeof ChatInputActionSchema>;
 export type ChatRequest = Static<typeof ChatRequestSchema>;
+export type DiscussionEnteredRequest = Static<typeof DiscussionEnteredRequestSchema>;
+export type DiscussionEnteredResponse = Static<typeof DiscussionEnteredResponseSchema>;
+export type CurrentTaskAction = Static<typeof CurrentTaskActionSchema>;
+export type CurrentTaskSnapshot = Static<typeof CurrentTaskSnapshotSchema>;
+export type CurrentTasksResponse = Static<typeof CurrentTasksResponseSchema>;
 export type GenUIBlock = Static<typeof GenUIBlockSchema>;
 export type ChatTurnEnvelope = Static<typeof ChatTurnEnvelopeSchema>;
 export type ConversationRole = Static<typeof ConversationRole>;

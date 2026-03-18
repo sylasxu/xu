@@ -28,6 +28,13 @@
     <text>讨论区已归档，仅可查看历史消息</text>
   </view>
 
+  <view class="task-stage-banner">
+    <view class="task-stage-banner__eyebrow">
+      <text>{{taskStageTitle}}</text>
+    </view>
+    <text class="task-stage-banner__hint">{{taskStageHint}}</text>
+  </view>
+
   <!-- 消息列表 -->
   <scroll-view
     class="message-list"

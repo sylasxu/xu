@@ -83,6 +83,13 @@ import { handleStructuredAction, type StructuredAction } from './user-action';
 import { buildTurnContextFromBlocks } from './turn-context';
 import { getConfigValue } from './config/config.service';
 import { buildNextBestActions } from './next-best-action.service';
+import { resolveConversationTaskId } from './task-runtime/agent-task.service';
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function isUuidLike(value: string | null | undefined): value is string {
+  return typeof value === 'string' && UUID_PATTERN.test(value);
+}
 
 type ConversationMessageRecord = typeof conversationMessages.$inferSelect;
 
@@ -973,6 +980,7 @@ function createStructuredActionResponse(
   structuredAction?: StructuredAction
 ): Response {
   const data = asRecord(result.data);
+  const pendingAction = asRecord(data?.pendingAction);
   const explorePayload = (() => {
     if (Array.isArray(data?.explore)) {
       return {
@@ -1008,8 +1016,31 @@ function createStructuredActionResponse(
             ? '草稿已准备好，确认后就能发出去'
             : result.success
               ? '操作成功！'
-              : '操作失败，请稍后再试'
+              : typeof result.error === 'string' && result.error.trim()
+                ? result.error.trim()
+                : '操作失败，请稍后再试'
   );
+  const authRequiredPayload = data?.requiresAuth === true && pendingAction
+    ? {
+        message: actionMessage,
+        authRequired: {
+          mode: data?.requiresPhoneBinding === true ? 'bind_phone' : 'login',
+          pendingAction,
+        },
+      }
+    : null;
+  const successWidgetPayload = result.success && actionMessage && (
+    typeof data?.navigationIntent === 'string' ||
+    isRecord(data?.navigationPayload) ||
+    (data?.draft && typeof data.draft === 'object')
+  )
+    ? {
+        message: actionMessage,
+        ...(typeof data?.navigationIntent === 'string' ? { navigationIntent: data.navigationIntent } : {}),
+        ...(isRecord(data?.navigationPayload) ? { navigationPayload: data.navigationPayload } : {}),
+      }
+    : null;
+  const shouldWritePrimaryText = !authRequiredPayload && !successWidgetPayload;
   const nextActions = buildNextBestActions({ actionType, data });
   const actionDurationMs = typeof result.durationMs === 'number' && Number.isFinite(result.durationMs)
     ? Math.max(0, result.durationMs)
@@ -1113,16 +1144,23 @@ function createStructuredActionResponse(
             ...data.draft,
           },
         });
-
-        if (typeof data.message === 'string' && data.message.trim()) {
-          writeWidgetEvent(writer, {
-            type: 'widget_success',
-            payload: { message: data.message.trim() },
-          });
-        }
       }
-      
-      if (actionMessage) {
+
+      if (authRequiredPayload) {
+        writeWidgetEvent(writer, {
+          type: 'widget_auth_required',
+          payload: authRequiredPayload,
+        });
+      }
+
+      if (successWidgetPayload) {
+        writeWidgetEvent(writer, {
+          type: 'widget_success',
+          payload: successWidgetPayload,
+        });
+      }
+
+      if (shouldWritePrimaryText && actionMessage) {
         writer.write({ type: 'text-delta', delta: actionMessage, id: randomUUID() });
       }
       
@@ -1940,6 +1978,11 @@ export async function listConversationMessages(params: {
     role,
     messageType,
   } = params;
+
+  if (!isUuidLike(conversationId)) {
+    throw new Error('会话不存在');
+  }
+
   const [thread] = await db
     .select({ id: conversations.id, userId: conversations.userId })
     .from(conversations)
@@ -2015,6 +2058,10 @@ export async function listConversationMessages(params: {
 }
 
 export async function getConversationMessages(conversationId: string) {
+  if (!isUuidLike(conversationId)) {
+    return { conversation: null, messages: [] };
+  }
+
   const [conv] = await db
     .select()
     .from(conversations)
@@ -2260,6 +2307,11 @@ export async function syncConversationTurnSnapshot(params: {
       }
     : null;
   const resolvedActivityId = params.activityId || extractActivityIdFromBlocks(params.blocks);
+  const resolvedTaskId = await resolveConversationTaskId({
+    userId: params.userId,
+    conversationId: params.conversationId,
+    ...(resolvedActivityId ? { activityId: resolvedActivityId } : {}),
+  });
   const hasError = hasAssistantErrorBlock(params.blocks);
 
   const recentMessages = await db
@@ -2291,6 +2343,7 @@ export async function syncConversationTurnSnapshot(params: {
         messageType: assistantRecord.messageType,
         content: assistantRecord.content,
         activityId: resolvedActivityId ?? null,
+        taskId: resolvedTaskId ?? null,
         embedding: null,
       })
       .where(eq(conversationMessages.id, existingAssistantForTurn.id));
@@ -2320,6 +2373,7 @@ export async function syncConversationTurnSnapshot(params: {
       role: 'user',
       messageType: userRecord.messageType,
       content: userRecord.content,
+      ...(resolvedTaskId ? { taskId: resolvedTaskId } : {}),
     });
   }
 
@@ -2330,6 +2384,7 @@ export async function syncConversationTurnSnapshot(params: {
     messageType: assistantRecord.messageType,
     content: assistantRecord.content,
     ...(resolvedActivityId ? { activityId: resolvedActivityId } : {}),
+    ...(resolvedTaskId ? { taskId: resolvedTaskId } : {}),
   });
 
   if (hasError) {

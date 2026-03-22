@@ -15,6 +15,7 @@ const logger = createLogger('partner-matching');
 
 export type PartnerActivityType = 'food' | 'entertainment' | 'sports' | 'boardgame' | 'other';
 export type PartnerTimeRange = 'tonight' | 'tomorrow' | 'weekend' | 'next_week';
+export type PartnerSportType = 'badminton' | 'basketball' | 'running' | 'tennis' | 'swimming' | 'cycling';
 
 interface ParsedPartnerAnswer {
   field: string;
@@ -35,8 +36,12 @@ export interface PartnerMatchingState {
   /** 已收集的偏好 */
   collectedPreferences: {
     activityType?: string;
+    sportType?: string;
     timeRange?: string;
     location?: string;
+    description?: string;
+    preferredGender?: string;
+    preferredAgeRange?: string;
     participants?: string;
     tags?: string[];
   };
@@ -65,6 +70,7 @@ export interface PartnerMatchingQuestion {
 export interface PartnerIntentDraftPayload {
   rawInput: string;
   activityType: PartnerActivityType;
+  sportType?: PartnerSportType;
   locationHint: string;
   timePreference?: string;
   tags: string[];
@@ -78,7 +84,7 @@ export interface PartnerIntentFormFieldOption {
 export interface PartnerIntentFormField {
   name: string;
   label: string;
-  type: 'single-select' | 'multi-select' | 'textarea';
+  type: 'single-select' | 'multi-select' | 'textarea' | 'text';
   required?: boolean;
   options?: PartnerIntentFormFieldOption[];
   placeholder?: string;
@@ -89,12 +95,28 @@ export interface PartnerIntentFormPayload {
   title: string;
   schema: {
     formType: 'partner_intent';
-    submitAction: 'submit_partner_intent_form';
+    submitAction: 'search_partners' | 'submit_partner_intent_form' | 'opt_in_partner_pool';
     submitLabel: string;
     fields: PartnerIntentFormField[];
   };
   initialValues: Record<string, unknown>;
 }
+
+export interface PartnerAskPreferencePayload {
+  status: 'collecting';
+  questionType: 'location' | 'time' | 'type';
+  question: string;
+  options: Array<{
+    label: string;
+    value: string;
+    action: 'find_partner';
+    params: Record<string, unknown>;
+  }>;
+  allowSkip: true;
+  collectedInfo: PartnerMatchingState['collectedPreferences'];
+}
+
+export type PartnerFormStage = 'refine_form' | 'intent_pool';
 
 /**
  * 存储格式 (保持 type 值不变以兼容已存储数据)
@@ -119,6 +141,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readRequiredText(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function readOptionalText(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
 function readStringList(value: unknown): string[] {
@@ -149,15 +175,23 @@ function readPartnerCollectedPreferences(
   }
 
   const activityType = readRequiredText(value.activityType) ?? undefined;
+  const sportType = readRequiredText(value.sportType) ?? undefined;
   const timeRange = readRequiredText(value.timeRange) ?? undefined;
   const location = readRequiredText(value.location) ?? undefined;
+  const description = readRequiredText(value.description) ?? undefined;
+  const preferredGender = readRequiredText(value.preferredGender) ?? undefined;
+  const preferredAgeRange = readRequiredText(value.preferredAgeRange) ?? undefined;
   const participants = readRequiredText(value.participants) ?? undefined;
   const tags = readStringList(value.tags);
 
   return {
     ...(activityType ? { activityType } : {}),
+    ...(sportType ? { sportType } : {}),
     ...(timeRange ? { timeRange } : {}),
     ...(location ? { location } : {}),
+    ...(description ? { description } : {}),
+    ...(preferredGender ? { preferredGender } : {}),
+    ...(preferredAgeRange ? { preferredAgeRange } : {}),
     ...(participants ? { participants } : {}),
     ...(tags.length > 0 ? { tags } : {}),
   };
@@ -199,7 +233,7 @@ function readStoredPartnerMatchingState(value: unknown): StoredPartnerMatchingSt
 
 // ============ 配置 ============
 
-const REQUIRED_FIELDS: Array<'activityType' | 'timeRange'> = ['activityType', 'timeRange'];
+const REQUIRED_FIELDS: Array<'activityType' | 'location'> = ['activityType', 'location'];
 
 const PARTNER_ACTIVITY_LABELS: Record<PartnerActivityType, string> = {
   food: '美食',
@@ -207,6 +241,15 @@ const PARTNER_ACTIVITY_LABELS: Record<PartnerActivityType, string> = {
   sports: '运动',
   boardgame: '桌游',
   other: '其他',
+};
+
+const PARTNER_SPORT_LABELS: Record<PartnerSportType, string> = {
+  badminton: '羽毛球',
+  basketball: '篮球',
+  running: '跑步',
+  tennis: '网球',
+  swimming: '游泳',
+  cycling: '骑行',
 };
 
 const PARTNER_TIME_LABELS: Record<PartnerTimeRange, string> = {
@@ -219,18 +262,30 @@ const PARTNER_TIME_LABELS: Record<PartnerTimeRange, string> = {
 const QUESTION_TEMPLATES: Record<string, PartnerMatchingQuestion> = {
   activityType: {
     field: 'activityType',
-    question: '想玩点什么呢？🎯',
+    question: '想玩点什么呢？',
     options: [
-      { label: '🍲 吃饭', value: 'food' },
-      { label: '🎮 娱乐', value: 'entertainment' },
-      { label: '⚽ 运动', value: 'sports' },
-      { label: '🎲 桌游', value: 'boardgame' },
-      { label: '☕ 喝咖啡', value: 'food', tags: ['Coffee'] },
+      { label: '吃饭', value: 'food' },
+      { label: '娱乐', value: 'entertainment' },
+      { label: '运动', value: 'sports' },
+      { label: '桌游', value: 'boardgame' },
+      { label: '喝咖啡', value: 'food', tags: ['Coffee'] },
+    ],
+  },
+  sportType: {
+    field: 'sportType',
+    question: '想先找哪种运动搭子？',
+    options: [
+      { label: '羽毛球', value: 'badminton' },
+      { label: '篮球', value: 'basketball' },
+      { label: '跑步', value: 'running' },
+      { label: '网球', value: 'tennis' },
+      { label: '游泳', value: 'swimming' },
+      { label: '骑行', value: 'cycling' },
     ],
   },
   timeRange: {
     field: 'timeRange',
-    question: '什么时候方便？⏰',
+    question: '什么时候方便？',
     options: [
       { label: '今晚', value: 'tonight' },
       { label: '明天', value: 'tomorrow' },
@@ -240,7 +295,7 @@ const QUESTION_TEMPLATES: Record<string, PartnerMatchingQuestion> = {
   },
   location: {
     field: 'location',
-    question: '想在哪儿玩？🗺️',
+    question: '想在哪儿玩？',
     options: [
       { label: '观音桥', value: '观音桥' },
       { label: '解放碑', value: '解放碑' },
@@ -250,7 +305,7 @@ const QUESTION_TEMPLATES: Record<string, PartnerMatchingQuestion> = {
   },
   participants: {
     field: 'participants',
-    question: '想约几个人？👥',
+    question: '想约几个人？',
     options: [
       { label: '2-3人', value: '2-3' },
       { label: '4-6人', value: '4-6' },
@@ -262,6 +317,15 @@ const QUESTION_TEMPLATES: Record<string, PartnerMatchingQuestion> = {
 
 
 const PARTNER_LOCATION_OPTIONS = ['观音桥', '解放碑', '南坪', '沙坪坝', '江北嘴', '杨家坪', '大坪'];
+
+const PARTNER_SPORT_OPTIONS: Array<{ label: string; value: PartnerSportType }> = [
+  { label: '羽毛球', value: 'badminton' },
+  { label: '篮球', value: 'basketball' },
+  { label: '跑步', value: 'running' },
+  { label: '网球', value: 'tennis' },
+  { label: '游泳', value: 'swimming' },
+  { label: '骑行', value: 'cycling' },
+];
 
 function inferPartnerActivityTypeFromText(message: string): PartnerActivityType | undefined {
   if (/(麻将|桌游|狼人杀|剧本杀)/.test(message)) {
@@ -276,6 +340,16 @@ function inferPartnerActivityTypeFromText(message: string): PartnerActivityType 
   if (/(羽毛球|篮球|跑步|徒步|运动|打球)/.test(message)) {
     return 'sports';
   }
+  return undefined;
+}
+
+function inferPartnerSportTypeFromText(message: string): PartnerSportType | undefined {
+  if (/(羽毛球)/.test(message)) return 'badminton';
+  if (/(篮球)/.test(message)) return 'basketball';
+  if (/(跑步|夜跑|晨跑|健走)/.test(message)) return 'running';
+  if (/(网球)/.test(message)) return 'tennis';
+  if (/(游泳)/.test(message)) return 'swimming';
+  if (/(骑行|骑车)/.test(message)) return 'cycling';
   return undefined;
 }
 
@@ -320,98 +394,126 @@ export function buildPartnerIntentFormPayload(params: {
 }): PartnerIntentFormPayload {
   const rawInput = params.rawInput?.trim() || params.state.rawInput.trim();
   const inferredActivityType = inferPartnerActivityTypeFromText(rawInput || '');
+  const inferredSportType = inferPartnerSportTypeFromText(rawInput || '');
   const inferredTimeRange = inferPartnerTimeRangeFromText(rawInput || '');
-  const inferredBudgetType = inferPartnerBudgetTypeFromText(rawInput || '');
   const inferredLocation = inferPartnerLocationFromText(rawInput || '');
-  const inferredTags = inferPartnerTagsFromText(rawInput || '');
-  const mergedTags = Array.from(new Set([
-    ...(params.state.collectedPreferences.tags || []),
-    ...inferredTags,
-  ]));
 
   const activityType = normalizePartnerActivityType(
     params.state.collectedPreferences.activityType
       || params.defaultActivityType
       || inferredActivityType
   );
+  const sportType = activityType === 'sports'
+    ? (params.state.collectedPreferences.sportType || inferredSportType || '')
+    : '';
+  const shouldAskActivityType = activityType !== 'sports' && activityType === 'other';
+  const selectedLocation = params.state.collectedPreferences.location
+    || params.defaultLocation
+    || inferredLocation
+    || '';
+  const normalizedLocation = PARTNER_LOCATION_OPTIONS.includes(selectedLocation)
+    ? selectedLocation
+    : '';
 
   const initialValues: Record<string, unknown> = {
     rawInput,
     activityType,
+    sportType,
     timeRange: params.state.collectedPreferences.timeRange || inferredTimeRange || '',
-    location: params.state.collectedPreferences.location || params.defaultLocation || inferredLocation || params.fallbackLocationHint,
-    budgetType: inferredBudgetType || '',
-    tags: mergedTags,
-    note: '',
+    location: params.state.collectedPreferences.location || normalizedLocation,
+    description: params.state.collectedPreferences.description || '',
+    preferredGender: params.state.collectedPreferences.preferredGender || '',
+    preferredAgeRange: params.state.collectedPreferences.preferredAgeRange || '',
   };
 
+  const fields: PartnerIntentFormField[] = [];
+
+  if (shouldAskActivityType) {
+    fields.push({
+      name: 'activityType',
+      label: '想找哪类搭子',
+      type: 'single-select',
+      required: true,
+      options: [
+        { label: '吃饭', value: 'food' },
+        { label: '娱乐', value: 'entertainment' },
+        { label: '运动', value: 'sports' },
+        { label: '麻将/桌游', value: 'boardgame' },
+      ],
+    });
+  }
+
+  if (activityType === 'sports') {
+    fields.push({
+      name: 'sportType',
+      label: '想玩什么运动',
+      type: 'single-select',
+      required: true,
+      options: PARTNER_SPORT_OPTIONS,
+    });
+  }
+
+  fields.push(
+    {
+      name: 'timeRange',
+      label: '什么时候方便',
+      type: 'single-select',
+      required: false,
+      options: [
+        { label: '今晚', value: 'tonight' },
+        { label: '明天', value: 'tomorrow' },
+        { label: '周末', value: 'weekend' },
+        { label: '下周', value: 'next_week' },
+      ],
+    },
+    {
+      name: 'location',
+      label: '你一般在哪片活动方便',
+      type: 'text',
+      required: true,
+      placeholder: '比如观音桥、南坪、大学城',
+      maxLength: 30,
+    },
+    {
+      name: 'description',
+      label: '想找什么样的搭子',
+      type: 'textarea',
+      required: false,
+      placeholder: activityType === 'sports'
+        ? '比如想找一个周末能一起慢跑的人，不用太能聊，但别太鸽；最好在观音桥附近活动方便。'
+        : '比如想找下班后能一起吃饭或散步的人，轻松点就行，别太临时放鸽子。',
+      maxLength: 140,
+    },
+    {
+      name: 'preferredGender',
+      label: '希望对方性别',
+      type: 'single-select',
+      options: [
+        { label: '不限', value: 'any' },
+        { label: '女生', value: 'female' },
+        { label: '男生', value: 'male' },
+      ],
+    },
+    {
+      name: 'preferredAgeRange',
+      label: '希望对方年龄区间',
+      type: 'single-select',
+      options: [
+        { label: '不限', value: 'any' },
+        { label: '18-22', value: '18-22' },
+        { label: '23-28', value: '23-28' },
+        { label: '29-35', value: '29-35' },
+      ],
+    },
+  );
+
   return {
-    title: '找搭子偏好',
+    title: '想找什么样的搭子？',
     schema: {
       formType: 'partner_intent',
-      submitAction: 'submit_partner_intent_form',
-      submitLabel: '开始找搭子',
-      fields: [
-        {
-          name: 'activityType',
-          label: '想找哪类搭子',
-          type: 'single-select',
-          required: true,
-          options: [
-            { label: '吃饭', value: 'food' },
-            { label: '娱乐', value: 'entertainment' },
-            { label: '运动', value: 'sports' },
-            { label: '麻将/桌游', value: 'boardgame' },
-          ],
-        },
-        {
-          name: 'timeRange',
-          label: '什么时候方便',
-          type: 'single-select',
-          required: true,
-          options: [
-            { label: '今晚', value: 'tonight' },
-            { label: '明天', value: 'tomorrow' },
-            { label: '周末', value: 'weekend' },
-            { label: '下周', value: 'next_week' },
-          ],
-        },
-        {
-          name: 'location',
-          label: '大概在哪儿',
-          type: 'single-select',
-          required: true,
-          options: PARTNER_LOCATION_OPTIONS.map((location) => ({ label: location, value: location })),
-        },
-        {
-          name: 'budgetType',
-          label: '费用方式',
-          type: 'single-select',
-          options: [
-            { label: 'AA制', value: 'AA' },
-            { label: '有人请客也行', value: 'Treat' },
-            { label: '都可以', value: 'Flexible' },
-          ],
-        },
-        {
-          name: 'tags',
-          label: '特别要求',
-          type: 'multi-select',
-          options: [
-            { label: '不喝酒', value: 'NoAlcohol' },
-            { label: '安静点的', value: 'Quiet' },
-            { label: '女生友好', value: 'WomenFriendly' },
-            { label: '没有特别要求', value: 'NoPreference' },
-          ],
-        },
-        {
-          name: 'note',
-          label: '补充说明',
-          type: 'textarea',
-          placeholder: '比如想凑一桌麻将，接受新手，或希望离地铁口近一点',
-          maxLength: 80,
-        },
-      ],
+      submitAction: 'search_partners',
+      submitLabel: '先帮我找找',
+      fields,
     },
     initialValues,
   };
@@ -437,12 +539,36 @@ export function shouldStartPartnerMatching(
 
 export function createPartnerMatchingState(rawInput: string): PartnerMatchingState {
   const now = new Date();
+  const inferredActivityType = inferPartnerActivityTypeFromText(rawInput);
+  const inferredSportType = inferPartnerSportTypeFromText(rawInput);
+  const inferredTimeRange = inferPartnerTimeRangeFromText(rawInput);
+  const inferredLocation = inferPartnerLocationFromText(rawInput);
+  const inferredTags = inferPartnerTagsFromText(rawInput);
+  const collectedPreferences: PartnerMatchingState['collectedPreferences'] = {
+    ...(inferredActivityType ? { activityType: inferredActivityType } : {}),
+    ...(inferredSportType ? { sportType: inferredSportType } : {}),
+    ...(inferredTimeRange ? { timeRange: inferredTimeRange } : {}),
+    ...(inferredLocation ? { location: inferredLocation } : {}),
+    ...(inferredTags.length > 0 ? { tags: inferredTags } : {}),
+  };
+  const missingRequired: string[] = REQUIRED_FIELDS.filter((field) => {
+    if (field === 'activityType') {
+      return !collectedPreferences.activityType;
+    }
+
+    return !collectedPreferences.location;
+  });
+
+  if (collectedPreferences.activityType === 'sports' && !collectedPreferences.sportType) {
+    missingRequired.unshift('sportType');
+  }
+
   return {
     workflowId: randomUUID(),
     rawInput,
     status: 'collecting',
-    collectedPreferences: {},
-    missingRequired: [...REQUIRED_FIELDS],
+    collectedPreferences,
+    missingRequired,
     round: 0,
     createdAt: now,
     updatedAt: now,
@@ -474,15 +600,17 @@ export function updatePartnerMatchingState(
     updatedAt: new Date(),
   };
 
-  newState.missingRequired = REQUIRED_FIELDS.filter(
-    (field) => {
-      if (field === 'activityType') {
-        return !newState.collectedPreferences.activityType;
-      }
-
-      return !newState.collectedPreferences.timeRange;
+  newState.missingRequired = REQUIRED_FIELDS.filter((field) => {
+    if (field === 'activityType') {
+      return !newState.collectedPreferences.activityType;
     }
-  );
+
+    return !newState.collectedPreferences.location;
+  });
+
+  if (newState.collectedPreferences.activityType === 'sports' && !newState.collectedPreferences.sportType) {
+    newState.missingRequired.unshift('sportType');
+  }
 
   if (newState.missingRequired.length === 0) {
     newState.status = 'searching';
@@ -551,6 +679,10 @@ export function looksLikePartnerAnswer(
 
   if (currentQuestion.field === 'timeRange') {
     return /(今晚|今天|晚上|明天|明晚|周末|周六|周日|下周|八点|8点|九点|9点)/.test(trimmed);
+  }
+
+  if (currentQuestion.field === 'sportType') {
+    return /(羽毛球|篮球|跑步|夜跑|晨跑|健走|网球|游泳|骑行|骑车)/.test(trimmed);
   }
 
   if (currentQuestion.field === 'location') {
@@ -646,8 +778,28 @@ export function parseUserAnswer(
     }
   }
 
+  if (currentQuestion.field === 'sportType') {
+    const sportMap: Record<string, string> = {
+      '羽毛球': 'badminton',
+      '篮球': 'basketball',
+      '跑步': 'running',
+      '夜跑': 'running',
+      '晨跑': 'running',
+      '健走': 'running',
+      '网球': 'tennis',
+      '游泳': 'swimming',
+      '骑行': 'cycling',
+      '骑车': 'cycling',
+    };
+    for (const [keyword, value] of Object.entries(sportMap)) {
+      if (lowerMessage.includes(keyword)) {
+        return { field: 'sportType', value };
+      }
+    }
+  }
+
   if (currentQuestion.field === 'location') {
-  const locations = ['观音桥', '解放碑', '南坪', '沙坪坝', '江北嘴', '杨家坪', '大坪'];
+    const locations = ['观音桥', '解放碑', '南坪', '沙坪坝', '江北嘴', '杨家坪', '大坪'];
     for (const loc of locations) {
       if (message.includes(loc)) {
         return { field: 'location', value: loc };
@@ -668,8 +820,83 @@ export function normalizePartnerActivityType(value: string | undefined): Partner
   return 'other';
 }
 
+export function normalizePartnerSportType(value: string | undefined): PartnerSportType | undefined {
+  if (
+    value === 'badminton'
+    || value === 'basketball'
+    || value === 'running'
+    || value === 'tennis'
+    || value === 'swimming'
+    || value === 'cycling'
+  ) {
+    return value;
+  }
+
+  return undefined;
+}
+
+export function hydratePartnerMatchingStateFromPayload(
+  state: PartnerMatchingState,
+  payload: Record<string, unknown>
+): PartnerMatchingState {
+  const collectedInfo = isRecord(payload.collectedInfo) ? payload.collectedInfo : null;
+  const activityType = readOptionalText(payload.activityType)
+    || readOptionalText(payload.type)
+    || readOptionalText(collectedInfo?.activityType);
+  const sportType = readOptionalText(payload.sportType) || readOptionalText(collectedInfo?.sportType);
+  const timeRange = readOptionalText(payload.timeRange) || readOptionalText(collectedInfo?.timeRange);
+  const location = readOptionalText(payload.location)
+    || readOptionalText(payload.locationName)
+    || readOptionalText(collectedInfo?.location);
+  const description = readOptionalText(payload.description) || readOptionalText(collectedInfo?.description);
+  const preferredGender = readOptionalText(payload.preferredGender) || readOptionalText(collectedInfo?.preferredGender);
+  const preferredAgeRange = readOptionalText(payload.preferredAgeRange) || readOptionalText(collectedInfo?.preferredAgeRange);
+  const tags = Array.from(new Set([
+    ...(state.collectedPreferences.tags || []),
+    ...readStringList(payload.tags),
+    ...readStringList(collectedInfo?.tags),
+  ]));
+
+  const collectedPreferences: PartnerMatchingState['collectedPreferences'] = {
+    ...state.collectedPreferences,
+    ...(activityType ? { activityType: normalizePartnerActivityType(activityType) } : {}),
+    ...(sportType ? { sportType: normalizePartnerSportType(sportType) } : {}),
+    ...(timeRange ? { timeRange } : {}),
+    ...(location ? { location } : {}),
+    ...(description ? { description } : {}),
+    ...(preferredGender ? { preferredGender } : {}),
+    ...(preferredAgeRange ? { preferredAgeRange } : {}),
+    ...(tags.length > 0 ? { tags } : {}),
+  };
+
+  const missingRequired: string[] = REQUIRED_FIELDS.filter((field) => {
+    if (field === 'activityType') {
+      return !collectedPreferences.activityType;
+    }
+
+    return !collectedPreferences.location;
+  });
+
+  if (collectedPreferences.activityType === 'sports' && !collectedPreferences.sportType) {
+    missingRequired.unshift('sportType');
+  }
+
+  return {
+    ...state,
+    collectedPreferences,
+    missingRequired,
+    status: missingRequired.length === 0 ? 'searching' : 'collecting',
+    updatedAt: new Date(),
+  };
+}
+
 export function getPartnerActivityTypeLabel(value: string | undefined): string {
   return PARTNER_ACTIVITY_LABELS[normalizePartnerActivityType(value)] || '其他';
+}
+
+export function getPartnerSportTypeLabel(value: string | undefined): string {
+  const normalized = normalizePartnerSportType(value);
+  return normalized ? PARTNER_SPORT_LABELS[normalized] : '';
 }
 
 export function getPartnerTimeLabel(value: string | undefined): string {
@@ -685,11 +912,138 @@ export function getPartnerTimeLabel(value: string | undefined): string {
   }
 }
 
+export function buildPartnerWorkflowIntroText(state: PartnerMatchingState): string {
+  const resolvedTypeLabel = state.collectedPreferences.activityType === 'sports'
+    ? getPartnerSportTypeLabel(state.collectedPreferences.sportType)
+      || getPartnerActivityTypeLabel(state.collectedPreferences.activityType)
+    : getPartnerActivityTypeLabel(state.collectedPreferences.activityType);
+  const resolvedLocationLabel = state.collectedPreferences.location?.trim() || '';
+
+  if (resolvedTypeLabel && resolvedLocationLabel) {
+    return `你想找${resolvedLocationLabel}附近的${resolvedTypeLabel}搭子，我先按这个方向帮你收窄。`;
+  }
+
+  if (resolvedTypeLabel) {
+    return `我先按${resolvedTypeLabel}搭子这个方向帮你收窄，再补一个最关键的条件。`;
+  }
+
+  if (resolvedLocationLabel) {
+    return `我先按${resolvedLocationLabel}附近帮你找搭子，再补一个最关键的条件。`;
+  }
+
+  return '我先按你刚才说的方向帮你收窄，再补一个最关键的条件。';
+}
+
+function resolvePartnerQuestionType(field: string): 'location' | 'time' | 'type' {
+  if (field === 'location') {
+    return 'location';
+  }
+
+  if (field === 'timeRange') {
+    return 'time';
+  }
+
+  return 'type';
+}
+
+export function buildPartnerAskPreferencePayload(
+  state: PartnerMatchingState
+): PartnerAskPreferencePayload | null {
+  const nextQuestion = getNextQuestion(state);
+  if (!nextQuestion) {
+    return null;
+  }
+
+  return {
+    status: 'collecting',
+    questionType: resolvePartnerQuestionType(nextQuestion.field),
+    question: nextQuestion.question,
+    options: nextQuestion.options.map((option) => ({
+      label: option.label,
+      value: option.value,
+      action: 'find_partner',
+      params: {
+        rawInput: state.rawInput,
+        collectedInfo: state.collectedPreferences,
+        ...(nextQuestion.field === 'location'
+          ? {
+              location: option.value,
+              locationName: option.label,
+            }
+          : {}),
+        ...(nextQuestion.field === 'activityType'
+          ? {
+              activityType: option.value,
+            }
+          : {}),
+        ...(nextQuestion.field === 'sportType'
+          ? {
+              activityType: 'sports',
+              sportType: option.value,
+            }
+          : {}),
+        ...(nextQuestion.field === 'timeRange'
+          ? {
+              timeRange: option.value,
+              slot: option.value,
+            }
+          : {}),
+      },
+    })),
+    allowSkip: true,
+    collectedInfo: state.collectedPreferences,
+  };
+}
+
+export function buildPartnerSearchPayloadFromState(
+  state: PartnerMatchingState
+): Record<string, unknown> {
+  return {
+    rawInput: state.rawInput,
+    ...(state.collectedPreferences.activityType ? { activityType: state.collectedPreferences.activityType } : {}),
+    ...(state.collectedPreferences.sportType ? { sportType: state.collectedPreferences.sportType } : {}),
+    ...(state.collectedPreferences.timeRange ? { timeRange: state.collectedPreferences.timeRange } : {}),
+    ...(state.collectedPreferences.location ? { location: state.collectedPreferences.location } : {}),
+    ...(state.collectedPreferences.description ? { description: state.collectedPreferences.description } : {}),
+    ...(state.collectedPreferences.preferredGender ? { preferredGender: state.collectedPreferences.preferredGender } : {}),
+    ...(state.collectedPreferences.preferredAgeRange ? { preferredAgeRange: state.collectedPreferences.preferredAgeRange } : {}),
+  };
+}
+
+export function shouldRenderPartnerIntentFormFromPayload(
+  payload: Record<string, unknown>
+): boolean {
+  const renderMode = readOptionalText(payload.renderMode);
+  const partnerStage = readOptionalText(payload.partnerStage);
+  return renderMode === 'full-form' || partnerStage === 'refine_form' || partnerStage === 'intent_pool';
+}
+
+export function resolvePartnerFormStageFromPayload(
+  payload: Record<string, unknown>
+): PartnerFormStage | undefined {
+  const partnerStage = readOptionalText(payload.partnerStage);
+  if (partnerStage === 'refine_form' || partnerStage === 'intent_pool') {
+    return partnerStage;
+  }
+
+  if (readOptionalText(payload.renderMode) === 'full-form') {
+    return 'refine_form';
+  }
+
+  return undefined;
+}
+
 export function buildPartnerIntentPayload(
   state: PartnerMatchingState,
   fallbackLocationHint: string
 ): PartnerIntentDraftPayload {
   const normalizedType = normalizePartnerActivityType(state.collectedPreferences.activityType);
+  const sportType = typeof state.collectedPreferences.sportType === 'string'
+    ? state.collectedPreferences.sportType.trim()
+    : '';
+  const sportLabel = sportType && sportType in PARTNER_SPORT_LABELS
+    ? PARTNER_SPORT_LABELS[sportType as PartnerSportType]
+    : '';
   const timePreference = state.collectedPreferences.timeRange
     ? getPartnerTimeLabel(state.collectedPreferences.timeRange)
     : undefined;
@@ -702,12 +1056,13 @@ export function buildPartnerIntentPayload(
   const rawInput = state.rawInput.trim() || [
     timePreference ? `${timePreference}` : '',
     state.collectedPreferences.location || fallbackLocationHint,
-    `${getPartnerActivityTypeLabel(normalizedType)}搭子`,
+    sportLabel ? `${sportLabel}搭子` : `${getPartnerActivityTypeLabel(normalizedType)}搭子`,
   ].filter(Boolean).join(' ');
 
   return {
     rawInput,
     activityType: normalizedType,
+    ...(sportType ? { sportType: sportType as PartnerSportType } : {}),
     locationHint: state.collectedPreferences.location?.trim() || fallbackLocationHint,
     ...(timePreference ? { timePreference } : {}),
     tags,

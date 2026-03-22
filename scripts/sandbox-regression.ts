@@ -1191,7 +1191,7 @@ async function scenarioAiLocationFollowupFlow(context: ScenarioContext): Promise
   return { name: 'ai-location-followup-flow', passed: true, details };
 }
 
-async function scenarioAiPartnerIntentFormFlow(context: ScenarioContext): Promise<ScenarioResult> {
+async function scenarioAiPartnerSearchBootstrapFlow(context: ScenarioContext): Promise<ScenarioResult> {
   const [user] = context.users;
   const details: string[] = [];
 
@@ -1214,52 +1214,19 @@ async function scenarioAiPartnerIntentFormFlow(context: ScenarioContext): Promis
   assert(typeof firstTurn.conversationId === 'string' && firstTurn.conversationId.length > 0, '找搭子首轮未返回 conversationId');
   assertNoLeakedToolText(firstTurn.turn.blocks, '找搭子首轮');
   assert(hasTextContent(firstTurn.turn.blocks), `找搭子首轮缺少说明文本: ${JSON.stringify(firstTurn.turn.blocks)}`);
-
-  const formBlock = findBlock(firstTurn.turn.blocks, 'form');
-  assert(formBlock, `找搭子首轮未返回 form block: ${JSON.stringify(firstTurn.turn.blocks)}`);
-  assert(formBlock.schema && typeof formBlock.schema === 'object', '找搭子 form block 缺少 schema');
-
-  const formSchema = formBlock.schema as Record<string, unknown>;
-  assert(formSchema.formType === 'partner_intent', `找搭子 formType 异常: ${JSON.stringify(formSchema)}`);
-  assert(formSchema.submitAction === 'submit_partner_intent_form', `找搭子 submitAction 异常: ${JSON.stringify(formSchema)}`);
-  assert(Array.isArray(formSchema.fields) && formSchema.fields.length >= 5, '找搭子表单字段数量异常');
-
-  const firstInitialValues = formBlock.initialValues as Record<string, unknown> | undefined;
-  assert(firstInitialValues?.activityType === 'boardgame', `找搭子默认类型异常: ${JSON.stringify(firstInitialValues)}`);
-  assert(firstInitialValues?.location === '观音桥', `找搭子默认位置异常: ${JSON.stringify(firstInitialValues)}`);
-
-  const secondTurn = await postAiAction({
-    user,
-    action: 'submit_partner_intent_form',
-    conversationId: firstTurn.conversationId,
-    displayText: '提交找搭子偏好',
-    payload: {
-      rawInput: '观音桥周围有人打麻将没得？',
-      activityType: 'boardgame',
-      timeRange: 'tonight',
-      location: '观音桥',
-      budgetType: 'AA',
-      tags: ['Quiet'],
-      note: '三缺一，能接受新手',
-      lat: 29.563009,
-      lng: 106.551556,
-    },
-  });
-
-  assertNoLeakedToolText(secondTurn.turn.blocks, '找搭子提交');
-  assert(hasVisibleFeedback(secondTurn.turn.blocks), `找搭子提交后缺少可见反馈: ${JSON.stringify(secondTurn.turn.blocks)}`);
-
-  const ctaBlock = findBlock(secondTurn.turn.blocks, 'cta-group');
-  assert(ctaBlock && Array.isArray(ctaBlock.items) && ctaBlock.items.length > 0, `找搭子提交后缺少 cta-group: ${JSON.stringify(secondTurn.turn.blocks)}`);
   assert(
-    ctaBlock.items.some((item) => item.action === 'explore_nearby' || item.action === 'find_partner'),
-    `找搭子提交后的后续动作异常: ${JSON.stringify(ctaBlock.items)}`
+    !firstTurn.turn.blocks.some((block) => block.type === 'form' && block.dedupeKey === 'partner_intent_form'),
+    `找搭子首轮不应再返回完整 form: ${JSON.stringify(firstTurn.turn.blocks)}`
+  );
+  assert(
+    firstTurn.turn.blocks.some((block) => block.type === 'text' || block.type === 'choice' || block.type === 'list'),
+    `找搭子首轮未返回轻问或搜索结果: ${JSON.stringify(firstTurn.turn.blocks)}`
   );
 
-  details.push(`会话 ${firstTurn.conversationId} 首轮返回正文 + partner_intent form`);
-  details.push('提交表单后返回文本反馈和后续 CTA，没有再走纯文字问卷');
+  details.push(`会话 ${firstTurn.conversationId} 首轮已走 search-first 链路，没有再直接弹完整搭子表单`);
+  details.push('当前验收点改为：先给文本说明，再返回轻问 choice 或搜索结果 list，显式入池另走单独动作');
 
-  return { name: 'ai-partner-intent-form-flow', passed: true, details };
+  return { name: 'ai-partner-search-bootstrap-flow', passed: true, details };
 }
 
 async function scenarioAiDraftSettingsFormFlow(context: ScenarioContext): Promise<ScenarioResult> {
@@ -1505,6 +1472,210 @@ async function scenarioAiAccessFlow(context: ScenarioContext): Promise<ScenarioR
   return { name: 'ai-access-flow', passed: true, details };
 }
 
+async function scenarioAiLongConversationFlow(context: ScenarioContext): Promise<ScenarioResult> {
+  const [user] = context.users;
+  const details: string[] = [];
+
+  const steps = [
+    { text: '周末附近有什么活动', expectedBlocks: ['text', 'choice'] },
+    { text: '观音桥', expectedBlocks: ['text', 'choice'] },
+    { text: '桌游', expectedBlocks: ['text', 'list'] },
+    { text: '帮我组一个吧', expectedBlocks: ['text', 'entity-card', 'cta-group'] },
+    { text: '改下时间', expectedBlocks: ['text', 'form'] },
+    { text: '确认发布', expectedBlocks: ['text', 'alert', 'entity-card', 'cta-group'] },
+    { text: '帮我找同类搭子', expectedBlocks: ['text', 'choice'] },
+    { text: '运动', expectedBlocks: ['text', 'choice'] },
+    { text: '羽毛球', expectedBlocks: ['text', 'choice'] },
+    { text: '周六晚上', expectedBlocks: ['text', 'list'] },
+  ];
+
+  let conversationId: string | null = null;
+
+  for (let index = 0; index < steps.length; index++) {
+    const step = steps[index];
+    const turn = await postAiChat({
+      user,
+      text: step.text,
+      conversationId: conversationId || undefined,
+    });
+
+    assert(typeof turn.conversationId === 'string', `长对话 turn${index + 1} 未返回 conversationId`);
+    assertNoLeakedToolText(turn.turn.blocks, `长对话 turn${index + 1}`);
+    assert(turn.turn.blocks.length > 0, `长对话 turn${index + 1} 返回空 blocks`);
+
+    if (conversationId) {
+      assert(turn.conversationId === conversationId, `长对话 turn${index + 1} conversationId 漂移`);
+    }
+
+    conversationId = turn.conversationId;
+    const blockTypes = turn.turn.blocks.map((b) => b.type);
+    details.push(`turn${index + 1}=[${blockTypes.join(',')}]`);
+  }
+
+  const messages = await getAiConversations(user);
+  assert(messages.items.some((item) => item.id === conversationId), '长对话未持久化到会话列表');
+
+  details.push(`会话 ${conversationId} 完成 ${steps.length} 轮长对话`);
+  return { name: 'ai-long-conversation-flow', passed: true, details };
+}
+
+async function scenarioAiTransientContextFlow(context: ScenarioContext): Promise<ScenarioResult> {
+  const [user] = context.users;
+  const details: string[] = [];
+
+  const firstTurn = await postAiChat({ user, text: '周末附近有什么活动' });
+  assert(typeof firstTurn.conversationId === 'string', 'transient context 首轮未返回 conversationId');
+  const conversationId = firstTurn.conversationId;
+
+  const locationTurn = await postAiChat({ user, text: '观音桥', conversationId });
+  assertNoLeakedToolText(locationTurn.turn.blocks, 'transient context 位置');
+
+  const typeTurn = await postAiChat({ user, text: '桌游', conversationId });
+  assertNoLeakedToolText(typeTurn.turn.blocks, 'transient context 类型');
+
+  const partnerTurn = await postAiChat({ user, text: '帮我找同类搭子', conversationId });
+  assertNoLeakedToolText(partnerTurn.turn.blocks, 'transient context 转找搭子');
+
+  const sportTurn = await postAiChat({ user, text: '羽毛球', conversationId });
+  assertNoLeakedToolText(sportTurn.turn.blocks, 'transient context 运动类型');
+
+  const timeTurn = await postAiChat({ user, text: '周六晚上', conversationId });
+  assertNoLeakedToolText(timeTurn.turn.blocks, 'transient context 时间');
+
+  details.push(`会话 ${conversationId} 通过 transient context 完成多轮追问`);
+  details.push('位置、类型、运动、时间在多轮对话中被正确保持');
+
+  return { name: 'ai-transient-context-flow', passed: true, details };
+}
+
+async function scenarioAiMultiIntentCrossFlow(context: ScenarioContext): Promise<ScenarioResult> {
+  const [user] = context.users;
+  const details: string[] = [];
+
+  await cleanupSandboxAgentTasks([user]);
+
+  const createTurn = await postAiAction({
+    user,
+    action: 'create_activity',
+    displayText: '先创建草稿',
+    payload: {
+      title: '多意图测试局',
+      type: 'boardgame',
+      activityType: '桌游',
+      locationName: '观音桥',
+      location: '观音桥',
+      description: '测试多意图交叉',
+      maxParticipants: 6,
+    },
+  });
+  const conversationId = createTurn.conversationId;
+
+  const exploreTurn = await postAiChat({ user, text: '观音桥附近还有什么活动', conversationId });
+  assertNoLeakedToolText(exploreTurn.turn.blocks, '多意图交叉探索');
+
+  const partnerTurn = await postAiChat({ user, text: '帮我找个运动搭子', conversationId });
+  assertNoLeakedToolText(partnerTurn.turn.blocks, '多意图交叉找搭子');
+
+  const refineTurn = await postAiChat({ user, text: '羽毛球', conversationId });
+  assertNoLeakedToolText(refineTurn.turn.blocks, '多意图交叉细化');
+
+  const manageTurn = await postAiChat({ user, text: '我草稿箱里那个活动能改时间吗', conversationId });
+  assertNoLeakedToolText(manageTurn.turn.blocks, '多意图交叉管理');
+
+  details.push(`会话 ${conversationId} 完成 创建->探索->找搭子->管理 多意图交叉`);
+  return { name: 'ai-multi-intent-cross-flow', passed: true, details };
+}
+
+async function scenarioAiAnonymousLongFlow(context: ScenarioContext): Promise<ScenarioResult> {
+  const details: string[] = [];
+
+  const steps = [
+    '周末附近有什么活动',
+    '观音桥',
+    '桌游',
+    '换个关键词重搜',
+    '那解放碑呢',
+    '帮我组一个周六晚上的局',
+    '人数改成8人',
+  ];
+
+  let conversationId: string | null = null;
+
+  for (let index = 0; index < steps.length; index++) {
+    const turn = await postAiChat({
+      text: steps[index],
+      conversationId: conversationId || undefined,
+    });
+
+    assert(typeof turn.conversationId === 'string', `匿名长对话 turn${index + 1} 未返回 conversationId`);
+    assertNoLeakedToolText(turn.turn.blocks, `匿名长对话 turn${index + 1}`);
+
+    conversationId = turn.conversationId;
+  }
+
+  details.push(`匿名会话 ${conversationId} 完成 ${steps.length} 轮对话`);
+  details.push('验证了 transient context 在匿名状态下的保持');
+
+  return { name: 'ai-anonymous-long-flow', passed: true, details };
+}
+
+async function scenarioAiErrorRecoveryFlow(context: ScenarioContext): Promise<ScenarioResult> {
+  const [user] = context.users;
+  const details: string[] = [];
+
+  const invalidTurn = await postAiAction({
+    user,
+    action: 'nonexistent_action',
+    displayText: '测试无效动作',
+    payload: {},
+  });
+  assert(typeof invalidTurn.conversationId === 'string', '错误恢复测试首轮未返回 conversationId');
+  const conversationId = invalidTurn.conversationId;
+
+  const recoveryTurn = await postAiChat({
+    user,
+    text: '帮我组个周五的桌游局',
+    conversationId,
+  });
+  assertNoLeakedToolText(recoveryTurn.turn.blocks, '错误恢复测试恢复对话');
+
+  const emptyResultTurn = await postAiChat({
+    user,
+    text: '火星上有什么活动',
+    conversationId,
+  });
+  assertNoLeakedToolText(emptyResultTurn.turn.blocks, '错误恢复测试空结果');
+
+  const continueTurn = await postAiChat({
+    user,
+    text: '观音桥附近有什么',
+    conversationId,
+  });
+  assertNoLeakedToolText(continueTurn.turn.blocks, '错误恢复测试继续');
+
+  details.push(`会话 ${conversationId} 完成错误恢复序列`);
+  details.push('无效动作->有效输入->空结果->正常继续 全部通过');
+
+  return { name: 'ai-error-recovery-flow', passed: true, details };
+}
+
+async function scenarioAiRapidFireFlow(context: ScenarioContext): Promise<ScenarioResult> {
+  const [user] = context.users;
+  const details: string[] = [];
+
+  const texts = ['你好', '附近有什么', '观音桥', '桌游', '周五晚上', '帮我组一个'];
+  let conversationId: string | null = null;
+
+  for (const text of texts) {
+    const turn = await postAiChat({ user, text, conversationId: conversationId || undefined });
+    assert(typeof turn.conversationId === 'string', `rapid-fire "${text}" 未返回 conversationId`);
+    conversationId = turn.conversationId;
+  }
+
+  details.push(`会话 ${conversationId} 完成 ${texts.length} 轮 rapid-fire 对话`);
+  return { name: 'ai-rapid-fire-flow', passed: true, details };
+}
+
 const scenarios = [
   scenarioBasicDiscussionFlow,
   scenarioCapacityLimit,
@@ -1516,9 +1687,16 @@ const scenarios = [
   scenarioAiExploreWithoutLocationFlow,
   scenarioAiLocationFollowupFlow,
   scenarioAiJoinAuthResumeDiscussionFlow,
-  scenarioAiPartnerIntentFormFlow,
+  scenarioAiPartnerSearchBootstrapFlow,
   scenarioAiDraftSettingsFormFlow,
   scenarioAiAccessFlow,
+  // v5.5: 新增长对话链路场景
+  scenarioAiLongConversationFlow,
+  scenarioAiTransientContextFlow,
+  scenarioAiMultiIntentCrossFlow,
+  scenarioAiAnonymousLongFlow,
+  scenarioAiErrorRecoveryFlow,
+  scenarioAiRapidFireFlow,
 ];
 
 async function main() {

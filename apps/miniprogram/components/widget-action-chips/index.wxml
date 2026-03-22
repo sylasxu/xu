@@ -1,0 +1,13 @@
+<view class="widget-action-chips {{(disabled || isSubmitting) ? 'widget--disabled' : ''}}">
+  <view class="chips-section">
+    <view
+      wx:for="{{items}}"
+      wx:key="label"
+      class="chip-btn btn-pressable {{(disabled || isSubmitting) ? 'chip-btn--disabled' : ''}}"
+      data-item="{{item}}"
+      bindtap="onTap"
+    >
+      <text class="chip-label">{{item.label}}</text>
+    </view>
+  </view>
+</view>

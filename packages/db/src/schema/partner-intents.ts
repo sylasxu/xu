@@ -8,12 +8,13 @@ import { createInsertSchema, createSelectSchema } from "drizzle-typebox";
  * 搭子意向表 (v4.0 Smart Broker)
  * 
  * 存储用户的找搭子意向，经过 Agent 追问澄清后入库
- * metaData 包含 Rich Intent：tags, poiPreference, budgetType, rawInput
+ * metaData 包含 Rich Intent：tags, sportType, poiPreference, budgetType, rawInput
  */
 
 // Rich Intent 元数据类型
 export interface PartnerIntentMetaData {
   tags: string[];              // ["AA", "NoAlcohol", "Quiet", "GirlFriendly"]
+  sportType?: "badminton" | "basketball" | "running" | "tennis" | "swimming" | "cycling";
   poiPreference?: string;      // "朱光玉" (具体店铺)
   budgetType?: "AA" | "Treat" | "Free";
   rawInput: string;            // 原始用户输入

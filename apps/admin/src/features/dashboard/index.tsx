@@ -304,12 +304,12 @@ export function Dashboard() {
               </Link>
 
               <Link 
-                to="/growth/poster" 
+                to="/content" 
                 className="flex flex-col items-center p-4 bg-muted/50 rounded-lg hover:bg-muted transition-colors"
               >
                 <TrendingUp className='h-8 w-8 mb-2 text-primary' />
-                <span className='text-sm font-medium'>文案工厂</span>
-                <span className='text-xs text-muted-foreground'>生成素材</span>
+                <span className='text-sm font-medium'>内容运营</span>
+                <span className='text-xs text-muted-foreground'>继续做内容</span>
               </Link>
             </div>
           </CardContent>

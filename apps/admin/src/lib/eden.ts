@@ -34,6 +34,65 @@ export const auth = {
   isAuthenticated: () => !!localStorage.getItem('admin_token'),
 }
 
+function normalizeAdminApiErrorMessage(message: string): string {
+  const normalized = message.trim()
+  const lowerCased = normalized.toLowerCase()
+
+  if (
+    lowerCased.includes('no object generated')
+    || lowerCased.includes('could not parse the response')
+    || lowerCased.includes('response did not match schema')
+  ) {
+    return 'AI 这次回包格式不太对，内容还没整理出来，稍后再试一次吧～'
+  }
+
+  if (
+    lowerCased.includes('invalid api key')
+    || lowerCased.includes('incorrect api key')
+    || lowerCased.includes('authentication')
+    || lowerCased.includes('unauthorized')
+    || lowerCased.includes('invalid_api_key')
+  ) {
+    return 'OpenAI / sub2api 鉴权失败，请检查当前 API Key 是否有效。'
+  }
+
+  if (
+    lowerCased.includes('free tier of the model has been exhausted')
+    || (lowerCased.includes('use free tier only') && lowerCased.includes('management console'))
+  ) {
+    return '当前上游模型的免费额度已经用完了。去服务商控制台关闭“仅使用免费额度”，或者切到可用模型后再试。'
+  }
+
+  if (
+    lowerCased.includes('insufficient_quota')
+    || lowerCased.includes('quota exceeded')
+    || lowerCased.includes('exceeded your current quota')
+    || lowerCased.includes('billing')
+    || lowerCased.includes('credit balance')
+    || lowerCased.includes('balance is not enough')
+  ) {
+    return 'OpenAI / sub2api 账户余额或账单状态异常，请检查上游账号后再试。'
+  }
+
+  if (
+    lowerCased.includes('rate limit')
+    || lowerCased.includes('too many requests')
+    || lowerCased.includes('429')
+  ) {
+    return 'OpenAI / sub2api 请求过于频繁，请稍后再试。'
+  }
+
+  if (
+    lowerCased.includes('model not found')
+    || lowerCased.includes('does not exist')
+    || lowerCased.includes('unknown model')
+  ) {
+    return '当前模型在 OpenAI / sub2api 不可用，请检查模型 ID。'
+  }
+
+  return normalized
+}
+
 /**
  * 统一的 API 响应处理器
  * Eden Treaty 返回 { data, error, status } 格式
@@ -88,10 +147,12 @@ export async function unwrap<T>(
       }
     }
     
+    const normalizedErrorMsg = normalizeAdminApiErrorMessage(errorMsg)
+
     // 显示错误提示
-    toast.error(errorMsg)
+    toast.error(normalizedErrorMsg)
     
-    throw new Error(errorMsg)
+    throw new Error(normalizedErrorMsg)
   }
   
   return response.data

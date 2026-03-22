@@ -9,7 +9,7 @@
 import { t } from 'elysia';
 import { tool, jsonSchema } from 'ai';
 import { toJsonSchema } from '@juchang/utils';
-import { db, users, partnerIntents, eq, and, sql } from '@juchang/db';
+import { db, users, partnerIntents, eq, and, desc, not, sql, type PartnerIntent } from '@juchang/db';
 import { detectMatchesForIntent, getPendingMatchesForUser, confirmMatch as confirmMatchService } from './partner-match';
 import { recordPartnerTaskIntentPosted } from '../task-runtime/agent-task.service';
 
@@ -24,10 +24,20 @@ const activityTypeSchema = t.Union([
   t.Literal('other'),
 ], { description: '活动类型' });
 
+const sportTypeSchema = t.Union([
+  t.Literal('badminton'),
+  t.Literal('basketball'),
+  t.Literal('running'),
+  t.Literal('tennis'),
+  t.Literal('swimming'),
+  t.Literal('cycling'),
+], { description: '运动细分类型' });
+
 /** 创建搭子意向参数 */
 const createPartnerIntentSchema = t.Object({
   rawInput: t.String({ description: '用户原始输入' }),
   activityType: activityTypeSchema,
+  sportType: t.Optional(sportTypeSchema),
   locationHint: t.String({ description: '地点提示: 观音桥/解放碑' }),
   timePreference: t.Optional(t.String({ description: '时间偏好: 今晚/周末/明天下午' })),
   tags: t.Array(t.String(), { description: '偏好标签: ["AA", "NoAlcohol", "Quiet"]' }),
@@ -55,6 +65,55 @@ export type CreatePartnerIntentParams = typeof createPartnerIntentSchema.static;
 export type CancelIntentParams = typeof cancelIntentSchema.static;
 export type ConfirmMatchParams = typeof confirmMatchSchema.static;
 
+export interface SearchPartnerCandidatesParams {
+  rawInput: string;
+  activityType: CreatePartnerIntentParams['activityType'];
+  sportType?: CreatePartnerIntentParams['sportType'];
+  locationHint: string;
+  timePreference?: string;
+  description: string;
+  preferredGender?: string;
+  preferredAgeRange?: string;
+  limit?: number;
+}
+
+export interface SearchPartnerCandidate {
+  intentId: string;
+  userId: string;
+  nickname: string;
+  avatarUrl: string | null;
+  typeName: string;
+  locationHint: string;
+  timePreference: string | null;
+  summary: string;
+  matchReason: string;
+  score: number;
+  tags: string[];
+}
+
+export type SearchPartnerCandidatesResult =
+  | {
+      success: true;
+      items: SearchPartnerCandidate[];
+      total: number;
+    }
+  | {
+      success: false;
+      error: string;
+    };
+
+export type EnsureSearchDrivenPartnerIntentResult =
+  | {
+      success: true;
+      intent: PartnerIntent;
+      created: boolean;
+    }
+  | {
+      success: false;
+      error: string;
+      requireAuth?: boolean;
+    };
+
 export type CreatePartnerIntentResult =
   | {
       success: true;
@@ -80,6 +139,159 @@ const TYPE_NAMES: Record<string, string> = {
   boardgame: '桌游',
   other: '其他',
 };
+
+const SPORT_TYPE_NAMES: Record<string, string> = {
+  badminton: '羽毛球',
+  basketball: '篮球',
+  running: '跑步',
+  tennis: '网球',
+  swimming: '游泳',
+  cycling: '骑行',
+};
+
+function getPartnerIntentTypeName(activityType: string, sportType?: string): string {
+  if (activityType === 'sports' && sportType && SPORT_TYPE_NAMES[sportType]) {
+    return SPORT_TYPE_NAMES[sportType];
+  }
+
+  return TYPE_NAMES[activityType] || activityType;
+}
+
+function normalizeSearchText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[，。！？、,.!?\-_/\\()[\]{}:：;；'"`~]/g, '');
+}
+
+function extractSearchTokens(value: string): string[] {
+  const matches = value.match(/[\u4e00-\u9fff]{2,}|[a-zA-Z0-9]+/g) || [];
+  return Array.from(new Set(matches.map((item) => item.trim().toLowerCase()).filter(Boolean)));
+}
+
+function calculatePartnerSearchScore(params: {
+  query: SearchPartnerCandidatesParams;
+  candidate: typeof partnerIntents.$inferSelect;
+}): { score: number; reasons: string[] } {
+  const { query, candidate } = params;
+  let score = 35;
+  const reasons: string[] = [];
+  const candidateTags = Array.isArray(candidate.metaData?.tags) ? candidate.metaData.tags : [];
+  const candidateRawInput = typeof candidate.metaData?.rawInput === 'string' ? candidate.metaData.rawInput : '';
+  const queryDescription = `${query.description} ${query.rawInput}`.trim();
+  const queryTokens = extractSearchTokens(queryDescription);
+  const candidateTokens = extractSearchTokens(`${candidateRawInput} ${candidate.locationHint} ${candidate.timePreference || ''} ${candidateTags.join(' ')}`);
+  const normalizedQueryLocation = normalizeSearchText(query.locationHint);
+  const normalizedCandidateLocation = normalizeSearchText(candidate.locationHint);
+
+  if (query.activityType === 'sports' && query.sportType) {
+    if (candidate.metaData?.sportType === query.sportType) {
+      score += 18;
+      reasons.push(`都想找${getPartnerIntentTypeName('sports', query.sportType)}搭子`);
+    } else {
+      score -= 12;
+    }
+  }
+
+  if (query.timePreference && candidate.timePreference && query.timePreference === candidate.timePreference) {
+    score += 16;
+    reasons.push(`时间都偏向${query.timePreference}`);
+  }
+
+  if (
+    normalizedQueryLocation &&
+    normalizedCandidateLocation &&
+    (
+      normalizedCandidateLocation.includes(normalizedQueryLocation)
+      || normalizedQueryLocation.includes(normalizedCandidateLocation)
+    )
+  ) {
+    score += 14;
+    reasons.push(`都提到${candidate.locationHint}附近更方便`);
+  }
+
+  const overlapCount = queryTokens.filter((token) => candidateTokens.includes(token)).length;
+  if (overlapCount > 0) {
+    score += Math.min(18, overlapCount * 5);
+    reasons.push('描述里有相近偏好');
+  }
+
+  if (candidateTags.length > 0) {
+    score += Math.min(10, candidateTags.length * 2);
+  }
+
+  return {
+    score: Math.max(0, Math.min(100, score)),
+    reasons: reasons.slice(0, 2),
+  };
+}
+
+export async function searchPartnerCandidates(
+  userId: string | null,
+  params: SearchPartnerCandidatesParams
+): Promise<SearchPartnerCandidatesResult> {
+  try {
+    const rows = await db
+      .select({
+        intent: partnerIntents,
+        nickname: users.nickname,
+        avatarUrl: users.avatarUrl,
+      })
+      .from(partnerIntents)
+      .innerJoin(users, eq(partnerIntents.userId, users.id))
+      .where(and(
+        eq(partnerIntents.status, 'active'),
+        eq(partnerIntents.activityType, params.activityType),
+        ...(userId ? [not(eq(partnerIntents.userId, userId))] : []),
+      ))
+      .orderBy(desc(partnerIntents.updatedAt))
+      .limit(Math.max(6, Math.min(params.limit ?? 12, 24)));
+
+    const scored = rows
+      .filter((row) => {
+        if (params.activityType !== 'sports' || !params.sportType) {
+          return true;
+        }
+
+        return row.intent.metaData?.sportType === params.sportType;
+      })
+      .map((row) => {
+        const { score, reasons } = calculatePartnerSearchScore({
+          query: params,
+          candidate: row.intent,
+        });
+        const typeName = getPartnerIntentTypeName(row.intent.activityType, row.intent.metaData?.sportType);
+        const summary = typeof row.intent.metaData?.rawInput === 'string' && row.intent.metaData.rawInput.trim()
+          ? row.intent.metaData.rawInput.trim()
+          : `想找${typeName}搭子`;
+
+        return {
+          intentId: row.intent.id,
+          userId: row.intent.userId,
+          nickname: row.nickname?.trim() || '匿名搭子',
+          avatarUrl: row.avatarUrl ?? null,
+          typeName: `${typeName}搭子`,
+          locationHint: row.intent.locationHint,
+          timePreference: row.intent.timePreference || null,
+          summary,
+          matchReason: reasons.join(' · ') || '你们想找的是同一类搭子',
+          score,
+          tags: Array.isArray(row.intent.metaData?.tags) ? row.intent.metaData.tags.slice(0, 3) : [],
+        } satisfies SearchPartnerCandidate;
+      })
+      .sort((left, right) => right.score - left.score)
+      .slice(0, Math.max(1, Math.min(params.limit ?? 6, 12)));
+
+    return {
+      success: true,
+      items: scored,
+      total: scored.length,
+    };
+  } catch (error) {
+    console.error('[searchPartnerCandidates] Error:', error);
+    return { success: false, error: '搜索搭子失败，请稍后再试' };
+  }
+}
 
 // ============ Service 函数 ============
 
@@ -118,6 +330,9 @@ export async function createPartnerIntent(
         .map(tag => tag.trim())
         .filter(Boolean)
     ));
+    const normalizedSportType: CreatePartnerIntentParams['sportType'] = params.activityType === 'sports'
+      ? params.sportType
+      : undefined;
 
     const [existingIntent] = await db
       .select({ id: partnerIntents.id })
@@ -130,7 +345,10 @@ export async function createPartnerIntent(
       .limit(1);
 
     if (existingIntent) {
-      return { success: false, error: `你已经有一个[${TYPE_NAMES[params.activityType]}]意向在等待匹配了` };
+      return {
+        success: false,
+        error: `你已经有一个[${getPartnerIntentTypeName(params.activityType, normalizedSportType)}]意向在等待匹配了`,
+      };
     }
 
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
@@ -143,9 +361,10 @@ export async function createPartnerIntent(
       timePreference: params.timePreference?.trim() || null,
       metaData: {
         tags: normalizedTags,
+        ...(normalizedSportType ? { sportType: normalizedSportType } : {}),
         poiPreference: params.poiPreference?.trim() || undefined,
         budgetType: params.budgetType,
-        rawInput: params.rawInput.trim() || `想找${TYPE_NAMES[params.activityType]}搭子`,
+        rawInput: params.rawInput.trim() || `想找${getPartnerIntentTypeName(params.activityType, normalizedSportType)}搭子`,
       },
       expiresAt,
       status: 'active',
@@ -156,8 +375,9 @@ export async function createPartnerIntent(
     await recordPartnerTaskIntentPosted({
       userId,
       partnerIntentId: intent.id,
-      rawInput: params.rawInput.trim() || `想找${TYPE_NAMES[params.activityType]}搭子`,
+      rawInput: params.rawInput.trim() || `想找${getPartnerIntentTypeName(params.activityType, normalizedSportType)}搭子`,
       activityType: params.activityType,
+      ...(normalizedSportType ? { sportType: normalizedSportType } : {}),
       locationHint: normalizedLocationHint,
       ...(params.timePreference?.trim() ? { timePreference: params.timePreference.trim() } : {}),
       ...(matchResult ? { intentMatchId: matchResult.id } : {}),
@@ -186,6 +406,107 @@ export async function createPartnerIntent(
     console.error('[createPartnerIntent] Error:', error);
     return { success: false, error: '创建意向失败，请再试一次' };
   }
+}
+
+export async function ensureSearchDrivenPartnerIntent(params: {
+  userId: string | null;
+  userLocation: { lat: number; lng: number } | null;
+  rawInput: string;
+  activityType: CreatePartnerIntentParams['activityType'];
+  sportType?: CreatePartnerIntentParams['sportType'];
+  locationHint: string;
+  timePreference?: string;
+  description?: string;
+}): Promise<EnsureSearchDrivenPartnerIntentResult> {
+  const { userId, userLocation } = params;
+
+  if (!userId) {
+    return { success: false, error: '请先登录', requireAuth: true };
+  }
+
+  if (!userLocation) {
+    return { success: false, error: '需要先获取你的位置，才能继续和对方对接' };
+  }
+
+  const [user] = await db
+    .select({ phoneNumber: users.phoneNumber })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  if (!user?.phoneNumber) {
+    return { success: false, error: '需要先绑定手机号，才能继续和对方对接', requireAuth: true };
+  }
+
+  const normalizedSportType: CreatePartnerIntentParams['sportType'] = params.activityType === 'sports'
+    ? params.sportType
+    : undefined;
+
+  const [existingIntent] = await db
+    .select()
+    .from(partnerIntents)
+    .where(and(
+      eq(partnerIntents.userId, userId),
+      eq(partnerIntents.activityType, params.activityType),
+      eq(partnerIntents.status, 'active')
+    ))
+    .orderBy(desc(partnerIntents.updatedAt))
+    .limit(1);
+
+  if (existingIntent) {
+    const existingSportType = typeof existingIntent.metaData?.sportType === 'string'
+      ? existingIntent.metaData.sportType
+      : undefined;
+
+    if (params.activityType === 'sports' && normalizedSportType && existingSportType && existingSportType !== normalizedSportType) {
+      return {
+        success: false,
+        error: `你已经有一个[${getPartnerIntentTypeName(params.activityType, existingSportType)}]意向在等待匹配了，先处理完它再来找新的吧`,
+      };
+    }
+
+    return {
+      success: true,
+      intent: existingIntent,
+      created: false,
+    };
+  }
+
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const normalizedLocationHint = params.locationHint.trim() || '附近';
+  const rawInput = params.rawInput.trim() || `想找${getPartnerIntentTypeName(params.activityType, normalizedSportType)}搭子`;
+
+  const [intent] = await db.insert(partnerIntents).values({
+    userId,
+    activityType: params.activityType,
+    locationHint: normalizedLocationHint,
+    location: sql`ST_SetSRID(ST_MakePoint(${userLocation.lng}, ${userLocation.lat}), 4326)`,
+    timePreference: params.timePreference?.trim() || null,
+    metaData: {
+      tags: [],
+      ...(normalizedSportType ? { sportType: normalizedSportType } : {}),
+      ...(params.description?.trim() ? { poiPreference: params.description.trim() } : {}),
+      rawInput,
+    },
+    expiresAt,
+    status: 'active',
+  }).returning();
+
+  await recordPartnerTaskIntentPosted({
+    userId,
+    partnerIntentId: intent.id,
+    rawInput,
+    activityType: params.activityType,
+    ...(normalizedSportType ? { sportType: normalizedSportType } : {}),
+    locationHint: normalizedLocationHint,
+    ...(params.timePreference?.trim() ? { timePreference: params.timePreference.trim() } : {}),
+  });
+
+  return {
+    success: true,
+    intent,
+    created: true,
+  };
 }
 
 // ============ Tool 工厂函数 ============
@@ -229,9 +550,10 @@ export function getMyIntentsTool(userId: string | null) {
         const formattedIntents = intents.map(intent => ({
           id: intent.id,
           type: intent.activityType,
-          typeName: TYPE_NAMES[intent.activityType] || intent.activityType,
+          typeName: getPartnerIntentTypeName(intent.activityType, intent.metaData?.sportType),
           locationHint: intent.locationHint,
           timePreference: intent.timePreference,
+          sportType: intent.metaData?.sportType,
           tags: intent.metaData?.tags || [],
           status: intent.status,
           expiresAt: intent.expiresAt,

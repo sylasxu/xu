@@ -25,6 +25,7 @@ import { Route as AuthenticatedSettingsRouteRouteImport } from './routes/_authen
 import { Route as AuthenticatedUsersIndexRouteImport } from './routes/_authenticated/users/index'
 import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
 import { Route as AuthenticatedHotKeywordsIndexRouteImport } from './routes/_authenticated/hot-keywords/index'
+import { Route as AuthenticatedContentIndexRouteImport } from './routes/_authenticated/content/index'
 import { Route as AuthenticatedAiOpsIndexRouteImport } from './routes/_authenticated/ai-ops/index'
 import { Route as AuthenticatedActivitiesIndexRouteImport } from './routes/_authenticated/activities/index'
 import { Route as AuthenticatedUsersIdRouteImport } from './routes/_authenticated/users/$id'
@@ -34,12 +35,8 @@ import { Route as AuthenticatedSafetyModerationRouteImport } from './routes/_aut
 import { Route as AuthenticatedSafetyActivitiesRouteImport } from './routes/_authenticated/safety/activities'
 import { Route as AuthenticatedHotKeywordsCreateRouteImport } from './routes/_authenticated/hot-keywords/create'
 import { Route as AuthenticatedHotKeywordsAnalyticsRouteImport } from './routes/_authenticated/hot-keywords/analytics'
-import { Route as AuthenticatedGrowthTrendsRouteImport } from './routes/_authenticated/growth/trends'
-import { Route as AuthenticatedGrowthPosterRouteImport } from './routes/_authenticated/growth/poster'
-import { Route as AuthenticatedGrowthLibraryRouteImport } from './routes/_authenticated/growth/library'
-import { Route as AuthenticatedGrowthContentRouteImport } from './routes/_authenticated/growth/content'
-import { Route as AuthenticatedGrowthAnalyticsRouteImport } from './routes/_authenticated/growth/analytics'
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
+import { Route as AuthenticatedContentIdRouteImport } from './routes/_authenticated/content/$id'
 import { Route as AuthenticatedAiOpsUsageRouteImport } from './routes/_authenticated/ai-ops/usage'
 import { Route as AuthenticatedAiOpsPlaygroundRouteImport } from './routes/_authenticated/ai-ops/playground'
 import { Route as AuthenticatedAiOpsConversationsRouteImport } from './routes/_authenticated/ai-ops/conversations'
@@ -131,6 +128,12 @@ const AuthenticatedHotKeywordsIndexRoute =
     path: '/hot-keywords/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedContentIndexRoute =
+  AuthenticatedContentIndexRouteImport.update({
+    id: '/content/',
+    path: '/content/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedAiOpsIndexRoute = AuthenticatedAiOpsIndexRouteImport.update({
   id: '/ai-ops/',
   path: '/ai-ops/',
@@ -183,42 +186,17 @@ const AuthenticatedHotKeywordsAnalyticsRoute =
     path: '/hot-keywords/analytics',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
-const AuthenticatedGrowthTrendsRoute =
-  AuthenticatedGrowthTrendsRouteImport.update({
-    id: '/growth/trends',
-    path: '/growth/trends',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedGrowthPosterRoute =
-  AuthenticatedGrowthPosterRouteImport.update({
-    id: '/growth/poster',
-    path: '/growth/poster',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedGrowthLibraryRoute =
-  AuthenticatedGrowthLibraryRouteImport.update({
-    id: '/growth/library',
-    path: '/growth/library',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedGrowthContentRoute =
-  AuthenticatedGrowthContentRouteImport.update({
-    id: '/growth/content',
-    path: '/growth/content',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedGrowthAnalyticsRoute =
-  AuthenticatedGrowthAnalyticsRouteImport.update({
-    id: '/growth/analytics',
-    path: '/growth/analytics',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
 const AuthenticatedErrorsErrorRoute =
   AuthenticatedErrorsErrorRouteImport.update({
     id: '/errors/$error',
     path: '/errors/$error',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedContentIdRoute = AuthenticatedContentIdRouteImport.update({
+  id: '/content/$id',
+  path: '/content/$id',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedAiOpsUsageRoute = AuthenticatedAiOpsUsageRouteImport.update({
   id: '/ai-ops/usage',
   path: '/ai-ops/usage',
@@ -285,12 +263,8 @@ export interface FileRoutesByFullPath {
   '/ai-ops/conversations': typeof AuthenticatedAiOpsConversationsRouteWithChildren
   '/ai-ops/playground': typeof AuthenticatedAiOpsPlaygroundRoute
   '/ai-ops/usage': typeof AuthenticatedAiOpsUsageRoute
+  '/content/$id': typeof AuthenticatedContentIdRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
-  '/growth/analytics': typeof AuthenticatedGrowthAnalyticsRoute
-  '/growth/content': typeof AuthenticatedGrowthContentRoute
-  '/growth/library': typeof AuthenticatedGrowthLibraryRoute
-  '/growth/poster': typeof AuthenticatedGrowthPosterRoute
-  '/growth/trends': typeof AuthenticatedGrowthTrendsRoute
   '/hot-keywords/analytics': typeof AuthenticatedHotKeywordsAnalyticsRoute
   '/hot-keywords/create': typeof AuthenticatedHotKeywordsCreateRoute
   '/safety/activities': typeof AuthenticatedSafetyActivitiesRoute
@@ -300,6 +274,7 @@ export interface FileRoutesByFullPath {
   '/users/$id': typeof AuthenticatedUsersIdRoute
   '/activities': typeof AuthenticatedActivitiesIndexRoute
   '/ai-ops': typeof AuthenticatedAiOpsIndexRoute
+  '/content': typeof AuthenticatedContentIndexRoute
   '/hot-keywords': typeof AuthenticatedHotKeywordsIndexRoute
   '/settings/': typeof AuthenticatedSettingsIndexRoute
   '/users': typeof AuthenticatedUsersIndexRoute
@@ -324,12 +299,8 @@ export interface FileRoutesByTo {
   '/ai-ops/conversations': typeof AuthenticatedAiOpsConversationsRouteWithChildren
   '/ai-ops/playground': typeof AuthenticatedAiOpsPlaygroundRoute
   '/ai-ops/usage': typeof AuthenticatedAiOpsUsageRoute
+  '/content/$id': typeof AuthenticatedContentIdRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
-  '/growth/analytics': typeof AuthenticatedGrowthAnalyticsRoute
-  '/growth/content': typeof AuthenticatedGrowthContentRoute
-  '/growth/library': typeof AuthenticatedGrowthLibraryRoute
-  '/growth/poster': typeof AuthenticatedGrowthPosterRoute
-  '/growth/trends': typeof AuthenticatedGrowthTrendsRoute
   '/hot-keywords/analytics': typeof AuthenticatedHotKeywordsAnalyticsRoute
   '/hot-keywords/create': typeof AuthenticatedHotKeywordsCreateRoute
   '/safety/activities': typeof AuthenticatedSafetyActivitiesRoute
@@ -339,6 +310,7 @@ export interface FileRoutesByTo {
   '/users/$id': typeof AuthenticatedUsersIdRoute
   '/activities': typeof AuthenticatedActivitiesIndexRoute
   '/ai-ops': typeof AuthenticatedAiOpsIndexRoute
+  '/content': typeof AuthenticatedContentIndexRoute
   '/hot-keywords': typeof AuthenticatedHotKeywordsIndexRoute
   '/settings': typeof AuthenticatedSettingsIndexRoute
   '/users': typeof AuthenticatedUsersIndexRoute
@@ -366,12 +338,8 @@ export interface FileRoutesById {
   '/_authenticated/ai-ops/conversations': typeof AuthenticatedAiOpsConversationsRouteWithChildren
   '/_authenticated/ai-ops/playground': typeof AuthenticatedAiOpsPlaygroundRoute
   '/_authenticated/ai-ops/usage': typeof AuthenticatedAiOpsUsageRoute
+  '/_authenticated/content/$id': typeof AuthenticatedContentIdRoute
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
-  '/_authenticated/growth/analytics': typeof AuthenticatedGrowthAnalyticsRoute
-  '/_authenticated/growth/content': typeof AuthenticatedGrowthContentRoute
-  '/_authenticated/growth/library': typeof AuthenticatedGrowthLibraryRoute
-  '/_authenticated/growth/poster': typeof AuthenticatedGrowthPosterRoute
-  '/_authenticated/growth/trends': typeof AuthenticatedGrowthTrendsRoute
   '/_authenticated/hot-keywords/analytics': typeof AuthenticatedHotKeywordsAnalyticsRoute
   '/_authenticated/hot-keywords/create': typeof AuthenticatedHotKeywordsCreateRoute
   '/_authenticated/safety/activities': typeof AuthenticatedSafetyActivitiesRoute
@@ -381,6 +349,7 @@ export interface FileRoutesById {
   '/_authenticated/users/$id': typeof AuthenticatedUsersIdRoute
   '/_authenticated/activities/': typeof AuthenticatedActivitiesIndexRoute
   '/_authenticated/ai-ops/': typeof AuthenticatedAiOpsIndexRoute
+  '/_authenticated/content/': typeof AuthenticatedContentIndexRoute
   '/_authenticated/hot-keywords/': typeof AuthenticatedHotKeywordsIndexRoute
   '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
   '/_authenticated/users/': typeof AuthenticatedUsersIndexRoute
@@ -408,12 +377,8 @@ export interface FileRouteTypes {
     | '/ai-ops/conversations'
     | '/ai-ops/playground'
     | '/ai-ops/usage'
+    | '/content/$id'
     | '/errors/$error'
-    | '/growth/analytics'
-    | '/growth/content'
-    | '/growth/library'
-    | '/growth/poster'
-    | '/growth/trends'
     | '/hot-keywords/analytics'
     | '/hot-keywords/create'
     | '/safety/activities'
@@ -423,6 +388,7 @@ export interface FileRouteTypes {
     | '/users/$id'
     | '/activities'
     | '/ai-ops'
+    | '/content'
     | '/hot-keywords'
     | '/settings/'
     | '/users'
@@ -447,12 +413,8 @@ export interface FileRouteTypes {
     | '/ai-ops/conversations'
     | '/ai-ops/playground'
     | '/ai-ops/usage'
+    | '/content/$id'
     | '/errors/$error'
-    | '/growth/analytics'
-    | '/growth/content'
-    | '/growth/library'
-    | '/growth/poster'
-    | '/growth/trends'
     | '/hot-keywords/analytics'
     | '/hot-keywords/create'
     | '/safety/activities'
@@ -462,6 +424,7 @@ export interface FileRouteTypes {
     | '/users/$id'
     | '/activities'
     | '/ai-ops'
+    | '/content'
     | '/hot-keywords'
     | '/settings'
     | '/users'
@@ -488,12 +451,8 @@ export interface FileRouteTypes {
     | '/_authenticated/ai-ops/conversations'
     | '/_authenticated/ai-ops/playground'
     | '/_authenticated/ai-ops/usage'
+    | '/_authenticated/content/$id'
     | '/_authenticated/errors/$error'
-    | '/_authenticated/growth/analytics'
-    | '/_authenticated/growth/content'
-    | '/_authenticated/growth/library'
-    | '/_authenticated/growth/poster'
-    | '/_authenticated/growth/trends'
     | '/_authenticated/hot-keywords/analytics'
     | '/_authenticated/hot-keywords/create'
     | '/_authenticated/safety/activities'
@@ -503,6 +462,7 @@ export interface FileRouteTypes {
     | '/_authenticated/users/$id'
     | '/_authenticated/activities/'
     | '/_authenticated/ai-ops/'
+    | '/_authenticated/content/'
     | '/_authenticated/hot-keywords/'
     | '/_authenticated/settings/'
     | '/_authenticated/users/'
@@ -639,6 +599,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedHotKeywordsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/content/': {
+      id: '/_authenticated/content/'
+      path: '/content'
+      fullPath: '/content'
+      preLoaderRoute: typeof AuthenticatedContentIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/ai-ops/': {
       id: '/_authenticated/ai-ops/'
       path: '/ai-ops'
@@ -702,46 +669,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedHotKeywordsAnalyticsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/growth/trends': {
-      id: '/_authenticated/growth/trends'
-      path: '/growth/trends'
-      fullPath: '/growth/trends'
-      preLoaderRoute: typeof AuthenticatedGrowthTrendsRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/growth/poster': {
-      id: '/_authenticated/growth/poster'
-      path: '/growth/poster'
-      fullPath: '/growth/poster'
-      preLoaderRoute: typeof AuthenticatedGrowthPosterRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/growth/library': {
-      id: '/_authenticated/growth/library'
-      path: '/growth/library'
-      fullPath: '/growth/library'
-      preLoaderRoute: typeof AuthenticatedGrowthLibraryRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/growth/content': {
-      id: '/_authenticated/growth/content'
-      path: '/growth/content'
-      fullPath: '/growth/content'
-      preLoaderRoute: typeof AuthenticatedGrowthContentRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/growth/analytics': {
-      id: '/_authenticated/growth/analytics'
-      path: '/growth/analytics'
-      fullPath: '/growth/analytics'
-      preLoaderRoute: typeof AuthenticatedGrowthAnalyticsRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
     '/_authenticated/errors/$error': {
       id: '/_authenticated/errors/$error'
       path: '/errors/$error'
       fullPath: '/errors/$error'
       preLoaderRoute: typeof AuthenticatedErrorsErrorRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/content/$id': {
+      id: '/_authenticated/content/$id'
+      path: '/content/$id'
+      fullPath: '/content/$id'
+      preLoaderRoute: typeof AuthenticatedContentIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/ai-ops/usage': {
@@ -844,12 +783,8 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedAiOpsConversationsRoute: typeof AuthenticatedAiOpsConversationsRouteWithChildren
   AuthenticatedAiOpsPlaygroundRoute: typeof AuthenticatedAiOpsPlaygroundRoute
   AuthenticatedAiOpsUsageRoute: typeof AuthenticatedAiOpsUsageRoute
+  AuthenticatedContentIdRoute: typeof AuthenticatedContentIdRoute
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
-  AuthenticatedGrowthAnalyticsRoute: typeof AuthenticatedGrowthAnalyticsRoute
-  AuthenticatedGrowthContentRoute: typeof AuthenticatedGrowthContentRoute
-  AuthenticatedGrowthLibraryRoute: typeof AuthenticatedGrowthLibraryRoute
-  AuthenticatedGrowthPosterRoute: typeof AuthenticatedGrowthPosterRoute
-  AuthenticatedGrowthTrendsRoute: typeof AuthenticatedGrowthTrendsRoute
   AuthenticatedHotKeywordsAnalyticsRoute: typeof AuthenticatedHotKeywordsAnalyticsRoute
   AuthenticatedHotKeywordsCreateRoute: typeof AuthenticatedHotKeywordsCreateRoute
   AuthenticatedSafetyActivitiesRoute: typeof AuthenticatedSafetyActivitiesRoute
@@ -857,6 +792,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedUsersIdRoute: typeof AuthenticatedUsersIdRoute
   AuthenticatedActivitiesIndexRoute: typeof AuthenticatedActivitiesIndexRoute
   AuthenticatedAiOpsIndexRoute: typeof AuthenticatedAiOpsIndexRoute
+  AuthenticatedContentIndexRoute: typeof AuthenticatedContentIndexRoute
   AuthenticatedHotKeywordsIndexRoute: typeof AuthenticatedHotKeywordsIndexRoute
   AuthenticatedUsersIndexRoute: typeof AuthenticatedUsersIndexRoute
   AuthenticatedAiOpsSecurityModerationRoute: typeof AuthenticatedAiOpsSecurityModerationRoute
@@ -872,12 +808,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
     AuthenticatedAiOpsConversationsRouteWithChildren,
   AuthenticatedAiOpsPlaygroundRoute: AuthenticatedAiOpsPlaygroundRoute,
   AuthenticatedAiOpsUsageRoute: AuthenticatedAiOpsUsageRoute,
+  AuthenticatedContentIdRoute: AuthenticatedContentIdRoute,
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
-  AuthenticatedGrowthAnalyticsRoute: AuthenticatedGrowthAnalyticsRoute,
-  AuthenticatedGrowthContentRoute: AuthenticatedGrowthContentRoute,
-  AuthenticatedGrowthLibraryRoute: AuthenticatedGrowthLibraryRoute,
-  AuthenticatedGrowthPosterRoute: AuthenticatedGrowthPosterRoute,
-  AuthenticatedGrowthTrendsRoute: AuthenticatedGrowthTrendsRoute,
   AuthenticatedHotKeywordsAnalyticsRoute:
     AuthenticatedHotKeywordsAnalyticsRoute,
   AuthenticatedHotKeywordsCreateRoute: AuthenticatedHotKeywordsCreateRoute,
@@ -886,6 +818,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedUsersIdRoute: AuthenticatedUsersIdRoute,
   AuthenticatedActivitiesIndexRoute: AuthenticatedActivitiesIndexRoute,
   AuthenticatedAiOpsIndexRoute: AuthenticatedAiOpsIndexRoute,
+  AuthenticatedContentIndexRoute: AuthenticatedContentIndexRoute,
   AuthenticatedHotKeywordsIndexRoute: AuthenticatedHotKeywordsIndexRoute,
   AuthenticatedUsersIndexRoute: AuthenticatedUsersIndexRoute,
   AuthenticatedAiOpsSecurityModerationRoute:

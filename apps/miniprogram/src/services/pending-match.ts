@@ -26,6 +26,7 @@ export interface PendingMatchDetailResponse {
   id: string;
   activityType: string;
   typeName: string;
+  requestMode: 'auto_match' | 'connect' | 'group_up';
   matchScore: number;
   commonTags: string[];
   locationHint: string;

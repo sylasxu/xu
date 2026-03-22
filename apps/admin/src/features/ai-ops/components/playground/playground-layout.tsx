@@ -8,6 +8,7 @@
 import { useCallback, useState, useMemo } from 'react'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport } from 'ai'
+import { useAiConfigDetail } from '../../hooks/use-ai-config'
 import { useExecutionTrace } from '../../hooks/use-execution-trace'
 import { FlowTracePanel } from '../flow/flow-trace-panel'
 import { PlaygroundDrawer } from './playground-drawer'
@@ -15,7 +16,18 @@ import { SessionStatsBar } from './session-stats-bar'
 import { RoundSelector } from './round-selector'
 import type { MockSettings } from './mock-settings-panel'
 import type { FlowNode } from '../../types/flow'
-import type { TraceStep, TraceStatus, IntentMethod, IntentType } from '../../types/trace'
+import {
+  calculateSessionStats,
+  FOLLOW_ROUTE_MAP_MODEL,
+  type TraceStep,
+  type TraceStatus,
+  type IntentMethod,
+  type IntentType,
+} from '../../types/trace'
+import {
+  normalizeRouteMapConfig,
+  ROUTE_MAP_CONFIG_KEY,
+} from '../../model-routing'
 import { API_BASE_URL } from '@/lib/eden'
 import { Header } from '@/components/layout/header'
 import { Search } from '@/components/search'
@@ -144,6 +156,7 @@ export function PlaygroundLayout() {
     userType: 'with_phone',
     location: 'guanyinqiao',
   })
+  const { data: routeMapData, isLoading: isRouteMapLoading } = useAiConfigDetail(ROUTE_MAP_CONFIG_KEY)
 
   // Trace 管理
   const {
@@ -151,13 +164,28 @@ export function PlaygroundLayout() {
     modelParams,
     setModelParams,
     systemPrompt,
-    sessionStats,
     clearTrace,
     handleTraceStart,
     handleTraceStep,
     handleTraceEnd,
     updateTraceStep,
   } = useExecutionTrace()
+
+  const routeMap = useMemo(
+    () => normalizeRouteMapConfig(routeMapData?.configValue),
+    [routeMapData?.configValue],
+  )
+
+  const followsRouteMap = modelParams.model === FOLLOW_ROUTE_MAP_MODEL
+  const effectiveRequestedModel = followsRouteMap ? routeMap.chat : modelParams.model
+  const sessionStats = useMemo(
+    () => calculateSessionStats(traces, effectiveRequestedModel),
+    [effectiveRequestedModel, traces],
+  )
+  const modelSourceLabel = followsRouteMap ? '跟随后台链路' : '手动覆盖'
+  const modelSourceTitle = followsRouteMap
+    ? `当前 chat=${routeMap.chat} · reasoning=${routeMap.reasoning} · agent=${routeMap.agent}`
+    : `当前手动覆盖 chat=${modelParams.model}；后台 reasoning=${routeMap.reasoning} · agent=${routeMap.agent}`
 
   // 最新轮次的 traceOutput
   const traceOutput = useMemo(() => {
@@ -172,10 +200,12 @@ export function PlaygroundLayout() {
       api: `${API_BASE_URL}/ai/chat`,
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       body: {
-        source: 'admin',
+        context: {
+          client: 'admin',
+        },
         trace: traceEnabled,
-        modelParams: {
-          model: modelParams.model,
+        ai: {
+          ...(modelParams.model !== FOLLOW_ROUTE_MAP_MODEL ? { model: modelParams.model } : {}),
           temperature: modelParams.temperature,
           maxTokens: modelParams.maxTokens,
         },
@@ -288,7 +318,12 @@ export function PlaygroundLayout() {
       />
 
       {/* 底部统计栏 */}
-      <SessionStatsBar model={modelParams.model} stats={sessionStats} />
+      <SessionStatsBar
+        model={effectiveRequestedModel}
+        modelSourceLabel={modelSourceLabel}
+        modelSourceTitle={modelSourceTitle}
+        stats={sessionStats}
+      />
 
       {/* 右侧 Drawer */}
       <PlaygroundDrawer
@@ -304,6 +339,8 @@ export function PlaygroundLayout() {
         onMockSettingsChange={setMockSettings}
         modelParams={modelParams}
         onModelParamsChange={setModelParams}
+        routeMap={routeMap}
+        routeMapLoading={isRouteMapLoading}
         traceEnabled={traceEnabled}
         onTraceEnabledChange={setTraceEnabled}
         selectedNode={selectedNode}

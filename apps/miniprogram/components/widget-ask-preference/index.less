@@ -10,29 +10,7 @@
 @import '/styles/tokens.less';
 
 .widget-ask-preference {
-  padding: @spacing-4;
-  margin: @spacing-2 0;
-}
-
-// ==================== 问题区域 ====================
-
-.question-section {
-  display: flex;
-  align-items: flex-start;
-  gap: @spacing-3;
-  margin-bottom: @spacing-4;
-}
-
-.question-icon {
-  flex-shrink: 0;
-}
-
-.question-text {
-  flex: 1;
-  font-size: @text-base;
-  font-weight: 500;
-  color: var(--text-main, @text-main);
-  line-height: 1.5;
+  margin: @spacing-1 0 0;
 }
 
 // ==================== 选项按钮区域 ====================
@@ -41,23 +19,30 @@
   display: flex;
   flex-wrap: wrap;
   gap: @spacing-2;
-  margin-bottom: @spacing-3;
 }
 
 .option-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: @spacing-2 @spacing-4;
-  background: var(--bg-card, #FFFFFF);
+  min-height: 72rpx;
+  padding: 0 @spacing-5;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1rpx solid rgba(255, 255, 255, 0.82);
   border-radius: var(--radius-full, @rounded-full);
-  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.06);
+  box-shadow:
+    inset 0 1rpx 0 rgba(255, 255, 255, 0.88),
+    0 12rpx 24rpx -20rpx rgba(67, 86, 170, 0.34);
   transition: transform var(--duration-fast, @duration-fast) var(--ease-out-back, @ease-out-back),
-              box-shadow var(--duration-fast, @duration-fast);
+              box-shadow var(--duration-fast, @duration-fast),
+              background var(--duration-fast, @duration-fast);
   
   &:active {
     transform: scale(0.96);
-    box-shadow: 0 1rpx 4rpx rgba(0, 0, 0, 0.08);
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow:
+      inset 0 1rpx 0 rgba(255, 255, 255, 0.9),
+      0 10rpx 18rpx -18rpx rgba(67, 86, 170, 0.3);
   }
 }
 
@@ -65,11 +50,7 @@
   font-size: @text-sm;
   font-weight: 500;
   line-height: 1.4;
-  // 渐变文字 - 紫色系（与 askPreference 主题匹配）
-  background: linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: #2F3B6B;
 }
 
 .option-btn--disabled {
@@ -77,23 +58,74 @@
   pointer-events: none;
 }
 
-// ==================== 跳过按钮区域 ====================
+// ==================== 自定义区域输入 ====================
 
-.skip-section {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: @spacing-2 0;
+.custom-location-section {
+  margin-top: @spacing-3;
+  padding: @spacing-3;
+  background: rgba(255, 255, 255, 0.74);
+  border: 1rpx solid rgba(255, 255, 255, 0.8);
+  border-radius: @rounded-2xl;
+  box-shadow:
+    inset 0 1rpx 0 rgba(255, 255, 255, 0.84),
+    0 16rpx 28rpx -24rpx rgba(67, 86, 170, 0.28);
 }
 
-.skip-text {
+.custom-location-title {
+  display: block;
   font-size: @text-sm;
+  font-weight: 500;
+  color: var(--text-main, @text-main);
+}
+
+.custom-location-desc {
+  display: block;
+  margin-top: @spacing-1;
+  font-size: @text-xs;
+  line-height: 1.5;
   color: var(--text-tertiary, @text-tertiary);
-  transition: color var(--duration-fast, @duration-fast);
-  
-  &:active {
-    color: var(--color-primary, @color-primary);
-  }
+}
+
+.custom-location-row {
+  display: flex;
+  align-items: center;
+  gap: @spacing-2;
+  margin-top: @spacing-2;
+}
+
+.custom-location-input {
+  flex: 1;
+  min-width: 0;
+  height: 72rpx;
+  padding: 0 @spacing-3;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1rpx solid rgba(255, 255, 255, 0.84);
+  border-radius: @rounded-full;
+  font-size: @text-sm;
+  color: var(--text-main, @text-main);
+  box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.72);
+}
+
+.custom-location-submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 72rpx;
+  padding: 0 @spacing-4;
+  background: linear-gradient(135deg, #5B67F4 0%, #7380FF 52%, #7D6BFF 100%);
+  border-radius: @rounded-full;
+  box-shadow: 0 6rpx 18rpx rgba(91, 103, 244, 0.24);
+}
+
+.custom-location-submit__text {
+  font-size: @text-xs;
+  font-weight: 500;
+  color: #FFFFFF;
+}
+
+.custom-location-submit--disabled {
+  opacity: 0.45;
+  pointer-events: none;
 }
 
 // ==================== 禁用状态 ====================
@@ -104,25 +136,17 @@
   .option-btn {
     pointer-events: none;
   }
-  
-  .skip-section {
-    display: none;
-  }
 }
 
 // ==================== 深色模式 ====================
 
 @media (prefers-color-scheme: dark) {
-  .question-text {
-    color: var(--text-main, @text-main-dark);
-  }
-  
   .option-btn {
     background: var(--bg-card-dark, rgba(255, 255, 255, 0.08));
     box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.2);
   }
-  
-  .skip-text {
-    color: var(--text-tertiary, @text-tertiary-dark);
+
+  .option-label {
+    color: var(--text-main, @text-main-dark);
   }
 }

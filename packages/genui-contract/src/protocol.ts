@@ -1,4 +1,4 @@
-export const GENUI_CONTRACT_VERSION = "2026-03-16";
+export const GENUI_CONTRACT_VERSION = "2026-03-19";
 
 export const GENUI_BLOCK_TYPES = [
   "text",
@@ -13,6 +13,10 @@ export const GENUI_BLOCK_TYPES = [
 export type GenUIBlockType = (typeof GENUI_BLOCK_TYPES)[number];
 export type GenUIReplacePolicy = "append" | "replace" | "ignore-if-exists";
 export type GenUITurnStatus = "streaming" | "completed" | "error";
+export type GenUIChoicePresentation = "inline-actions" | "card-form";
+export type GenUIChoiceInputMode = "none" | "free-text-optional";
+export type GenUICtaPresentation = "inline-actions" | "card-panel";
+export type GenUIListPresentation = "compact-stack" | "immersive-carousel" | "partner-carousel";
 
 export interface GenUITurnChoiceContextOption {
   label: string;
@@ -102,10 +106,20 @@ export interface GenUIRequest {
   input: GenUIInput;
   context?: GenUIRequestContext;
   ai?: GenUIRequestAi;
+  trace?: boolean;
 }
 
 export interface GenUIBlockMeta {
   traceRef?: string;
+  choicePresentation?: GenUIChoicePresentation;
+  choiceInputMode?: GenUIChoiceInputMode;
+  choiceQuestionType?: string;
+  choiceShowHeader?: boolean;
+  ctaGroupPresentation?: GenUICtaPresentation;
+  ctaShowHeader?: boolean;
+  listPresentation?: GenUIListPresentation;
+  listShowHeader?: boolean;
+  formShowHeader?: boolean;
   [key: string]: unknown;
 }
 

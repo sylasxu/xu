@@ -228,6 +228,32 @@ export function buildNextBestActions(params: NextBestActionInput): NextBestActio
           params: { prompt: '我想调整找搭子的偏好' },
         },
       ];
+    case 'search_partners': {
+      const items: NextBestActionItem[] = [];
+      const searchPayload = isRecord(data?.searchPayload) ? data.searchPayload : null;
+
+      if (searchPayload) {
+        items.push({
+          label: '继续帮我留意',
+          action: 'opt_in_partner_pool',
+          params: searchPayload,
+        });
+      }
+
+      items.push({
+        label: '改一下偏好',
+        action: 'find_partner',
+        params: {
+          ...(searchPayload ?? {}),
+          ...(locationName ? { locationName } : {}),
+          ...(exploreType ? { type: exploreType } : {}),
+          renderMode: 'full-form',
+          partnerStage: 'refine_form',
+        },
+      });
+
+      return items;
+    }
     case 'submit_partner_intent_form': {
       const items: NextBestActionItem[] = [];
       if (locationName) {
@@ -245,8 +271,11 @@ export function buildNextBestActions(params: NextBestActionInput): NextBestActio
         label: '改一下偏好',
         action: 'find_partner',
         params: {
+          ...(isRecord(data?.searchPayload) ? data.searchPayload : {}),
           ...(locationName ? { locationName } : {}),
           ...(exploreType ? { type: exploreType } : {}),
+          renderMode: 'full-form',
+          partnerStage: 'refine_form',
         },
       });
 

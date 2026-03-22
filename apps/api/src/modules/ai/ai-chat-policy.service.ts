@@ -32,8 +32,9 @@ const AUTH_REQUIRED_ACTIONS = new Set([
   'save_draft_settings',
   'publish_draft',
   'confirm_publish',
-  'find_partner',
-  'submit_partner_intent_form',
+  'connect_partner',
+  'request_partner_group_up',
+  'opt_in_partner_pool',
   'confirm_match',
   'cancel_match',
 ]);
@@ -62,7 +63,10 @@ function getAuthRequiredMessage(action: string): string {
   if (action.includes('publish') || action.includes('create') || action === 'edit_draft' || action === 'save_draft_settings') {
     return '这个操作会创建或修改活动，先登录后我再继续帮你完成。';
   }
-  if (action.includes('match') || action === 'find_partner') {
+  if (action === 'connect_partner' || action === 'request_partner_group_up' || action === 'opt_in_partner_pool') {
+    return '这个操作会继续帮你和搭子建立联系，先登录后再继续。';
+  }
+  if (action.includes('match')) {
     return '这个操作会影响你的搭子匹配结果，先登录后再继续。';
   }
   if (action.includes('join') || action.includes('cancel_join')) {

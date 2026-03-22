@@ -31,6 +31,7 @@ interface SystemNotification {
   content: string;
   activityId: string;
   taskId?: string;
+  requestMode?: PendingMatchRequestMode;
   read: boolean;
   createdAt: string;
   source: 'system' | 'match';
@@ -49,6 +50,8 @@ interface ChatItem {
   participantCount: number;
 }
 
+type PendingMatchRequestMode = 'auto_match' | 'connect' | 'group_up';
+
 interface PendingMatchDetailMemberView {
   userId: string;
   nickname: string;
@@ -65,6 +68,7 @@ interface PendingMatchDetailView {
   id: string;
   activityType: string;
   typeName: string;
+  requestMode: 'auto_match' | 'connect' | 'group_up';
   matchScore: number;
   commonTags: string[];
   locationHint: string;
@@ -147,6 +151,11 @@ interface MessagePageData {
   matchDetailLoading: boolean;
   matchDetailError: string;
   selectedMatchDetail: PendingMatchDetailView | null;
+}
+
+interface MessagePageOptions {
+  matchId?: string;
+  taskId?: string;
 }
 
 interface SocketMessage {
@@ -371,7 +380,21 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     selectedMatchDetail: null,
   },
 
-  onLoad() {
+  onLoad(options?: MessagePageOptions) {
+    const matchId = typeof options?.matchId === 'string' && options.matchId.trim()
+      ? options.matchId.trim()
+      : undefined;
+    const taskId = typeof options?.taskId === 'string' && options.taskId.trim()
+      ? options.taskId.trim()
+      : undefined;
+
+    if (matchId || taskId) {
+      useAppStore.getState().setMessageCenterFocus({
+        ...(taskId ? { taskId } : {}),
+        ...(matchId ? { matchId } : {}),
+      });
+    }
+
     this.loadData();
     this.loadCurrentTasks();
     this.setupWebSocket();
@@ -527,17 +550,32 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     const scoreText = `匹配度 ${item.matchScore}%`;
     const tagText = commonTags ? `，共同偏好：${commonTags}` : '';
     const deadlineText = this.formatTime(item.confirmDeadline);
-    const content = item.isTempOrganizer
-      ? `${scoreText}，地点：${item.locationHint}${tagText}。请在 ${deadlineText} 前确认是否成局。`
-      : `${scoreText}，地点：${item.locationHint}${tagText}。已提醒召集人确认，先去聊聊吧。`;
+    const requestMode = item.requestMode as PendingMatchRequestMode;
+    const title = requestMode === 'connect'
+      ? `收到搭子邀请（${item.typeName}）`
+      : requestMode === 'group_up'
+        ? `收到组局邀请（${item.typeName}）`
+        : `匹配结果待确认（${item.typeName}）`;
+    const content = requestMode === 'connect'
+      ? (item.isTempOrganizer
+        ? `${scoreText}，活动区域：${item.locationHint}${tagText}。有用户向你发起搭子邀请，请于 ${deadlineText} 前处理。`
+        : `${scoreText}，活动区域：${item.locationHint}${tagText}。搭子邀请已发送，等待对方处理。`)
+      : requestMode === 'group_up'
+        ? (item.isTempOrganizer
+          ? `${scoreText}，活动区域：${item.locationHint}${tagText}。有用户向你发起组局邀请，请于 ${deadlineText} 前处理。`
+          : `${scoreText}，活动区域：${item.locationHint}${tagText}。组局邀请已发送，等待对方处理。`)
+        : (item.isTempOrganizer
+          ? `${scoreText}，活动区域：${item.locationHint}${tagText}。请于 ${deadlineText} 前确认本次匹配。`
+          : `${scoreText}，活动区域：${item.locationHint}${tagText}。匹配结果已提交召集人处理。`);
 
     return {
       id: `match_${item.id}`,
       type: 'match_pending',
-      title: `找到合拍搭子（${item.typeName}）`,
+      title,
       content,
       activityId: '',
       ...(typeof item.taskId === 'string' && item.taskId.trim() ? { taskId: item.taskId.trim() } : {}),
+      requestMode,
       read: false,
       createdAt: this.formatTime(item.confirmDeadline),
       source: 'match',
@@ -566,6 +604,7 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
       id: detail.id,
       activityType: detail.activityType,
       typeName: detail.typeName,
+      requestMode: detail.requestMode,
       matchScore: detail.matchScore,
       commonTags: detail.commonTags,
       locationHint: detail.locationHint,
@@ -749,7 +788,7 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     if (type === 'match_pending') {
       if (!matchId) {
         wx.showToast({
-          title: canConfirm ? '直接点右侧按钮确认或取消' : '已提醒召集人确认，确认后会自动成局',
+          title: canConfirm ? '请使用右侧按钮处理该匹配' : '该匹配正在等待处理结果',
           icon: 'none',
         });
         return;
@@ -805,7 +844,7 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
         throw new Error(response.data.msg || '确认失败，请稍后再试');
       }
 
-      wx.showToast({ title: response.data.msg || '确认成功', icon: 'none' });
+      wx.showToast({ title: response.data.msg || '匹配已确认', icon: 'none' });
       this.closeMatchDetail();
       await this.loadData();
       await this.loadCurrentTasks();
@@ -840,7 +879,7 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
         throw new Error(response.data.msg || '取消失败，请稍后再试');
       }
 
-      wx.showToast({ title: response.data.msg || '已取消匹配', icon: 'none' });
+      wx.showToast({ title: response.data.msg || '本次匹配已取消', icon: 'none' });
       this.closeMatchDetail();
       await this.loadData();
       await this.loadCurrentTasks();

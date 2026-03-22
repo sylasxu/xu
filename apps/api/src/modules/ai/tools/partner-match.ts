@@ -27,6 +27,7 @@ import {
   recordPartnerTaskMatchConfirmed,
   recordPartnerTaskMatchReady,
 } from '../task-runtime/agent-task.service';
+import { sendServiceNotificationByUserId } from '../../wechat';
 
 type MatchQueryExecutor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -36,6 +37,48 @@ const CONFLICTING_TAGS: [string, string][] = [
   ['GirlOnly', 'BoyOnly'],
   ['AA', 'Treat'],
 ];
+
+const SPORT_TYPE_NAMES: Record<string, string> = {
+  badminton: '羽毛球',
+  basketball: '篮球',
+  running: '跑步',
+  tennis: '网球',
+  swimming: '游泳',
+  cycling: '骑行',
+};
+
+function toTemplateValue(value: string, maxLength = 20): string {
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  if (!normalized) return '待补充';
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, Math.max(maxLength - 1, 1))}…`;
+}
+
+function readPartnerSportType(intent: PartnerIntent): string | null {
+  return typeof intent.metaData?.sportType === 'string' && intent.metaData.sportType.trim()
+    ? intent.metaData.sportType.trim()
+    : null;
+}
+
+function getPartnerDisplayType(activityType: string, sportType?: string | null): string {
+  if (activityType === 'sports' && sportType && SPORT_TYPE_NAMES[sportType]) {
+    return SPORT_TYPE_NAMES[sportType];
+  }
+
+  const typeNames: Record<string, string> = {
+    food: '吃饭',
+    entertainment: '娱乐',
+    sports: '运动',
+    boardgame: '桌游',
+    other: '活动',
+  };
+
+  return typeNames[activityType] || '活动';
+}
+
+function getPartnerIntentDisplayType(intent: PartnerIntent): string {
+  return getPartnerDisplayType(intent.activityType, readPartnerSportType(intent));
+}
 
 function buildPendingIntentCondition(intentIds: string[]) {
   if (intentIds.length === 1) {
@@ -121,7 +164,21 @@ export async function detectMatchesForIntent(intentId: string): Promise<IntentMa
   const intentTags = intent.metaData?.tags || [];
   const compatibleCandidates = candidates.filter(candidate => {
     const candidateTags = candidate.metaData?.tags || [];
-    return !hasTagConflict(intentTags, candidateTags);
+    if (hasTagConflict(intentTags, candidateTags)) {
+      return false;
+    }
+
+    if (intent.activityType === 'sports') {
+      const sourceSportType = readPartnerSportType(intent);
+      const candidateSportType = readPartnerSportType(candidate);
+      if (!sourceSportType || !candidateSportType) {
+        return false;
+      }
+
+      return sourceSportType === candidateSportType;
+    }
+
+    return true;
   });
 
   if (compatibleCandidates.length === 0) return null;
@@ -296,15 +353,10 @@ async function sendIcebreaker(
   const userMap = new Map(userList.map(user => [user.id, user.nickname || '匿名用户']));
   const organizerNickname = userMap.get(match.tempOrganizerId) || '匿名用户';
 
-  const typeNames: Record<string, string> = {
-    food: '吃饭',
-    entertainment: '娱乐',
-    sports: '运动',
-    boardgame: '桌游',
-    other: '活动',
-  };
-
-  const activityTypeName = typeNames[match.activityType] || '活动';
+  const firstSportType = intents
+    .map((intent) => readPartnerSportType(intent))
+    .find((value): value is string => Boolean(value));
+  const activityTypeName = getPartnerDisplayType(match.activityType, firstSportType);
   const commonTagsStr = match.commonTags.length > 0
     ? `都${match.commonTags.join('、')}`
     : '需求很一致';
@@ -320,6 +372,90 @@ async function sendIcebreaker(
     messageType: 'icebreaker',
     content: icebreakerContent,
   });
+}
+
+async function sendManualConnectIcebreaker(params: {
+  match: IntentMatch;
+  sourceIntent: PartnerIntent;
+  targetIntent: PartnerIntent;
+  initiatedByUserId: string;
+  mode: 'connect' | 'group_up';
+}): Promise<void> {
+  const userIds = Array.from(new Set([params.sourceIntent.userId, params.targetIntent.userId]));
+  const userRows = await db
+    .select({
+      id: users.id,
+      nickname: users.nickname,
+    })
+    .from(users)
+    .where(inArray(users.id, userIds));
+
+  const nicknameMap = new Map(userRows.map((row) => [row.id, row.nickname?.trim() || '搭子']));
+  const initiatorNickname = nicknameMap.get(params.initiatedByUserId) || '有人';
+  const organizerNickname = nicknameMap.get(params.match.tempOrganizerId) || '对方';
+  const actionText = params.mode === 'group_up'
+    ? '想问问能不能一起组个局'
+    : '想先和你搭一下';
+  const firstSportType = [params.sourceIntent, params.targetIntent]
+    .map((intent) => readPartnerSportType(intent))
+    .find((value): value is string => Boolean(value));
+  const typeName = getPartnerDisplayType(params.match.activityType, firstSportType);
+  const locationHint = params.match.centerLocationHint || params.targetIntent.locationHint || params.sourceIntent.locationHint;
+  const timeHint = params.sourceIntent.timePreference || params.targetIntent.timePreference || '时间再商量';
+  const content = `有人来敲门啦！
+@${organizerNickname}，${initiatorNickname}${actionText}。
+你们看的都是${typeName}方向，${locationHint}这片也都方便，时间先按「${timeHint}」来聊最合适。
+如果你觉得可以，点确认我们就继续往成局推进。`;
+
+  await db.insert(matchMessages).values({
+    matchId: params.match.id,
+    senderId: null,
+    messageType: params.mode === 'group_up' ? 'group_up_request' : 'connect_request',
+    content,
+  });
+}
+
+async function notifyManualPartnerMatchCreated(params: {
+  matchId: string;
+  targetUserId: string;
+  initiatedByUserId: string;
+  activityType: string;
+  locationHint: string;
+  mode: 'connect' | 'group_up';
+}): Promise<void> {
+  const [initiator] = await db
+    .select({
+      nickname: users.nickname,
+    })
+    .from(users)
+    .where(eq(users.id, params.initiatedByUserId))
+    .limit(1);
+
+  const typeName = getPartnerDisplayType(params.activityType);
+  const initiatorName = initiator?.nickname?.trim() || '有人';
+
+  const result = await sendServiceNotificationByUserId({
+    userId: params.targetUserId,
+    scene: params.mode === 'group_up' ? 'partner_group_up_request' : 'partner_connect_request',
+    pagePath: `pages/message/index?matchId=${params.matchId}`,
+    data: {
+      thing1: toTemplateValue(
+        params.mode === 'group_up'
+          ? `${initiatorName}想问你能不能一起组局`
+          : `${initiatorName}想和你搭一下`,
+        20,
+      ),
+      thing2: toTemplateValue(`${typeName} · ${params.locationHint}`, 20),
+    },
+  });
+
+  if (!result.success && result.skipped !== true) {
+    console.warn('[notifyManualPartnerMatchCreated] service notification failed', {
+      matchId: params.matchId,
+      targetUserId: params.targetUserId,
+      error: result.error,
+    });
+  }
 }
 
 /**
@@ -366,17 +502,9 @@ export async function confirmMatch(matchId: string, userId: string): Promise<{
 
   const firstIntent = intentList[0];
 
-  const typeNames: Record<string, string> = {
-    food: '美食',
-    entertainment: '娱乐',
-    sports: '运动',
-    boardgame: '桌游',
-    other: '其他',
-  };
-
   const [activity] = await db.insert(activities).values({
     creatorId: userId,
-    title: `🤝 ${typeNames[firstIntent.activityType]}搭子局`,
+    title: `🤝 ${getPartnerIntentDisplayType(firstIntent)}搭子局`,
     description: `由搭子匹配自动创建。共同偏好：${match.commonTags.join('、') || '无'}`,
     location: match.centerLocation,
     locationName: match.centerLocationHint,
@@ -454,6 +582,154 @@ export async function cancelMatch(matchId: string, userId: string): Promise<{
   });
 
   return { success: true };
+}
+
+export async function createManualPartnerMatch(params: {
+  sourceIntentId: string;
+  targetIntentId: string;
+  initiatedByUserId: string;
+  mode: 'connect' | 'group_up';
+}): Promise<{
+  success: boolean;
+  matchId?: string;
+  existing?: boolean;
+  tempOrganizerId?: string;
+  error?: string;
+}> {
+  if (params.sourceIntentId === params.targetIntentId) {
+    return { success: false, error: '不能和自己的同一条搭子意向建立匹配' };
+  }
+
+  const transactionResult = await db.transaction(async (tx) => {
+    const intentIds = [params.sourceIntentId, params.targetIntentId].sort();
+
+    await tx
+      .select({ id: partnerIntents.id })
+      .from(partnerIntents)
+      .where(inArray(partnerIntents.id, intentIds))
+      .orderBy(partnerIntents.id)
+      .for('update');
+
+    const intents = await tx
+      .select()
+      .from(partnerIntents)
+      .where(inArray(partnerIntents.id, intentIds));
+
+    const sourceIntent = intents.find((intent) => intent.id === params.sourceIntentId) || null;
+    const targetIntent = intents.find((intent) => intent.id === params.targetIntentId) || null;
+    if (!sourceIntent || !targetIntent) {
+      return { success: false as const, error: '有一方的搭子意向已经不存在了' };
+    }
+
+    if (sourceIntent.status !== 'active' || targetIntent.status !== 'active') {
+      return { success: false as const, error: '这条搭子意向已经不在可连接状态了' };
+    }
+
+    if (sourceIntent.userId === targetIntent.userId) {
+      return { success: false as const, error: '不能和自己建立搭子匹配' };
+    }
+
+    if (sourceIntent.activityType !== targetIntent.activityType) {
+      return { success: false as const, error: '这位搭子的意向类型已经变了，请重新搜索一下' };
+    }
+
+    if (sourceIntent.activityType === 'sports') {
+      const sourceSportType = readPartnerSportType(sourceIntent);
+      const targetSportType = readPartnerSportType(targetIntent);
+      if (!sourceSportType || !targetSportType || sourceSportType !== targetSportType) {
+        return { success: false as const, error: '你们现在看的不是同一个运动方向，换一个更合适的搭子吧' };
+      }
+    }
+
+    const overlappingPendingMatches = await getPendingMatchesByIntentIds(intentIds, tx);
+    const exactPendingMatch = overlappingPendingMatches.find((match) => {
+      const ids = Array.isArray(match.intentIds) ? [...match.intentIds].sort() : [];
+      return ids.length === intentIds.length && ids.every((id, index) => id === intentIds[index]);
+    });
+
+    if (exactPendingMatch) {
+      return {
+        success: true as const,
+        match: exactPendingMatch,
+        sourceIntent,
+        targetIntent,
+        created: false,
+      };
+    }
+
+    const occupiedByOtherMatch = overlappingPendingMatches.find((match) => {
+      const ids = Array.isArray(match.intentIds) ? match.intentIds : [];
+      return ids.includes(params.sourceIntentId) || ids.includes(params.targetIntentId);
+    });
+    if (occupiedByOtherMatch) {
+      return { success: false as const, error: '这位搭子正在处理另一条匹配，稍后再试试吧' };
+    }
+
+    const commonTags = getCommonTags([sourceIntent, targetIntent]);
+    const rawScore = calculateMatchScore([sourceIntent, targetIntent]);
+    const matchScore = Math.max(rawScore, 88);
+    const targetLocationHint = targetIntent.locationHint.trim();
+    const sourceLocationHint = sourceIntent.locationHint.trim();
+
+    const [match] = await tx.insert(intentMatches).values({
+      activityType: sourceIntent.activityType,
+      matchScore,
+      commonTags,
+      centerLocation: targetIntent.location,
+      centerLocationHint: targetLocationHint || sourceLocationHint || '待沟通',
+      tempOrganizerId: targetIntent.userId,
+      intentIds,
+      userIds: [sourceIntent.userId, targetIntent.userId],
+      confirmDeadline: calculateConfirmDeadline(),
+      outcome: 'pending',
+    }).returning();
+
+    return {
+      success: true as const,
+      match,
+      sourceIntent,
+      targetIntent,
+      created: true,
+    };
+  });
+
+  if (!transactionResult.success) {
+    return { success: false, error: transactionResult.error };
+  }
+
+  if (transactionResult.created) {
+    await sendManualConnectIcebreaker({
+      match: transactionResult.match,
+      sourceIntent: transactionResult.sourceIntent,
+      targetIntent: transactionResult.targetIntent,
+      initiatedByUserId: params.initiatedByUserId,
+      mode: params.mode,
+    });
+  }
+
+  await recordPartnerTaskMatchReady({
+    matchId: transactionResult.match.id,
+    activityType: transactionResult.match.activityType,
+    locationHint: transactionResult.match.centerLocationHint,
+  });
+
+  if (transactionResult.created) {
+    await notifyManualPartnerMatchCreated({
+      matchId: transactionResult.match.id,
+      targetUserId: transactionResult.match.tempOrganizerId,
+      initiatedByUserId: params.initiatedByUserId,
+      activityType: transactionResult.match.activityType,
+      locationHint: transactionResult.match.centerLocationHint,
+      mode: params.mode,
+    });
+  }
+
+  return {
+    success: true,
+    matchId: transactionResult.match.id,
+    existing: transactionResult.created === false,
+    tempOrganizerId: transactionResult.match.tempOrganizerId,
+  };
 }
 
 /**

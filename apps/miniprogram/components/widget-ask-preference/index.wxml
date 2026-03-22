@@ -7,16 +7,7 @@
   - 渲染选项按钮供用户快速选择
   - 支持"随便/都可以"跳过按钮
 -->
-<view class="widget-ask-preference halo-card {{(disabled || isSubmitting) ? 'widget--disabled' : ''}}">
-  <!-- 问题文本 -->
-  <view class="question-section">
-    <view class="question-icon icon-circle icon-circle--purple">
-      <t-icon wx:if="{{questionType === 'location'}}" name="location" size="36rpx" />
-      <t-icon wx:else name="app" size="36rpx" />
-    </view>
-    <text class="question-text">{{question}}</text>
-  </view>
-  
+<view class="widget-ask-preference {{(disabled || isSubmitting) ? 'widget--disabled' : ''}}">
   <!-- 选项按钮列表 -->
   <view class="options-section">
     <view 
@@ -29,13 +20,26 @@
       <text class="option-label">{{item.label}}</text>
     </view>
   </view>
-  
-  <!-- 跳过按钮 -->
-  <view 
-    wx:if="{{allowSkip && !disabled && !isSubmitting}}"
-    class="skip-section"
-    bindtap="onSkip"
-  >
-    <text class="skip-text">都可以，你随便推荐 ✨</text>
+
+  <view wx:if="{{inputMode === 'free-text-optional'}}" class="custom-location-section">
+    <text class="custom-location-title">上面都不合适？直接输入片区</text>
+    <text class="custom-location-desc">直接输入你常活动的地方，我会按这里继续筛。</text>
+    <view class="custom-location-row">
+      <input
+        class="custom-location-input"
+        type="text"
+        maxlength="24"
+        placeholder="比如大学城、沙坪坝、两路口"
+        value="{{customLocation}}"
+        disabled="{{disabled || isSubmitting}}"
+        bindinput="onCustomLocationInput"
+      />
+      <view
+        class="custom-location-submit btn-pressable {{(!customLocation || disabled || isSubmitting) ? 'custom-location-submit--disabled' : ''}}"
+        bindtap="onSubmitCustomLocation"
+      >
+        <text class="custom-location-submit__text">使用该区域</text>
+      </view>
+    </view>
   </view>
 </view>

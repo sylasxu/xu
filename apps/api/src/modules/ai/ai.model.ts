@@ -113,7 +113,7 @@ const ChatContextSchema = t.Object({
 }, { additionalProperties: true });
 
 const ChatAiSchema = t.Object({
-  model: t.Optional(t.String({ minLength: 1, description: '本轮 AI 使用的模型 ID，如 qwen-plus / deepseek-chat' })),
+  model: t.Optional(t.String({ minLength: 1, description: '本轮 AI 使用的模型 ID，如 gpt-5.4 / gpt-5 / deepseek-chat' })),
   temperature: t.Optional(t.Number({ minimum: 0, maximum: 2, description: '采样温度，默认 0' })),
   maxTokens: t.Optional(t.Number({ minimum: 1, description: '最大输出 Token 数' })),
 }, { additionalProperties: false });
@@ -123,7 +123,10 @@ const ChatRequestSchema = t.Object({
   input: t.Union([ChatInputTextSchema, ChatInputActionSchema]),
   context: t.Optional(ChatContextSchema),
   ai: t.Optional(ChatAiSchema),
+  trace: t.Optional(t.Boolean({ description: 'stream=true 时是否返回 trace 调试事件；H5/小程序默认 false，Admin 可动态开启' })),
   stream: t.Optional(t.Boolean({ description: 'true 时返回 GenUI SSE 事件流' })),
+  // v5.4: 传递最近一次 Assistant Turn 的上下文，用于无登录状态下感知已收集的偏好
+  latestAssistantTurnContext: t.Optional(TurnContextSchema),
 });
 
 const DiscussionEnteredRequestSchema = t.Object({
@@ -447,7 +450,6 @@ const QuickItemType = t.Union([
 // 快捷项
 const QuickItem = t.Object({
   type: QuickItemType,
-  icon: t.Optional(t.String({ description: 'Emoji 图标' })),
   label: t.String({ description: '显示文案' }),
   prompt: t.String({ description: '点击后发送的 prompt' }),
   context: t.Optional(t.Any({ description: '附加上下文数据' })),
@@ -456,7 +458,6 @@ const QuickItem = t.Object({
 // 分组
 const WelcomeSection = t.Object({
   id: t.String({ description: '分组 ID' }),
-  icon: t.String({ description: '分组图标 Emoji' }),
   title: t.String({ description: '分组标题' }),
   items: t.Array(QuickItem),
 });
@@ -487,7 +488,6 @@ const WelcomeResponse = t.Object({
   socialProfile: t.Optional(SocialProfile),
   pendingActivities: t.Optional(t.Array(WelcomePendingActivity, { description: '待参加活动列表（最多 3 个）' })),
   quickPrompts: t.Array(t.Object({
-    icon: t.String(),
     text: t.String(),
     prompt: t.String(),
   }), { description: '快捷入口' }),

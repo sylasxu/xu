@@ -10,11 +10,25 @@ import { createLogger } from '../observability/logger';
 // 复用现有 Service 函数
 import { joinActivity, quitActivity, getActivityById } from '../../activities/activity.service';
 import { search } from '../rag';
-import { confirmMatch, cancelMatch } from '../tools/partner-match';
+import { confirmMatch, cancelMatch, createManualPartnerMatch } from '../tools/partner-match';
 import { buildCreateDraftParamsFromActionPayload, createActivityDraftRecord, publishActivityRecord, updateActivityDraftRecord } from '../tools/activity-tools';
-import { createPartnerIntent } from '../tools/partner-tools';
+import { createPartnerIntent, ensureSearchDrivenPartnerIntent, searchPartnerCandidates } from '../tools/partner-tools';
 import { buildExploreNearbyResult, type ExploreResultItem } from '../tools/explore-nearby';
-import { buildPartnerIntentFormPayload, createPartnerMatchingState, getPartnerTimeLabel, normalizePartnerActivityType } from '../workflow/partner-matching';
+import {
+  buildPartnerAskPreferencePayload,
+  buildPartnerIntentFormPayload,
+  buildPartnerSearchPayloadFromState,
+  buildPartnerWorkflowIntroText,
+  createPartnerMatchingState,
+  getPartnerActivityTypeLabel,
+  getPartnerSportTypeLabel,
+  getPartnerTimeLabel,
+  hydratePartnerMatchingStateFromPayload,
+  normalizePartnerActivityType,
+  normalizePartnerSportType,
+  resolvePartnerFormStageFromPayload,
+  shouldRenderPartnerIntentFormFromPayload,
+} from '../workflow/partner-matching';
 
 const logger = createLogger('structured-action');
 
@@ -24,6 +38,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function getErrorMessage(error: unknown, fallback = '操作失败'): string {
   return error instanceof Error && error.message ? error.message : fallback;
+}
+
+function getPartnerSearchTargetLabel(activityType: string, sportType?: string): string {
+  if (activityType === 'sports') {
+    return `${getPartnerSportTypeLabel(sportType) || '运动'}搭子`;
+  }
+
+  return `${getPartnerActivityTypeLabel(activityType)}搭子`;
 }
 
 function buildPendingStructuredAction(action: StructuredAction): Record<string, unknown> {
@@ -152,13 +174,33 @@ const STRUCTURED_ACTION_HANDLERS: Record<StructuredActionType, {
   // 找搭子相关
   find_partner: {
     handler: handleFindPartner,
-    requiresAuth: true,
+    requiresAuth: false,
     description: '找搭子',
   },
-  submit_partner_intent_form: {
-    handler: handleSubmitPartnerIntentForm,
+  search_partners: {
+    handler: handleSearchPartners,
+    requiresAuth: false,
+    description: '搜索搭子结果',
+  },
+  connect_partner: {
+    handler: handleConnectPartner,
     requiresAuth: true,
-    description: '提交找搭子表单',
+    description: '和候选搭子建立联系',
+  },
+  request_partner_group_up: {
+    handler: handleRequestPartnerGroupUp,
+    requiresAuth: true,
+    description: '询问是否一起组局',
+  },
+  opt_in_partner_pool: {
+    handler: handleOptInPartnerPool,
+    requiresAuth: true,
+    description: '继续帮我留意',
+  },
+  submit_partner_intent_form: {
+    handler: handleSearchPartners,
+    requiresAuth: false,
+    description: '兼容：提交找搭子表单并搜索',
   },
   confirm_match: {
     handler: handleConfirmMatch,
@@ -404,8 +446,8 @@ function buildExploreSemanticQueryFromSelection(
 
 function buildTypeAskPreferencePayload(params: {
   locationName: string;
-  lat: number;
-  lng: number;
+  lat?: number;
+  lng?: number;
 }): {
   message: string;
   askPreference: {
@@ -417,9 +459,13 @@ function buildTypeAskPreferencePayload(params: {
   const question = `${params.locationName}想先看哪类活动？`;
   const baseParams = {
     locationName: params.locationName,
-    lat: params.lat,
-    lng: params.lng,
-    radiusKm: 5,
+    ...(typeof params.lat === 'number' ? { lat: params.lat } : {}),
+    ...(typeof params.lng === 'number' ? { lng: params.lng } : {}),
+    ...(
+      typeof params.lat === 'number' && typeof params.lng === 'number'
+        ? { radiusKm: 5 }
+        : {}
+    ),
   };
 
   return {
@@ -929,14 +975,6 @@ async function handleExploreNearby(
 ): Promise<StructuredActionResult> {
   const location = resolveActionLocation(payload);
 
-  if (!location) {
-    return { 
-      success: false, 
-      fallbackToLLM: true,
-      fallbackText: '探索附近的活动',
-    };
-  }
-
   try {
     const locationName = toTextValue(payload.locationName, '附近') || '附近';
     const radius = toNumericValue(payload.radiusKm) ?? 5;
@@ -948,11 +986,15 @@ async function handleExploreNearby(
     const scoredResults = await search({
       semanticQuery,
       filters: {
-        location: {
-          lat: location.lat,
-          lng: location.lng,
-          radiusInKm: radius,
-        },
+        ...(location
+          ? {
+              location: {
+                lat: location.lat,
+                lng: location.lng,
+                radiusInKm: radius,
+              },
+            }
+          : {}),
         type: type ?? undefined,
       },
       limit: 10,
@@ -982,7 +1024,8 @@ async function handleExploreNearby(
     return {
       success: true,
       data: buildExploreNearbyResult({
-        center: { lat: location.lat, lng: location.lng, name: locationName },
+        ...(location ? { center: { lat: location.lat, lng: location.lng, name: locationName } } : {}),
+        locationName,
         results,
         radiusKm: radius,
         semanticQuery,
@@ -1025,39 +1068,313 @@ async function handleFindPartner(
   payload: Record<string, unknown>,
   userId: string | null
 ): Promise<StructuredActionResult> {
-  if (!userId) {
-    return { success: false, error: '请先登录', data: { requiresAuth: true } };
-  }
-
   const rawInput = typeof payload.rawInput === 'string' && payload.rawInput.trim()
     ? payload.rawInput.trim()
     : typeof payload.prompt === 'string' && payload.prompt.trim()
       ? payload.prompt.trim()
       : '帮我找找有没有同意向的人';
 
-  const state = createPartnerMatchingState(rawInput);
-  const formPayload = buildPartnerIntentFormPayload({
-    state,
-    rawInput,
-    defaultActivityType: typeof payload.type === 'string' ? payload.type : undefined,
-    defaultLocation: typeof payload.locationName === 'string' ? payload.locationName : undefined,
-    fallbackLocationHint: typeof payload.locationName === 'string' && payload.locationName.trim()
-      ? payload.locationName.trim()
-      : '附近',
-  });
+  const state = hydratePartnerMatchingStateFromPayload(createPartnerMatchingState(rawInput), payload);
+
+  if (shouldRenderPartnerIntentFormFromPayload(payload)) {
+    const partnerStage = resolvePartnerFormStageFromPayload(payload) || 'refine_form';
+    const formPayload = buildPartnerIntentFormPayload({
+      state,
+      rawInput,
+      defaultActivityType: state.collectedPreferences.activityType,
+      defaultLocation: state.collectedPreferences.location,
+      fallbackLocationHint: state.collectedPreferences.location || '附近',
+    });
+
+    return {
+      success: true,
+      data: {
+        message: partnerStage === 'intent_pool'
+          ? '我把可补充的偏好都展开了。你填得越清楚，后面替你留意时就会更准。'
+          : '我把可调整的偏好都展开了，你想细化的话可以直接改。',
+        locationName: state.collectedPreferences.location,
+        type: state.collectedPreferences.activityType,
+        partnerIntentForm: {
+          ...formPayload,
+          renderMode: 'full-form',
+          partnerStage,
+        },
+      },
+    };
+  }
+
+  const askPreference = buildPartnerAskPreferencePayload(state);
+
+  if (!askPreference) {
+    return handleSearchPartners(buildPartnerSearchPayloadFromState(state), userId);
+  }
 
   return {
     success: true,
     data: {
-      message: '填一下偏好，我帮你找找有没有同意向的人。',
-      locationName: typeof formPayload.initialValues.location === 'string' ? formPayload.initialValues.location : undefined,
-      type: typeof formPayload.initialValues.activityType === 'string' ? formPayload.initialValues.activityType : undefined,
-      partnerIntentForm: formPayload,
+      message: buildPartnerWorkflowIntroText(state),
+      locationName: state.collectedPreferences.location,
+      type: state.collectedPreferences.activityType,
+      askPreference,
+      ...(userId ? {} : { previewOnly: true }),
     },
   };
 }
 
-async function handleSubmitPartnerIntentForm(
+function normalizePartnerSearchPayload(payload: Record<string, unknown>) {
+  const activityType = normalizePartnerActivityType(typeof payload.activityType === 'string' ? payload.activityType : undefined);
+  const sportType = normalizePartnerSportType(typeof payload.sportType === 'string' ? payload.sportType.trim() : undefined);
+  const timeRange = typeof payload.timeRange === 'string' ? payload.timeRange.trim() : '';
+  const locationHint = typeof payload.location === 'string' && payload.location.trim()
+    ? payload.location.trim()
+    : typeof payload.locationName === 'string' && payload.locationName.trim()
+      ? payload.locationName.trim()
+      : '';
+  const description = typeof payload.description === 'string' && payload.description.trim()
+    ? payload.description.trim()
+    : typeof payload.note === 'string' && payload.note.trim()
+      ? payload.note.trim()
+      : '';
+  const preferredGender = typeof payload.preferredGender === 'string' && payload.preferredGender.trim()
+    ? payload.preferredGender.trim()
+    : '';
+  const preferredAgeRange = typeof payload.preferredAgeRange === 'string' && payload.preferredAgeRange.trim()
+    ? payload.preferredAgeRange.trim()
+    : '';
+  const timePreference = timeRange ? getPartnerTimeLabel(timeRange) : undefined;
+  const sportLabel = getPartnerSportTypeLabel(sportType);
+  const rawInputParts = [
+    typeof payload.rawInput === 'string' ? payload.rawInput.trim() : '',
+    sportLabel ? `${sportLabel}搭子` : '',
+    timePreference || '',
+    locationHint,
+    description,
+  ].filter(Boolean);
+
+  return {
+    activityType,
+    sportType,
+    timeRange,
+    timePreference,
+    locationHint,
+    description,
+    preferredGender,
+    preferredAgeRange,
+    rawInput: Array.from(new Set(rawInputParts)).join('，'),
+  };
+}
+
+function buildPartnerSearchCardActions(params: {
+  userId: string | null;
+  partnerIntentId: string;
+  candidateUserId: string;
+  candidateTitle: string;
+  activityType: string;
+  sportType?: string;
+  searchPayload: Record<string, unknown>;
+}): Array<{ label: string; action: string; params: Record<string, unknown> }> {
+  return [
+    {
+      label: params.userId ? '和Ta搭一下' : '登录后搭一下',
+      action: 'connect_partner',
+      params: {
+        partnerIntentId: params.partnerIntentId,
+        candidateUserId: params.candidateUserId,
+        candidateTitle: params.candidateTitle,
+        activityType: params.activityType,
+        ...(params.sportType ? { sportType: params.sportType } : {}),
+        searchPayload: params.searchPayload,
+      },
+    },
+    {
+      label: params.userId ? '问问能不能组局' : '登录后问问能不能组局',
+      action: 'request_partner_group_up',
+      params: {
+        partnerIntentId: params.partnerIntentId,
+        candidateUserId: params.candidateUserId,
+        candidateTitle: params.candidateTitle,
+        activityType: params.activityType,
+        ...(params.sportType ? { sportType: params.sportType } : {}),
+        searchPayload: params.searchPayload,
+      },
+    },
+    {
+      label: params.userId ? '继续帮我留意' : '登录后继续帮我留意',
+      action: 'opt_in_partner_pool',
+      params: params.searchPayload,
+    },
+  ];
+}
+
+async function createPartnerMatchFromSelectedCandidate(params: {
+  payload: Record<string, unknown>;
+  userId: string;
+  mode: 'connect' | 'group_up';
+}): Promise<StructuredActionResult> {
+  const sourcePayload = isRecord(params.payload.searchPayload)
+    ? params.payload.searchPayload
+    : params.payload;
+  const normalized = normalizePartnerSearchPayload(sourcePayload);
+  const location = resolveActionLocation(params.payload);
+  if (!location) {
+    return { success: false, error: '需要先获取你的位置，才能继续和这位搭子对接' };
+  }
+
+  const candidateIntentId = toTextValue(params.payload.partnerIntentId);
+  if (!candidateIntentId) {
+    return { success: false, error: '缺少候选搭子的意向信息，请重新搜一下再试' };
+  }
+
+  if (normalized.activityType === 'sports' && !normalized.sportType) {
+    return { success: false, error: '还差一个运动类型，补完我才能继续帮你对接这位搭子' };
+  }
+
+  if (!normalized.locationHint) {
+    return { success: false, error: '还差一个方便区域，补完我才能继续帮你对接这位搭子' };
+  }
+
+  const sourceIntentResult = await ensureSearchDrivenPartnerIntent({
+    userId: params.userId,
+    userLocation: location,
+    rawInput: normalized.rawInput,
+    activityType: normalized.activityType,
+    ...(normalized.sportType ? { sportType: normalized.sportType } : {}),
+    locationHint: normalized.locationHint,
+    ...(normalized.timePreference ? { timePreference: normalized.timePreference } : {}),
+    ...(normalized.description ? { description: normalized.description } : {}),
+  });
+
+  if (!sourceIntentResult.success) {
+    return {
+      success: false,
+      error: sourceIntentResult.error,
+      ...(sourceIntentResult.requireAuth ? { data: { requiresAuth: true } } : {}),
+    };
+  }
+
+  const matchResult = await createManualPartnerMatch({
+    sourceIntentId: sourceIntentResult.intent.id,
+    targetIntentId: candidateIntentId,
+    initiatedByUserId: params.userId,
+    mode: params.mode,
+  });
+
+  if (!matchResult.success || !matchResult.matchId) {
+    return { success: false, error: matchResult.error || '发起搭子对接失败，请稍后再试' };
+  }
+
+  const candidateTitle = toTextValue(params.payload.candidateTitle) || '这位搭子';
+  const actionMessage = params.mode === 'group_up'
+    ? (matchResult.existing
+      ? `你和${candidateTitle}的组局邀约还在处理中，我先带你去消息中心看看。`
+      : `已经帮你把“能不能一起组局”的邀约发过去了，先去消息中心看看这条进展。`)
+    : (matchResult.existing
+      ? `你和${candidateTitle}已经有一条待处理的搭子邀约了，我先带你去消息中心看看。`
+      : `已经帮你把“和${candidateTitle}搭一下”的邀约发过去了，先去消息中心看看这条进展。`);
+
+  return {
+    success: true,
+    data: {
+      matchId: matchResult.matchId,
+      locationName: normalized.locationHint,
+      type: normalized.activityType,
+      message: actionMessage,
+      navigationIntent: 'open_message_center',
+      navigationPayload: {
+        matchId: matchResult.matchId,
+      },
+    },
+  };
+}
+
+async function handleSearchPartners(
+  payload: Record<string, unknown>,
+  userId: string | null
+): Promise<StructuredActionResult> {
+  const normalized = normalizePartnerSearchPayload(payload);
+
+  if (normalized.activityType === 'sports' && !normalized.sportType) {
+    return { success: false, error: '还差一个运动类型，补完我就能开始搜索' };
+  }
+
+  if (!normalized.locationHint) {
+    return { success: false, error: '还差一个方便区域，填完我就能帮你开始搜索' };
+  }
+
+  const searchPayload = {
+    rawInput: normalized.rawInput,
+    activityType: normalized.activityType,
+    ...(normalized.sportType ? { sportType: normalized.sportType } : {}),
+    location: normalized.locationHint,
+    ...(normalized.timeRange ? { timeRange: normalized.timeRange } : {}),
+    ...(normalized.description ? { description: normalized.description } : {}),
+    ...(normalized.preferredGender ? { preferredGender: normalized.preferredGender } : {}),
+    ...(normalized.preferredAgeRange ? { preferredAgeRange: normalized.preferredAgeRange } : {}),
+  };
+
+  const searchDescription = normalized.description
+    || normalized.rawInput
+    || `${normalized.locationHint}${normalized.activityType}搭子`;
+
+  const searchResult = await searchPartnerCandidates(userId, {
+    rawInput: normalized.rawInput,
+    activityType: normalized.activityType,
+    ...(normalized.sportType ? { sportType: normalized.sportType } : {}),
+    locationHint: normalized.locationHint,
+    ...(normalized.timePreference ? { timePreference: normalized.timePreference } : {}),
+    description: searchDescription,
+    ...(normalized.preferredGender ? { preferredGender: normalized.preferredGender } : {}),
+    ...(normalized.preferredAgeRange ? { preferredAgeRange: normalized.preferredAgeRange } : {}),
+  });
+
+  if (!searchResult.success) {
+    return { success: false, error: searchResult.error };
+  }
+
+  const partnerSearchResults = {
+    title: searchResult.items.length > 0 ? '先看看这些搭子' : '暂时还没搜到特别合适的',
+    items: searchResult.items.map((item) => ({
+      id: item.intentId,
+      partnerIntentId: item.intentId,
+      candidateUserId: item.userId,
+      title: item.nickname,
+      avatarUrl: item.avatarUrl,
+      type: item.typeName,
+      locationName: item.locationHint,
+      locationHint: item.locationHint,
+      timePreference: item.timePreference || '时间待沟通',
+      summary: item.summary,
+      matchReason: item.matchReason,
+      score: item.score,
+      tags: item.tags,
+      actions: buildPartnerSearchCardActions({
+        userId,
+        partnerIntentId: item.intentId,
+        candidateUserId: item.userId,
+        candidateTitle: item.nickname,
+        activityType: normalized.activityType,
+        ...(normalized.sportType ? { sportType: normalized.sportType } : {}),
+        searchPayload,
+      }),
+    })),
+  };
+
+  return {
+    success: true,
+    data: {
+      activityType: normalized.activityType,
+      type: normalized.activityType,
+      locationName: normalized.locationHint,
+      searchPayload,
+      partnerSearchResults,
+      message: searchResult.items.length > 0
+        ? `先按${normalized.locationHint}附近的${getPartnerSearchTargetLabel(normalized.activityType, normalized.sportType)}帮你找了一圈，这几位可以先看看有没有眼缘。`
+        : `先按${normalized.locationHint}附近的${getPartnerSearchTargetLabel(normalized.activityType, normalized.sportType)}帮你搜了一圈，暂时还没看到特别合适的。你可以换个片区、补一句你想找的人是什么样，或者登录后让我继续替你留意。`,
+    },
+  };
+}
+
+async function handleOptInPartnerPool(
   payload: Record<string, unknown>,
   userId: string | null
 ): Promise<StructuredActionResult> {
@@ -1067,45 +1384,25 @@ async function handleSubmitPartnerIntentForm(
 
   const location = resolveActionLocation(payload);
   if (!location) {
-    return { success: false, error: '需要先获取你的位置，才能帮你匹配附近搭子' };
+    return { success: false, error: '需要先获取你的位置，才能继续替你留意附近搭子' };
   }
 
-  const activityType = normalizePartnerActivityType(typeof payload.activityType === 'string' ? payload.activityType : undefined);
-  const timeRange = typeof payload.timeRange === 'string' ? payload.timeRange.trim() : '';
-  const locationHint = typeof payload.location === 'string' && payload.location.trim()
-    ? payload.location.trim()
-    : typeof payload.locationName === 'string' && payload.locationName.trim()
-      ? payload.locationName.trim()
-      : '附近';
-  const budgetTypeRaw = typeof payload.budgetType === 'string' ? payload.budgetType.trim() : '';
-  const note = typeof payload.note === 'string' ? payload.note.trim() : '';
-  const formTags = Array.isArray(payload.tags)
-    ? payload.tags.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean)
-    : [];
-  const normalizedTags = Array.from(new Set(formTags.filter((tag) => tag !== 'NoPreference')));
-  const timePreference = timeRange ? getPartnerTimeLabel(timeRange) : undefined;
-  const budgetType = budgetTypeRaw === 'AA' || budgetTypeRaw === 'Treat' || budgetTypeRaw === 'Free'
-    ? budgetTypeRaw
-    : undefined;
-  const rawInputParts = [
-    typeof payload.rawInput === 'string' ? payload.rawInput.trim() : '',
-    timePreference || '',
-    locationHint,
-    note,
-  ].filter(Boolean);
-
-  if (!timePreference) {
-    return { success: false, error: '还差一个时间偏好，填完我就能帮你发起匹配' };
+  const normalized = normalizePartnerSearchPayload(payload);
+  if (normalized.activityType === 'sports' && !normalized.sportType) {
+    return { success: false, error: '还差一个运动类型，补完我就能继续替你留意' };
+  }
+  if (!normalized.locationHint) {
+    return { success: false, error: '还差一个方便区域，填完我就能继续替你留意' };
   }
 
   const partnerResult = await createPartnerIntent(userId, location, {
-    rawInput: Array.from(new Set(rawInputParts)).join('，'),
-    activityType,
-    locationHint,
-    timePreference,
-    tags: normalizedTags,
-    ...(budgetType ? { budgetType } : {}),
-    ...(note ? { poiPreference: note } : {}),
+    rawInput: normalized.rawInput,
+    activityType: normalized.activityType,
+    ...(normalized.sportType ? { sportType: normalized.sportType } : {}),
+    locationHint: normalized.locationHint,
+    timePreference: normalized.timePreference,
+    tags: [],
+    ...(normalized.description ? { poiPreference: normalized.description } : {}),
   });
 
   if (!partnerResult.success) {
@@ -1115,15 +1412,43 @@ async function handleSubmitPartnerIntentForm(
   return {
     success: true,
     data: {
-      activityType,
-      type: activityType,
-      locationName: locationHint,
+      activityType: normalized.activityType,
+      type: normalized.activityType,
+      locationName: normalized.locationHint,
       intentId: partnerResult.intentId,
       matchFound: partnerResult.matchFound,
       matchId: partnerResult.matchId,
       message: partnerResult.message,
     },
   };
+}
+
+async function handleConnectPartner(
+  payload: Record<string, unknown>,
+  userId: string | null
+): Promise<StructuredActionResult> {
+  if (!userId) {
+    return { success: false, error: '请先登录', data: { requiresAuth: true } };
+  }
+  return createPartnerMatchFromSelectedCandidate({
+    payload,
+    userId,
+    mode: 'connect',
+  });
+}
+
+async function handleRequestPartnerGroupUp(
+  payload: Record<string, unknown>,
+  userId: string | null
+): Promise<StructuredActionResult> {
+  if (!userId) {
+    return { success: false, error: '请先登录', data: { requiresAuth: true } };
+  }
+  return createPartnerMatchFromSelectedCandidate({
+    payload,
+    userId,
+    mode: 'group_up',
+  });
 }
 
 async function handleConfirmMatch(
@@ -1149,7 +1474,7 @@ async function handleConfirmMatch(
     data: {
       matchId,
       activityId: result.activityId,
-      message: '确认成功，已帮你把局组好，快去群聊里招呼大家～',
+      message: '匹配已确认，活动已创建',
     },
   };
 }
@@ -1176,7 +1501,7 @@ async function handleCancelMatch(
     success: true,
     data: {
       matchId,
-      message: '已取消这次匹配，你可以继续找更合适的搭子',
+      message: '本次匹配已取消',
     },
   };
 }
@@ -1194,9 +1519,9 @@ async function handleSelectPreference(
       || toTextValue(payload.location)
       || selectedLabel
       || selectedValue;
+    const activityType = normalizeExploreActivityType(toTextValue(payload.activityType));
     const presetLocation = resolvePresetLocation(locationName);
     if (presetLocation) {
-      const activityType = normalizeExploreActivityType(toTextValue(payload.activityType));
       if (activityType) {
         return handleExploreNearby({
           ...payload,
@@ -1217,22 +1542,49 @@ async function handleSelectPreference(
         }),
       };
     }
+
+    if (locationName) {
+      if (activityType) {
+        return handleExploreNearby({
+          ...payload,
+          locationName,
+          type: activityType,
+          semanticQuery: buildExploreSemanticQueryFromSelection(locationName, activityType),
+        }, userId);
+      }
+
+      return {
+        success: true,
+        data: buildTypeAskPreferencePayload({
+          locationName,
+        }),
+      };
+    }
   }
 
   if (questionType === 'type') {
     const locationName = toTextValue(payload.locationName) || toTextValue(payload.location);
     const resolvedLocation = resolveActionLocation(payload) || resolvePresetLocation(locationName);
-    if (resolvedLocation) {
-      const normalizedLocationName = locationName || '附近';
-      const activityType = normalizeExploreActivityType(
-        toTextValue(payload.activityType) || selectedValue || selectedLabel
-      );
+    const normalizedLocationName = locationName || '附近';
+    const activityType = normalizeExploreActivityType(
+      toTextValue(payload.activityType) || selectedValue || selectedLabel
+    );
 
+    if (resolvedLocation) {
       return handleExploreNearby({
         ...payload,
         locationName: normalizedLocationName,
         lat: resolvedLocation.lat,
         lng: resolvedLocation.lng,
+        ...(activityType ? { type: activityType } : {}),
+        semanticQuery: buildExploreSemanticQueryFromSelection(normalizedLocationName, activityType),
+      }, userId);
+    }
+
+    if (locationName) {
+      return handleExploreNearby({
+        ...payload,
+        locationName: normalizedLocationName,
         ...(activityType ? { type: activityType } : {}),
         semanticQuery: buildExploreSemanticQueryFromSelection(normalizedLocationName, activityType),
       }, userId);

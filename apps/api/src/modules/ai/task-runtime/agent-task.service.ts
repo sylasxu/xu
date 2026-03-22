@@ -769,8 +769,9 @@ function extractJoinAuthRequirement(blocks: GenUIBlock[]) {
 
 function extractPartnerAuthRequirement(blocks: GenUIBlock[]) {
   return extractAuthRequirementForActions(blocks, [
-    'find_partner',
-    'submit_partner_intent_form',
+    'connect_partner',
+    'request_partner_group_up',
+    'opt_in_partner_pool',
     'confirm_match',
     'cancel_match',
   ]);
@@ -818,6 +819,14 @@ function extractCreateActivityIdFromRequest(request: GenUIRequest): string | nul
 
 function hasPartnerIntentFormBlock(blocks: GenUIBlock[]): boolean {
   return blocks.some((block) => block.type === 'form' && block.dedupeKey === 'partner_intent_form');
+}
+
+function hasPartnerSearchResultsBlock(blocks: GenUIBlock[]): boolean {
+  return blocks.some((block) => (
+    block.type === 'list'
+    && isRecord(block.meta)
+    && block.meta.listKind === 'partner_search_results'
+  ));
 }
 
 function hasDraftSettingsFormBlock(blocks: GenUIBlock[]): boolean {
@@ -941,11 +950,11 @@ function buildPendingStructuredActionSnapshot(
 function buildJoinTaskSummary(task: AgentTask, activityTitle?: string): string {
   switch (task.currentStage) {
     case 'explore':
-      return '还在帮你筛附近合适的局，看到顺眼的就能继续推进。';
+      return '还在帮你筛附近更合适的局，你可以继续看看结果，也可以直接补一句想换的条件。';
     case 'action_selected':
       return activityTitle
-        ? `「${activityTitle}」已经选中了，下一步就是把报名真正做完。`
-        : '目标活动已经选中，下一步就是把报名真正做完。';
+        ? `「${activityTitle}」已经选中了，现在只差把报名真正做完。`
+        : '目标活动已经选中了，现在只差把报名真正做完。';
     case 'auth_gate':
       return '差一步登录或绑定手机号，恢复后我就接着帮你推进。';
     case 'joined':
@@ -964,14 +973,16 @@ function buildJoinTaskSummary(task: AgentTask, activityTitle?: string): string {
 function buildPartnerTaskSummary(task: AgentTask): string {
   switch (task.currentStage) {
     case 'preference_collecting':
-      return '还差一点活动类型、时间或地点偏好，补完就能开始匹配。';
+      return '还差一点你想找的人和活动片区偏好，补完我就能开始替你匹配。';
     case 'auth_gate':
       return '差一步账号验证，恢复后就继续替你发意向。';
     case 'intent_posted':
     case 'awaiting_match':
       return '意向已经挂上去了，我会继续替你盯着下一次合适的匹配。';
     case 'match_ready':
-      return '已经出现可确认的匹配结果，去消息中心就能看见下一步。';
+      return task.intentMatchId
+        ? '已经出现可确认的匹配结果，去消息中心看一眼，或者直接回来说你想继续哪一个。'
+        : '已经先帮你筛出一批候选搭子，回到当前对话里继续挑就行。';
     default:
       return '这条找搭子任务还在推进中，不会因为异步等待就丢掉。';
   }
@@ -1142,6 +1153,10 @@ function buildPartnerTaskPrimaryAction(task: AgentTask): CurrentAgentTaskAction 
   }
 
   if (task.currentStage === 'awaiting_match' || task.currentStage === 'match_ready') {
+    if (task.currentStage === 'match_ready' && !task.intentMatchId) {
+      return undefined;
+    }
+
     return {
       kind: 'switch_tab',
       label: task.currentStage === 'match_ready' ? '去确认匹配' : '看匹配进展',
@@ -1205,13 +1220,19 @@ function buildTaskHeadline(task: AgentTask, activityTitle?: string): string {
   return task.goalText.trim() || '正在持续推进这件事';
 }
 
-function getPartnerTypeLabel(activityType?: string | null): string {
+function getPartnerTypeLabel(activityType?: string | null, sportType?: string | null): string {
   switch (activityType) {
     case 'food':
       return '美食';
     case 'entertainment':
       return '娱乐';
     case 'sports':
+      if (sportType === 'badminton') return '羽毛球';
+      if (sportType === 'basketball') return '篮球';
+      if (sportType === 'running') return '跑步';
+      if (sportType === 'tennis') return '网球';
+      if (sportType === 'swimming') return '游泳';
+      if (sportType === 'cycling') return '骑行';
       return '运动';
     case 'boardgame':
       return '桌游';
@@ -1835,10 +1856,13 @@ export async function syncPartnerTaskFromChatTurn(params: {
   const entry = typeof params.request.context?.entry === 'string' ? params.request.context.entry : undefined;
   const authRequirement = extractPartnerAuthRequirement(params.blocks);
   const hasPartnerForm = hasPartnerIntentFormBlock(params.blocks);
+  const hasPartnerSearchResults = hasPartnerSearchResultsBlock(params.blocks);
   const actionName = params.request.input.type === 'action' ? params.request.input.action : null;
-  const isPartnerEntryAction = actionName === 'find_partner';
+  const isPartnerEntryAction = actionName === 'find_partner'
+    || actionName === 'search_partners'
+    || actionName === 'submit_partner_intent_form';
 
-  if (!hasPartnerForm && !isPartnerEntryAction && !authRequirement) {
+  if (!hasPartnerForm && !hasPartnerSearchResults && !isPartnerEntryAction && !authRequirement) {
     return;
   }
 
@@ -1848,13 +1872,14 @@ export async function syncPartnerTaskFromChatTurn(params: {
     conversationId: params.conversationId,
   });
 
-  if (hasPartnerForm || isPartnerEntryAction) {
+  if (hasPartnerForm || isPartnerEntryAction || hasPartnerSearchResults) {
+    const nextStage = hasPartnerSearchResults ? 'match_ready' : 'preference_collecting';
     task = task ?? await ensureTask({
       userId: params.userId,
       taskType: 'find_partner',
       conversationId: params.conversationId,
       goalText,
-      defaultStage: 'preference_collecting',
+      defaultStage: nextStage,
       source: entry ?? 'find_partner',
       entry,
       slotSummary,
@@ -1862,7 +1887,7 @@ export async function syncPartnerTaskFromChatTurn(params: {
 
     task = await updateJoinTask({
       task,
-      stage: 'preference_collecting',
+      stage: nextStage,
       status: task.status === 'waiting_auth' ? task.status : 'active',
       conversationId: params.conversationId,
       source: entry ?? 'find_partner',
@@ -2052,6 +2077,7 @@ export async function recordPartnerTaskIntentPosted(params: {
   partnerIntentId: string;
   rawInput: string;
   activityType: string;
+  sportType?: string;
   locationHint: string;
   timePreference?: string;
   intentMatchId?: string;
@@ -2060,7 +2086,7 @@ export async function recordPartnerTaskIntentPosted(params: {
     userId: params.userId,
     partnerIntentId: params.partnerIntentId,
   });
-  const goalText = params.rawInput.trim() || `帮我找个${getPartnerTypeLabel(params.activityType)}搭子`;
+  const goalText = params.rawInput.trim() || `帮我找个${getPartnerTypeLabel(params.activityType, params.sportType)}搭子`;
   const task = existingTask ?? await ensureTask({
     userId: params.userId,
     taskType: 'find_partner',
@@ -2071,6 +2097,7 @@ export async function recordPartnerTaskIntentPosted(params: {
     source: 'partner_intent_created',
     slotSummary: {
       activityType: params.activityType,
+      ...(params.sportType ? { sportType: params.sportType } : {}),
       locationHint: params.locationHint,
       ...(params.timePreference ? { timePreference: params.timePreference } : {}),
     },

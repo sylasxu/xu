@@ -43,6 +43,12 @@ import {
   syncJoinTaskFromChatTurn,
   syncPartnerTaskFromChatTurn,
 } from './task-runtime/agent-task.service';
+import {
+  buildPartnerIntentFormPayload,
+  createPartnerMatchingState,
+  shouldRenderPartnerIntentFormFromPayload,
+} from './workflow/partner-matching';
+import { normalizeAiProviderErrorMessage } from './models/provider-error';
 
 const ID_PREFIX = {
   conversation: 'conv',
@@ -71,7 +77,8 @@ const CREATE_FROM_EXPLORE_PATTERN = /(我来组|我想自己组|我自己组|我
 const CREATE_ACTIVITY_PATTERN = /(组|租|约).{0,8}局|想.*局|周五.*局/;
 const CREATE_PUBLISH_PATTERN = /(发吧|发布吧|就这样发|确认发布|发出去|直接发)/;
 const CREATE_DRAFT_UPDATE_PATTERN = /(改成|换成|地点|位置|时间|人数|几个人|今晚|明天|周末|观音桥|解放碑|南坪|江北嘴|杨家坪|大坪|沙坪坝|\d+\s*人)/;
-const PARTNER_FOLLOWUP_PATTERN = /(找搭子|搭子|一起|同去|桌游|吃饭|火锅|羽毛球|运动|今晚|明天|周末|下周|观音桥|解放碑|南坪|AA|安静|不喝酒|女生友好|都可以|随便)/;
+const PARTNER_ENTRY_PATTERN = /(找搭子|求搭子|找[^，。！？\s]{0,12}搭子|约人)/;
+const PARTNER_FOLLOWUP_PATTERN = /(找搭子|求搭子|找[^，。！？\s]{0,12}搭子|搭子|一起|同去|桌游|吃饭|火锅|羽毛球|运动|今晚|明天|周末|下周|观音桥|解放碑|南坪|AA|安静|不喝酒|女生友好|都可以|随便)/;
 const REVIEW_SUMMARY_MAX_LENGTH = 280;
 
 
@@ -92,6 +99,11 @@ interface BuildAiChatTurnOptions {
 
 interface CreateAiChatBridgeStreamResponseOptions extends BuildAiChatTurnOptions {
   requestAbortSignal?: AbortSignal;
+}
+
+interface ResolvedStreamOptions {
+  includeTrace: boolean;
+  eventEnvelope: 'full' | 'compact';
 }
 
 interface BuildAiChatTurnResult {
@@ -179,6 +191,16 @@ function createId(prefix: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function resolveStreamOptions(request: GenUIRequest): ResolvedStreamOptions {
+  const includeTrace = request.trace === true;
+  const eventEnvelope = includeTrace ? 'full' : 'compact';
+
+  return {
+    includeTrace,
+    eventEnvelope,
+  };
 }
 
 function isDataStreamEvent(value: unknown): value is DataStreamEvent {
@@ -614,6 +636,32 @@ function hasRecentCreatePrompt(historyMessages: ChatRequest['messages']): boolea
     }
 
     if (inspectedUserTurns >= 3) {
+      break;
+    }
+  }
+
+  return false;
+}
+
+function looksLikePartnerQuestion(text: string): boolean {
+  return /(搭子|想玩什么运动|想玩点什么|想在哪儿玩|在哪片活动方便|想找什么样的搭子)/.test(text);
+}
+
+function hasRecentPartnerPrompt(historyMessages: ChatRequest['messages']): boolean {
+  let inspectedAssistantTurns = 0;
+
+  for (const message of [...historyMessages].reverse()) {
+    if (message.role !== 'assistant') {
+      continue;
+    }
+
+    inspectedAssistantTurns += 1;
+    const content = typeof message.content === 'string' ? message.content.trim() : '';
+    if (content && looksLikePartnerQuestion(content)) {
+      return true;
+    }
+
+    if (inspectedAssistantTurns >= 3) {
       break;
     }
   }
@@ -1088,6 +1136,7 @@ function inferStructuredActionFromText(
       && !/[，。,.!?？！；;:：]/.test(normalized)
       && normalized.length <= 12
   );
+  const isShortReply = normalized.length <= 18 && !/[。！？!?]/.test(normalized);
 
   if (CREATE_FROM_EXPLORE_PATTERN.test(normalized) && center) {
     return {
@@ -1132,6 +1181,21 @@ function inferStructuredActionFromText(
         radiusKm: 5,
         semanticQuery: buildExploreSemanticQuery(currentCenter.name, activityType),
         ...(activityType ? { type: activityType } : {}),
+      },
+      source: 'text_action_inference',
+      originalText: normalized,
+    };
+  }
+
+  if (PARTNER_ENTRY_PATTERN.test(normalized) || (hasRecentPartnerPrompt(historyMessages) && (PARTNER_FOLLOWUP_PATTERN.test(normalized) || isShortReply))) {
+    return {
+      action: 'find_partner',
+      payload: {
+        rawInput: normalized,
+        ...(activityType ? { type: activityType } : {}),
+        ...(center?.name ? { locationName: center.name } : {}),
+        ...(center?.lat !== undefined ? { lat: center.lat } : {}),
+        ...(center?.lng !== undefined ? { lng: center.lng } : {}),
       },
       source: 'text_action_inference',
       originalText: normalized,
@@ -1502,6 +1566,10 @@ async function resolveAiChatExecution(
       structuredAction: resolvedStructuredAction,
       location,
       trace: true,
+      // v5.4: 传递最近一次 Assistant Turn 的上下文，用于无登录状态下感知已收集的偏好
+      ...(conversation.latestAssistantTurnContext
+        ? { latestAssistantTurnContext: conversation.latestAssistantTurnContext }
+        : {}),
       ...(ai ? { ai } : {}),
       ...(abortSignal ? { abortSignal } : {}),
     },
@@ -1550,6 +1618,253 @@ function toStringValue(value: unknown, fallback = ''): string {
   return fallback;
 }
 
+function sanitizeChoiceQuestion(rawQuestion: string): string {
+  const normalized = rawQuestion
+    .replace(/\r\n/g, '\n')
+    .replace(/\u3000/g, ' ')
+    .trim();
+
+  if (!normalized) {
+    return '';
+  }
+
+  const firstLine = normalized
+    .split('\n')
+    .map((line) => line.trim())
+    .find(Boolean) || '';
+
+  const compactLine = firstLine
+    .replace(/\s*[-*]\s*[A-ZＡ-Ｚ][:：].*$/u, '')
+    .replace(/\s*[A-ZＡ-Ｚ][:：].*$/u, '')
+    .trim();
+
+  return compactLine;
+}
+
+function punctuateChoiceLeadQuestion(question: string): string {
+  const normalized = question.trim();
+  if (!normalized) {
+    return '';
+  }
+
+  return /[。！？!?]$/u.test(normalized) ? normalized : `${normalized}。`;
+}
+
+function inferChoiceLeadText(
+  questionType: string,
+  question: string,
+  options: GenUIChoiceOption[]
+): string {
+  const fallbackQuestion = buildFallbackChoiceQuestion(questionType, options);
+  const rawQuestion = question.trim();
+  const labels = options.map((option) => option.label.trim()).filter(Boolean);
+  const sportLike = labels.some((label) =>
+    ['羽毛球', '篮球', '跑步', '跑步/健走', '健走', '网球', '游泳', '骑行'].includes(label)
+  );
+
+  // v5.5: 文案更口语化、像真人说话，不再强行拼接
+  if (questionType === 'location') {
+    return '这些地方怎么样？有想去的直接点，或者输入具体位置～';
+  }
+
+  if (questionType === 'time') {
+    return '什么时候方便？选一个，或者告诉我你的时间～';
+  }
+
+  if (questionType === 'result') {
+    return '看看有没有合适的？选一个，或者跟我说说你的具体需求～';
+  }
+
+  if (questionType === 'action') {
+    return '想怎么处理？选一个，我帮你继续～';
+  }
+
+  if (questionType === 'budget') {
+    return '预算方面呢？选一个，或者告诉我你的预算范围～';
+  }
+
+  if (questionType === 'preference') {
+    return '还有其他要求吗？选一个，或者直接补充～';
+  }
+
+  if (questionType === 'type') {
+    if (sportLike || rawQuestion.includes('运动')) {
+      return '想玩什么运动？选一个，或者直接输入你想玩的项目～';
+    }
+    return '想看哪类？选一个，或者告诉我具体类型～';
+  }
+
+  // 如果 question 本身已经够自然，直接返回
+  if (rawQuestion && rawQuestion.length >= 3) {
+    // 如果已经带标点，直接返回；否则加波浪号
+    if (/[。？！?！~]$/.test(rawQuestion)) {
+      return rawQuestion;
+    }
+    return `${rawQuestion}～`;
+  }
+  
+  return fallbackQuestion;
+}
+
+function buildFallbackChoiceQuestion(
+  questionType: string,
+  options: GenUIChoiceOption[]
+): string {
+  if (questionType === 'location') {
+    // v5.4: 更有人味的文案
+    return '想去哪片玩？';
+  }
+
+  if (questionType === 'time') {
+    return '你更偏好什么时间？';
+  }
+
+  if (questionType === 'result') {
+    return '你想怎么选？';
+  }
+
+  if (questionType === 'action') {
+    return '想先定哪一项偏好？';
+  }
+
+  if (questionType === 'budget') {
+    return '费用方式怎么安排？';
+  }
+
+  if (questionType === 'preference') {
+    return '你还有什么特别要求？';
+  }
+
+  if (questionType === 'type') {
+    const labels = options.map((option) => option.label.trim()).filter(Boolean);
+    const sportLike = labels.some((label) =>
+      ['羽毛球', '篮球', '跑步', '跑步/健走', '健走', '网球', '游泳', '骑行'].includes(label)
+    );
+
+    // v5.4: 更有人味的文案
+    return sportLike ? '想玩什么运动？' : '想看哪类活动？';
+  }
+
+  return '请选择一个选项';
+}
+
+function resolveChoiceQuestionType(
+  rawQuestionType: string,
+  rawQuestion: string,
+  options: Array<{ label: string; value: string }>
+): string {
+  const normalizedQuestion = rawQuestion.replace(/\s+/g, '');
+  const labels = options.map((option) => option.label.trim()).filter(Boolean);
+  const normalizedLabels = labels.map((label) => label.replace(/\s+/g, ''));
+  const normalizedValues = options.map((option) => option.value.trim()).filter(Boolean);
+
+  const semanticKinds = new Set<string>();
+  for (let index = 0; index < normalizedLabels.length; index += 1) {
+    const label = normalizedLabels[index];
+    const value = normalizedValues[index] || '';
+
+    if (
+      KNOWN_LOCATION_CENTERS.some((location) => location.name === label)
+      || value.startsWith('location_')
+    ) {
+      semanticKinds.add('location');
+      continue;
+    }
+
+    if (
+      /(今晚|明天|后天|周末|工作日|今天|上午|中午|下午|晚上|夜里|下周|本周)/.test(label)
+      || label.startsWith('时间：')
+      || value.startsWith('time_')
+    ) {
+      semanticKinds.add('time');
+      continue;
+    }
+
+    if (
+      /(AA|请客|平摊|都可以|预算)/.test(label)
+      || label.startsWith('费用：')
+      || value.startsWith('budget_')
+    ) {
+      semanticKinds.add('budget');
+      continue;
+    }
+
+    if (
+      /(不喝酒|安静|女生友好|没有特别要求|无所谓|随便)/.test(label)
+      || label.startsWith('要求：')
+      || value.startsWith('preference_')
+    ) {
+      semanticKinds.add('preference');
+      continue;
+    }
+
+    if (['羽毛球', '篮球', '跑步', '跑步/健走', '健走', '网球', '游泳', '骑行'].includes(label)) {
+      semanticKinds.add('type');
+    }
+  }
+
+  if (semanticKinds.size === 1) {
+    return [...semanticKinds][0] || rawQuestionType || 'type';
+  }
+
+  if (semanticKinds.size > 1) {
+    return 'action';
+  }
+
+  if (rawQuestionType === 'action') {
+    return 'action';
+  }
+
+  const looksLikeLocation = labels.length > 0
+    && normalizedLabels.every((label) =>
+      KNOWN_LOCATION_CENTERS.some((location) => location.name === label)
+    );
+  if (
+    looksLikeLocation
+    || (rawQuestionType !== 'action' && (
+      normalizedQuestion.includes('哪个区域')
+      || normalizedQuestion.includes('哪个位置')
+      || normalizedQuestion.includes('在哪')
+      || normalizedQuestion.includes('地点')
+    ))
+  ) {
+    return 'location';
+  }
+
+  const looksLikeTime = labels.length > 0
+    && normalizedLabels.every((label) =>
+      /(今晚|明天|后天|周末|工作日|今天|上午|中午|下午|晚上|夜里|下周|本周)/.test(label)
+    );
+  if (looksLikeTime || normalizedQuestion.includes('时间偏好') || normalizedQuestion.includes('什么时候')) {
+    return 'time';
+  }
+
+  const looksLikeBudget = labels.length > 0
+    && normalizedLabels.every((label) =>
+      /(AA|请客|平摊|都可以|预算)/.test(label)
+    );
+  if (looksLikeBudget || normalizedQuestion.includes('费用方式') || normalizedQuestion.includes('预算')) {
+    return 'budget';
+  }
+
+  const looksLikeSport = labels.some((label) =>
+    ['羽毛球', '篮球', '跑步', '跑步/健走', '健走', '网球', '游泳', '骑行'].includes(label)
+  );
+  if (looksLikeSport || normalizedQuestion.includes('想玩什么运动') || normalizedQuestion.includes('运动类型')) {
+    return 'type';
+  }
+
+  const looksLikePreference = labels.length > 0
+    && normalizedLabels.every((label) =>
+      /(不喝酒|安静|女生友好|没有特别要求|无所谓|随便)/.test(label)
+    );
+  if (looksLikePreference || normalizedQuestion.includes('特别要求') || normalizedQuestion.includes('偏好')) {
+    return 'preference';
+  }
+
+  return rawQuestionType || 'type';
+}
+
 function sanitizePrimitiveFields(record: Record<string, unknown>, limit = 18): Record<string, unknown> {
   const entries = Object.entries(record).filter(([, value]) => {
     if (value === null || value === undefined) {
@@ -1574,6 +1889,20 @@ function sanitizePrimitiveFields(record: Record<string, unknown>, limit = 18): R
   return Object.fromEntries(entries.slice(0, limit));
 }
 
+function sanitizeChoiceOptionLabel(rawLabel: string): string {
+  const normalized = rawLabel.replace(/\r\n/g, '\n').trim();
+  if (!normalized) {
+    return '';
+  }
+
+  const firstLine = normalized
+    .split('\n')
+    .map((line) => line.trim())
+    .find(Boolean);
+
+  return firstLine || normalized;
+}
+
 function normalizeChoiceOptions(
   payload: Record<string, unknown>,
   questionType: string
@@ -1586,8 +1915,9 @@ function normalizeChoiceOptions(
       continue;
     }
 
-    const label = toStringValue(item.label);
-    const rawValue = toStringValue(item.value, label);
+    const rawLabel = toStringValue(item.label);
+    const label = sanitizeChoiceOptionLabel(rawLabel);
+    const rawValue = toStringValue(item.value, rawLabel || label);
     const explicitAction = toStringValue(item.action);
     if (!label) {
       continue;
@@ -1638,6 +1968,30 @@ function createTextBlock(content: string, traceRef: string, dedupeKey?: string):
     content,
     ...(dedupeKey ? { dedupeKey, replacePolicy: 'replace' as const } : {}),
     meta: { traceRef },
+  };
+}
+
+function compactBlockForStream<TBlock extends GenUIBlock>(block: TBlock): TBlock {
+  const meta = isRecord(block.meta) ? block.meta : null;
+  if (!meta || meta.traceRef === undefined) {
+    return block;
+  }
+
+  const { traceRef: _traceRef, ...restMeta } = meta;
+  return {
+    ...block,
+    ...(Object.keys(restMeta).length > 0 ? { meta: restMeta } : {}),
+    ...(Object.keys(restMeta).length === 0 ? { meta: undefined } : {}),
+  } as TBlock;
+}
+
+function compactTurnEnvelopeForStream(envelope: GenUITurnEnvelope): GenUITurnEnvelope {
+  return {
+    ...envelope,
+    turn: {
+      ...envelope.turn,
+      blocks: envelope.turn.blocks.map((block) => compactBlockForStream(block)),
+    },
   };
 }
 
@@ -1781,24 +2135,192 @@ function mapAskPreferencePayloadToBlock(
   traceRef: string,
   dedupeKey: string
 ): GenUIBlock | null {
-  const questionType = toStringValue(payload.questionType, 'type');
+  const rawQuestionType = toStringValue(payload.questionType, 'type');
   const rawQuestion = toStringValue(payload.question, '请先补充你的偏好');
+  const rawOptions = Array.isArray(payload.options) ? payload.options : [];
+  const optionEntries = rawOptions
+    .filter(isRecord)
+    .map((item) => ({
+      label: toStringValue(item.label),
+      value: toStringValue(item.value, toStringValue(item.label)),
+    }))
+    .filter((item) => item.label);
+  const questionType = resolveChoiceQuestionType(rawQuestionType, rawQuestion, optionEntries);
   const options = normalizeChoiceOptions(payload, questionType);
 
   if (options.length === 0) {
     return null;
   }
 
-  const question = hasDuplicateQuestion(assistantText, rawQuestion)
-    ? '请选择一个选项'
-    : rawQuestion;
+  const sanitizedQuestion = sanitizeChoiceQuestion(rawQuestion);
+  const fallbackQuestion = buildFallbackChoiceQuestion(questionType, options);
+  const shouldUseCanonicalQuestion = ['location', 'time', 'budget', 'preference', 'action'].includes(questionType);
+  const question = shouldUseCanonicalQuestion
+    ? fallbackQuestion
+    : hasDuplicateQuestion(assistantText, sanitizedQuestion)
+      ? fallbackQuestion
+      : sanitizedQuestion || fallbackQuestion;
 
   return createChoiceBlock({
     question,
     options,
     dedupeKey,
     traceRef,
+    meta: {
+      choicePresentation: 'inline-actions',
+      choiceInputMode: 'none',  // v5.4: 简化交互，去掉自定义输入框，统一使用底部输入框
+      choiceQuestionType: questionType,
+      choiceShowHeader: false,
+    },
   });
+}
+
+function inferCardPriorityLeadTextFromPayload(
+  kind: 'askPreference' | 'widget_ask_preference' | 'widget_partner_intent_form' | 'widget_draft_settings_form',
+  payload: Record<string, unknown>
+): string {
+  if (kind === 'widget_partner_intent_form') {
+    const partnerStage = toStringValue(payload.partnerStage);
+    if (partnerStage === 'intent_pool') {
+      return '把偏好补充得更细一点，后面替你留意时会更准。';
+    }
+
+    return '我把可调整的偏好都展开了，你可以直接细化。';
+  }
+
+  if (kind === 'widget_draft_settings_form') {
+    return '先补充几个组局信息，我来接着整理。';
+  }
+
+  const rawQuestionType = toStringValue(payload.questionType, 'type');
+  const rawQuestion = toStringValue(payload.question, '请先补充你的偏好');
+  const rawOptions = Array.isArray(payload.options) ? payload.options : [];
+  const optionEntries = rawOptions
+    .filter(isRecord)
+    .map((item) => ({
+      label: toStringValue(item.label),
+      value: toStringValue(item.value, toStringValue(item.label)),
+    }))
+    .filter((item) => item.label);
+  const questionType = resolveChoiceQuestionType(rawQuestionType, rawQuestion, optionEntries);
+  const options = normalizeChoiceOptions(payload, questionType);
+  const sanitizedQuestion = sanitizeChoiceQuestion(rawQuestion);
+  return inferChoiceLeadText(questionType, sanitizedQuestion, options);
+}
+
+function isCardPriorityToolName(toolName: string): boolean {
+  return toolName === 'askPreference';
+}
+
+function isCardPriorityWidgetType(widgetType: string): boolean {
+  return widgetType === 'widget_ask_preference'
+    || widgetType === 'widget_partner_intent_form'
+    || widgetType === 'widget_draft_settings_form';
+}
+
+function resolveCardPriorityLeadTextFromTool(
+  toolName: string,
+  toolInput?: Record<string, unknown>,
+  toolOutput?: unknown
+): string | null {
+  if (!isCardPriorityToolName(toolName)) {
+    return null;
+  }
+
+  const candidate = isRecord(toolOutput) ? toolOutput : toolInput;
+  if (!candidate) {
+    return null;
+  }
+
+  return inferCardPriorityLeadTextFromPayload('askPreference', candidate);
+}
+
+function resolveCardPriorityLeadTextFromWidget(
+  widgetType: string,
+  payload: unknown
+): string | null {
+  if (!isCardPriorityWidgetType(widgetType) || !isRecord(payload)) {
+    return null;
+  }
+
+  if (widgetType === 'widget_partner_intent_form') {
+    return inferCardPriorityLeadTextFromPayload('widget_partner_intent_form', payload);
+  }
+
+  if (widgetType === 'widget_draft_settings_form') {
+    return inferCardPriorityLeadTextFromPayload('widget_draft_settings_form', payload);
+  }
+
+  return inferCardPriorityLeadTextFromPayload('widget_ask_preference', payload);
+}
+
+function inferInitialCardPriorityLeadText(
+  request: GenUIRequest,
+  execution: ResolvedAiChatExecution
+): string | null {
+  const structuredAction = execution.resolvedStructuredAction;
+  if (structuredAction?.action === 'ask_preference' && isRecord(structuredAction.payload)) {
+    return resolveCardPriorityLeadTextFromTool(
+      'askPreference',
+      structuredAction.payload,
+      structuredAction.payload
+    );
+  }
+
+  if (request.input.type !== 'text') {
+    return null;
+  }
+
+  const normalizedText = request.input.text.trim();
+  if (!normalizedText) {
+    return null;
+  }
+
+  const hasLocation = Boolean(parseRequestLocation(request) || findKnownLocationCenter(normalizedText));
+  const looksLikePartner = (PARTNER_ENTRY_PATTERN.test(normalizedText) || /(搭子|一起|同去|匹配)/.test(normalizedText));
+  const looksLikeExplore = EXPLORE_TEXT_PATTERN.test(normalizedText);
+
+  if (looksLikePartner) {
+    return '先补充几个偏好，我来按这些条件筛。';
+  }
+
+  if (!hasLocation && looksLikeExplore) {
+    return '先定一个你常活动的片区。';
+  }
+
+  return null;
+}
+
+function scoreCardPriorityLeadText(text: string | null): number {
+  if (!text) {
+    return 0;
+  }
+
+  if (text.includes('补充几个偏好')) {
+    return 5;
+  }
+
+  if (text.includes('区域') || text.includes('片区')) {
+    return 4;
+  }
+
+  if (text.includes('时间')) {
+    return 3;
+  }
+
+  if (text.includes('运动类型') || text.includes('运动')) {
+    return 3;
+  }
+
+  if (text.includes('组局信息')) {
+    return 3;
+  }
+
+  if (text.includes('偏好')) {
+    return 2;
+  }
+
+  return 1;
 }
 
 function mapExplorePayloadToList(
@@ -1826,6 +2348,10 @@ function mapExplorePayloadToList(
   const interaction = isRecord(payload.interaction) ? payload.interaction : null;
   const preview = isRecord(payload.preview) ? payload.preview : null;
   const semanticQuery = toStringValue(container.semanticQuery);
+  if (items.length === 0 && !fetchConfig && !preview) {
+    return null;
+  }
+
   if (items.length === 0 && !center && !semanticQuery && !fetchConfig && !interaction && !preview) {
     return null;
   }
@@ -1846,10 +2372,44 @@ function mapExplorePayloadToList(
     ...(fetchConfig ? { fetchConfig } : {}),
     ...(interaction ? { interaction } : {}),
     ...(preview ? { preview } : {}),
+    meta: {
+      listPresentation: fetchConfig || interaction?.swipeable === true ? 'immersive-carousel' : 'compact-stack',
+      listShowHeader: false,
+    },
+  });
+}
+
+function mapPartnerSearchResultsPayloadToBlock(
+  payload: Record<string, unknown>,
+  traceRef: string,
+  dedupeKey: string
+): GenUIBlock | null {
+  const itemsSource = Array.isArray(payload.items) ? payload.items : [];
+  const items = itemsSource
+    .filter((item): item is Record<string, unknown> => isRecord(item))
+    .map((item) => sanitizePrimitiveFields(item, 16))
+    .filter((item) => Object.keys(item).length > 0)
+    .slice(0, 12);
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  return createListBlock({
+    title: toStringValue(payload.title, '先看看这些搭子'),
+    items,
+    dedupeKey,
+    traceRef,
+    meta: {
+      listKind: 'partner_search_results',
+      listPresentation: 'partner-carousel',
+      listShowHeader: false,
+    },
   });
 }
 
 function mapToolOutputToBlocks(params: {
+  request?: GenUIRequest;
   toolName: string;
   toolInput?: Record<string, unknown>;
   toolOutput?: unknown;
@@ -1859,6 +2419,7 @@ function mapToolOutputToBlocks(params: {
 }): GenUIBlock[] {
   const blocks: GenUIBlock[] = [];
   const {
+    request,
     toolName,
     toolInput,
     toolOutput,
@@ -1884,6 +2445,13 @@ function mapToolOutputToBlocks(params: {
   if (toolName === 'askPreference') {
     const candidate = outputRecord || toolInput;
     if (candidate) {
+      if (request) {
+        const partnerForm = mapPartnerAskPreferenceToFormBlock(request, candidate, traceRef);
+        if (partnerForm) {
+          blocks.push(partnerForm);
+          return blocks;
+        }
+      }
       const choice = mapAskPreferencePayloadToBlock(
         candidate,
         assistantText,
@@ -1972,7 +2540,11 @@ function mapToolOutputToBlocks(params: {
 }
 
 function mapPartnerIntentFormPayloadToBlock(
-  payload: Record<string, unknown>,
+  payload: {
+    title?: unknown;
+    schema?: unknown;
+    initialValues?: unknown;
+  },
   traceRef: string
 ): GenUIBlock | null {
   const schema = isRecord(payload.schema) ? payload.schema : null;
@@ -1989,7 +2561,95 @@ function mapPartnerIntentFormPayloadToBlock(
     initialValues,
     dedupeKey: 'partner_intent_form',
     traceRef,
+    meta: {
+      formShowHeader: false,
+    },
   });
+}
+
+function readRawInputFromRequest(request: GenUIRequest): string {
+  if (request.input.type === 'text') {
+    return request.input.text.trim();
+  }
+
+  if (isRecord(request.input.params)) {
+    const rawInput = toStringValue(request.input.params.rawInput);
+    if (rawInput) {
+      return rawInput;
+    }
+  }
+
+  return '';
+}
+
+function isPartnerIntentRequest(request: GenUIRequest): boolean {
+  if (request.input.type === 'action') {
+    return request.input.action === 'find_partner'
+      || request.input.action === 'search_partners'
+      || request.input.action === 'submit_partner_intent_form';
+  }
+
+  const normalized = request.input.text.trim();
+  if (!normalized) {
+    return false;
+  }
+
+  return PARTNER_ENTRY_PATTERN.test(normalized) || /(搭子|找个.*搭子)/.test(normalized);
+}
+
+function shouldRenderPartnerAskPreferenceAsForm(payload: Record<string, unknown>): boolean {
+  return shouldRenderPartnerIntentFormFromPayload(payload);
+}
+
+function mapPartnerAskPreferenceToFormBlock(
+  request: GenUIRequest,
+  payload: Record<string, unknown>,
+  traceRef: string
+): GenUIBlock | null {
+  if (!isPartnerIntentRequest(request)) {
+    return null;
+  }
+
+  if (!shouldRenderPartnerAskPreferenceAsForm(payload)) {
+    return null;
+  }
+
+  const questionType = toStringValue(payload.questionType);
+  if (!['location', 'time', 'action', 'type'].includes(questionType)) {
+    return null;
+  }
+
+  const rawInput = readRawInputFromRequest(request) || '帮我找个搭子';
+  const state = createPartnerMatchingState(rawInput);
+  const explicitLocation = request.input.type === 'text'
+    ? findKnownLocationCenter(request.input.text)?.name
+    : isRecord(request.input.params)
+      ? toStringValue(request.input.params.locationName) || toStringValue(request.input.params.location)
+      : '';
+  const collectedInfo = isRecord(payload.collectedInfo) ? payload.collectedInfo : null;
+  const defaultLocation = explicitLocation || toStringValue(collectedInfo?.location);
+
+  return mapPartnerIntentFormPayloadToBlock(
+    buildPartnerIntentFormPayload({
+      state,
+      rawInput,
+      defaultLocation: defaultLocation || undefined,
+      fallbackLocationHint: '',
+    }),
+    traceRef,
+  );
+}
+
+function resolvePartnerFormLeadText(
+  request: GenUIRequest,
+  payload: Record<string, unknown>
+): string | null {
+  const block = mapPartnerAskPreferenceToFormBlock(request, payload, 'partner_form_preview');
+  if (!block) {
+    return null;
+  }
+
+  return '先补充几个偏好，我来按这些条件筛。';
 }
 
 function mapDraftSettingsFormPayloadToBlock(
@@ -2010,16 +2670,32 @@ function mapDraftSettingsFormPayloadToBlock(
     initialValues,
     dedupeKey: 'draft_settings_form',
     traceRef,
+    meta: {
+      formShowHeader: false,
+    },
   });
 }
 
+function removeRedundantPreferenceBlocks(blocks: GenUIBlock[]): GenUIBlock[] {
+  const hasPartnerIntentForm = blocks.some(
+    (block) => block.type === 'form' && block.dedupeKey === 'partner_intent_form'
+  );
+
+  if (!hasPartnerIntentForm) {
+    return blocks;
+  }
+
+  return blocks.filter((block) => block.dedupeKey !== 'ask_preference');
+}
+
 function mapWidgetDataToBlock(params: {
+  request?: GenUIRequest;
   widgetType: string;
   payload: unknown;
   assistantText: string;
   traceRef: string;
 }): GenUIBlock | null {
-  const { widgetType, payload, assistantText, traceRef } = params;
+  const { request, widgetType, payload, assistantText, traceRef } = params;
   if (!isRecord(payload)) {
     return null;
   }
@@ -2043,11 +2719,21 @@ function mapWidgetDataToBlock(params: {
   })();
 
   if (widgetType === 'widget_ask_preference') {
+    if (request) {
+      const partnerForm = mapPartnerAskPreferenceToFormBlock(request, payload, traceRef);
+      if (partnerForm) {
+        return partnerForm;
+      }
+    }
     return mapAskPreferencePayloadToBlock(payload, assistantText, traceRef, 'ask_preference');
   }
 
   if (widgetType === 'widget_explore') {
     return mapExplorePayloadToList(payload, traceRef, 'widget_explore');
+  }
+
+  if (widgetType === 'widget_partner_search_results') {
+    return mapPartnerSearchResultsPayloadToBlock(payload, traceRef, 'widget_partner_search_results');
   }
 
   if (widgetType === 'widget_partner_intent_form') {
@@ -2147,6 +2833,10 @@ function mapActionResultToCtaBlock(
     items,
     dedupeKey: 'action_result_next_actions',
     traceRef,
+    meta: {
+      ctaGroupPresentation: 'inline-actions',
+      ctaShowHeader: false,
+    },
   });
 }
 
@@ -2238,7 +2928,8 @@ function buildWorkflowCompleteTraceFromEventData(
 
 function buildBlocksFromDataStream(
   events: DataStreamEvent[],
-  defaultExecutionPath: ExecutionPath
+  defaultExecutionPath: ExecutionPath,
+  request?: GenUIRequest
 ): {
   blocks: GenUIBlock[];
   traces: GenUITracePayload[];
@@ -2251,6 +2942,7 @@ function buildBlocksFromDataStream(
 
   let assistantText = '';
   let executionPath = defaultExecutionPath;
+  let cardPriorityLeadText: string | null = null;
 
   for (const event of events) {
     if (event.type === 'text-delta') {
@@ -2300,6 +2992,18 @@ function buildBlocksFromDataStream(
       }
 
       toolStates.set(toolCallId, existing);
+      if (!cardPriorityLeadText) {
+        cardPriorityLeadText = request && isRecord(existing.output)
+          ? resolvePartnerFormLeadText(request, existing.output)
+          : null;
+      }
+      if (!cardPriorityLeadText) {
+        cardPriorityLeadText = resolveCardPriorityLeadTextFromTool(
+          existing.toolName,
+          existing.input,
+          existing.output
+        );
+      }
       continue;
     }
 
@@ -2320,6 +3024,17 @@ function buildBlocksFromDataStream(
           widgetType,
           payload: event.data.payload,
         });
+        if (!cardPriorityLeadText) {
+          cardPriorityLeadText = request && isRecord(event.data.payload)
+            ? resolvePartnerFormLeadText(request, event.data.payload)
+            : null;
+        }
+        if (!cardPriorityLeadText) {
+          cardPriorityLeadText = resolveCardPriorityLeadTextFromWidget(
+            widgetType,
+            event.data.payload
+          );
+        }
       } else if (widgetType === 'action_result') {
         actionResultEvents.push({
           success: event.data.success === true,
@@ -2346,13 +3061,14 @@ function buildBlocksFromDataStream(
   }
 
   const blocks: GenUIBlock[] = [];
-  const trimmedText = assistantText.trim();
+  const trimmedText = cardPriorityLeadText || assistantText.trim();
   if (trimmedText) {
     pushBlock(blocks, createTextBlock(trimmedText, 'assistant_text', 'assistant_text'));
   }
 
   for (const widgetEvent of widgetDataEvents) {
     const block = mapWidgetDataToBlock({
+      request,
       widgetType: widgetEvent.widgetType,
       payload: widgetEvent.payload,
       assistantText: trimmedText,
@@ -2373,6 +3089,7 @@ function buildBlocksFromDataStream(
 
   for (const toolState of toolStates.values()) {
     const mappedBlocks = mapToolOutputToBlocks({
+      request,
       toolName: toolState.toolName,
       toolInput: toolState.input,
       toolOutput: toolState.output,
@@ -2397,19 +3114,21 @@ function buildBlocksFromDataStream(
     );
   }
 
+  const finalBlocks = removeRedundantPreferenceBlocks(blocks);
+
   ensureStrictTraceCoverage(traces, trimmedText, executionPath);
 
   traces.push({
     stage: 'genui_blocks_built',
     detail: {
-      blockCount: blocks.length,
-      blockTypes: blocks.map((block) => block.type),
+      blockCount: finalBlocks.length,
+      blockTypes: finalBlocks.map((block) => block.type),
       executionPath,
     },
   });
 
   return {
-    blocks,
+    blocks: finalBlocks,
     traces,
     executionPath,
   };
@@ -2439,7 +3158,11 @@ function createStreamEvent(...args: StreamEventArgs): GenUIStreamEvent {
 
 export function buildAiChatStreamEvents(
   envelope: GenUITurnEnvelope,
-  traces: GenUITracePayload[]
+  traces: GenUITracePayload[],
+  streamOptions: ResolvedStreamOptions = {
+    includeTrace: true,
+    eventEnvelope: 'full',
+  }
 ): GenUIStreamEvent[] {
   const events: GenUIStreamEvent[] = [];
 
@@ -2476,23 +3199,53 @@ export function buildAiChatStreamEvents(
 
   events.push(createStreamEvent('turn-complete', envelope));
 
-  for (const trace of traces) {
-    events.push(createStreamEvent('trace', trace));
+  if (streamOptions.includeTrace) {
+    for (const trace of traces) {
+      events.push(createStreamEvent('trace', trace));
+    }
   }
 
   return events;
 }
 
-function serializeSSE(event: GenUIStreamEvent): string {
-  return `event: ${event.event}\ndata: ${JSON.stringify(event)}\n\n`;
+function readStreamEventPayload(
+  event: GenUIStreamEvent,
+  streamOptions: ResolvedStreamOptions
+): unknown {
+  if (streamOptions.eventEnvelope === 'full') {
+    return event;
+  }
+
+  switch (event.event) {
+    case 'block-append':
+    case 'block-replace':
+      return {
+        turnId: event.data.turnId,
+        block: compactBlockForStream(event.data.block),
+      };
+    case 'turn-complete':
+      return compactTurnEnvelopeForStream(event.data);
+    default:
+      return event.data;
+  }
 }
 
-export function createAiChatSSEStreamResponse(events: GenUIStreamEvent[]): Response {
+function serializeSSE(event: GenUIStreamEvent, streamOptions: ResolvedStreamOptions): string {
+  return `event: ${event.event}\ndata: ${JSON.stringify(readStreamEventPayload(event, streamOptions))}\n\n`;
+}
+
+export function createAiChatSSEStreamResponse(
+  events: GenUIStreamEvent[],
+  streamOptions: ResolvedStreamOptions = {
+    includeTrace: true,
+    eventEnvelope: 'full',
+  }
+): Response {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     start(controller) {
       for (const event of events) {
-        controller.enqueue(encoder.encode(serializeSSE(event)));
+        controller.enqueue(encoder.encode(serializeSSE(event, streamOptions)));
       }
 
       controller.enqueue(encoder.encode('data: [DONE]\n\n'));
@@ -2523,20 +3276,32 @@ function upsertBridgeBlock(
 ): {
   eventName: 'block-append' | 'block-replace';
   block: GenUIBlock;
+  changed: boolean;
 } {
   const targetIndex = block.dedupeKey
     ? blocks.findIndex((item) => item.dedupeKey === block.dedupeKey)
     : blocks.findIndex((item) => item.blockId === block.blockId);
 
   if (targetIndex >= 0) {
+    const previousBlock = blocks[targetIndex];
     const nextBlock = {
       ...block,
-      blockId: blocks[targetIndex].blockId,
+      blockId: previousBlock.blockId,
     };
+    const changed = JSON.stringify(previousBlock) !== JSON.stringify(nextBlock);
+    if (!changed) {
+      return {
+        eventName: 'block-replace',
+        block: previousBlock,
+        changed: false,
+      };
+    }
+
     blocks[targetIndex] = nextBlock;
     return {
       eventName: 'block-replace',
       block: nextBlock,
+      changed: true,
     };
   }
 
@@ -2544,6 +3309,7 @@ function upsertBridgeBlock(
   return {
     eventName: 'block-append',
     block,
+    changed: true,
   };
 }
 
@@ -2565,6 +3331,7 @@ export async function createAiChatBridgeStreamResponse(
   options?: CreateAiChatBridgeStreamResponseOptions
 ): Promise<Response> {
   const viewer = options?.viewer ?? null;
+  const streamOptions = resolveStreamOptions(request);
   const bridgeAbortController = new AbortController();
   const requestAbortSignal = options?.requestAbortSignal;
 
@@ -2587,6 +3354,7 @@ export async function createAiChatBridgeStreamResponse(
     viewer,
     bridgeAbortController.signal
   );
+  const initialCardPriorityLeadText = inferInitialCardPriorityLeadText(request, execution);
 
   const traceId = createId(ID_PREFIX.trace);
   const turnId = createId(ID_PREFIX.turn);
@@ -2620,7 +3388,7 @@ export async function createAiChatBridgeStreamResponse(
         if (shouldStopBridge()) {
           return;
         }
-        controller.enqueue(encoder.encode(serializeSSE(event)));
+        controller.enqueue(encoder.encode(serializeSSE(event, streamOptions)));
       };
 
       const emitDone = () => {
@@ -2636,6 +3404,10 @@ export async function createAiChatBridgeStreamResponse(
         emittedTraceSignatures: Set<string>
       ) => {
         traces.push(trace);
+        if (!streamOptions.includeTrace) {
+          return;
+        }
+
         emittedTraceSignatures.add(getTraceSignature(trace));
         emit(createStreamEvent('trace', trace));
       };
@@ -2649,6 +3421,67 @@ export async function createAiChatBridgeStreamResponse(
       let done = false;
       let assistantText = '';
       let executionPath = execution.defaultExecutionPath;
+      let cardPriorityLeadText: string | null = initialCardPriorityLeadText;
+
+      const emitCardPriorityLeadText = (nextText: string | null) => {
+        if (!nextText || shouldStopBridge()) {
+          return;
+        }
+
+        if (nextText === cardPriorityLeadText) {
+          return;
+        }
+
+        const currentScore = scoreCardPriorityLeadText(cardPriorityLeadText);
+        const nextScore = scoreCardPriorityLeadText(nextText);
+        if (cardPriorityLeadText && nextScore < currentScore) {
+          return;
+        }
+
+        cardPriorityLeadText = nextText;
+        const blockEvent = upsertBridgeBlock(
+          streamedBlocks,
+          createStreamingTextBlock(nextText, textBlockId)
+        );
+        if (!blockEvent.changed) {
+          return;
+        }
+        emit(createStreamEvent(blockEvent.eventName, {
+          turnId,
+          block: blockEvent.block,
+        }));
+      };
+
+      const hasStreamedAssistantTextBlock = () => (
+        streamedBlocks.some((block) => block.type === 'text' && block.dedupeKey === 'assistant_text')
+      );
+
+      const ensureAssistantTextBlockBeforeStructured = (preferredText?: string | null) => {
+        if (shouldStopBridge() || hasStreamedAssistantTextBlock()) {
+          return;
+        }
+
+        const nextText = toStringValue(
+          preferredText,
+          toStringValue(cardPriorityLeadText, assistantText.trim())
+        );
+        if (!nextText) {
+          return;
+        }
+
+        const blockEvent = upsertBridgeBlock(
+          streamedBlocks,
+          createStreamingTextBlock(nextText, textBlockId)
+        );
+        if (!blockEvent.changed) {
+          return;
+        }
+
+        emit(createStreamEvent(blockEvent.eventName, {
+          turnId,
+          block: blockEvent.block,
+        }));
+      };
 
       try {
         if (stopBridgeIfAborted()) {
@@ -2664,6 +3497,18 @@ export async function createAiChatBridgeStreamResponse(
           turnId,
           status: 'streaming',
         }));
+        if (initialCardPriorityLeadText) {
+          const blockEvent = upsertBridgeBlock(
+            streamedBlocks,
+            createStreamingTextBlock(initialCardPriorityLeadText, textBlockId)
+          );
+          if (blockEvent.changed) {
+            emit(createStreamEvent(blockEvent.eventName, {
+              turnId,
+              block: blockEvent.block,
+            }));
+          }
+        }
         emitTrace(execution.conversation.trace, streamedTraces, emittedTraceSignatures);
 
         const aiResponse = await handleChatStream(execution.chatRequest);
@@ -2684,10 +3529,16 @@ export async function createAiChatBridgeStreamResponse(
 
           if (event.type === 'text-delta') {
             assistantText += toStringValue(event.delta);
+            if (cardPriorityLeadText) {
+              return;
+            }
             const blockEvent = upsertBridgeBlock(
               streamedBlocks,
               createStreamingTextBlock(assistantText, textBlockId)
             );
+            if (!blockEvent.changed) {
+              return;
+            }
             emit(createStreamEvent(blockEvent.eventName, {
               turnId,
               block: blockEvent.block,
@@ -2716,6 +3567,10 @@ export async function createAiChatBridgeStreamResponse(
             }
 
             toolStates.set(toolCallId, existing);
+            emitCardPriorityLeadText(
+              (isRecord(existing.output) && resolvePartnerFormLeadText(request, existing.output))
+                || resolveCardPriorityLeadTextFromTool(existing.toolName, existing.input, existing.output)
+            );
             return;
           }
 
@@ -2737,8 +3592,13 @@ export async function createAiChatBridgeStreamResponse(
             }
 
             toolStates.set(toolCallId, existing);
+            emitCardPriorityLeadText(
+              (isRecord(existing.output) && resolvePartnerFormLeadText(request, existing.output))
+                || resolveCardPriorityLeadTextFromTool(existing.toolName, existing.input, existing.output)
+            );
 
             const mappedBlocks = mapToolOutputToBlocks({
+              request,
               toolName: existing.toolName,
               toolInput: existing.input,
               toolOutput: existing.output,
@@ -2748,7 +3608,13 @@ export async function createAiChatBridgeStreamResponse(
             });
 
             for (const block of mappedBlocks) {
+              if (block.type !== 'text') {
+                ensureAssistantTextBlockBeforeStructured();
+              }
               const blockEvent = upsertBridgeBlock(streamedBlocks, block);
+              if (!blockEvent.changed) {
+                continue;
+              }
               emit(createStreamEvent(blockEvent.eventName, {
                 turnId,
                 block: blockEvent.block,
@@ -2772,7 +3638,12 @@ export async function createAiChatBridgeStreamResponse(
           if ((event.type === 'data-widget' || event.type === 'data') && isRecord(event.data)) {
             const widgetType = toStringValue(event.data.type);
             if (widgetType.startsWith('widget_')) {
+              emitCardPriorityLeadText(
+                (isRecord(event.data.payload) && resolvePartnerFormLeadText(request, event.data.payload))
+                  || resolveCardPriorityLeadTextFromWidget(widgetType, event.data.payload)
+              );
               const block = mapWidgetDataToBlock({
+                request,
                 widgetType,
                 payload: event.data.payload,
                 assistantText: assistantText.trim(),
@@ -2780,7 +3651,13 @@ export async function createAiChatBridgeStreamResponse(
               });
 
               if (block) {
+                if (block.type !== 'text') {
+                  ensureAssistantTextBlockBeforeStructured();
+                }
                 const blockEvent = upsertBridgeBlock(streamedBlocks, block);
+                if (!blockEvent.changed) {
+                  return;
+                }
                 emit(createStreamEvent(blockEvent.eventName, {
                   turnId,
                   block: blockEvent.block,
@@ -2797,7 +3674,13 @@ export async function createAiChatBridgeStreamResponse(
               }, 'action_result');
 
               if (block) {
+                if (block.type !== 'text') {
+                  ensureAssistantTextBlockBeforeStructured();
+                }
                 const blockEvent = upsertBridgeBlock(streamedBlocks, block);
+                if (!blockEvent.changed) {
+                  return;
+                }
                 emit(createStreamEvent(blockEvent.eventName, {
                   turnId,
                   block: blockEvent.block,
@@ -2887,7 +3770,11 @@ export async function createAiChatBridgeStreamResponse(
           return;
         }
 
-        const mapped = buildBlocksFromDataStream(internalEvents, execution.defaultExecutionPath);
+        const mapped = buildBlocksFromDataStream(
+          internalEvents,
+          execution.defaultExecutionPath,
+          request
+        );
         executionPath = mapped.executionPath;
         const turnContext = buildTurnContextFromBlocks(mapped.blocks);
 
@@ -3024,14 +3911,16 @@ export async function createAiChatBridgeStreamResponse(
         }));
         emit(createStreamEvent('turn-complete', normalized.envelope));
 
-        for (const trace of responseTraces) {
-          const signature = getTraceSignature(trace);
-          if (emittedTraceSignatures.has(signature)) {
-            continue;
-          }
+        if (streamOptions.includeTrace) {
+          for (const trace of responseTraces) {
+            const signature = getTraceSignature(trace);
+            if (emittedTraceSignatures.has(signature)) {
+              continue;
+            }
 
-          emittedTraceSignatures.add(signature);
-          emit(createStreamEvent('trace', trace));
+            emittedTraceSignatures.add(signature);
+            emit(createStreamEvent('trace', trace));
+          }
         }
 
         emitDone();
@@ -3042,7 +3931,9 @@ export async function createAiChatBridgeStreamResponse(
           return;
         }
 
-        const message = error instanceof Error ? error.message : 'AI 服务暂时不可用';
+        const message = normalizeAiProviderErrorMessage(
+          error instanceof Error ? error.message : 'AI 服务暂时不可用'
+        );
         emit(createStreamEvent('turn-status', {
           turnId,
           status: 'error',
@@ -3095,7 +3986,8 @@ export async function buildAiChatTurn(
   const parsed = await parseDataStreamResponse(aiResponse);
   const mapped = buildBlocksFromDataStream(
     parsed.events,
-    execution.defaultExecutionPath
+    execution.defaultExecutionPath,
+    request
   );
   const executionPath = mapped.executionPath;
   const turnContext = buildTurnContextFromBlocks(mapped.blocks);

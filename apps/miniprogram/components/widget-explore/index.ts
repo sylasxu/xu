@@ -65,6 +65,8 @@ interface WidgetExploreProperties {
   results?: ExploreResult[];
   center?: CenterPoint;
   title?: string;
+  presentation?: 'compact-stack' | 'immersive-carousel';
+  showHeader?: boolean;
   semanticQuery?: string;
   fetchConfig?: FetchConfig;
   interaction?: Interaction;
@@ -302,6 +304,8 @@ Component({
       value: DEFAULT_CENTER,
     },
     title: { type: String, value: '' },
+    presentation: { type: String, value: 'compact-stack' },
+    showHeader: { type: Boolean, value: true },
     semanticQuery: { type: String, value: '' },
     // 引用模式新增
     fetchConfig: { type: Object, value: undefined },

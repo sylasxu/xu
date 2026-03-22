@@ -1,0 +1,79 @@
+<view class="widget-partner-search-results halo-card {{showHeader ? '' : 'widget-partner-search-results--frameless'}}">
+  <view wx:if="{{showHeader}}" class="header">
+    <view class="header-badge">
+      <text class="header-badge__text">搭子候选</text>
+    </view>
+    <text class="title">{{title}}</text>
+    <text class="subtitle">先看看这些已经注册过、方向也比较接近的搭子。</text>
+  </view>
+
+  <view wx:if="{{renderResults.length > 0}}" class="swiper-shell">
+    <swiper
+      class="swiper"
+      indicator-dots="{{true}}"
+      indicator-color="rgba(91, 117, 251, 0.18)"
+      indicator-active-color="#5B75FB"
+      current="{{activeIndex}}"
+      previous-margin="48rpx"
+      next-margin="48rpx"
+      duration="260"
+      bindchange="onSwiperChange"
+    >
+      <swiper-item wx:for="{{renderResults}}" wx:for-item="result" wx:key="id">
+        <view class="result-card">
+          <view class="result-head">
+            <view class="result-user">
+              <image wx:if="{{result.avatarUrl}}" class="avatar" src="{{result.avatarUrl}}" mode="aspectFill" />
+              <view wx:else class="avatar avatar--fallback">
+                <text>{{result.avatarInitial}}</text>
+              </view>
+
+              <view class="user-copy">
+                <view class="user-copy__row">
+                  <text class="type-chip">{{result.type}}</text>
+                  <text wx:if="{{result.score}}" class="score-chip">匹配 {{result.score}}%</text>
+                </view>
+                <text class="user-name">{{result.title}}</text>
+              </view>
+            </view>
+          </view>
+
+          <view class="meta-wrap">
+            <text class="meta-chip">{{result.locationName}}</text>
+            <text wx:if="{{result.timePreference}}" class="meta-chip meta-chip--soft">{{result.timePreference}}</text>
+          </view>
+
+          <text class="summary">{{result.summary || result.matchReason || result.locationHint || '先看看这位搭子的描述，顺眼的话就继续下一步。'}}</text>
+
+          <view wx:if="{{result.tags && result.tags.length > 0}}" class="tag-wrap">
+            <text wx:for="{{result.tags}}" wx:for-item="tag" wx:key="*this" class="tag-chip">{{tag}}</text>
+          </view>
+
+          <view wx:if="{{result.actions.length > 0}}" class="action-wrap">
+            <button
+              wx:for="{{result.actions}}"
+              wx:for-item="actionItem"
+              wx:key="action"
+              class="action-btn {{index === 0 ? 'action-btn--primary' : 'action-btn--secondary'}}"
+              data-label="{{actionItem.label}}"
+              data-action="{{actionItem.action}}"
+              data-params="{{actionItem.params}}"
+              catchtap="onActionTap"
+            >
+              {{actionItem.label}}
+            </button>
+          </view>
+        </view>
+      </swiper-item>
+    </swiper>
+
+    <view class="counter">
+      <text>{{activeIndex + 1}} / {{renderResults.length}}</text>
+    </view>
+  </view>
+
+  <view wx:else class="empty-state">
+    <text class="empty-title">暂时还没搜到特别合适的</text>
+    <text class="empty-subtitle">你可以先调整描述，或者登录后让我继续替你留意。</text>
+  </view>
+</view>

@@ -16,7 +16,6 @@
   
   <!-- 自定义导航栏 -->
   <custom-navbar 
-    title="聚场"
     showMenu="{{true}}"
     showMore="{{true}}"
     bind:newchat="onNewChat"
@@ -114,10 +113,21 @@
                     results="{{part.data.results}}"
                     center="{{part.data.center}}"
                     title="{{part.data.title}}"
+                    presentation="{{part.data.presentation}}"
+                    showHeader="{{part.data.showHeader}}"
                     fetchConfig="{{part.data.fetchConfig}}"
                     interaction="{{part.data.interaction}}"
                     preview="{{part.data.preview}}"
                     bind:expandmap="onExploreExpandMap"
+                  />
+                </block>
+
+                <block wx:elif="{{part.widgetType === 'partner_search_results'}}">
+                  <widget-partner-search-results
+                    title="{{part.data.title}}"
+                    presentation="{{part.data.presentation}}"
+                    showHeader="{{part.data.showHeader}}"
+                    results="{{part.data.results}}"
                   />
                 </block>
                 
@@ -125,13 +135,21 @@
                 <block wx:elif="{{part.widgetType === 'ask_preference'}}">
                   <widget-ask-preference 
                     questionType="{{part.data.questionType}}"
+                    inputMode="{{part.data.inputMode}}"
                     question="{{part.data.question}}"
                     options="{{part.data.options}}"
                     allowSkip="{{part.data.allowSkip}}"
                     collectedInfo="{{part.data.collectedInfo}}"
-                    disabled="{{part.data.disabled}}"
+                    disabled="{{part.data.disabled || index < messages.length - 1}}"
                     bind:select="onAskPreferenceSelect"
                     bind:skip="onAskPreferenceSkip"
+                  />
+                </block>
+
+                <block wx:elif="{{part.widgetType === 'action_chips'}}">
+                  <widget-action-chips
+                    items="{{part.data.items}}"
+                    disabled="{{part.data.disabled || index < messages.length - 1}}"
                   />
                 </block>
 
@@ -141,7 +159,8 @@
                     title="{{part.data.title}}"
                     schema="{{part.data.schema}}"
                     initialValues="{{part.data.initialValues}}"
-                    disabled="{{part.data.disabled}}"
+                    showHeader="{{part.data.showHeader}}"
+                    disabled="{{part.data.disabled || index < messages.length - 1}}"
                     bind:submit="onPartnerIntentFormSubmit"
                   />
                 </block>
@@ -152,7 +171,7 @@
                     title="{{part.data.title}}"
                     schema="{{part.data.schema}}"
                     initialValues="{{part.data.initialValues}}"
-                    disabled="{{part.data.disabled}}"
+                    disabled="{{part.data.disabled || index < messages.length - 1}}"
                     bind:submit="onDraftSettingsFormSubmit"
                   />
                 </block>
@@ -184,7 +203,7 @@
     
     <!-- AI 思考态 - 当 status 为 submitted 时显示 -->
     <view wx:if="{{status === 'submitted'}}" class="message-item message-item--assistant slide-up-fade-in">
-      <thinking-bubble text="收到，小聚正在整理你的安排..." />
+      <thinking-bubble text="稍等，我帮你看看..." />
     </view>
     
     <!-- 底部占位（为 AI Dock 留空间） -->

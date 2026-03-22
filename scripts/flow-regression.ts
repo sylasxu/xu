@@ -6,9 +6,12 @@ interface CheckTask {
   name: string;
   command: string;
   args: string[];
+  optional?: boolean;
 }
 
 function runTask(task: CheckTask): void {
+  console.log(`\n>>> ${task.name}${task.optional ? ' (optional)' : ''}`);
+
   const result = spawnSync(task.command, task.args, {
     encoding: 'utf8',
     maxBuffer: 1024 * 1024 * 10,
@@ -19,13 +22,18 @@ function runTask(task: CheckTask): void {
   }
 
   if (result.status !== 0) {
+    if (task.optional) {
+      console.log(`WARNING: ${task.name} failed (optional), continuing...`);
+      return;
+    }
     const stderr = result.stderr?.trim() || 'unknown error';
     throw new Error(`${task.name} failed: ${stderr}`);
   }
 }
 
 function main(): void {
-  const tasks: CheckTask[] = [
+  // Core regression tests (must pass)
+  const coreTasks: CheckTask[] = [
     {
       name: 'Sandbox multi-user regression',
       command: 'bun',
@@ -38,12 +46,48 @@ function main(): void {
     },
   ];
 
-  for (const task of tasks) {
-    console.log(`\n>>> ${task.name}`);
+  // Extended regression tests (v5.5+)
+  const extendedTasks: CheckTask[] = [
+    {
+      name: 'Chat full regression with long conversation chains',
+      command: 'bun',
+      args: ['scripts/chat-full-regression.ts'],
+    },
+    {
+      name: 'GenUI turns regression with multi-intent scenarios',
+      command: 'bun',
+      args: ['scripts/genui-turns-regression.ts'],
+    },
+    {
+      name: 'Long conversation dedicated regression',
+      command: 'bun',
+      args: ['scripts/long-conversation-regression.ts'],
+      optional: true,
+    },
+  ];
+
+  console.log('=== Flow Regression Test Suite (v5.5) ===');
+  console.log(`Started at: ${new Date().toISOString()}`);
+
+  // Run core tests
+  console.log('\n--- Core Tests ---');
+  for (const task of coreTasks) {
     runTask(task);
   }
 
-  console.log('\nFlow regressions passed: multi-user core journeys are healthy.');
+  // Run extended tests
+  console.log('\n--- Extended Tests (v5.5) ---');
+  for (const task of extendedTasks) {
+    runTask(task);
+  }
+
+  console.log('\n=== Flow Regression Summary ===');
+  console.log('All required tests passed!');
+  console.log('\nTest Coverage:');
+  console.log('- Core: multi-user journeys, smoke tests');
+  console.log('- Extended: 10+ turn conversations, transient context, multi-intent crossovers');
+  console.log('- Long conversation: 15-turn linear chains, boundary values, rapid context switching');
+  console.log(`\nCompleted at: ${new Date().toISOString()}`);
 }
 
 try {

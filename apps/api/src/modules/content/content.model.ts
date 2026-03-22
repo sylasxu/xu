@@ -6,15 +6,18 @@ import {
 } from '@juchang/db'
 import { Elysia, t, type Static } from 'elysia'
 import { ContentTypeSchema } from './content-type'
+import { ContentPlatformSchema } from './content-platform'
 
 const ContentNoteResponseSchema = t.Composite([
   t.Pick(selectContentNoteSchema, [
     'id',
     'topic',
+    'platform',
     'contentType',
     'title',
     'body',
     'hashtags',
+    'coverText',
     'coverImageHint',
     'views',
     'likes',
@@ -30,16 +33,31 @@ const ContentNoteResponseSchema = t.Composite([
 ])
 
 const GenerateContentRequestSchema = t.Composite([
-  t.Pick(insertContentNoteSchema, ['topic', 'contentType']),
+  t.Pick(insertContentNoteSchema, ['topic', 'platform', 'contentType']),
   t.Object({
     count: t.Optional(t.Integer({ minimum: 1, maximum: 5, default: 1, description: '生成数量' })),
     trendKeywords: t.Optional(t.Array(t.String(), { description: '趋势关键词' })),
   }),
 ])
 
+const TopicSuggestionRequestSchema = t.Object({
+  platform: ContentPlatformSchema,
+  contentType: ContentTypeSchema,
+  seed: t.Optional(t.String({ minLength: 1, maxLength: 120, description: '可选的补充方向' })),
+})
+
+const TopicSuggestionResponseSchema = t.Object({
+  items: t.Array(t.String({ minLength: 6, maxLength: 60 }), {
+    minItems: 3,
+    maxItems: 3,
+    description: 'AI 推荐的主题建议',
+  }),
+})
+
 const ContentLibraryQuerySchema = t.Object({
   page: t.Optional(t.Integer({ minimum: 1, default: 1, description: '页码' })),
   limit: t.Optional(t.Integer({ minimum: 1, maximum: 50, default: 20, description: '每页数量' })),
+  platform: t.Optional(ContentPlatformSchema),
   contentType: t.Optional(ContentTypeSchema),
   keyword: t.Optional(t.String({ description: '关键词搜索（topic/body）' })),
 })
@@ -85,6 +103,8 @@ const SuccessResponseSchema = t.Object({
 export const contentModel = new Elysia({ name: 'contentModel' }).model({
   'content.noteResponse': ContentNoteResponseSchema,
   'content.generateRequest': GenerateContentRequestSchema,
+  'content.topicSuggestionRequest': TopicSuggestionRequestSchema,
+  'content.topicSuggestionResponse': TopicSuggestionResponseSchema,
   'content.libraryQuery': ContentLibraryQuerySchema,
   'content.libraryResponse': ContentLibraryResponseSchema,
   'content.performanceUpdate': PerformanceUpdateRequestSchema,
@@ -95,6 +115,8 @@ export const contentModel = new Elysia({ name: 'contentModel' }).model({
 
 export type ContentNoteResponse = Static<typeof ContentNoteResponseSchema>
 export type GenerateContentRequest = Static<typeof GenerateContentRequestSchema>
+export type TopicSuggestionRequest = Static<typeof TopicSuggestionRequestSchema>
+export type TopicSuggestionResponse = Static<typeof TopicSuggestionResponseSchema>
 export type ContentLibraryQuery = Static<typeof ContentLibraryQuerySchema>
 export type ContentLibraryResponse = Static<typeof ContentLibraryResponseSchema>
 export type PerformanceUpdateRequest = Static<typeof PerformanceUpdateRequestSchema>

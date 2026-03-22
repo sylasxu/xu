@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import type { UIMessage } from '@ai-sdk/react'
 import { type FlowNode, type FlowNodeData, getNodeChineseLabel } from '../../types/flow'
+import type { RouteMapConfig } from '../../model-routing'
 import { DetailRow } from '../shared/detail-row'
 import { type ModelParams, type TraceOutput, formatDuration } from '../../types/trace'
 import type { MockSettings } from './mock-settings-panel'
@@ -35,6 +36,8 @@ export interface PlaygroundDrawerProps {
   onMockSettingsChange: (settings: MockSettings) => void
   modelParams: ModelParams
   onModelParamsChange: (params: ModelParams) => void
+  routeMap: RouteMapConfig
+  routeMapLoading?: boolean
   traceEnabled: boolean
   onTraceEnabledChange: (enabled: boolean) => void
   // Node detail props
@@ -124,6 +127,8 @@ interface UserInputNodePanelProps {
   onMockSettingsChange: (settings: MockSettings) => void
   modelParams: ModelParams
   onModelParamsChange: (params: ModelParams) => void
+  routeMap: RouteMapConfig
+  routeMapLoading?: boolean
   traceEnabled: boolean
   onTraceEnabledChange: (enabled: boolean) => void
 }
@@ -140,6 +145,8 @@ function UserInputNodePanel({
   onMockSettingsChange,
   modelParams,
   onModelParamsChange,
+  routeMap,
+  routeMapLoading,
   traceEnabled,
   onTraceEnabledChange,
 }: UserInputNodePanelProps) {
@@ -178,6 +185,8 @@ function UserInputNodePanel({
           onMockSettingsChange={onMockSettingsChange}
           modelParams={modelParams}
           onModelParamsChange={onModelParamsChange}
+          routeMap={routeMap}
+          routeMapLoading={routeMapLoading}
           traceEnabled={traceEnabled}
           onTraceEnabledChange={onTraceEnabledChange}
         />
@@ -200,6 +209,8 @@ export function PlaygroundDrawer({
   onMockSettingsChange,
   modelParams,
   onModelParamsChange,
+  routeMap,
+  routeMapLoading,
   traceEnabled,
   onTraceEnabledChange,
   systemPrompt,
@@ -247,6 +258,8 @@ export function PlaygroundDrawer({
               onMockSettingsChange={onMockSettingsChange}
               modelParams={modelParams}
               onModelParamsChange={onModelParamsChange}
+              routeMap={routeMap}
+              routeMapLoading={routeMapLoading}
               traceEnabled={traceEnabled}
               onTraceEnabledChange={onTraceEnabledChange}
             />

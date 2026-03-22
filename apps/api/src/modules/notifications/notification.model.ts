@@ -34,11 +34,18 @@ const MatchPendingQuery = t.Object({
   }),
 });
 
+const MatchPendingRequestMode = t.Union([
+  t.Literal('auto_match'),
+  t.Literal('connect'),
+  t.Literal('group_up'),
+], { description: '这条待确认匹配的来源模式' });
+
 // 待确认匹配项
 const MatchPendingItem = t.Object({
   id: t.String({ format: 'uuid', description: '匹配 ID' }),
   activityType: t.String({ description: '活动类型' }),
   typeName: t.String({ description: '活动类型中文名' }),
+  requestMode: MatchPendingRequestMode,
   matchScore: t.Number({ description: '匹配分' }),
   commonTags: t.Array(t.String(), { description: '共同标签' }),
   locationHint: t.String({ description: '地点提示' }),
@@ -76,6 +83,7 @@ const MatchPendingDetailResponse = t.Object({
   id: t.String({ format: 'uuid', description: '匹配 ID' }),
   activityType: t.String({ description: '活动类型' }),
   typeName: t.String({ description: '活动类型中文名' }),
+  requestMode: MatchPendingRequestMode,
   matchScore: t.Number({ description: '匹配分' }),
   commonTags: t.Array(t.String(), { description: '共同偏好标签' }),
   locationHint: t.String({ description: '匹配中心地点提示' }),
@@ -174,6 +182,7 @@ export const notificationModel = new Elysia({ name: 'notificationModel' })
     'notification.matchPendingDetailQuery': MatchPendingDetailQuery,
     'notification.matchPendingMember': MatchPendingMember,
     'notification.matchPendingIcebreaker': MatchPendingIcebreaker,
+    'notification.matchPendingRequestMode': MatchPendingRequestMode,
     'notification.matchPendingDetailResponse': MatchPendingDetailResponse,
     'notification.messageCenterQuery': MessageCenterQuery,
     'notification.messageCenterChatItem': MessageCenterChatItem,
@@ -196,6 +205,7 @@ export type MatchPendingResponse = Static<typeof MatchPendingResponse>;
 export type MatchPendingDetailQuery = Static<typeof MatchPendingDetailQuery>;
 export type MatchPendingMember = Static<typeof MatchPendingMember>;
 export type MatchPendingIcebreaker = Static<typeof MatchPendingIcebreaker>;
+export type MatchPendingRequestMode = Static<typeof MatchPendingRequestMode>;
 export type MatchPendingDetailResponse = Static<typeof MatchPendingDetailResponse>;
 export type MessageCenterQuery = Static<typeof MessageCenterQuery>;
 export type MessageCenterChatItem = Static<typeof MessageCenterChatItem>;

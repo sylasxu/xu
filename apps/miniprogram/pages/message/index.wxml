@@ -105,7 +105,7 @@
                 data-match-id="{{item.matchId}}"
                 catch:tap="onMatchConfirmTap"
               >
-                确认成局
+                {{item.requestMode === 'connect' ? '同意搭一下' : (item.requestMode === 'group_up' ? '同意一起组局' : '确认成局')}}
               </t-button>
               <t-button
                 size="small"
@@ -114,14 +114,14 @@
                 data-match-id="{{item.matchId}}"
                 catch:tap="onMatchCancelTap"
               >
-                暂不成局
+                {{item.requestMode === 'connect' ? '这次先不搭' : (item.requestMode === 'group_up' ? '这次先不组' : '暂不成局')}}
               </t-button>
             </view>
             <view wx:elif="{{item.type === 'post_activity'}}" class="notification-tag">
               复盘 / 再约
             </view>
             <view wx:elif="{{item.type === 'match_pending' && !item.isTempOrganizer}}" class="notification-tag">
-              等召集人确认
+              {{item.requestMode === 'auto_match' ? '等召集人确认' : '等对方回应'}}
             </view>
             <view
               wx:elif="{{item.taskId}}"
@@ -207,7 +207,13 @@
     <view class="match-detail-sheet" catchtouchmove="noop">
       <view class="match-detail-sheet__header">
         <view>
-          <text class="match-detail-sheet__title">{{selectedMatchDetail ? '待确认搭子详情' : '搭子详情'}}</text>
+          <text class="match-detail-sheet__title">
+            {{selectedMatchDetail
+              ? (selectedMatchDetail.requestMode === 'connect'
+                ? '待处理搭子邀请'
+                : (selectedMatchDetail.requestMode === 'group_up' ? '待处理组局邀请' : '待确认匹配结果'))
+              : '搭子详情'}}
+          </text>
           <text class="match-detail-sheet__subtitle">把当前状态、下一步和破冰建议讲清楚</text>
         </view>
         <view class="match-detail-sheet__close" bind:tap="closeMatchDetail">
@@ -229,11 +235,19 @@
         <view class="match-detail-card">
           <view class="match-detail-card__header">
             <view>
-              <text class="match-detail-card__title">{{selectedMatchDetail.typeName}} 搭子</text>
+              <text class="match-detail-card__title">
+                {{selectedMatchDetail.requestMode === 'connect'
+                  ? ('搭子邀请 · ' + selectedMatchDetail.typeName)
+                  : (selectedMatchDetail.requestMode === 'group_up'
+                    ? ('组局邀请 · ' + selectedMatchDetail.typeName)
+                    : (selectedMatchDetail.typeName + ' 匹配结果'))}}
+              </text>
               <text class="match-detail-card__desc">匹配度 {{selectedMatchDetail.matchScore}}%</text>
             </view>
             <view class="match-detail-badge {{selectedMatchDetail.isTempOrganizer ? 'match-detail-badge--primary' : ''}}">
-              <text>{{selectedMatchDetail.isTempOrganizer ? '现在你来拍板' : '等召集人确认'}}</text>
+              <text>{{selectedMatchDetail.requestMode === 'auto_match'
+                ? (selectedMatchDetail.isTempOrganizer ? '现在你来拍板' : '等召集人确认')
+                : (selectedMatchDetail.isTempOrganizer ? '等你回应' : '等对方回应')}}</text>
             </view>
           </view>
 
@@ -313,7 +327,7 @@
             data-match-id="{{selectedMatchDetail.id}}"
             catch:tap="onMatchConfirmTap"
           >
-            确认成局
+            {{selectedMatchDetail.requestMode === 'connect' ? '同意搭一下' : (selectedMatchDetail.requestMode === 'group_up' ? '同意一起组局' : '确认成局')}}
           </t-button>
           <t-button
             wx:if="{{selectedMatchDetail.isTempOrganizer}}"
@@ -322,7 +336,7 @@
             data-match-id="{{selectedMatchDetail.id}}"
             catch:tap="onMatchCancelTap"
           >
-            暂不成局
+            {{selectedMatchDetail.requestMode === 'connect' ? '这次先不搭' : (selectedMatchDetail.requestMode === 'group_up' ? '这次先不组' : '暂不成局')}}
           </t-button>
           <t-button wx:if="{{!selectedMatchDetail.isTempOrganizer}}" variant="outline" bind:tap="closeMatchDetail">
             我知道了

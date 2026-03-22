@@ -24,6 +24,22 @@ const ACTIVITY_TYPE_NAMES: Record<string, string> = {
   other: '其他',
 };
 const OPEN_TASK_STATUSES = ['active', 'waiting_auth', 'waiting_async_result'] as const;
+const SPORT_TYPE_NAMES: Record<string, string> = {
+  badminton: '羽毛球',
+  basketball: '篮球',
+  running: '跑步',
+  tennis: '网球',
+  swimming: '游泳',
+  cycling: '骑行',
+};
+
+function getIntentTypeName(activityType: string, sportType?: string | null): string {
+  if (activityType === 'sports' && sportType && SPORT_TYPE_NAMES[sportType]) {
+    return SPORT_TYPE_NAMES[sportType];
+  }
+
+  return ACTIVITY_TYPE_NAMES[activityType] || activityType;
+}
 
 function toTemplateValue(value: string, maxLength = 20): string {
   const normalized = value.replace(/\s+/g, ' ').trim();
@@ -50,6 +66,18 @@ function buildIntentSummary(params: {
   ].filter(Boolean);
 
   return segments.join(' · ') || '这次主要想找个合拍搭子先碰一碰';
+}
+
+function inferPendingMatchRequestMode(messageType: string | null | undefined): 'auto_match' | 'connect' | 'group_up' {
+  if (messageType === 'connect_request') {
+    return 'connect';
+  }
+
+  if (messageType === 'group_up_request') {
+    return 'group_up';
+  }
+
+  return 'auto_match';
 }
 
 /** 类型守卫：检查是否为有效的通知类型 */
@@ -128,6 +156,7 @@ export async function getPendingMatches(userId: string): Promise<MatchPendingRes
     .select({
       id: intentMatches.id,
       activityType: intentMatches.activityType,
+      intentIds: intentMatches.intentIds,
       matchScore: intentMatches.matchScore,
       commonTags: intentMatches.commonTags,
       centerLocationHint: intentMatches.centerLocationHint,
@@ -141,10 +170,52 @@ export async function getPendingMatches(userId: string): Promise<MatchPendingRes
     ))
     .orderBy(desc(intentMatches.matchedAt));
 
+  const matchIds = rows.map((row) => row.id);
+  const latestModeMessages = matchIds.length > 0
+    ? await db
+      .select({
+        matchId: matchMessages.matchId,
+        messageType: matchMessages.messageType,
+        createdAt: matchMessages.createdAt,
+      })
+      .from(matchMessages)
+      .where(and(
+        inArray(matchMessages.matchId, matchIds),
+        inArray(matchMessages.messageType, ['icebreaker', 'connect_request', 'group_up_request']),
+      ))
+      .orderBy(desc(matchMessages.createdAt))
+    : [];
+  const latestModeByMatchId = new Map<string, string>();
+  for (const row of latestModeMessages) {
+    if (!latestModeByMatchId.has(row.matchId)) {
+      latestModeByMatchId.set(row.matchId, row.messageType);
+    }
+  }
+
+  const relatedIntentIds = Array.from(new Set(
+    rows.flatMap((row) => Array.isArray(row.intentIds) ? row.intentIds : [])
+  ));
+  const intentRows = relatedIntentIds.length > 0
+    ? await db
+      .select({
+        id: partnerIntents.id,
+        metaData: partnerIntents.metaData,
+      })
+      .from(partnerIntents)
+      .where(inArray(partnerIntents.id, relatedIntentIds))
+    : [];
+  const intentMap = new Map(intentRows.map((row) => [row.id, row]));
+
   const items = await Promise.all(rows.map(async (row) => ({
     id: row.id,
     activityType: row.activityType,
-    typeName: ACTIVITY_TYPE_NAMES[row.activityType] || row.activityType,
+    typeName: getIntentTypeName(
+      row.activityType,
+      Array.isArray(row.intentIds)
+        ? intentMap.get(row.intentIds[0])?.metaData?.sportType
+        : undefined
+    ),
+    requestMode: inferPendingMatchRequestMode(latestModeByMatchId.get(row.id)),
     matchScore: row.matchScore,
     commonTags: Array.isArray(row.commonTags) ? row.commonTags : [],
     locationHint: row.centerLocationHint,
@@ -212,17 +283,19 @@ export async function getPendingMatchDetail(
       .select({
         content: matchMessages.content,
         createdAt: matchMessages.createdAt,
+        messageType: matchMessages.messageType,
       })
       .from(matchMessages)
       .where(and(
         eq(matchMessages.matchId, match.id),
-        eq(matchMessages.messageType, 'icebreaker'),
+        inArray(matchMessages.messageType, ['icebreaker', 'connect_request', 'group_up_request']),
       ))
       .orderBy(desc(matchMessages.createdAt))
       .limit(1),
   ]);
 
   const icebreakerRow = icebreakerRows[0] || null;
+  const requestMode = inferPendingMatchRequestMode(icebreakerRow?.messageType);
 
   const organizer = memberRows.find((row) => row.userId === match.tempOrganizerId) || null;
   const organizerNickname = organizer?.nickname || '召集人';
@@ -257,14 +330,32 @@ export async function getPendingMatchDetail(
     .map(({ createdAt: _createdAt, ...member }) => member);
 
   const nextActionOwner = match.tempOrganizerId === userId ? 'self' : 'organizer';
-  const nextActionText = nextActionOwner === 'self'
-    ? '现在需要你来拍板。确认后会直接成局，大家就能继续去活动里协同。'
-    : `现在等 ${organizerNickname} 拍板。确认后会直接成局，你先看看信息和破冰建议就行。`;
+  const nextActionText = (() => {
+    if (requestMode === 'connect') {
+      return nextActionOwner === 'self'
+        ? '对方想先和你搭一下，如果你也觉得合适，点确认就能继续往成局推进。'
+        : `现在等 ${organizerNickname} 回应你的搭子邀约，确认后就会继续往成局推进。`;
+    }
+
+    if (requestMode === 'group_up') {
+      return nextActionOwner === 'self'
+        ? '对方想问你能不能一起组局，如果你愿意，点确认就能直接继续往成局推进。'
+        : `现在等 ${organizerNickname} 回应你的组局邀约，确认后就会继续往成局推进。`;
+    }
+
+    return nextActionOwner === 'self'
+      ? '现在需要你来拍板。确认后会直接成局，大家就能继续去活动里协同。'
+      : `现在等 ${organizerNickname} 拍板。确认后会直接成局，你先看看信息和破冰建议就行。`;
+  })();
+  const firstSportType = memberRows
+    .map((row) => row.metaData?.sportType)
+    .find((value) => typeof value === 'string' && value.trim().length > 0);
 
   return {
     id: match.id,
     activityType: match.activityType,
-    typeName: ACTIVITY_TYPE_NAMES[match.activityType] || match.activityType,
+    typeName: getIntentTypeName(match.activityType, firstSportType),
+    requestMode,
     matchScore: match.matchScore,
     commonTags: Array.isArray(match.commonTags) ? match.commonTags : [],
     locationHint: match.centerLocationHint,
@@ -296,7 +387,7 @@ export async function confirmPendingMatch(userId: string, matchId: string): Prom
 
   return {
     code: 200,
-    msg: '确认成功，已帮你把局组好，快去群聊里招呼大家～',
+    msg: '匹配已确认，活动已创建',
     ...(result.activityId ? { activityId: result.activityId } : {}),
   };
 }
@@ -312,7 +403,7 @@ export async function cancelPendingMatch(userId: string, matchId: string): Promi
 
   return {
     code: 200,
-    msg: '已取消这次匹配，你可以继续找更合适的搭子',
+    msg: '本次匹配已取消',
   };
 }
 

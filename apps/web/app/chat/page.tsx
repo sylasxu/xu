@@ -2,6 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  isDataUIPart,
+  isTextUIPart,
+  readUIMessageStream,
+  simulateReadableStream,
+  type UIMessage as AISDKUIMessage,
+  type UIMessageChunk,
+} from "ai";
+import {
   ArrowUp,
   ChevronRight,
   MoreHorizontal,
@@ -76,6 +84,7 @@ const DEFAULT_PROFILE_HINTS = {
 };
 const COMPOSER_EXPAND_THRESHOLD = 10;
 const PENDING_AGENT_ACTION_STORAGE_KEY = "juchang:web:pending-agent-action";
+const TEXT_STREAM_CHUNK_DELAY_MS = 60;  // v5.5: 调慢打字机速度，提升可读性
 
 type ComposerStatus = "ready" | "submitted";
 type TurnContextOverrides = Pick<GenUIRequestContext, "activityId" | "followUpMode" | "entry">;
@@ -145,7 +154,7 @@ type DiscussionNavigationPayload = {
   source?: string;
 };
 
-type GenUIFormFieldType = "single-select" | "multi-select" | "textarea";
+type GenUIFormFieldType = "single-select" | "multi-select" | "textarea" | "text";
 
 type GenUIFormOption = {
   label: string;
@@ -185,6 +194,22 @@ type ChatRecord =
 
 type AssistantRecord = Extract<ChatRecord, { role: "assistant" }>;
 type ActionOption = Pick<GenUIChoiceOption, "label" | "action" | "params"> | GenUICtaItem;
+type ChatStreamMessageMetadata = {
+  traceId?: string;
+  conversationId?: string;
+  turnId?: string;
+  status?: GenUITurnEnvelope["turn"]["status"];
+  turnContext?: GenUITurnEnvelope["turn"]["turnContext"];
+  assistantTextOverride?: string;
+};
+type ChatStreamDataTypes = {
+  genui_block: {
+    block: GenUIBlock;
+    mode: "append" | "replace";
+  };
+};
+type ChatStreamMessage = AISDKUIMessage<ChatStreamMessageMetadata, ChatStreamDataTypes>;
+type ChatStreamChunk = UIMessageChunk<ChatStreamMessageMetadata, ChatStreamDataTypes>;
 type WelcomeSocialProfile = {
   participationCount: number;
   activitiesCreatedCount: number;
@@ -216,16 +241,10 @@ type WelcomeUiPayload = {
   };
 };
 
-const TYPEWRITER_INTERVAL_MS = 18;
+const WELCOME_LOCATION_WAIT_MS = 600;
 
 function randomId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function sleep(ms: number) {
-  return new Promise<void>((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
 }
 
 function shouldExpandComposer(value: string) {
@@ -444,7 +463,70 @@ function readDiscussionNavigationPayload(value: unknown): DiscussionNavigationPa
 }
 
 function readGenUIFormFieldType(value: unknown): GenUIFormFieldType | null {
-  return value === "single-select" || value === "multi-select" || value === "textarea" ? value : null;
+  return value === "single-select" || value === "multi-select" || value === "textarea" || value === "text"
+    ? value
+    : null;
+}
+
+function isPartnerSearchResultsList(block: GenUIListBlock): boolean {
+  return isRecord(block.meta) && block.meta.listKind === "partner_search_results";
+}
+
+function readListPresentation(
+  block: GenUIListBlock
+): "compact-stack" | "immersive-carousel" | "partner-carousel" | null {
+  const presentation = isRecord(block.meta) ? block.meta.listPresentation : undefined;
+  return presentation === "compact-stack" || presentation === "immersive-carousel" || presentation === "partner-carousel"
+    ? presentation
+    : null;
+}
+
+function readListShowHeader(block: GenUIListBlock): boolean {
+  const showHeader = isRecord(block.meta) ? block.meta.listShowHeader : undefined;
+  return showHeader !== false;
+}
+
+function readFormShowHeader(block: GenUIFormBlock): boolean {
+  const showHeader = isRecord(block.meta) ? block.meta.formShowHeader : undefined;
+  return showHeader !== false;
+}
+
+function readChoiceQuestionType(block: GenUIChoiceBlock): string | null {
+  const questionType = isRecord(block.meta) ? block.meta.choiceQuestionType : undefined;
+  if (typeof questionType === "string" && questionType.trim()) {
+    return questionType.trim();
+  }
+
+  const option = block.options.find((entry) => {
+    const params = isRecord(entry.params) ? entry.params : null;
+    return typeof params?.questionType === "string" && params.questionType.trim().length > 0;
+  });
+
+  if (!option || !isRecord(option.params) || typeof option.params.questionType !== "string") {
+    return null;
+  }
+
+  return option.params.questionType.trim();
+}
+
+function readListItemActions(item: Record<string, unknown>): ActionOption[] {
+  if (!Array.isArray(item.actions)) {
+    return [];
+  }
+
+  return item.actions.reduce<ActionOption[]>((result, entry) => {
+    if (!isRecord(entry) || typeof entry.label !== "string" || typeof entry.action !== "string") {
+      return result;
+    }
+
+    result.push({
+      label: entry.label,
+      action: entry.action,
+      ...(isRecord(entry.params) ? { params: entry.params } : {}),
+    });
+
+    return result;
+  }, []);
 }
 
 function readGenUIFormSchema(value: unknown): GenUIFormSchemaConfig {
@@ -543,12 +625,59 @@ function validateGenUIFormRequiredFields(schema: GenUIFormSchemaConfig, values: 
       continue;
     }
 
-    if (!readGenUIFormTextValue(values, field.name).trim()) {
+    const currentValue = readGenUIFormTextValue(values, field.name).trim();
+    if (!currentValue) {
+      return field.label;
+    }
+
+    const fieldOptions = field.options ?? [];
+    if (
+      field.type === "single-select" &&
+      fieldOptions.length > 0 &&
+      !fieldOptions.some((option) => option.value === currentValue)
+    ) {
       return field.label;
     }
   }
 
   return null;
+}
+
+function countGenUIFormMissingRequiredFields(
+  schema: GenUIFormSchemaConfig,
+  values: Record<string, unknown>
+): number {
+  let missingCount = 0;
+
+  for (const field of schema.fields) {
+    if (!field.required) {
+      continue;
+    }
+
+    if (field.type === "multi-select") {
+      if (readGenUIFormMultiValue(values, field.name).length === 0) {
+        missingCount += 1;
+      }
+      continue;
+    }
+
+    const currentValue = readGenUIFormTextValue(values, field.name).trim();
+    if (!currentValue) {
+      missingCount += 1;
+      continue;
+    }
+
+    const fieldOptions = field.options ?? [];
+    if (
+      field.type === "single-select" &&
+      fieldOptions.length > 0 &&
+      !fieldOptions.some((option) => option.value === currentValue)
+    ) {
+      missingCount += 1;
+    }
+  }
+
+  return missingCount;
 }
 
 function extractActivityIdFromMiniProgramUrl(url: string): string | null {
@@ -625,6 +754,29 @@ function parseSSEPacket(packet: string): { eventName: string; dataText: string }
   };
 }
 
+function readStreamEventData(payload: unknown): unknown {
+  if (isRecord(payload) && payload.data !== undefined) {
+    return payload.data;
+  }
+
+  return payload;
+}
+
+function normalizeChatErrorMessage(message: string): string {
+  const normalized = message.trim();
+  const lowerCased = normalized.toLowerCase();
+
+  if (
+    lowerCased.includes("free tier of the model has been exhausted") ||
+    (lowerCased.includes("use free tier only") &&
+      lowerCased.includes("management console"))
+  ) {
+    return "AI 服务额度暂时用完了，请稍后再试。";
+  }
+
+  return normalized || "请求失败，请稍后再试";
+}
+
 function createEmptyEnvelope(params: {
   traceId: string;
   conversationId: string;
@@ -647,8 +799,152 @@ function resolvePrimaryBlockType(blocks: GenUIBlock[]): GenUITransientTurn["prim
   return primaryBlock?.type ?? null;
 }
 
+async function readChatResponseErrorMessage(response: Response): Promise<string> {
+  try {
+    const text = await response.text();
+    if (!text.trim()) {
+      return `请求失败（${response.status}）`;
+    }
+
+    try {
+      const payload = JSON.parse(text) as unknown;
+      if (isRecord(payload) && typeof payload.msg === "string") {
+        return normalizeChatErrorMessage(payload.msg);
+      }
+      if (isRecord(payload) && typeof payload.message === "string") {
+        return normalizeChatErrorMessage(payload.message);
+      }
+    } catch {
+      return normalizeChatErrorMessage(text);
+    }
+
+    return normalizeChatErrorMessage(text);
+  } catch {
+    return `请求失败（${response.status}）`;
+  }
+}
+
+function splitTextForUiStreaming(text: string): string[] {
+  const chunks = text.match(/.{1,8}(?:[，。！？；：,.!?;:\n\s]+|$)/gu);
+  return chunks && chunks.length > 0 ? chunks : [text];
+}
+
+async function enqueueSimulatedTextDeltaChunks(
+  enqueue: (chunk: ChatStreamChunk) => void,
+  params: {
+    textPartId: string;
+    deltaText: string;
+  }
+): Promise<void> {
+  const slices = splitTextForUiStreaming(params.deltaText).filter(Boolean);
+  if (slices.length === 0) {
+    return;
+  }
+
+  const stream = simulateReadableStream({
+    chunks: slices,
+    initialDelayInMs: 0,
+    chunkDelayInMs: TEXT_STREAM_CHUNK_DELAY_MS,
+  });
+  const reader = stream.getReader();
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    enqueue({
+      type: "text-delta",
+      id: params.textPartId,
+      delta: value,
+    });
+  }
+}
+
+function buildEnvelopeFromStreamMessage(message: ChatStreamMessage): GenUITurnEnvelope {
+  const metadata = message.metadata;
+  const blocks = message.parts.reduce<GenUIBlock[]>((result, part, index) => {
+    if (isTextUIPart(part)) {
+      const content =
+        typeof metadata?.assistantTextOverride === "string"
+          ? metadata.assistantTextOverride
+          : part.text;
+      if (!content.trim()) {
+        return result;
+      }
+
+      result.push({
+        blockId: `${message.id}_text_${index}`,
+        type: "text",
+        content,
+      });
+      return result;
+    }
+
+    if (isDataUIPart<ChatStreamDataTypes>(part) && part.type === "data-genui_block") {
+      const payload = part.data;
+      if (!isRecord(payload) || !isGenUIBlock(payload.block)) {
+        return result;
+      }
+
+      const mode = payload.mode === "replace" ? "replace" : "append";
+      return upsertBlockWithMode(result, payload.block, mode).blocks;
+    }
+
+    return result;
+  }, []);
+  const hasTextBlock = blocks.some((block) => block.type === "text");
+  if (!hasTextBlock && typeof metadata?.assistantTextOverride === "string") {
+    const content = metadata.assistantTextOverride.trim();
+    if (content) {
+      blocks.unshift({
+        blockId: `${message.id}_text_override`,
+        type: "text",
+        content,
+      });
+    }
+  }
+
+  return {
+    traceId: metadata?.traceId ?? `trace_${message.id}`,
+    conversationId: metadata?.conversationId ?? `conv_${message.id}`,
+    turn: {
+      turnId: metadata?.turnId ?? message.id,
+      role: "assistant",
+      status: metadata?.status ?? "streaming",
+      blocks,
+      ...(metadata?.turnContext ? { turnContext: metadata.turnContext } : {}),
+    },
+  };
+}
+
+function trimStructuredTextContent(text: string, blocks: GenUIBlock[]): string {
+  return text.trim();
+}
+
+function getRenderableBlocks(blocks: GenUIBlock[]): GenUIBlock[] {
+  return blocks.reduce<GenUIBlock[]>((result, block) => {
+    if (block.type !== "text") {
+      result.push(block);
+      return result;
+    }
+
+    const content = trimStructuredTextContent(block.content, blocks);
+    if (!content) {
+      return result;
+    }
+
+    result.push({
+      ...block,
+      content,
+    });
+    return result;
+  }, []);
+}
+
 function summarizeAssistantBlocks(blocks: GenUIBlock[]): string {
-  const textBlocks = blocks
+  const textBlocks = getRenderableBlocks(blocks)
     .filter((block): block is GenUITextBlock => block.type === "text")
     .map((block) => block.content.trim())
     .filter(Boolean);
@@ -1122,19 +1418,23 @@ export default function ChatPage() {
   const [welcomeDraftAction, setWelcomeDraftAction] = useState<WelcomeDraftAction | null>(null);
   const [welcomeGreeting, setWelcomeGreeting] = useState(DEFAULT_WELCOME_GREETING);
   const [welcomeSubGreeting, setWelcomeSubGreeting] = useState(DEFAULT_WELCOME_SUB_GREETING);
+  const [isWelcomeLoading, setIsWelcomeLoading] = useState(true);
   const [welcomeUi, setWelcomeUi] = useState<WelcomeUiPayload>({
     composerPlaceholder: DEFAULT_COMPOSER_PLACEHOLDER,
     bottomQuickActions: DEFAULT_BOTTOM_ACTIONS,
     profileHints: DEFAULT_PROFILE_HINTS,
   });
   const [clientLocation, setClientLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [welcomeLocationResolved, setWelcomeLocationResolved] = useState(false);
   const [currentTasks, setCurrentTasks] = useState<CurrentTaskItem[]>([]);
   const [pendingAgentAction, setPendingAgentAction] = useState<PendingAgentActionState | null>(null);
+  const [pendingAgentActionHydrated, setPendingAgentActionHydrated] = useState(false);
   const [taskPanelNotice, setTaskPanelNotice] = useState<string | null>(null);
   const [messageCenterOpenSignal, setMessageCenterOpenSignal] = useState(0);
   const [messageCenterFocusMatchId, setMessageCenterFocusMatchId] = useState<string | null>(null);
   const isDarkMode = false;
   const hasResumedPendingActionRef = useRef(false);
+  const hasRequestedWelcomeRef = useRef(false);
 
   const isSending = status === "submitted";
   const showComposerHint = shouldExpandComposer(input);
@@ -1161,30 +1461,71 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
-    setPendingAgentAction(readPendingAgentActionStateFromStorage());
+    const nextToken = readClientToken();
+    if (nextToken) {
+      setPendingAgentAction(readPendingAgentActionStateFromStorage());
+    }
+    setPendingAgentActionHydrated(true);
   }, []);
 
   useEffect(() => {
+    if (!pendingAgentActionHydrated) {
+      return;
+    }
+
     persistPendingAgentActionState(pendingAgentAction);
-  }, [pendingAgentAction]);
+  }, [pendingAgentAction, pendingAgentActionHydrated]);
+
+  useEffect(() => {
+    if (!pendingAgentActionHydrated || !authToken || pendingAgentAction) {
+      return;
+    }
+
+    const restoredPendingAction = readPendingAgentActionStateFromStorage();
+    if (restoredPendingAction) {
+      setPendingAgentAction(restoredPendingAction);
+    }
+  }, [authToken, pendingAgentAction, pendingAgentActionHydrated]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !("geolocation" in navigator)) {
+      setWelcomeLocationResolved(true);
       return;
     }
 
     let cancelled = false;
+    let settled = false;
+    const fallbackTimer = window.setTimeout(() => {
+      if (cancelled || settled) {
+        return;
+      }
+
+      settled = true;
+      setWelcomeLocationResolved(true);
+    }, WELCOME_LOCATION_WAIT_MS);
+
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        if (cancelled) {
+        if (cancelled || settled) {
           return;
         }
+
+        settled = true;
+        window.clearTimeout(fallbackTimer);
         setClientLocation({
           lat: position.coords.latitude,
           lng: position.coords.longitude,
         });
+        setWelcomeLocationResolved(true);
       },
       () => {
+        if (cancelled || settled) {
+          return;
+        }
+
+        settled = true;
+        window.clearTimeout(fallbackTimer);
+        setWelcomeLocationResolved(true);
         // silent fallback: no location context
       },
       {
@@ -1196,11 +1537,23 @@ export default function ChatPage() {
 
     return () => {
       cancelled = true;
+      window.clearTimeout(fallbackTimer);
     };
   }, []);
 
   useEffect(() => {
+    if (!welcomeLocationResolved) {
+      return;
+    }
+
+    if (hasRequestedWelcomeRef.current) {
+      return;
+    }
+
+    hasRequestedWelcomeRef.current = true;
+
     const controller = new AbortController();
+    let active = true;
     const welcomeUrl = new URL(`${API_BASE}/ai/welcome`);
     if (clientLocation) {
       welcomeUrl.searchParams.set("lat", String(clientLocation.lat));
@@ -1230,12 +1583,18 @@ export default function ChatPage() {
       })
       .catch(() => {
         // keep local fallback prompts
+      })
+      .finally(() => {
+        if (active) {
+          setIsWelcomeLoading(false);
+        }
       });
 
     return () => {
+      active = false;
       controller.abort();
     };
-  }, [clientLocation]);
+  }, [clientLocation, welcomeLocationResolved]);
 
   const loadCurrentTasks = useCallback(async () => {
     if (!authToken) {
@@ -1332,6 +1691,13 @@ export default function ChatPage() {
         }
         return;
       }
+
+      if (meta?.navigationIntent === "open_message_center") {
+        const focusIntent = readMessageCenterFocusIntent(meta.navigationPayload);
+        setMessageCenterFocusMatchId(focusIntent?.matchId ?? null);
+        setMessageCenterOpenSignal((value) => value + 1);
+        return;
+      }
     }
   }, []);
 
@@ -1364,6 +1730,12 @@ export default function ChatPage() {
       ]);
       setStatus("submitted");
 
+      let uiChunkController: ReadableStreamDefaultController<ChatStreamChunk> | null =
+        null;
+      let uiMessageReader: Promise<void> | null = null;
+      let closeUiChunkStream = () => {};
+      let errorUiChunkStream = (_reason: unknown) => {};
+
       try {
         const streamState: { envelope: GenUITurnEnvelope | null } = {
           envelope: null,
@@ -1392,74 +1764,6 @@ export default function ChatPage() {
           }));
         };
 
-        const ensureEnvelope = () => {
-          if (streamState.envelope) {
-            return streamState.envelope;
-          }
-
-          const fallbackConversationId = conversationId ?? randomId("conv");
-          const nextEnvelope = createEmptyEnvelope({
-            traceId: randomId("trace"),
-            conversationId: fallbackConversationId,
-            turnId: randomId("turn"),
-          });
-          applyEnvelope(nextEnvelope, true);
-          return nextEnvelope;
-        };
-
-        const applyBlock = (block: GenUIBlock, mode: "append" | "replace") => {
-          const baseEnvelope = ensureEnvelope();
-          const merge = upsertBlockWithMode(baseEnvelope.turn.blocks, block, mode);
-          const nextEnvelope: GenUITurnEnvelope = {
-            ...baseEnvelope,
-            turn: {
-              ...baseEnvelope.turn,
-              blocks: merge.blocks,
-            },
-          };
-          applyEnvelope(nextEnvelope, true);
-          return merge.index;
-        };
-
-        const typewriteTextBlock = async (
-          block: GenUITextBlock,
-          mode: "append" | "replace"
-        ) => {
-          const text = block.content || "";
-          const typingBlock: GenUITextBlock = {
-            ...block,
-            content: "",
-          };
-          const blockIndex = applyBlock(typingBlock, mode);
-          if (!text) {
-            return;
-          }
-
-          for (let cursor = 1; cursor <= text.length; cursor += 1) {
-            const activeEnvelope = ensureEnvelope();
-            const nextBlocks = [...activeEnvelope.turn.blocks];
-            const currentBlock = nextBlocks[blockIndex];
-            if (!currentBlock || currentBlock.type !== "text") {
-              break;
-            }
-
-            nextBlocks[blockIndex] = {
-              ...currentBlock,
-              content: text.slice(0, cursor),
-            };
-
-            const nextEnvelope: GenUITurnEnvelope = {
-              ...activeEnvelope,
-              turn: {
-                ...activeEnvelope.turn,
-                blocks: nextBlocks,
-              },
-            };
-            applyEnvelope(nextEnvelope, true);
-            await sleep(TYPEWRITER_INTERVAL_MS);
-          }
-        };
-
         const transientTurns = !authToken ? buildTransientTurns(messages) : undefined;
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
@@ -1474,6 +1778,7 @@ export default function ChatPage() {
           body: JSON.stringify({
             ...(conversationId ? { conversationId } : {}),
             input: nextInput,
+            trace: false,
             context: {
               client: "web",
               locale: "zh-CN",
@@ -1497,8 +1802,145 @@ export default function ChatPage() {
         });
 
         if (!response.ok || !response.body) {
-          throw new Error(`请求失败（${response.status}）`);
+          throw new Error(await readChatResponseErrorMessage(response));
         }
+
+        const uiStreamState: {
+          metadata: ChatStreamMessageMetadata;
+          started: boolean;
+          textPartStarted: boolean;
+          assistantText: string;
+          textBlocks: GenUITextBlock[];
+        } = {
+          metadata: {
+            traceId: randomId("trace"),
+            conversationId: conversationId ?? randomId("conv"),
+            turnId: randomId("turn"),
+            status: "streaming",
+          },
+          started: false,
+          textPartStarted: false,
+          assistantText: "",
+          textBlocks: [],
+        };
+        const uiChunkStream = new ReadableStream<ChatStreamChunk>({
+          start(controller) {
+            uiChunkController = controller;
+            closeUiChunkStream = () => {
+              controller.close();
+            };
+            errorUiChunkStream = (reason) => {
+              controller.error(reason);
+            };
+          },
+        });
+        const enqueueChunk = (chunk: ChatStreamChunk) => {
+          uiChunkController?.enqueue(chunk);
+        };
+        const startAssistantUiMessage = () => {
+          if (uiStreamState.started) {
+            return;
+          }
+
+          enqueueChunk({
+            type: "start",
+            messageId: assistantMessageId,
+            messageMetadata: uiStreamState.metadata,
+          });
+          uiStreamState.started = true;
+        };
+        const updateAssistantUiMetadata = (
+          patch: Partial<ChatStreamMessageMetadata>
+        ) => {
+          uiStreamState.metadata = {
+            ...uiStreamState.metadata,
+            ...patch,
+          };
+          startAssistantUiMessage();
+          enqueueChunk({
+            type: "message-metadata",
+            messageMetadata: uiStreamState.metadata,
+          });
+        };
+        const ensureTextPartStarted = () => {
+          if (uiStreamState.textPartStarted) {
+            return;
+          }
+
+          startAssistantUiMessage();
+          enqueueChunk({
+            type: "text-start",
+            id: `${assistantMessageId}_text`,
+          });
+          uiStreamState.textPartStarted = true;
+        };
+        const syncAssistantTextBlock = async (
+          block: GenUITextBlock,
+          mode: "append" | "replace"
+        ) => {
+          uiStreamState.textBlocks = upsertBlockWithMode(
+            uiStreamState.textBlocks,
+            block,
+            mode
+          ).blocks.filter((item): item is GenUITextBlock => item.type === "text");
+
+          const nextAssistantText = uiStreamState.textBlocks
+            .map((item) => item.content)
+            .filter(Boolean)
+            .join("\n\n");
+
+          if (nextAssistantText === uiStreamState.assistantText) {
+            return;
+          }
+
+          if (!nextAssistantText.startsWith(uiStreamState.assistantText)) {
+            uiStreamState.assistantText = nextAssistantText;
+            updateAssistantUiMetadata({
+              assistantTextOverride: nextAssistantText,
+            });
+            return;
+          }
+
+          const deltaText = nextAssistantText.slice(uiStreamState.assistantText.length);
+          if (!deltaText) {
+            return;
+          }
+
+          ensureTextPartStarted();
+          await enqueueSimulatedTextDeltaChunks(enqueueChunk, {
+            textPartId: `${assistantMessageId}_text`,
+            deltaText,
+          });
+          uiStreamState.assistantText = nextAssistantText;
+        };
+        const appendStructuredBlockToUiMessage = (
+          block: GenUIBlock,
+          mode: "append" | "replace"
+        ) => {
+          startAssistantUiMessage();
+          enqueueChunk({
+            type: "data-genui_block",
+            id: block.blockId,
+            data: {
+              block,
+              mode,
+            },
+          });
+        };
+        uiMessageReader = (async () => {
+          for await (const streamMessage of readUIMessageStream<ChatStreamMessage>({
+            stream: uiChunkStream,
+            terminateOnError: true,
+          })) {
+            const nextEnvelope = buildEnvelopeFromStreamMessage(streamMessage);
+            setConversationId(nextEnvelope.conversationId);
+            // v5.5: 一旦有内容（特别是文字），立即隐藏 loading，打字机效果和 loading 互斥
+            const hasTextContent = nextEnvelope.turn.blocks.some(
+              (b) => b.type === "text" && typeof b.content === "string" && b.content.trim().length > 0
+            );
+            applyEnvelope(nextEnvelope, !hasTextContent && nextEnvelope.turn.status !== "completed");
+          }
+        })();
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -1540,82 +1982,100 @@ export default function ChatPage() {
               isRecord(payload) && typeof payload.event === "string"
                 ? payload.event
                 : parsed.eventName;
+            const eventData = readStreamEventData(payload);
 
-            if (eventName === "turn-start" && isRecord(payload) && isRecord(payload.data)) {
+            if (eventName === "turn-start" && isRecord(eventData)) {
               const traceId =
-                typeof payload.data.traceId === "string"
-                  ? payload.data.traceId
+                typeof eventData.traceId === "string"
+                  ? eventData.traceId
                   : randomId("trace");
               const streamConversationId =
-                typeof payload.data.conversationId === "string"
-                  ? payload.data.conversationId
+                typeof eventData.conversationId === "string"
+                  ? eventData.conversationId
                   : conversationId ?? randomId("conv");
               const turnId =
-                typeof payload.data.turnId === "string"
-                  ? payload.data.turnId
+                typeof eventData.turnId === "string"
+                  ? eventData.turnId
                   : randomId("turn");
 
               setConversationId(streamConversationId);
-              applyEnvelope(
-                createEmptyEnvelope({
-                  traceId,
-                  conversationId: streamConversationId,
-                  turnId,
-                }),
-                true
-              );
+              updateAssistantUiMetadata({
+                traceId,
+                conversationId: streamConversationId,
+                turnId,
+                status: "streaming",
+                assistantTextOverride: undefined,
+              });
             }
 
             if (
               (eventName === "block-append" || eventName === "block-replace") &&
-              isRecord(payload) &&
-              isRecord(payload.data) &&
-              isGenUIBlock(payload.data.block)
+              isRecord(eventData) &&
+              isGenUIBlock(eventData.block)
             ) {
-              const block = payload.data.block;
+              const block = eventData.block;
               const mode = eventName === "block-replace" ? "replace" : "append";
-
-              if (isGenUITextBlock(block)) {
-                await typewriteTextBlock(block, mode);
+              if (block.type === "text") {
+                await syncAssistantTextBlock(block, mode);
               } else {
-                applyBlock(block, mode);
+                appendStructuredBlockToUiMessage(block, mode);
               }
             }
 
-            if (eventName === "turn-status" && isRecord(payload) && isRecord(payload.data)) {
+            if (eventName === "turn-status" && isRecord(eventData)) {
               const statusText =
-                payload.data.status === "streaming" ||
-                payload.data.status === "completed" ||
-                payload.data.status === "error"
-                  ? payload.data.status
+                eventData.status === "streaming" ||
+                eventData.status === "completed" ||
+                eventData.status === "error"
+                  ? eventData.status
                   : null;
               if (statusText) {
-                const activeEnvelope = ensureEnvelope();
-                applyEnvelope(
-                  {
-                    ...activeEnvelope,
-                    turn: {
-                      ...activeEnvelope.turn,
-                      status: statusText,
-                    },
-                  },
-                  true
-                );
+                updateAssistantUiMetadata({
+                  status: statusText,
+                });
               }
             }
 
-            if (eventName === "turn-complete" && isRecord(payload) && isGenUITurnEnvelope(payload.data)) {
-              const completeEnvelope = payload.data;
+            if (eventName === "turn-complete" && isGenUITurnEnvelope(eventData)) {
+              const completeEnvelope = eventData;
               sawTurnComplete = true;
               setConversationId(completeEnvelope.conversationId);
-              applyEnvelope(completeEnvelope, false);
-              applyCompletionEffectsFromBlocks(completeEnvelope.turn.blocks);
+              updateAssistantUiMetadata({
+                traceId: completeEnvelope.traceId,
+                conversationId: completeEnvelope.conversationId,
+                turnId: completeEnvelope.turn.turnId,
+                status: completeEnvelope.turn.status,
+                turnContext: completeEnvelope.turn.turnContext,
+              });
+
+              const finalAssistantText = completeEnvelope.turn.blocks
+                .filter((block): block is GenUITextBlock => block.type === "text")
+                .map((block) => block.content)
+                .filter(Boolean)
+                .join("\n\n");
+              if (
+                finalAssistantText &&
+                finalAssistantText !== uiStreamState.assistantText
+              ) {
+                if (finalAssistantText.startsWith(uiStreamState.assistantText)) {
+                  ensureTextPartStarted();
+                  await enqueueSimulatedTextDeltaChunks(enqueueChunk, {
+                    textPartId: `${assistantMessageId}_text`,
+                    deltaText: finalAssistantText.slice(uiStreamState.assistantText.length),
+                  });
+                } else {
+                  updateAssistantUiMetadata({
+                    assistantTextOverride: finalAssistantText,
+                  });
+                }
+                uiStreamState.assistantText = finalAssistantText;
+              }
             }
 
-            if (eventName === "turn-error" && isRecord(payload) && isRecord(payload.data)) {
+            if (eventName === "turn-error" && isRecord(eventData)) {
               const message =
-                typeof payload.data.message === "string"
-                  ? payload.data.message
+                typeof eventData.message === "string"
+                  ? normalizeChatErrorMessage(eventData.message)
                   : "生成失败，请稍后再试";
               throw new Error(message);
             }
@@ -1624,22 +2084,41 @@ export default function ChatPage() {
           }
         }
 
-        const incompleteEnvelope = !sawTurnComplete ? streamState.envelope : null;
-        if (incompleteEnvelope) {
-          const completedEnvelope: GenUITurnEnvelope = {
-            traceId: incompleteEnvelope.traceId,
-            conversationId: incompleteEnvelope.conversationId,
-            turn: {
-              ...incompleteEnvelope.turn,
-              status: "completed",
-            },
-          };
+        if (!sawTurnComplete) {
+          updateAssistantUiMetadata({
+            status: "completed",
+          });
+        }
+
+        if (uiStreamState.textPartStarted) {
+          enqueueChunk({
+            type: "text-end",
+            id: `${assistantMessageId}_text`,
+          });
+        }
+        startAssistantUiMessage();
+        enqueueChunk({
+          type: "finish",
+          finishReason: "stop",
+          messageMetadata: uiStreamState.metadata,
+        });
+        closeUiChunkStream();
+        await uiMessageReader;
+
+        const completedEnvelope = streamState.envelope;
+        if (completedEnvelope) {
           applyEnvelope(completedEnvelope, false);
           applyCompletionEffectsFromBlocks(completedEnvelope.turn.blocks);
         }
       } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : "请求失败，请稍后再试";
+        errorUiChunkStream(error);
+        if (uiMessageReader) {
+          await uiMessageReader.catch(() => undefined);
+        }
+
+        const errorMessage = normalizeChatErrorMessage(
+          error instanceof Error ? error.message : "请求失败，请稍后再试"
+        );
 
         setMessages((prev) =>
           prev.map((message) =>
@@ -1808,37 +2287,6 @@ export default function ChatPage() {
     [isSending, sendTurn]
   );
 
-  const latestAssistantTurn = useMemo(() => {
-    const lastAssistant = [...messages]
-      .reverse()
-      .find(
-        (message): message is AssistantRecord =>
-          message.role === "assistant" && Boolean(message.turn)
-      );
-
-    return lastAssistant?.turn;
-  }, [messages]);
-
-  const bottomQuickActions = useMemo(() => {
-    const actionBlock = latestAssistantTurn?.turn.blocks.find(
-      (block): block is GenUICtaGroupBlock => block.type === "cta-group"
-    );
-
-    if (actionBlock?.items?.length) {
-      return actionBlock.items.slice(0, 5).map((item, index) => ({
-        id: `cta-${index}-${item.action}`,
-        label: item.label,
-        option: item,
-      }));
-    }
-
-    return welcomeUi.bottomQuickActions.map((label) => ({
-      id: `default-${label}`,
-      label,
-      prompt: label,
-    }));
-  }, [latestAssistantTurn, welcomeUi.bottomQuickActions]);
-
   const handleWelcomeDraftContinue = useCallback(async () => {
     if (!welcomeDraftAction) {
       return;
@@ -1874,29 +2322,6 @@ export default function ChatPage() {
 
     window.location.href = `/invite/${activityId}`;
   }, []);
-
-  const handleBottomAction = useCallback(
-    async (action: { label: string; option?: ActionOption; prompt?: string }) => {
-      if (isSending) {
-        return;
-      }
-
-      if (action.option) {
-        await handleActionSelect(action.option);
-        return;
-      }
-
-      const fallbackPrompt = action.prompt || action.label;
-      await sendTurn(
-        {
-          type: "text",
-          text: fallbackPrompt,
-        },
-        fallbackPrompt
-      );
-    },
-    [handleActionSelect, isSending, sendTurn]
-  );
 
   return (
     <div
@@ -2123,9 +2548,19 @@ export default function ChatPage() {
               <ConversationEmptyState className="justify-start px-1 pt-2">
                 <div className="w-full space-y-3">
                   <div className="flex items-start justify-between px-2">
-                    <div className="space-y-1 text-left">
-                      <p className={cn("text-[28px] font-bold leading-none", isDarkMode ? "text-[#e6eaff]" : "text-[#272f8b]")}>{welcomeGreeting}</p>
-                      <p className={cn("text-[28px] font-bold leading-none", isDarkMode ? "text-[#e6eaff]" : "text-[#272f8b]")}>{welcomeSubGreeting}</p>
+                    <div className="min-h-[112px] space-y-1 text-left">
+                      {isWelcomeLoading ? (
+                        <div className="space-y-2 pt-1">
+                          <div className="h-9 w-36 animate-pulse rounded-full bg-white/55" />
+                          <div className="h-9 w-64 max-w-[78vw] animate-pulse rounded-full bg-white/55" />
+                          <div className="h-9 w-52 animate-pulse rounded-full bg-white/48" />
+                        </div>
+                      ) : (
+                        <>
+                          <p className={cn("text-[28px] font-bold leading-none", isDarkMode ? "text-[#e6eaff]" : "text-[#272f8b]")}>{welcomeGreeting}</p>
+                          <p className={cn("text-[28px] font-bold leading-none", isDarkMode ? "text-[#e6eaff]" : "text-[#272f8b]")}>{welcomeSubGreeting}</p>
+                        </>
+                      )}
                     </div>
                     <div className={cn("mt-1 flex items-start justify-end pb-1", isDarkMode ? "text-[#8e9cff]" : "text-[#5b67f4]")}>
                       <Sparkles className="h-8 w-8" />
@@ -2141,26 +2576,42 @@ export default function ChatPage() {
                       <div className="grid grid-cols-3 gap-2">
                         <div className="rounded-xl bg-white/76 px-2 py-2 text-center text-[#2f3870]">
                           <p className="text-[11px] text-slate-500">参与</p>
-                          <p className="text-[16px] font-semibold">{welcomeProfile?.participationCount ?? 0}<span className="ml-0.5 text-[11px] font-normal">场</span></p>
+                          {isWelcomeLoading ? (
+                            <div className="mx-auto mt-2 h-6 w-12 animate-pulse rounded-full bg-white/75" />
+                          ) : (
+                            <p className="text-[16px] font-semibold">{welcomeProfile?.participationCount ?? 0}<span className="ml-0.5 text-[11px] font-normal">场</span></p>
+                          )}
                         </div>
                         <div className="rounded-xl bg-white/76 px-2 py-2 text-center text-[#2f3870]">
                           <p className="text-[11px] text-slate-500">发起</p>
-                          <p className="text-[16px] font-semibold">{welcomeProfile?.activitiesCreatedCount ?? 0}<span className="ml-0.5 text-[11px] font-normal">场</span></p>
+                          {isWelcomeLoading ? (
+                            <div className="mx-auto mt-2 h-6 w-12 animate-pulse rounded-full bg-white/75" />
+                          ) : (
+                            <p className="text-[16px] font-semibold">{welcomeProfile?.activitiesCreatedCount ?? 0}<span className="ml-0.5 text-[11px] font-normal">场</span></p>
+                          )}
                         </div>
                         <div className="rounded-xl bg-white/76 px-2 py-2 text-center text-[#2f3870]">
                           <p className="text-[11px] text-slate-500">偏好完善</p>
-                          <p className="text-[16px] font-semibold">{welcomeProfile?.preferenceCompleteness ?? 0}<span className="ml-0.5 text-[11px] font-normal">%</span></p>
+                          {isWelcomeLoading ? (
+                            <div className="mx-auto mt-2 h-6 w-12 animate-pulse rounded-full bg-white/75" />
+                          ) : (
+                            <p className="text-[16px] font-semibold">{welcomeProfile?.preferenceCompleteness ?? 0}<span className="ml-0.5 text-[11px] font-normal">%</span></p>
+                          )}
                         </div>
                       </div>
-                      <p className="mt-2 text-[12px] text-[#616c9f]">
-                        {getProfileHint(
-                          welcomeProfile?.preferenceCompleteness ?? 0,
-                          welcomeUi.profileHints
-                        )}
-                      </p>
+                      {isWelcomeLoading ? (
+                        <div className="mt-3 h-4 w-40 animate-pulse rounded-full bg-white/70" />
+                      ) : (
+                        <p className="mt-2 text-[12px] text-[#616c9f]">
+                          {getProfileHint(
+                            welcomeProfile?.preferenceCompleteness ?? 0,
+                            welcomeUi.profileHints
+                          )}
+                        </p>
+                      )}
                     </div>
 
-                    {welcomeDraftAction ? (
+                    {!isWelcomeLoading && welcomeDraftAction ? (
                       <button
                         type="button"
                         onClick={() => void handleWelcomeDraftContinue()}
@@ -2174,7 +2625,7 @@ export default function ChatPage() {
                       </button>
                     ) : null}
 
-                    {welcomePendingActivities.length > 0 ? (
+                    {!isWelcomeLoading && welcomePendingActivities.length > 0 ? (
                       <div className="space-y-2 rounded-2xl border border-white/70 bg-white/58 px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.68)]">
                         <div className="mb-2 flex items-center gap-2 text-[#2b3168]">
                           <span className="h-4 w-1 rounded-full bg-[linear-gradient(180deg,#5b75fb_0%,#7b90ff_100%)]" />
@@ -2204,28 +2655,42 @@ export default function ChatPage() {
                     ) : null}
 
                     <div className="space-y-2">
-                      {quickPrompts.slice(0, 3).map((prompt) => (
-                        <button
-                          key={prompt}
-                          type="button"
-                          onClick={() => {
-                            void sendTurn(
-                              {
-                                type: "text",
-                                text: prompt,
-                              },
-                              prompt
-                            );
-                          }}
-                          className="flex w-full items-end gap-2 rounded-2xl bg-white/86 px-3 py-2.5 text-left text-[14px] text-[#2a315e] shadow-[0_12px_24px_-20px_rgba(67,86,170,0.52)]"
-                        >
-                          <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[linear-gradient(140deg,#4e5dff_0%,#8658f8_100%)] text-[12px] font-semibold text-white">
-                            #
-                          </span>
-                          <span className="flex-1 break-words pr-2 leading-5">{prompt}</span>
-                          <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-slate-300" />
-                        </button>
-                      ))}
+                      {isWelcomeLoading
+                        ? [0.82, 0.7, 0.76].map((widthRatio, index) => (
+                            <div
+                              key={`welcome-skeleton-${index}`}
+                              className="flex w-full items-end gap-2 rounded-2xl bg-white/86 px-3 py-2.5 shadow-[0_12px_24px_-20px_rgba(67,86,170,0.32)]"
+                            >
+                              <div className="mt-0.5 inline-flex h-5 w-5 shrink-0 animate-pulse rounded-md bg-[linear-gradient(140deg,#d4dbff_0%,#e5dcff_100%)]" />
+                              <div
+                                className="h-4 animate-pulse rounded-full bg-white/90"
+                                style={{ width: `${widthRatio * 100}%` }}
+                              />
+                              <div className="mt-0.5 h-4 w-4 shrink-0 animate-pulse rounded-full bg-[#e4e9ff]" />
+                            </div>
+                          ))
+                        : quickPrompts.slice(0, 3).map((prompt) => (
+                            <button
+                              key={prompt}
+                              type="button"
+                              onClick={() => {
+                                void sendTurn(
+                                  {
+                                    type: "text",
+                                    text: prompt,
+                                  },
+                                  prompt
+                                );
+                              }}
+                              className="flex w-full items-end gap-2 rounded-2xl bg-white/86 px-3 py-2.5 text-left text-[14px] text-[#2a315e] shadow-[0_12px_24px_-20px_rgba(67,86,170,0.52)]"
+                            >
+                              <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[linear-gradient(140deg,#4e5dff_0%,#8658f8_100%)] text-[12px] font-semibold text-white">
+                                #
+                              </span>
+                              <span className="flex-1 break-words pr-2 leading-5">{prompt}</span>
+                              <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-slate-300" />
+                            </button>
+                          ))}
                     </div>
                   </div>
                 </div>
@@ -2258,27 +2723,6 @@ export default function ChatPage() {
               : "border-t border-white/65 bg-[linear-gradient(180deg,rgba(245,247,255,0.92)_0%,rgba(238,241,254,0.96)_100%)]"
           )}
         >
-          <div className="mb-2 overflow-x-auto">
-            <Suggestions className="flex w-max gap-2 pr-1">
-              {bottomQuickActions.map((action) => (
-                <Suggestion
-                  key={action.id}
-                  suggestion={action.label}
-                  onClick={() => {
-                    void handleBottomAction(action);
-                  }}
-                  disabled={isSending}
-                  className={cn(
-                    "h-8 rounded-full border-0 px-3 text-xs backdrop-blur-sm shadow-[0_10px_22px_-14px_rgba(82,102,191,0.34)] transition-[filter,transform] hover:brightness-[1.02] hover:-translate-y-[0.5px]",
-                    isDarkMode
-                      ? "bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.22)_0%,rgba(129,150,236,0.2)_56%,rgba(79,97,171,0.2)_100%)] text-[#e9edff]"
-                      : "bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.98)_0%,rgba(244,248,255,0.96)_54%,rgba(230,238,255,0.95)_100%)] text-[#2d396f]"
-                  )}
-                />
-              ))}
-            </Suggestions>
-          </div>
-
           <PromptInput
             onSubmit={handleSubmit}
             className={cn(
@@ -2317,7 +2761,7 @@ export default function ChatPage() {
                     isDarkMode ? "text-[#808bc1]" : "text-slate-400"
                   )}
                 >
-                  可补充时间、地点、人数
+                  也可以直接说地方、时间、类型或你想找的人
                 </span>
               ) : null}
               <PromptInputSubmit
@@ -2343,7 +2787,7 @@ export default function ChatPage() {
 
 function UserMessage({ text }: { text: string }) {
   return (
-    <Message from="user" className="max-w-[82%]">
+    <Message from="user" className="max-w-[82%] pt-4">
       <MessageContent className="rounded-[18px] rounded-tr-[8px] bg-[linear-gradient(135deg,#6271ff_0%,#5766f9_46%,#4f59e4_100%)] px-4 py-3 text-white shadow-[0_14px_26px_-16px_rgba(81,99,230,0.72)]">
         <MessageResponse className="text-[15px] leading-6 text-white">{text}</MessageResponse>
       </MessageContent>
@@ -2362,24 +2806,30 @@ function AssistantMessage({
   disabled: boolean;
   onActionSelect: (option: ActionOption) => Promise<void>;
 }) {
+  const renderableBlocks = message.turn ? getRenderableBlocks(message.turn.turn.blocks) : [];
+  const hasRenderableBlocks = renderableBlocks.length > 0;
+  // 非最后一条消息或正在发送中时，禁用交互
+  const isDisabled = disabled || !isLast;
+
   return (
     <Message from="assistant" className="w-full max-w-none pr-0">
       <MessageContent className="w-full overflow-visible rounded-none bg-transparent px-0 py-0 text-slate-800 shadow-none">
-        {message.pending && isLast ? (
-          <ThinkingDots />
-        ) : message.error ? (
+        {message.error ? (
           <p className="text-sm text-rose-600">{message.error}</p>
-        ) : message.turn ? (
+        ) : hasRenderableBlocks ? (
           <div className="space-y-3">
-            {message.turn.turn.blocks.map((block) => (
+            {renderableBlocks.map((block) => (
               <TurnBlockRenderer
                 key={block.blockId}
                 block={block}
-                disabled={disabled}
+                disabled={isDisabled}
                 onActionSelect={onActionSelect}
               />
             ))}
+            {message.pending && isLast ? <ThinkingDots /> : null}
           </div>
+        ) : message.pending && isLast ? (
+          <ThinkingDots />
         ) : (
           <p className="text-sm text-slate-500">这条消息暂时没有可展示内容</p>
         )}
@@ -2424,7 +2874,13 @@ function TurnBlockRenderer({
   }
 
   if (block.type === "list") {
-    return <ListBlockCard block={block} />;
+    return (
+      <ListBlockCard
+        block={block}
+        disabled={disabled}
+        onActionSelect={onActionSelect}
+      />
+    );
   }
 
   if (block.type === "form") {
@@ -2456,6 +2912,76 @@ function TurnBlockRenderer({
   );
 }
 
+function GenUICardHeader({
+  eyebrow,
+  title,
+  description,
+  trailingLabel,
+  className,
+}: {
+  eyebrow: string;
+  title: string;
+  description?: string;
+  trailingLabel?: string;
+  className?: string;
+}) {
+  return (
+    <div className={cn("mb-3", className)}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="mb-2 inline-flex items-center gap-1 rounded-full border border-white/70 bg-white/56 px-2.5 py-1 text-[11px] font-medium text-[#5b67f4] shadow-[inset_0_1px_0_rgba(255,255,255,0.82)]">
+          <Sparkles className="h-3.5 w-3.5" />
+          <span>{eyebrow}</span>
+        </div>
+        {trailingLabel ? (
+          <div className="shrink-0 rounded-full border border-white/70 bg-white/52 px-3 py-1.5 text-[11px] font-medium text-slate-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)]">
+            {trailingLabel}
+          </div>
+        ) : null}
+      </div>
+      <p className="text-[15px] font-semibold tracking-[0.01em] text-slate-800">{title}</p>
+      {description ? (
+        <p className="mt-1.5 text-xs leading-5 text-slate-500">{description}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function GenUIActionChips({
+  items,
+  disabled,
+}: {
+  items: Array<{
+    key: string;
+    label: string;
+    onSelect: () => void;
+  }>;
+  disabled: boolean;
+}) {
+  return (
+    <Suggestions className="gap-2.5">
+      {items.map((item) => (
+        <Suggestion
+          key={item.key}
+          suggestion={item.label}
+          onClick={item.onSelect}
+          disabled={disabled}
+          className="h-11 rounded-full border border-white/78 bg-white/78 px-5 text-sm font-medium text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.86),0_12px_24px_-20px_rgba(67,86,170,0.34)] transition-all hover:border-[#d5dbff] hover:bg-white/86 disabled:opacity-45"
+        />
+      ))}
+    </Suggestions>
+  );
+}
+
+function readChoicePresentation(block: GenUIChoiceBlock): "inline-actions" | "card-form" {
+  const presentation = isRecord(block.meta) ? block.meta.choicePresentation : undefined;
+  return presentation === "card-form" ? "card-form" : "inline-actions";
+}
+
+function readChoiceInputMode(block: GenUIChoiceBlock): "none" | "free-text-optional" {
+  const inputMode = isRecord(block.meta) ? block.meta.choiceInputMode : undefined;
+  return inputMode === "free-text-optional" ? "free-text-optional" : "none";
+}
+
 function ChoiceBlockCard({
   block,
   disabled,
@@ -2465,22 +2991,118 @@ function ChoiceBlockCard({
   disabled: boolean;
   onActionSelect: (option: ActionOption) => Promise<void>;
 }) {
+  const [customLocation, setCustomLocation] = useState("");
+  const choicePresentation = useMemo(() => readChoicePresentation(block), [block]);
+  const choiceInputMode = useMemo(() => readChoiceInputMode(block), [block]);
+  const choiceQuestionType = useMemo(() => readChoiceQuestionType(block), [block]);
+
+  const supportsCustomLocation = useMemo(() => {
+    return choiceQuestionType === "location" && choiceInputMode === "free-text-optional";
+  }, [choiceInputMode, choiceQuestionType]);
+
+  const choiceActionItems = useMemo(
+    () =>
+      block.options.map((option, index) => ({
+        key: `${option.label}-${index}`,
+        label: option.label,
+        onSelect: () => {
+          void onActionSelect(option);
+        },
+      })),
+    [block.options, onActionSelect]
+  );
+
+  const customLocationAction = useMemo(() => {
+    const normalizedLocation = customLocation.trim();
+    if (!supportsCustomLocation || !normalizedLocation) {
+      return null;
+    }
+
+    const templateOption = block.options.find((option) => {
+      const params = isRecord(option.params) ? option.params : null;
+      return params?.questionType === "location";
+    }) ?? block.options[0];
+
+    if (!templateOption) {
+      return null;
+    }
+
+    const templateParams = isRecord(templateOption.params) ? templateOption.params : {};
+    const {
+      lat: _lat,
+      lng: _lng,
+      center: _center,
+      _location: __location,
+      radiusKm: _radiusKm,
+      location: _templateLocation,
+      locationName: _templateLocationName,
+      value: _templateValue,
+      selectedValue: _templateSelectedValue,
+      selectedLabel: _templateSelectedLabel,
+      ...restParams
+    } = templateParams;
+
+    return {
+      label: normalizedLocation,
+      action: "select_preference",
+      params: {
+        ...restParams,
+        questionType: "location",
+        value: normalizedLocation,
+        selectedValue: normalizedLocation,
+        selectedLabel: normalizedLocation,
+        location: normalizedLocation,
+        locationName: normalizedLocation,
+      },
+    } satisfies ActionOption;
+  }, [block.options, customLocation, supportsCustomLocation]);
+
+  useEffect(() => {
+    setCustomLocation("");
+  }, [block.blockId]);
+
   return (
-    <div className="rounded-xl border border-slate-200 bg-white/85 p-3">
-      <p className="text-sm font-medium text-slate-700">{block.question}</p>
-      <Suggestions className="mt-2 gap-2">
-        {block.options.map((option, index) => (
-          <Suggestion
-            key={`${option.label}-${index}`}
-            suggestion={option.label}
-            onClick={() => {
-              void onActionSelect(option);
-            }}
-            disabled={disabled}
-            className="h-8 border-transparent bg-sky-50 px-3 text-xs text-sky-700 hover:bg-sky-100 disabled:opacity-45"
-          />
-        ))}
-      </Suggestions>
+    <div
+      className={cn(
+        "mt-1 space-y-2.5",
+        choicePresentation === "card-form"
+          ? "rounded-[26px] border border-white/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.72)_0%,rgba(245,248,255,0.62)_100%)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.78),0_20px_40px_-32px_rgba(60,78,160,0.48)] backdrop-blur-xl"
+          : undefined
+      )}
+    >
+      <GenUIActionChips items={choiceActionItems} disabled={disabled} />
+
+      {supportsCustomLocation ? (
+        <div className="rounded-[24px] border border-white/78 bg-white/74 px-3.5 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.84),0_16px_28px_-24px_rgba(67,86,170,0.28)]">
+          <p className="text-[12px] font-medium text-slate-700">上面都不合适？直接输入片区</p>
+          <p className="mt-1 text-[11px] leading-5 text-slate-500">
+            直接输入你常活动的地方，我会按这里继续筛。
+          </p>
+          <div className="mt-2.5 flex items-center gap-2">
+            <input
+              type="text"
+              value={customLocation}
+              onChange={(event) => setCustomLocation(event.target.value)}
+              disabled={disabled}
+              placeholder="比如大学城、沙坪坝、两路口"
+              className="h-10 min-w-0 flex-1 rounded-full border border-white/80 bg-white/92 px-3 text-xs text-slate-700 outline-none shadow-[inset_0_1px_0_rgba(255,255,255,0.66)] transition focus:border-[#c8d1ff] focus:bg-white disabled:opacity-45"
+            />
+            <button
+              type="button"
+              disabled={disabled || !customLocationAction}
+              onClick={() => {
+                if (!customLocationAction) {
+                  return;
+                }
+                void onActionSelect(customLocationAction);
+              }}
+              className="h-10 shrink-0 rounded-full bg-[linear-gradient(135deg,#5b67f4_0%,#7380ff_52%,#7d6bff_100%)] px-4 text-xs font-medium text-white shadow-[0_12px_24px_-16px_rgba(91,103,244,0.72)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              使用该区域
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2653,26 +3275,398 @@ function EntityCardBlock({ block }: { block: GenUIEntityCardBlock }) {
   );
 }
 
-function ListBlockCard({ block }: { block: GenUIListBlock }) {
+function isBrowseableResultList(block: GenUIListBlock): boolean {
+  const presentation = readListPresentation(block);
+  if (presentation === "immersive-carousel" || presentation === "partner-carousel") {
+    return true;
+  }
+
+  if (presentation === "compact-stack") {
+    return false;
+  }
+
+  if (block.items.length <= 1) {
+    return false;
+  }
+
+  const interaction = isRecord(block.interaction) ? block.interaction : null;
+  if (interaction?.swipeable === true) {
+    return true;
+  }
+
+  return false;
+}
+
+function ResultCarouselCard({
+  item,
+  index,
+  active,
+  partnerMode,
+  disabled,
+  onActionSelect,
+}: {
+  item: Record<string, unknown>;
+  index: number;
+  active: boolean;
+  partnerMode?: boolean;
+  disabled?: boolean;
+  onActionSelect?: (option: ActionOption) => Promise<void>;
+}) {
+  const title = readStringField(item, "title", `结果 ${index + 1}`);
+  const type = readStringField(item, "type");
+  const locationName = readStringField(item, "locationName", "附近");
+  const startAt = renderFieldValue(item.startAt);
+  const avatarUrl = readStringField(item, "avatarUrl");
+  const distance = formatDistance(item.distance);
+  const currentParticipants = item.currentParticipants;
+  const maxParticipants = item.maxParticipants;
+  const timePreference = readStringField(item, "timePreference");
+  const score = readNumberField(item, "score", 0);
+  const note =
+    readStringField(item, "summary") ||
+    readStringField(item, "description") ||
+    readStringField(item, "matchReason") ||
+    readStringField(item, "reason") ||
+    readStringField(item, "locationHint");
+  const actions = readListItemActions(item);
+  const tags = Array.isArray(item.tags)
+    ? item.tags
+        .filter((tag): tag is string => typeof tag === "string" && tag.trim().length > 0)
+        .slice(0, 3)
+    : [];
+  const hiddenKeys = new Set([
+    "id",
+    "partnerIntentId",
+    "candidateUserId",
+    "title",
+    "type",
+    "avatarUrl",
+    "locationName",
+    "locationHint",
+    "startAt",
+    "timePreference",
+    "distance",
+    "score",
+    "currentParticipants",
+    "maxParticipants",
+    "summary",
+    "description",
+    "matchReason",
+    "reason",
+    "tags",
+    "actions",
+    "lat",
+    "lng",
+  ]);
+  const detailEntries = Object.entries(item)
+    .filter(([key, value]) => !hiddenKeys.has(key) && value !== undefined && value !== null)
+    .slice(0, 2);
+
   return (
-    <div className="rounded-xl border border-slate-200 bg-white/85 p-3">
-      {block.title && <p className="text-sm font-semibold text-slate-800">{block.title}</p>}
-      <div className="mt-2 space-y-2">
-        {block.items.map((item, index) => (
+    <article
+      className={cn(
+        "flex min-h-[238px] flex-col rounded-[30px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(244,247,255,0.94)_100%)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_28px_48px_-34px_rgba(65,83,162,0.48)] transition-all duration-300",
+        active ? "opacity-100" : "opacity-[0.55]"
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          {partnerMode ? (
+            avatarUrl ? (
+              <img
+                src={avatarUrl}
+                alt={title}
+                className="h-11 w-11 shrink-0 rounded-full border border-white/80 object-cover shadow-[0_10px_24px_-18px_rgba(65,83,162,0.52)]"
+              />
+            ) : (
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/80 bg-[linear-gradient(135deg,#eef2ff_0%,#dbe4ff_100%)] text-sm font-semibold text-[#5b67f4] shadow-[0_10px_24px_-18px_rgba(65,83,162,0.52)]">
+                {title.slice(0, 1) || "搭"}
+              </div>
+            )
+          ) : null}
+          <div className="min-w-0">
+          {type ? (
+            <div className="mb-2 inline-flex items-center rounded-full border border-white/75 bg-white/70 px-2.5 py-1 text-[11px] font-medium text-[#5b67f4] shadow-[inset_0_1px_0_rgba(255,255,255,0.82)]">
+              {type}
+            </div>
+          ) : null}
+          <h3 className="text-[15px] font-semibold leading-6 text-slate-800">{title}</h3>
+          </div>
+        </div>
+        {partnerMode && score > 0 ? (
+          <div className="shrink-0 rounded-full border border-[#dce4ff] bg-white/84 px-2.5 py-1 text-[11px] font-semibold text-[#4f63f3] shadow-[inset_0_1px_0_rgba(255,255,255,0.82)]">
+            匹配 {score}%
+          </div>
+        ) : (
+          <div className="shrink-0 rounded-full border border-white/75 bg-white/72 px-2.5 py-1 text-[11px] font-medium text-slate-500 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)]">
+            {index + 1}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <span className="rounded-full bg-[rgba(92,106,244,0.08)] px-2.5 py-1 text-[11px] font-medium text-slate-600">
+          {locationName}
+        </span>
+        {partnerMode && timePreference ? (
+          <span className="rounded-full bg-white/78 px-2.5 py-1 text-[11px] text-slate-500">
+            {timePreference}
+          </span>
+        ) : null}
+        {distance !== "-" ? (
+          <span className="rounded-full bg-white/78 px-2.5 py-1 text-[11px] text-slate-500">
+            距离 {distance}
+          </span>
+        ) : null}
+        {startAt !== "-" ? (
+          <span className="rounded-full bg-white/78 px-2.5 py-1 text-[11px] text-slate-500">
+            {startAt}
+          </span>
+        ) : null}
+      </div>
+
+      {note ? (
+        <p className="mt-3 text-sm leading-6 text-slate-600">{note}</p>
+      ) : (
+        <p className="mt-3 text-sm leading-6 text-slate-500">
+          左右滑动看看其他结果，选到顺眼的我们再继续。
+        </p>
+      )}
+
+      <div className="mt-4 space-y-2">
+        {currentParticipants !== undefined && maxParticipants !== undefined ? (
+          <div className="flex items-center justify-between rounded-[20px] border border-white/75 bg-white/70 px-3 py-2 text-xs text-slate-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)]">
+            <span>当前进度</span>
+            <span className="font-medium text-slate-700">
+              {renderFieldValue(currentParticipants)}/{renderFieldValue(maxParticipants)} 人
+            </span>
+          </div>
+        ) : null}
+
+        {detailEntries.map(([key, value]) => (
           <div
-            key={String(item.id ?? index)}
-            className="rounded-lg bg-slate-50/90 px-3 py-2"
+            key={key}
+            className="flex items-center justify-between gap-3 rounded-[20px] border border-white/70 bg-white/62 px-3 py-2 text-xs text-slate-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]"
           >
-            <p className="text-sm font-medium text-slate-800">
-              {String(item.title ?? `活动 ${index + 1}`)}
-            </p>
-            <p className="mt-0.5 text-xs text-slate-500">
-              {String(item.locationName ?? "附近")} ·{" "}
-              {formatDistance(item.distance)}
-            </p>
+            <span>{prettyFieldLabel(key)}</span>
+            <span className="text-right font-medium text-slate-700">{renderFieldValue(value)}</span>
           </div>
         ))}
       </div>
+
+      {tags.length > 0 ? (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {tags.map((tag) => (
+            <span
+              key={tag}
+              className="rounded-full border border-white/75 bg-white/74 px-2.5 py-1 text-[11px] text-slate-500"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {partnerMode && actions.length > 0 ? (
+        <div className="mt-4 grid grid-cols-1 gap-2">
+          {actions.map((action, actionIndex) => (
+            <button
+              key={`${action.action}-${actionIndex}`}
+              type="button"
+              onClick={() => {
+                if (onActionSelect) {
+                  void onActionSelect(action);
+                }
+              }}
+              disabled={disabled}
+              className={cn(
+                "rounded-[18px] px-3.5 py-2.5 text-left text-xs font-medium transition-all disabled:opacity-45",
+                actionIndex === 0
+                  ? "bg-[linear-gradient(135deg,#5b67f4_0%,#6f7cff_100%)] text-white shadow-[0_18px_30px_-22px_rgba(81,96,236,0.72)]"
+                  : "border border-white/80 bg-white/84 text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]"
+              )}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function ResultCarousel({
+  items,
+  partnerMode,
+  disabled,
+  onActionSelect,
+}: {
+  items: Record<string, unknown>[];
+  partnerMode?: boolean;
+  disabled?: boolean;
+  onActionSelect?: (option: ActionOption) => Promise<void>;
+}) {
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+
+    const updateActiveIndex = () => {
+      const cards = Array.from(
+        viewport.querySelectorAll<HTMLElement>("[data-carousel-index]")
+      );
+      if (cards.length === 0) {
+        return;
+      }
+
+      const viewportCenter = viewport.scrollLeft + viewport.clientWidth / 2;
+      let nearestIndex = 0;
+      let nearestDistance = Number.POSITIVE_INFINITY;
+
+      cards.forEach((card, index) => {
+        const cardCenter = card.offsetLeft + card.offsetWidth / 2;
+        const distance = Math.abs(cardCenter - viewportCenter);
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearestIndex = index;
+        }
+      });
+
+      setActiveIndex(nearestIndex);
+    };
+
+    updateActiveIndex();
+    viewport.addEventListener("scroll", updateActiveIndex, { passive: true });
+    window.addEventListener("resize", updateActiveIndex);
+
+    return () => {
+      viewport.removeEventListener("scroll", updateActiveIndex);
+      window.removeEventListener("resize", updateActiveIndex);
+    };
+  }, [items.length]);
+
+  return (
+    <div className="mt-3">
+      <div className="relative">
+        <div
+          ref={viewportRef}
+          className="[&::-webkit-scrollbar]:hidden overflow-x-auto px-[10%] pb-2 [scrollbar-width:none]"
+        >
+          <div className="flex snap-x snap-mandatory gap-3">
+            {items.map((item, index) => (
+              <div
+                key={String(item.id ?? index)}
+                data-carousel-index={index}
+                className={cn(
+                  "basis-[80%] shrink-0 snap-center transition-transform duration-300",
+                  activeIndex === index ? "scale-100" : "scale-[0.965]"
+                )}
+              >
+                <ResultCarouselCard
+                  item={item}
+                  index={index}
+                  active={activeIndex === index}
+                  partnerMode={partnerMode}
+                  disabled={disabled}
+                  onActionSelect={onActionSelect}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="pointer-events-none absolute inset-y-0 left-0 w-12 bg-gradient-to-r from-[#f3f6ff] via-[#f3f6ff] to-transparent" />
+        <div className="pointer-events-none absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-[#f3f6ff] via-[#f3f6ff] to-transparent" />
+      </div>
+
+      <div className="mt-2 flex items-center justify-between px-1 text-[11px] text-slate-500">
+        <span>左右滑动查看</span>
+        <span>
+          {activeIndex + 1} / {items.length}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function ListBlockCard({
+  block,
+  disabled,
+  onActionSelect,
+}: {
+  block: GenUIListBlock;
+  disabled: boolean;
+  onActionSelect: (option: ActionOption) => Promise<void>;
+}) {
+  const partnerMode = isPartnerSearchResultsList(block);
+  const browseable = isBrowseableResultList(block);
+  const listPresentation = readListPresentation(block);
+  const showHeader = readListShowHeader(block);
+  const preview = isRecord(block.preview) ? block.preview : null;
+  const fetchConfig = isRecord(block.fetchConfig) ? block.fetchConfig : null;
+
+  if (block.items.length === 0 && !preview && !fetchConfig) {
+    return null;
+  }
+
+  return (
+    <div
+      className={cn(
+        showHeader
+          ? "rounded-[28px] border border-white/75 bg-[linear-gradient(180deg,rgba(255,255,255,0.72)_0%,rgba(245,248,255,0.64)_100%)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.82),0_24px_46px_-34px_rgba(63,79,162,0.44)] backdrop-blur-xl"
+          : "mt-1",
+        showHeader && listPresentation === "compact-stack"
+          ? "rounded-[24px] bg-white/64 p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_18px_32px_-28px_rgba(63,79,162,0.28)]"
+          : undefined
+      )}
+    >
+      {showHeader && block.title ? (
+        <GenUICardHeader
+          eyebrow={partnerMode ? "搭子候选" : "结果浏览"}
+          title={block.title}
+          trailingLabel={`${block.items.length} ${partnerMode ? "位" : "张"}`}
+        />
+      ) : null}
+
+      {browseable ? (
+        <ResultCarousel
+          items={block.items}
+          partnerMode={partnerMode}
+          disabled={disabled}
+          onActionSelect={onActionSelect}
+        />
+      ) : (
+        <div className={cn(showHeader ? "mt-3 space-y-2" : "space-y-2")}>
+          {block.items.map((item, index) => (
+            partnerMode ? (
+              <ResultCarouselCard
+                key={String(item.id ?? index)}
+                item={item}
+                index={index}
+                active
+                partnerMode
+                disabled={disabled}
+                onActionSelect={onActionSelect}
+              />
+            ) : (
+              <div
+              key={String(item.id ?? index)}
+              className="rounded-[20px] border border-white/75 bg-white/80 px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)]"
+              >
+                <p className="text-sm font-medium text-slate-800">
+                  {String(item.title ?? `活动 ${index + 1}`)}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {String(item.locationName ?? "附近")} · {formatDistance(item.distance)}
+                </p>
+              </div>
+            )
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -2693,6 +3687,7 @@ function FormBlockCard({
   );
   const [formValues, setFormValues] = useState<Record<string, unknown>>(initialValues);
   const [formError, setFormError] = useState<string | null>(null);
+  const showHeader = useMemo(() => readFormShowHeader(block), [block]);
 
   useEffect(() => {
     setFormValues(initialValues);
@@ -2703,6 +3698,21 @@ function FormBlockCard({
     typeof schema.submitLabel === "string" && schema.submitLabel.trim()
       ? schema.submitLabel.trim()
       : "提交";
+  const requiredFields = useMemo(
+    () => schema.fields.filter((field) => field.required),
+    [schema.fields]
+  );
+  const optionalFields = useMemo(
+    () => schema.fields.filter((field) => !field.required),
+    [schema.fields]
+  );
+  const missingRequiredCount = useMemo(
+    () => countGenUIFormMissingRequiredFields(schema, formValues),
+    [formValues, schema]
+  );
+  const submitBlocked = missingRequiredCount > 0;
+  const submitButtonLabel =
+    missingRequiredCount > 0 ? `${submitLabel} · 还差 ${missingRequiredCount} 项必填` : submitLabel;
 
   const handleSingleSelect = useCallback((fieldName: string, value: string) => {
     setFormValues((current) => ({
@@ -2760,12 +3770,152 @@ function FormBlockCard({
   const fields = schema.fields;
   const showFallbackPreview = fields.length === 0;
 
+  const renderField = (field: GenUIFormField) => {
+    if (field.type === "textarea") {
+      const currentValue = readGenUIFormTextValue(formValues, field.name);
+      return (
+        <div key={field.name} className="space-y-1.5">
+          <div className="flex items-center gap-1">
+            <p className="text-[12px] font-medium text-slate-700">{field.label}</p>
+            {field.required ? <span className="text-[11px] text-rose-500">*</span> : null}
+          </div>
+          <textarea
+            value={currentValue}
+            onChange={(event) => {
+              setFormValues((current) => ({
+                ...current,
+                [field.name]: event.target.value,
+              }));
+              setFormError(null);
+            }}
+            disabled={disabled}
+            maxLength={typeof field.maxLength === "number" ? field.maxLength : 120}
+            rows={3}
+            placeholder={field.placeholder || `补充${field.label}`}
+            className="min-h-[92px] w-full rounded-[22px] border border-white/80 bg-white/92 px-3 py-2.5 text-sm text-slate-700 outline-none shadow-[inset_0_1px_0_rgba(255,255,255,0.66)] transition focus:border-[#c8d1ff] focus:bg-white disabled:opacity-45"
+          />
+        </div>
+      );
+    }
+
+    if (field.type === "text") {
+      const currentValue = readGenUIFormTextValue(formValues, field.name);
+      return (
+        <div key={field.name} className="space-y-1.5">
+          <div className="flex items-center gap-1">
+            <p className="text-[12px] font-medium text-slate-700">{field.label}</p>
+            {field.required ? <span className="text-[11px] text-rose-500">*</span> : null}
+          </div>
+          <input
+            type="text"
+            value={currentValue}
+            onChange={(event) => {
+              setFormValues((current) => ({
+                ...current,
+                [field.name]: event.target.value,
+              }));
+              setFormError(null);
+            }}
+            disabled={disabled}
+            maxLength={typeof field.maxLength === "number" ? field.maxLength : 60}
+            placeholder={field.placeholder || `补充${field.label}`}
+            className="h-11 w-full rounded-[18px] border border-white/80 bg-white/92 px-3 text-sm text-slate-700 outline-none shadow-[inset_0_1px_0_rgba(255,255,255,0.66)] transition focus:border-[#c8d1ff] focus:bg-white disabled:opacity-45"
+          />
+        </div>
+      );
+    }
+
+    if (field.type === "multi-select") {
+      const currentValues = readGenUIFormMultiValue(formValues, field.name);
+      return (
+        <div key={field.name} className="space-y-1.5">
+          <div className="flex items-center gap-1">
+            <p className="text-[12px] font-medium text-slate-700">{field.label}</p>
+            {field.required ? <span className="text-[11px] text-rose-500">*</span> : null}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {(field.options || []).map((option) => {
+              const selected = currentValues.includes(option.value);
+              return (
+                <button
+                  key={`${field.name}-${option.value}`}
+                  type="button"
+                  onClick={() => handleMultiSelect(field.name, option.value)}
+                  disabled={disabled}
+                  className={cn(
+                    "rounded-full border px-3 py-2 text-xs transition-all duration-150 disabled:opacity-45",
+                    selected
+                      ? "border-transparent bg-[linear-gradient(135deg,#4856e8_0%,#6775ff_100%)] text-white shadow-[0_12px_24px_-16px_rgba(83,97,232,0.78)]"
+                      : "border-slate-200 bg-white/92 text-slate-700 hover:border-[#d5dbff] hover:bg-[#f7f8ff]"
+                  )}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
+    const currentValue = readGenUIFormTextValue(formValues, field.name);
+    return (
+      <div key={field.name} className="space-y-1.5">
+        <div className="flex items-center gap-1">
+          <p className="text-[12px] font-medium text-slate-700">{field.label}</p>
+          {field.required ? <span className="text-[11px] text-rose-500">*</span> : null}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {(field.options || []).map((option) => (
+            <button
+              key={`${field.name}-${option.value}`}
+              type="button"
+              onClick={() => handleSingleSelect(field.name, option.value)}
+              disabled={disabled}
+              className={cn(
+                "rounded-full border px-3 py-2 text-xs transition-all duration-150 disabled:opacity-45",
+                currentValue === option.value
+                  ? "border-transparent bg-[linear-gradient(135deg,#5b67f4_0%,#7380ff_52%,#7d6bff_100%)] text-white shadow-[0_12px_24px_-16px_rgba(91,103,244,0.78)]"
+                  : "border-slate-200 bg-white/92 text-slate-700 hover:border-[#d5dbff] hover:bg-[#f7f8ff]"
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <div className="rounded-xl border border-slate-200 bg-white/85 p-3">
-      <p className="text-sm font-semibold text-slate-800">{block.title || "参数设置"}</p>
+    <div
+      className={cn(
+        showHeader
+          ? "rounded-[28px] border border-[#dde3ff] bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(246,248,255,0.96)_100%)] p-4 shadow-[0_26px_46px_-34px_rgba(63,79,162,0.48)]"
+          : "mt-1 space-y-3"
+      )}
+    >
+      {showHeader ? (
+        <GenUICardHeader
+          eyebrow="搭子偏好表"
+          title={block.title || "参数设置"}
+          description={
+            requiredFields.length > 0
+              ? missingRequiredCount > 0
+                ? `先补齐 ${requiredFields.length} 项必填，我就按这些条件开始筛。`
+                : "必填已经补齐，选填项能帮我筛得更准。"
+              : "按你的想法补几项，我会据此把范围收窄。"
+          }
+          trailingLabel={
+            requiredFields.length > 0
+              ? `${requiredFields.length - missingRequiredCount}/${requiredFields.length} 必填`
+              : undefined
+          }
+        />
+      ) : null}
 
       {showFallbackPreview ? (
-        <div className="mt-2 space-y-2">
+        <div className={cn(showHeader ? "mt-2 space-y-2" : "space-y-2")}>
           {Object.entries(initialValues).map(([key, value]) => (
             <div key={key} className="rounded-lg bg-slate-50/90 px-3 py-2">
               <p className="text-[11px] text-slate-500">{prettyFieldLabel(key)}</p>
@@ -2774,96 +3924,28 @@ function FormBlockCard({
           ))}
         </div>
       ) : (
-        <div className="mt-3 space-y-3">
-          {fields.map((field) => {
-            if (field.type === "textarea") {
-              const currentValue = readGenUIFormTextValue(formValues, field.name);
-              return (
-                <div key={field.name} className="space-y-1.5">
-                  <div className="flex items-center gap-1">
-                    <p className="text-[12px] font-medium text-slate-600">{field.label}</p>
-                    {field.required ? <span className="text-[11px] text-rose-500">*</span> : null}
-                  </div>
-                  <textarea
-                    value={currentValue}
-                    onChange={(event) => {
-                      setFormValues((current) => ({
-                        ...current,
-                        [field.name]: event.target.value,
-                      }));
-                      setFormError(null);
-                    }}
-                    disabled={disabled}
-                    maxLength={typeof field.maxLength === "number" ? field.maxLength : 120}
-                    rows={3}
-                    placeholder={field.placeholder || `补充${field.label}`}
-                    className="min-h-[84px] w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-slate-300 disabled:opacity-45"
-                  />
-                </div>
-              );
-            }
-
-            if (field.type === "multi-select") {
-              const currentValues = readGenUIFormMultiValue(formValues, field.name);
-              return (
-                <div key={field.name} className="space-y-1.5">
-                  <div className="flex items-center gap-1">
-                    <p className="text-[12px] font-medium text-slate-600">{field.label}</p>
-                    {field.required ? <span className="text-[11px] text-rose-500">*</span> : null}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {(field.options || []).map((option) => {
-                      const selected = currentValues.includes(option.value);
-                      return (
-                        <button
-                          key={`${field.name}-${option.value}`}
-                          type="button"
-                          onClick={() => handleMultiSelect(field.name, option.value)}
-                          disabled={disabled}
-                          className={cn(
-                            "rounded-full px-3 py-1.5 text-xs transition disabled:opacity-45",
-                            selected
-                              ? "bg-slate-800 text-white"
-                              : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                          )}
-                        >
-                          {option.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            }
-
-            const currentValue = readGenUIFormTextValue(formValues, field.name);
-            return (
-              <div key={field.name} className="space-y-1.5">
-                <div className="flex items-center gap-1">
-                  <p className="text-[12px] font-medium text-slate-600">{field.label}</p>
-                  {field.required ? <span className="text-[11px] text-rose-500">*</span> : null}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {(field.options || []).map((option) => (
-                    <button
-                      key={`${field.name}-${option.value}`}
-                      type="button"
-                      onClick={() => handleSingleSelect(field.name, option.value)}
-                      disabled={disabled}
-                      className={cn(
-                        "rounded-full px-3 py-1.5 text-xs transition disabled:opacity-45",
-                        currentValue === option.value
-                          ? "bg-[#5b67f4] text-white"
-                          : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                      )}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
+        <div className={cn(showHeader ? "mt-3 space-y-3" : "space-y-3")}>
+          {requiredFields.length > 0 ? (
+            <div className="space-y-3 rounded-[24px] border border-[#ffd8e1] bg-[linear-gradient(180deg,rgba(255,247,249,0.96)_0%,rgba(255,241,245,0.92)_100%)] p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[12px] font-semibold tracking-[0.02em] text-slate-700">先填这几项</p>
+                <span className="rounded-full bg-white/72 px-2 py-1 text-[11px] text-rose-500">
+                  {missingRequiredCount > 0 ? `还差 ${missingRequiredCount} 项` : "已补齐"}
+                </span>
               </div>
-            );
-          })}
+              <div className="space-y-3">{requiredFields.map(renderField)}</div>
+            </div>
+          ) : null}
+
+          {optionalFields.length > 0 ? (
+            <div className="space-y-3 rounded-[24px] border border-[#e3e8f6] bg-[linear-gradient(180deg,rgba(250,251,255,0.96)_0%,rgba(244,247,252,0.92)_100%)] p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.78)]">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[12px] font-semibold tracking-[0.02em] text-slate-700">有空再补</p>
+                <span className="text-[11px] text-slate-500">选填，能帮我筛得更准</span>
+              </div>
+              <div className="space-y-3">{optionalFields.map(renderField)}</div>
+            </div>
+          ) : null}
 
           {formError ? (
             <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">{formError}</p>
@@ -2875,10 +3957,20 @@ function FormBlockCard({
               void handleSubmit();
             }}
             disabled={disabled}
-            className="w-full rounded-2xl bg-[#5b67f4] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-[#4d59ec] disabled:opacity-45"
+            className={cn(
+              "w-full rounded-[22px] px-4 py-3 text-sm font-medium text-white transition-all",
+              submitBlocked
+                ? "bg-[linear-gradient(135deg,#b4bddf_0%,#96a1c9_100%)] shadow-[inset_0_1px_0_rgba(255,255,255,0.35)]"
+                : "bg-[linear-gradient(135deg,#5b67f4_0%,#6e7cff_52%,#7d6bff_100%)] shadow-[0_22px_36px_-24px_rgba(81,96,236,0.72)] hover:brightness-[1.02]"
+            )}
           >
-            {submitLabel}
+            {submitButtonLabel}
           </button>
+          <p className="px-1 text-[11px] leading-5 text-slate-500">
+            {submitBlocked
+              ? "把上面的必填补齐后，我就按这些条件开始匹配。"
+              : "提交后会直接进入匹配，不会再让你重填一遍。"}
+          </p>
         </div>
       )}
     </div>
@@ -2895,21 +3987,17 @@ function CtaGroupBlockCard({
   onActionSelect: (option: ActionOption) => Promise<void>;
 }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white/85 p-3">
-      <p className="text-xs text-slate-500">接下来你可以：</p>
-      <Suggestions className="mt-2 gap-2">
-        {block.items.map((item, index) => (
-          <Suggestion
-            key={`${item.label}-${index}`}
-            suggestion={item.label}
-            onClick={() => {
-              void onActionSelect(item);
-            }}
-            disabled={disabled}
-            className="h-8 border-transparent bg-slate-100 px-3 text-xs text-slate-700 hover:bg-slate-200 disabled:opacity-45"
-          />
-        ))}
-      </Suggestions>
+    <div className="mt-1">
+      <GenUIActionChips
+        items={block.items.map((item, index) => ({
+          key: `${item.label}-${index}`,
+          label: item.label,
+          onSelect: () => {
+            void onActionSelect(item);
+          },
+        }))}
+        disabled={disabled}
+      />
     </div>
   );
 }

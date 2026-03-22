@@ -6,9 +6,9 @@
   - 自包含模式（无 fetchConfig）：现有行为不变
   - 引用模式（有 fetchConfig）：Swiper + 半屏详情 + 卡内操作
 -->
-<view class="widget-explore halo-card">
+<view class="widget-explore halo-card {{showHeader ? '' : 'widget-explore--frameless'}} {{presentation === 'immersive-carousel' ? 'widget-explore--immersive' : 'widget-explore--compact'}}">
   <!-- 头部 -->
-  <view class="explore-header">
+  <view wx:if="{{showHeader}}" class="explore-header">
     <view class="header-icon icon-circle icon-circle--blue">
       <t-icon name="location" size="40rpx" />
     </view>
@@ -46,63 +46,71 @@
 
   <!-- ========== Swiper 模式（引用模式 + swipeable） ========== -->
   <block wx:elif="{{swiperMode && displayResults.length > 0}}">
-    <swiper
-      class="explore-swiper"
-      indicator-dots="{{true}}"
-      indicator-color="rgba(0,0,0,0.2)"
-      indicator-active-color="#5B75FB"
-      circular="{{false}}"
-      current="{{activeIndex}}"
-      bindchange="onSwiperChange"
-    >
-      <swiper-item
-        wx:for="{{displayResults}}"
-        wx:key="id"
-        class="swiper-slide"
+    <view class="explore-swiper-shell">
+      <view class="explore-swiper-mask explore-swiper-mask--left"></view>
+      <view class="explore-swiper-mask explore-swiper-mask--right"></view>
+      <swiper
+        class="explore-swiper"
+        indicator-dots="{{true}}"
+        indicator-color="rgba(72, 86, 232, 0.16)"
+        indicator-active-color="#5B75FB"
+        circular="{{false}}"
+        current="{{activeIndex}}"
+        previous-margin="72rpx"
+        next-margin="72rpx"
+        easing-function="easeOutCubic"
+        duration="260"
+        bindchange="onSwiperChange"
       >
-        <view class="swiper-card" data-id="{{item.id}}" bindtap="onActivityTap">
-          <view class="swiper-card__body">
-            <text class="swiper-card__title">{{item.title}}</text>
-            <view class="swiper-card__meta">
-              <text class="meta-tag">{{item.type}}</text>
-              <text class="meta-dot">·</text>
-              <text>{{item.locationName}}</text>
-            </view>
-            <view class="swiper-card__info">
-              <view class="info-item">
-                <t-icon name="time" size="28rpx" color="#9CA3AF" />
-                <text>{{item.startAt}}</text>
+        <swiper-item
+          wx:for="{{displayResults}}"
+          wx:key="id"
+          class="swiper-slide"
+        >
+          <view class="swiper-card {{activeIndex === index ? 'is-active' : ''}}" data-id="{{item.id}}" bindtap="onActivityTap">
+            <view class="swiper-card__body">
+              <text class="swiper-card__title">{{item.title}}</text>
+              <view class="swiper-card__meta">
+                <text class="meta-tag">{{item.type}}</text>
+                <text class="meta-dot">·</text>
+                <text>{{item.locationName}}</text>
               </view>
-              <view class="info-item">
-                <t-icon name="location" size="28rpx" color="#9CA3AF" />
-                <text>{{item.distance >= 1000 ? (item.distance / 1000).toFixed(1) + 'km' : item.distance + 'm'}}</text>
+              <view class="swiper-card__info">
+                <view class="info-item">
+                  <t-icon name="time" size="28rpx" color="#9CA3AF" />
+                  <text>{{item.startAt}}</text>
+                </view>
+                <view class="info-item">
+                  <t-icon name="location" size="28rpx" color="#9CA3AF" />
+                  <text>{{item.distance >= 1000 ? (item.distance / 1000).toFixed(1) + 'km' : item.distance + 'm'}}</text>
+                </view>
               </view>
             </view>
-          </view>
 
-          <!-- 卡内操作按钮 -->
-          <view wx:if="{{interaction.actions}}" class="swiper-card__actions">
-            <view
-              wx:for="{{interaction.actions}}"
-              wx:for-item="action"
-              wx:key="type"
-              class="card-action-btn btn-pressable {{actionStates[item.id + '_' + action.type] === 'loading' ? 'is-loading' : ''}} {{actionStates[item.id + '_' + action.type] === 'success' ? 'is-success' : ''}}"
-              data-actiontype="{{action.type}}"
-              data-activityid="{{item.id}}"
-              data-activitytitle="{{item.title}}"
-              data-startat="{{item.startAt}}"
-              data-locationname="{{item.locationName}}"
-              data-actionparams="{{action.params}}"
-              catchtap="onActionTap"
-            >
-              <text wx:if="{{actionStates[item.id + '_' + action.type] === 'loading'}}">...</text>
-              <text wx:elif="{{actionStates[item.id + '_' + action.type] === 'success'}}">{{action.type === 'join' ? '已报名' : action.label}}</text>
-              <text wx:else>{{action.label}}</text>
+            <!-- 卡内操作按钮 -->
+            <view wx:if="{{interaction.actions}}" class="swiper-card__actions">
+              <view
+                wx:for="{{interaction.actions}}"
+                wx:for-item="action"
+                wx:key="type"
+                class="card-action-btn btn-pressable {{actionStates[item.id + '_' + action.type] === 'loading' ? 'is-loading' : ''}} {{actionStates[item.id + '_' + action.type] === 'success' ? 'is-success' : ''}}"
+                data-actiontype="{{action.type}}"
+                data-activityid="{{item.id}}"
+                data-activitytitle="{{item.title}}"
+                data-startat="{{item.startAt}}"
+                data-locationname="{{item.locationName}}"
+                data-actionparams="{{action.params}}"
+                catchtap="onActionTap"
+              >
+                <text wx:if="{{actionStates[item.id + '_' + action.type] === 'loading'}}">...</text>
+                <text wx:elif="{{actionStates[item.id + '_' + action.type] === 'success'}}">{{action.type === 'join' ? '已报名' : action.label}}</text>
+                <text wx:else>{{action.label}}</text>
+              </view>
             </view>
           </view>
-        </view>
-      </swiper-item>
-    </swiper>
+        </swiper-item>
+      </swiper>
+    </view>
 
     <!-- Swiper 计数器 -->
     <view class="swiper-counter">

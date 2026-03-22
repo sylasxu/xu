@@ -12,6 +12,10 @@ const LOCAL_CORS_ORIGINS = [
   'http://127.0.0.1:3000',
   'http://localhost:5173',
   'http://127.0.0.1:5173',
+  'http://localhost:1113',
+  'http://127.0.0.1:1113',
+  'http://localhost:1114',
+  'http://127.0.0.1:1114',
 ];
 
 function readEnv(name: string): string | null {

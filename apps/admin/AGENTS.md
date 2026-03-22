@@ -136,6 +136,15 @@ export function FeaturePage() {
 
 ---
 
+## 🎨 UI 统一规范
+
+- 列表页必须优先复用 `@/components/list-page` 的 `ListPage + DataTable` 组合，默认对齐“用户管理”的页面骨架、工具栏、表格容器和分页样式
+- 禁止在列表页里单独再拼一套 `Card + Table + 自定义分页` 来替代统一表格框架；如果是 `/users`、`/content`、`/activities` 这一类管理页，先参考“用户管理”再实现
+- 页面视觉优先减少无意义边框和重复包裹层；同一块信息不要同时出现外层 `Card`、内层 `border`、再套一层表格边框
+- 新增 Admin 列表页时，优先学习“用户管理”的标题区、筛选区、空态和表格密度，不要自创一套不同的列表视觉语言
+
+---
+
 ## 📊 表格规范
 
 ### TanStack Table + 服务端分页

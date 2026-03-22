@@ -14,6 +14,7 @@ export function createChoiceBlock(params: {
   options: GenUIChoiceOption[];
   dedupeKey: string;
   traceRef: string;
+  meta?: Record<string, unknown>;
 }): GenUIBlock {
   return {
     blockId: createBlockId(),
@@ -22,7 +23,10 @@ export function createChoiceBlock(params: {
     options: params.options,
     dedupeKey: params.dedupeKey,
     replacePolicy: 'replace',
-    meta: { traceRef: params.traceRef },
+    meta: {
+      ...(params.meta ?? {}),
+      traceRef: params.traceRef,
+    },
   };
 }
 
@@ -47,6 +51,7 @@ export function createCtaGroupBlock(params: {
   items: Array<{ label: string; action: string; params?: Record<string, unknown> }>;
   dedupeKey: string;
   traceRef: string;
+  meta?: Record<string, unknown>;
 }): GenUIBlock {
   return {
     blockId: createBlockId(),
@@ -54,7 +59,10 @@ export function createCtaGroupBlock(params: {
     items: params.items,
     dedupeKey: params.dedupeKey,
     replacePolicy: 'replace',
-    meta: { traceRef: params.traceRef },
+    meta: {
+      ...(params.meta ?? {}),
+      traceRef: params.traceRef,
+    },
   };
 }
 
@@ -64,6 +72,7 @@ export function createFormBlock(params: {
   initialValues?: Record<string, unknown>;
   dedupeKey: string;
   traceRef: string;
+  meta?: Record<string, unknown>;
 }): GenUIBlock {
   return {
     blockId: createBlockId(),
@@ -73,7 +82,10 @@ export function createFormBlock(params: {
     ...(params.initialValues ? { initialValues: params.initialValues } : {}),
     dedupeKey: params.dedupeKey,
     replacePolicy: 'replace',
-    meta: { traceRef: params.traceRef },
+    meta: {
+      ...(params.meta ?? {}),
+      traceRef: params.traceRef,
+    },
   };
 }
 

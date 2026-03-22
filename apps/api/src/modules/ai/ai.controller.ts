@@ -33,6 +33,7 @@ import {
   createAiChatBridgeStreamResponse,
 } from './ai-chat-gateway.service';
 import { applyAiChatTurnPolicies } from './ai-chat-policy.service';
+import { normalizeAiProviderErrorMessage } from './models/provider-error';
 
 // 子领域 controller
 import { aiSessionsController } from './ai-sessions.controller';
@@ -207,7 +208,10 @@ export const aiController = new Elysia({ prefix: '/ai' })
         }
         console.error('AI Chat 失败:', error);
         set.status = 500;
-        return { code: 500, msg: error.message || 'AI 服务暂时不可用' } satisfies ErrorResponse;
+        return {
+          code: 500,
+          msg: normalizeAiProviderErrorMessage(error instanceof Error ? error.message : 'AI 服务暂时不可用'),
+        } satisfies ErrorResponse;
       }
     },
     {

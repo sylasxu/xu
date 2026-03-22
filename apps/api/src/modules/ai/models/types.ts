@@ -2,7 +2,7 @@
  * Models Module Types - 模型抽象层类型定义
  * 
  * 架构设计：
- * - Chat: Qwen (主力) + DeepSeek (备选)
+ * - Chat: OpenAI 兼容网关 / Qwen / DeepSeek
  * - Embedding: Qwen text-embedding-v4 (主力)
  * - 未来扩展: Doubao, OpenAI 等
  */
@@ -13,6 +13,21 @@ import type { LanguageModel } from 'ai';
  * 模型提供商名称
  */
 export type ModelProviderName = 'deepseek' | 'qwen' | 'doubao' | 'openai';
+
+/**
+ * 模型路由键
+ *
+ * 按 workload 区分，而不是只按通用 intent。
+ */
+export type ModelRouteKey =
+  | 'chat'
+  | 'reasoning'
+  | 'agent'
+  | 'vision'
+  | 'content_generation'
+  | 'content_topic_suggestions'
+  | 'embedding'
+  | 'rerank';
 
 /**
  * 模型用途
@@ -39,6 +54,24 @@ export interface ModelConfig {
   /** 优先级（数字越小优先级越高） */
   priority: number;
 }
+
+/**
+ * 单个模型路由选择
+ */
+export interface ModelRouteSelection {
+  provider: ModelProviderName;
+  modelId: string;
+}
+
+/**
+ * 路由配置允许兼容旧字符串和显式 provider/model 对象
+ */
+export type ModelRouteConfigValue = string | ModelRouteSelection;
+
+/**
+ * 模型路由映射
+ */
+export type ModelRouteMap = Partial<Record<ModelRouteKey, ModelRouteConfigValue>>;
 
 /**
  * Chat 请求参数
@@ -216,6 +249,10 @@ export const MODEL_IDS = {
   DEEPSEEK_CHAT: 'deepseek-chat',
   DEEPSEEK_REASONER: 'deepseek-reasoner',
 
+  // OpenAI - 主力 Chat（可通过 OPENAI_BASE_URL 接 OpenAI 兼容网关，如 sub2api）
+  OPENAI_GPT_54: 'gpt-5.4',
+  OPENAI_GPT_54_MINI: 'gpt-5.4-mini',
+
 
   // Qwen3 - 分层 Chat (v4.6 新增，使用 OpenAI 兼容接口)
   // 官方文档: https://help.aliyun.com/zh/model-studio/getting-started/models
@@ -260,10 +297,52 @@ export const ACTIVE_MODELS = {
 } as const;
 
 /**
+ * 默认模型路由（代码级兜底）。
+ *
+ * 说明：
+ * - Chat / Reasoning / Agent 默认走 OpenAI
+ * - 内容生成与主题建议默认跟随 OpenAI 主链路
+ * - Embedding / Rerank / Vision 继续走 Qwen
+ */
+export const DEFAULT_MODEL_ROUTE_MAP: Record<ModelRouteKey, ModelRouteSelection> = {
+  chat: {
+    provider: 'openai',
+    modelId: MODEL_IDS.OPENAI_GPT_54,
+  },
+  reasoning: {
+    provider: 'openai',
+    modelId: MODEL_IDS.OPENAI_GPT_54,
+  },
+  agent: {
+    provider: 'openai',
+    modelId: MODEL_IDS.OPENAI_GPT_54,
+  },
+  vision: {
+    provider: 'qwen',
+    modelId: MODEL_IDS.QWEN_VL_MAX,
+  },
+  content_generation: {
+    provider: 'openai',
+    modelId: MODEL_IDS.OPENAI_GPT_54,
+  },
+  content_topic_suggestions: {
+    provider: 'openai',
+    modelId: MODEL_IDS.OPENAI_GPT_54,
+  },
+  embedding: {
+    provider: 'qwen',
+    modelId: MODEL_IDS.QWEN_EMBEDDING,
+  },
+  rerank: {
+    provider: 'qwen',
+    modelId: MODEL_IDS.QWEN_RERANK,
+  },
+};
+
+/**
  * Embedding 维度配置
  */
 export const EMBEDDING_DIMENSIONS = {
   /** Qwen text-embedding-v4 */
   QWEN: 1536,
 } as const;
-

@@ -61,6 +61,7 @@ type PendingMatch = {
   id: string;
   activityType: string;
   typeName: string;
+  requestMode: "auto_match" | "connect" | "group_up";
   matchScore: number;
   commonTags: string[];
   locationHint: string;
@@ -72,6 +73,7 @@ type PendingMatchDetail = {
   id: string;
   activityType: string;
   typeName: string;
+  requestMode: "auto_match" | "connect" | "group_up";
   matchScore: number;
   commonTags: string[];
   locationHint: string;
@@ -254,6 +256,82 @@ function getNotificationFallbackContent(type: NotificationType): string {
   };
 
   return map[type] || "你有一条新通知";
+}
+
+function getPendingMatchHeadline(detail: PendingMatchDetail): string {
+  if (detail.requestMode === "connect") {
+    return `搭子邀请 · ${detail.typeName}`;
+  }
+
+  if (detail.requestMode === "group_up") {
+    return `组局邀请 · ${detail.typeName}`;
+  }
+
+  return `${detail.typeName} 匹配结果`;
+}
+
+function getPendingMatchListTitle(match: PendingMatch): string {
+  if (match.requestMode === "connect") {
+    return `收到搭子邀请（${match.typeName}）`;
+  }
+
+  if (match.requestMode === "group_up") {
+    return `收到组局邀请（${match.typeName}）`;
+  }
+
+  return `匹配结果待确认（${match.typeName}）`;
+}
+
+function getPendingMatchListHint(match: PendingMatch): string {
+  if (match.requestMode === "connect") {
+    return "查看邀请说明、成员信息与后续处理方式。";
+  }
+
+  if (match.requestMode === "group_up") {
+    return "查看组局说明、成员信息与后续处理方式。";
+  }
+
+  return "查看匹配说明、成员信息与后续处理方式。";
+}
+
+function getPendingMatchPrimaryActionLabel(mode: PendingMatch["requestMode"]): string {
+  if (mode === "connect") {
+    return "同意搭一下";
+  }
+
+  if (mode === "group_up") {
+    return "同意一起组局";
+  }
+
+  return "确认成局";
+}
+
+function getPendingMatchSecondaryActionLabel(mode: PendingMatch["requestMode"]): string {
+  if (mode === "connect") {
+    return "这次先不搭";
+  }
+
+  if (mode === "group_up") {
+    return "这次先不组";
+  }
+
+  return "暂不成局";
+}
+
+function getPendingMatchStatusLabel(match: PendingMatch): string {
+  if (match.requestMode === "auto_match") {
+    return match.isTempOrganizer ? "你来拍板" : "等召集人确认";
+  }
+
+  return match.isTempOrganizer ? "等你回应" : "等对方回应";
+}
+
+function getPendingMatchDetailStatusLabel(detail: PendingMatchDetail): string {
+  if (detail.requestMode === "auto_match") {
+    return detail.isTempOrganizer ? "你来拍板" : `等 ${detail.organizerNickname || "召集人"} 确认`;
+  }
+
+  return detail.isTempOrganizer ? "等你回应" : "等对方回应";
 }
 
 export function MessageCenterDrawer({
@@ -798,14 +876,14 @@ export function MessageCenterDrawer({
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div>
-                              <p className="text-sm font-semibold">{pendingMatchDetail.typeName} 搭子</p>
+                              <p className="text-sm font-semibold">{getPendingMatchHeadline(pendingMatchDetail)}</p>
                               <p className={cn("mt-1 text-xs leading-5", isDarkMode ? "text-[#aeb7e7]" : "text-[#5b648c]")}>
                                 匹配度 {pendingMatchDetail.matchScore}% · {pendingMatchDetail.locationHint}
                                 {pendingMatchDetail.commonTags.length > 0 ? ` · ${pendingMatchDetail.commonTags.join("、")}` : ""}
                               </p>
                             </div>
                             <span className={cn("rounded-full px-2 py-1 text-[11px] font-medium", pendingMatchDetail.isTempOrganizer ? "bg-[#5b67f4] text-white" : isDarkMode ? "bg-white/10 text-[#dce1ff]" : "bg-[#eef2ff] text-[#3e4ba2]")}>
-                              {pendingMatchDetail.isTempOrganizer ? "你来拍板" : `等 ${pendingMatchDetail.organizerNickname || "召集人"} 确认`}
+                              {getPendingMatchDetailStatusLabel(pendingMatchDetail)}
                             </span>
                           </div>
                           <div className={cn("mt-3 flex flex-wrap items-center gap-3 text-xs", isDarkMode ? "text-[#9eabd8]" : "text-[#7380ad]")}>
@@ -899,7 +977,7 @@ export function MessageCenterDrawer({
                               className="inline-flex items-center gap-1 rounded-full bg-[#5b67f4] px-3 py-2 text-xs font-medium text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               {pendingActionKey === `confirm:${pendingMatchDetail.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                              确认成局
+                              {getPendingMatchPrimaryActionLabel(pendingMatchDetail.requestMode)}
                             </button>
                             <button
                               type="button"
@@ -911,7 +989,7 @@ export function MessageCenterDrawer({
                               )}
                             >
                               {pendingActionKey === `cancel:${pendingMatchDetail.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
-                              暂不成局
+                              {getPendingMatchSecondaryActionLabel(pendingMatchDetail.requestMode)}
                             </button>
                           </div>
                         ) : null}
@@ -947,21 +1025,21 @@ export function MessageCenterDrawer({
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div>
-                              <p className="text-sm font-semibold">找到合拍搭子（{match.typeName}）</p>
+                              <p className="text-sm font-semibold">{getPendingMatchListTitle(match)}</p>
                               <p className={cn("mt-1 text-xs leading-5", isDarkMode ? "text-[#aeb7e7]" : "text-[#5b648c]")}>
                                 匹配度 {match.matchScore}% · {match.locationHint}
                                 {tags ? ` · ${tags}` : ""}
                               </p>
                             </div>
                             <span className={cn("rounded-full px-2 py-1 text-[11px] font-medium", match.isTempOrganizer ? "bg-[#5b67f4] text-white" : isDarkMode ? "bg-white/10 text-[#dce1ff]" : "bg-[#eef2ff] text-[#3e4ba2]")}>
-                              {match.isTempOrganizer ? "你来拍板" : "等召集人确认"}
+                              {getPendingMatchStatusLabel(match)}
                             </span>
                           </div>
                           <div className={cn("mt-3 flex items-center gap-2 text-xs", isDarkMode ? "text-[#9eabd8]" : "text-[#7380ad]")}>
                             <Clock3 className="h-3.5 w-3.5" />
                             {formatRelativeTime(match.confirmDeadline)} 前确认
                           </div>
-                          <div className={cn("mt-2 text-[11px]", isDarkMode ? "text-[#9eabd8]" : "text-[#7380ad]")}>点开可看成员摘要、当前该谁推进和破冰建议。</div>
+                          <div className={cn("mt-2 text-[11px]", isDarkMode ? "text-[#9eabd8]" : "text-[#7380ad]")}>{getPendingMatchListHint(match)}</div>
                           {match.isTempOrganizer ? (
                             <div className="mt-3 flex gap-2">
                               <button
@@ -974,7 +1052,7 @@ export function MessageCenterDrawer({
                                 className="inline-flex items-center gap-1 rounded-full bg-[#5b67f4] px-3 py-2 text-xs font-medium text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 {pendingActionKey === confirmKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                                确认成局
+                                {getPendingMatchPrimaryActionLabel(match.requestMode)}
                               </button>
                               <button
                                 type="button"
@@ -989,7 +1067,7 @@ export function MessageCenterDrawer({
                                 )}
                               >
                                 {pendingActionKey === cancelKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
-                                暂不成局
+                                {getPendingMatchSecondaryActionLabel(match.requestMode)}
                               </button>
                             </div>
                           ) : null}

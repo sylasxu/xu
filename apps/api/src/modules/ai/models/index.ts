@@ -1,7 +1,7 @@
 /**
  * Models Module - 模型抽象层
  * 
- * 只支持 Qwen + DeepSeek 的统一模型访问
+ * 支持 OpenAI 兼容网关 / Qwen / DeepSeek 的统一模型访问
  * 
  * 使用示例：
  * ```typescript
@@ -24,6 +24,10 @@
 // Types
 export type {
   ModelProviderName,
+  ModelRouteKey,
+  ModelRouteSelection,
+  ModelRouteConfigValue,
+  ModelRouteMap,
   ModelType,
   ModelConfig,
   ChatParams,
@@ -40,13 +44,14 @@ export type {
   ToolCallPart,
 } from './types';
 
-export { DEFAULT_FALLBACK_CONFIG, MODEL_IDS } from './types';
+export { DEFAULT_FALLBACK_CONFIG, MODEL_IDS, DEFAULT_MODEL_ROUTE_MAP } from './types';
 
 // Router
 export {
   getChatModel,
   getEmbeddings,
   getEmbedding,
+  getModelRouteSelection,
   getDefaultChatModel,
   setFallbackConfig,
   getFallbackConfig,
@@ -55,8 +60,11 @@ export {
   checkProviderHealth,
   checkAllProvidersHealth,
   getAvailableProviders,
+  parseModelRouteIdentifier,
+  normalizeModelRouteSelection,
 } from './router';
 
 // Adapters
 export { deepseekProvider, getDeepSeekChat, getDeepSeekReasoner } from './adapters/deepseek';
+export { openaiProvider, getOpenAIChat } from './adapters/openai';
 export { runText, runObject, runStream } from './runtime';

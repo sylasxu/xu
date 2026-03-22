@@ -31,10 +31,12 @@ interface CollectedInfo {
 
 interface ComponentData {
   isSubmitting: boolean;
+  customLocation: string;
 }
 
 interface ComponentProperties {
   questionType: WechatMiniprogram.Component.PropertyOption;
+  inputMode: WechatMiniprogram.Component.PropertyOption;
   question: WechatMiniprogram.Component.PropertyOption;
   options: WechatMiniprogram.Component.PropertyOption;
   allowSkip: WechatMiniprogram.Component.PropertyOption;
@@ -88,6 +90,11 @@ Component({
       type: String,
       value: '你想看哪个地方的活动呢？',
     },
+    /** 输入模式 */
+    inputMode: {
+      type: String,
+      value: 'none',
+    },
     /** 选项列表 */
     options: {
       type: Array,
@@ -112,6 +119,7 @@ Component({
 
   data: {
     isSubmitting: false,
+    customLocation: '',
   },
 
   observers: {
@@ -123,6 +131,11 @@ Component({
   },
 
   methods: {
+    onCustomLocationInput(e: WechatMiniprogram.Input) {
+      const value = typeof e.detail?.value === 'string' ? e.detail.value : '';
+      this.setData({ customLocation: value });
+    },
+
     /**
      * 点击选项
      * v4.7: 发送结构化动作
@@ -194,6 +207,49 @@ Component({
         },
         source: 'widget_ask_preference',
         originalText: '随便，你推荐吧',
+      });
+    },
+
+    onSubmitCustomLocation() {
+      if (
+        this.properties.disabled
+        || this.data.isSubmitting
+        || this.properties.inputMode !== 'free-text-optional'
+      ) {
+        return;
+      }
+
+      const locationName = this.data.customLocation.trim();
+      if (!locationName) {
+        return;
+      }
+
+      this.setData({ isSubmitting: true });
+      wx.vibrateShort({ type: 'light' });
+
+      this.triggerEvent('select', {
+        questionType: this.properties.questionType,
+        selectedOption: {
+          label: locationName,
+          value: locationName,
+        },
+        collectedInfo: this.properties.collectedInfo,
+      });
+
+      const chatStore = useChatStore.getState();
+      chatStore.sendAction({
+        action: 'select_preference',
+        payload: {
+          questionType: 'location',
+          selectedValue: locationName,
+          selectedLabel: locationName,
+          value: locationName,
+          location: locationName,
+          locationName,
+          collectedInfo: this.properties.collectedInfo,
+        },
+        source: 'widget_ask_preference',
+        originalText: locationName,
       });
     },
   },

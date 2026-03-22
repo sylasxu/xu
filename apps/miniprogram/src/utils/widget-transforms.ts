@@ -43,6 +43,7 @@ interface AskPreferenceOption {
 
 interface AskPreferenceWidgetData {
   questionType: AskPreferenceQuestionType
+  inputMode: 'none' | 'free-text-optional'
   question: string
   options: AskPreferenceOption[]
   allowSkip: boolean
@@ -88,6 +89,9 @@ const WIDGET_TRANSFORMS: Record<string, WidgetTransformFn> = {
 
     const widgetData: AskPreferenceWidgetData = {
       questionType: inferQuestionType(askData.questionType, question),
+      inputMode: askData.inputMode === 'free-text-optional' || askData.questionType === 'location'
+        ? 'free-text-optional'
+        : 'none',
       question,
       options: normalizePreferenceOptions(askData.options),
       allowSkip: askData.allowSkip !== false,

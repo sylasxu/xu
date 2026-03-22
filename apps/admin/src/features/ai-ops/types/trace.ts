@@ -366,17 +366,19 @@ export type TraceEvent = TraceStartEvent | TraceStepEvent | TraceEndEvent
 
 /** 模型参数 */
 export interface ModelParams {
-  /** 模型名称 */
-  model: 'qwen-flash' | 'qwen-plus' | 'qwen3-max'
+  /** 模型名称或 provider/model 显式路由；follow-route-map 表示跟随后台 model.route_map */
+  model: string
   /** Temperature (0-2) */
   temperature: number
   /** 最大输出 Token 数 (256-8192) */
   maxTokens: number
 }
 
+export const FOLLOW_ROUTE_MAP_MODEL = 'follow-route-map'
+
 /** 默认模型参数 */
 export const DEFAULT_MODEL_PARAMS: ModelParams = {
-  model: 'qwen-flash',
+  model: FOLLOW_ROUTE_MAP_MODEL,
   temperature: 0,
   maxTokens: 2048,
 }
@@ -393,15 +395,15 @@ export interface SessionStats {
   estimatedCost: number
 }
 
-/** Qwen 成本粗估系数 (USD per token) */
-export const QWEN_PRICE: Record<string, { input: number; output: number }> = {
+/** 模型成本粗估系数 (USD per token) */
+export const MODEL_PRICE: Partial<Record<string, { input: number; output: number }>> = {
   'qwen-flash': { input: 0.0 / 1_000_000, output: 0.0 / 1_000_000 },
   'qwen-plus': { input: 0.8 / 1_000_000, output: 2.0 / 1_000_000 },
   'qwen3-max': { input: 2.0 / 1_000_000, output: 6.0 / 1_000_000 },
 }
 
 /** 计算会话统计 */
-export function calculateSessionStats(traces: ExecutionTrace[], model: string = 'qwen-flash'): SessionStats {
+export function calculateSessionStats(traces: ExecutionTrace[], model: string = 'gpt-5.4'): SessionStats {
   let totalTokens = 0
   let totalDuration = 0
   let inputTokens = 0
@@ -424,10 +426,11 @@ export function calculateSessionStats(traces: ExecutionTrace[], model: string = 
   }
 
   // 计算成本粗估（根据当前模型系数）
-  const price = QWEN_PRICE[model] || QWEN_PRICE['qwen-flash']
+  const price = MODEL_PRICE[model]
   const estimatedCost = 
-    inputTokens * price.input + 
-    outputTokens * price.output
+    price
+      ? inputTokens * price.input + outputTokens * price.output
+      : 0
 
   return {
     totalRounds: traces.length,

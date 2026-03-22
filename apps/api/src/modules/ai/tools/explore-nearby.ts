@@ -70,7 +70,7 @@ export interface ExploreResultItem {
  * 探索结果
  */
 export interface ExploreData {
-  center: { lat: number; lng: number; name: string };
+  center?: { lat: number; lng: number; name: string };
   results: ExploreResultItem[];
   title: string;
   semanticQuery?: string;
@@ -156,23 +156,25 @@ function toExploreResultItem(scored: ScoredActivity): ExploreResultItem {
 const REFERENCE_MODE_THRESHOLD = 5;
 
 export function buildExploreNearbyResult(params: {
-  center: { lat: number; lng: number; name: string };
+  center?: { lat: number; lng: number; name: string };
+  locationName: string;
   results: ExploreResultItem[];
   radiusKm: number;
   semanticQuery?: string;
   type?: string;
 }): ExploreNearbyResultPayload {
-  const { center, results, radiusKm, semanticQuery, type } = params;
+  const { center, locationName, results, radiusKm, semanticQuery, type } = params;
+  const locationLabel = locationName.trim() || center?.name || '附近';
   const title = results.length > 0
-    ? `为你找到${center.name}附近的 ${results.length} 个活动`
-    : `${center.name}附近暂时没有活动`;
+    ? `为你找到${locationLabel}附近的 ${results.length} 个活动`
+    : `${locationLabel}附近暂时没有活动`;
   const message = results.length > 0
-    ? `先给你看看${center.name}附近的局，顺眼的话点一个就能继续。`
-    : `${center.name}附近暂时没有合适的局，我再给你几个下一步。`;
+    ? `先帮你找了一批${locationLabel}附近的活动，你可以先看看有没有想继续了解的；如果想换条件，也可以直接告诉我。`
+    : `${locationLabel}附近这会儿还没刷到合适的活动。你也可以直接告诉我想换的地方、时间、类型或预算，我继续帮你找。`;
 
-  if (results.length > REFERENCE_MODE_THRESHOLD) {
+  if (results.length > REFERENCE_MODE_THRESHOLD && center) {
     return {
-      locationName: center.name,
+      locationName: locationLabel,
       ...(type ? { type } : {}),
       message,
       explore: {
@@ -216,11 +218,11 @@ export function buildExploreNearbyResult(params: {
   }
 
   return {
-    locationName: center.name,
+    locationName: locationLabel,
     ...(type ? { type } : {}),
     message,
     explore: {
-      center,
+      ...(center ? { center } : {}),
       results,
       title,
       ...(semanticQuery ? { semanticQuery } : {}),
@@ -265,6 +267,7 @@ export const exploreNearbyTool = createToolFactory<ExploreNearbyParams, ExploreD
         success: true as const,
         ...buildExploreNearbyResult({
           center,
+          locationName: center.name,
           results,
           radiusKm: radius,
           ...(semanticQuery ? { semanticQuery } : {}),

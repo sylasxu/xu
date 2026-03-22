@@ -51,10 +51,21 @@ const welcomeUiConfig = {
 };
 
 const modelIntentMapConfig = {
-  chat: 'qwen-plus',
-  reasoning: 'qwen-plus',
-  agent: 'qwen3-max',
-  vision: 'qwen-vl-max',
+  chat: 'openai/gpt-5.4',
+  reasoning: 'openai/gpt-5.4',
+  agent: 'openai/gpt-5.4',
+  vision: 'qwen/qwen-vl-max',
+};
+
+const modelRouteMapConfig = {
+  chat: 'openai/gpt-5.4',
+  reasoning: 'openai/gpt-5.4',
+  agent: 'openai/gpt-5.4',
+  vision: 'qwen/qwen-vl-max',
+  content_generation: 'openai/gpt-5.4',
+  content_topic_suggestions: 'openai/gpt-5.4',
+  embedding: 'qwen/text-embedding-v4',
+  rerank: 'qwen/qwen3-rerank',
 };
 
 const aiConfigSeeds = [
@@ -80,7 +91,13 @@ const aiConfigSeeds = [
     configKey: 'model.intent_map',
     configValue: modelIntentMapConfig,
     category: 'model',
-    description: 'AI 主链路意图到模型的映射配置（Chat/Reasoning/Agent/Vision）',
+    description: 'AI 主链路意图到模型的映射配置（兼容旧路由，推荐使用 provider/model 形式）',
+  },
+  {
+    configKey: 'model.route_map',
+    configValue: modelRouteMapConfig,
+    category: 'model',
+    description: 'AI workload 到模型路由的映射配置（推荐，显式 provider/model）',
   },
 ];
 

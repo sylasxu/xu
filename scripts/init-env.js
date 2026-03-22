@@ -43,9 +43,9 @@ try {
   // 3. AI 配置提示
   console.log('');
   console.log('🤖 AI 服务配置说明：');
-  console.log('   - 当前默认：Qwen（dashscope）主力，DeepSeek 备选');
-  console.log('   - 请至少配置 DASHSCOPE_API_KEY；如需降级兜底，再配置 DEEPSEEK_API_KEY');
-  console.log('   - 当前运行口径：qwen + deepseek');
+  console.log('   - 当前默认：OpenAI 兼容网关（如 sub2api）主力，Qwen / DeepSeek 备选');
+  console.log('   - 推荐至少配置 OPENAI_API_KEY；如使用兼容网关，再补 OPENAI_BASE_URL');
+  console.log('   - 如需保留兜底，再配置 DASHSCOPE_API_KEY / DEEPSEEK_API_KEY');
   console.log('');
 
   // 写入 .env

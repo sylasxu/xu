@@ -1,0 +1,237 @@
+@import '/styles/tokens.less';
+
+.widget-partner-search-results {
+  padding: @spacing-4;
+  margin: @spacing-2 0;
+}
+
+.widget-partner-search-results--frameless {
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+
+  &::before {
+    display: none;
+  }
+}
+
+.header {
+  margin-bottom: @spacing-4;
+}
+
+.header-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: @spacing-2;
+  padding: 8rpx 18rpx;
+  border-radius: @rounded-full;
+  background: rgba(255, 255, 255, 0.84);
+  border: 2rpx solid rgba(91, 117, 251, 0.12);
+}
+
+.header-badge__text {
+  font-size: @text-xs;
+  font-weight: 600;
+  color: @color-primary;
+}
+
+.title {
+  display: block;
+  font-size: @text-lg;
+  font-weight: 600;
+  color: var(--text-main, @text-main);
+  line-height: 1.4;
+}
+
+.subtitle {
+  display: block;
+  margin-top: @spacing-1;
+  font-size: @text-sm;
+  color: var(--text-secondary, @text-secondary);
+  line-height: 1.5;
+}
+
+.swiper-shell {
+  margin: 0 -8rpx;
+}
+
+.swiper {
+  height: 700rpx;
+}
+
+.result-card {
+  height: 640rpx;
+  margin: 0 18rpx;
+  padding: @spacing-4;
+  border-radius: 28rpx;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(244, 247, 255, 0.94) 100%);
+  border: 2rpx solid rgba(255, 255, 255, 0.86);
+  box-shadow: 0 24rpx 48rpx -32rpx rgba(65, 83, 162, 0.38);
+}
+
+.result-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.result-user {
+  display: flex;
+  align-items: center;
+  gap: @spacing-3;
+}
+
+.avatar {
+  width: 88rpx;
+  height: 88rpx;
+  border-radius: 999rpx;
+  background: #eef2ff;
+}
+
+.avatar--fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: @color-primary;
+  font-size: @text-base;
+  font-weight: 600;
+}
+
+.user-copy {
+  min-width: 0;
+}
+
+.user-copy__row {
+  display: flex;
+  align-items: center;
+  gap: @spacing-2;
+  margin-bottom: 8rpx;
+}
+
+.type-chip,
+.score-chip,
+.meta-chip,
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8rpx 18rpx;
+  border-radius: @rounded-full;
+  font-size: @text-xs;
+}
+
+.type-chip {
+  color: @color-primary;
+  background: rgba(91, 117, 251, 0.1);
+}
+
+.score-chip {
+  color: #4361ee;
+  background: rgba(67, 97, 238, 0.1);
+}
+
+.user-name {
+  display: block;
+  font-size: @text-lg;
+  font-weight: 600;
+  color: var(--text-main, @text-main);
+  line-height: 1.4;
+}
+
+.meta-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: @spacing-2;
+  margin-top: @spacing-4;
+}
+
+.meta-chip {
+  color: var(--text-secondary, @text-secondary);
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.meta-chip--soft {
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.summary {
+  display: block;
+  margin-top: @spacing-4;
+  font-size: @text-sm;
+  line-height: 1.7;
+  color: var(--text-main, @text-main);
+}
+
+.tag-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: @spacing-2;
+  margin-top: @spacing-4;
+}
+
+.tag-chip {
+  color: var(--text-secondary, @text-secondary);
+  background: rgba(255, 255, 255, 0.88);
+  border: 2rpx solid rgba(148, 163, 184, 0.16);
+}
+
+.action-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: @spacing-2;
+  margin-top: @spacing-4;
+}
+
+.action-btn {
+  height: 84rpx;
+  line-height: 84rpx;
+  border: none;
+  border-radius: 22rpx;
+  font-size: @text-sm;
+  font-weight: 600;
+}
+
+.action-btn--primary {
+  color: #ffffff;
+  background: linear-gradient(135deg, #5B75FB 0%, #7481FF 100%);
+  box-shadow: 0 18rpx 30rpx -24rpx rgba(91, 117, 251, 0.62);
+}
+
+.action-btn--secondary {
+  color: var(--text-main, @text-main);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.counter {
+  margin-top: @spacing-2;
+  text-align: center;
+  font-size: @text-xs;
+  color: var(--text-secondary, @text-secondary);
+}
+
+.widget-partner-search-results--frameless {
+  .swiper-shell {
+    margin-top: @spacing-1;
+  }
+}
+
+.empty-state {
+  padding: @spacing-5 @spacing-4;
+  text-align: center;
+}
+
+.empty-title {
+  display: block;
+  font-size: @text-base;
+  font-weight: 600;
+  color: var(--text-main, @text-main);
+}
+
+.empty-subtitle {
+  display: block;
+  margin-top: @spacing-2;
+  font-size: @text-sm;
+  line-height: 1.6;
+  color: var(--text-secondary, @text-secondary);
+}

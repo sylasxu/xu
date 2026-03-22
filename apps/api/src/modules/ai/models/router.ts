@@ -4,24 +4,38 @@
  * 提供统一的模型访问接口，支持降级和意图路由
  * 
  * 策略 (v4.6):
- * - 主力 Chat: Qwen (qwen-flash 闲聊 / qwen-plus 推理 / qwen3-max Agent)
- * - 备选 Chat: DeepSeek (deepseek-chat)
+ * - 主力 Chat: OpenAI 兼容网关（如 sub2api）/ Qwen / DeepSeek
  * - Embedding: Qwen text-embedding-v4
  * - Rerank: qwen3-rerank
  */
 
 import type { LanguageModel } from 'ai';
 import { deepseekProvider } from './adapters/deepseek';
-import { qwenProvider, getQwenEmbeddings, qwenRerank } from './adapters/qwen';
-import type { ModelProvider, ModelProviderName, FallbackConfig, RerankResponse } from './types';
-import { DEFAULT_FALLBACK_CONFIG, ACTIVE_MODELS } from './types';
-import { getConfigValue, getRequiredConfigValue } from '../config/config.service';
+import { openaiProvider } from './adapters/openai';
+import { qwenProvider } from './adapters/qwen';
+import type {
+  ModelProvider,
+  ModelProviderName,
+  FallbackConfig,
+  RerankResponse,
+  ModelRouteConfigValue,
+  ModelRouteKey,
+  ModelRouteMap,
+  ModelRouteSelection,
+} from './types';
+import {
+  DEFAULT_FALLBACK_CONFIG,
+  ACTIVE_MODELS,
+  DEFAULT_MODEL_ROUTE_MAP,
+} from './types';
+import { getConfigValue } from '../config/config.service';
 
 /**
  * 提供商映射
  */
 const providers: Partial<Record<ModelProviderName, ModelProvider>> = {
   deepseek: deepseekProvider,
+  openai: openaiProvider,
   qwen: qwenProvider,
 };
 
@@ -64,6 +78,103 @@ function inferProviderFromModelId(modelId?: string): ModelProviderName | undefin
   return undefined;
 }
 
+function isModelProviderName(value: string): value is ModelProviderName {
+  return value === 'openai' || value === 'qwen' || value === 'deepseek' || value === 'doubao';
+}
+
+export function parseModelRouteIdentifier(identifier: string): ModelRouteSelection | null {
+  const normalized = identifier.trim();
+  const separatorIndex = normalized.indexOf('/');
+
+  if (separatorIndex <= 0 || separatorIndex === normalized.length - 1) {
+    return null;
+  }
+
+  const provider = normalized.slice(0, separatorIndex).trim();
+  const modelId = normalized.slice(separatorIndex + 1).trim();
+
+  if (!isModelProviderName(provider) || !modelId) {
+    return null;
+  }
+
+  return {
+    provider,
+    modelId,
+  };
+}
+
+export function normalizeModelRouteSelection(
+  value: ModelRouteConfigValue | undefined | null
+): ModelRouteSelection | null {
+  if (!value) {
+    return null;
+  }
+
+  if (typeof value === 'string') {
+    const explicitRoute = parseModelRouteIdentifier(value);
+    if (explicitRoute) {
+      return explicitRoute;
+    }
+
+    const provider = inferProviderFromModelId(value);
+    if (!provider) {
+      return null;
+    }
+
+    return {
+      provider,
+      modelId: value.trim(),
+    };
+  }
+
+  const provider = typeof value.provider === 'string' ? value.provider.trim() : '';
+  const modelId = typeof value.modelId === 'string' ? value.modelId.trim() : '';
+
+  if (!provider || !modelId || !isModelProviderName(provider)) {
+    return null;
+  }
+
+  return {
+    provider,
+    modelId,
+  };
+}
+
+const LEGACY_INTENT_ROUTE_KEYS = ['chat', 'reasoning', 'agent', 'vision'] as const;
+type LegacyIntentRouteKey = typeof LEGACY_INTENT_ROUTE_KEYS[number];
+
+function isLegacyIntentRouteKey(routeKey: ModelRouteKey): routeKey is LegacyIntentRouteKey {
+  return (LEGACY_INTENT_ROUTE_KEYS as readonly string[]).includes(routeKey);
+}
+
+async function getConfiguredModelRouteMap(): Promise<ModelRouteMap> {
+  return getConfigValue<ModelRouteMap>('model.route_map', {});
+}
+
+async function getLegacyIntentMap(): Promise<Record<string, unknown>> {
+  return getConfigValue<Record<string, unknown>>('model.intent_map', {});
+}
+
+export async function getModelRouteSelection(routeKey: ModelRouteKey): Promise<ModelRouteSelection> {
+  const routeMap = await getConfiguredModelRouteMap();
+  const explicitSelection = normalizeModelRouteSelection(routeMap[routeKey]);
+  if (explicitSelection) {
+    return explicitSelection;
+  }
+
+  if (isLegacyIntentRouteKey(routeKey)) {
+    const legacyIntentMap = await getLegacyIntentMap();
+    const legacySelection = normalizeModelRouteSelection(
+      legacyIntentMap[routeKey] as ModelRouteConfigValue | undefined,
+    );
+    if (legacySelection) {
+      return legacySelection;
+    }
+  }
+
+  return DEFAULT_MODEL_ROUTE_MAP[routeKey];
+}
+
 /**
  * 设置降级配置
  */
@@ -92,7 +203,9 @@ export function getChatModel(
     allowFallback?: boolean;
   }
 ): LanguageModel {
-  const primary = preferredProvider || inferProviderFromModelId(modelId) || fallbackConfig.primary;
+  const explicitSelection = normalizeModelRouteSelection(modelId ?? null);
+  const resolvedModelId = explicitSelection?.modelId ?? modelId;
+  const primary = preferredProvider || explicitSelection?.provider || inferProviderFromModelId(modelId) || fallbackConfig.primary;
   const allowFallback = options?.allowFallback ?? fallbackConfig.enableFallback;
 
   try {
@@ -100,7 +213,7 @@ export function getChatModel(
     if (!provider) {
       throw new Error(`Provider ${primary} not found`);
     }
-    return provider.getChatModel(modelId);
+    return provider.getChatModel(resolvedModelId);
   } catch (error) {
     if (!allowFallback) {
       throw error;
@@ -121,7 +234,19 @@ export function getChatModel(
  * v4.6: 切换主力为 Qwen
  */
 export async function getEmbeddings(texts: string[]): Promise<number[][]> {
-  return getQwenEmbeddings(texts);
+  const selection = await getModelRouteSelection('embedding');
+  const provider = providers[selection.provider];
+
+  if (!provider?.embed) {
+    throw new Error(`Provider ${selection.provider} does not support embedding`);
+  }
+
+  const result = await provider.embed({
+    modelId: selection.modelId,
+    texts,
+  });
+
+  return result.embeddings;
 }
 
 /**
@@ -138,33 +263,58 @@ export async function getEmbedding(text: string): Promise<number[]> {
  * 新主链路请优先使用 resolveChatModelSelection，从 AI 配置读取默认模型。
  */
 export function getDefaultChatModel(): LanguageModel {
+  if (process.env.OPENAI_API_KEY) {
+    const selection = DEFAULT_MODEL_ROUTE_MAP.chat;
+    return getChatModel(selection.modelId, selection.provider, { allowFallback: false });
+  }
+
   return qwenProvider.getChatModel(ACTIVE_MODELS.CHAT_PRIMARY);
 }
 
-type IntentModelType = 'chat' | 'reasoning' | 'agent' | 'vision';
+type IntentModelType = LegacyIntentRouteKey;
 
 export async function getModelIdByIntent(intent: IntentModelType): Promise<string> {
-  const intentMap = await getRequiredConfigValue<Record<string, unknown>>('model.intent_map');
-  const modelId = intentMap[intent];
-
-  if (typeof modelId !== 'string' || !modelId.trim()) {
-    throw new Error(`AI 配置 model.intent_map.${intent} 缺失，请在 Admin 或 seed 中补齐`);
-  }
-
-  return modelId.trim();
+  const selection = await getModelRouteSelection(intent);
+  return selection.modelId;
 }
 
 export async function resolveChatModelSelection(params?: {
+  routeKey?: Exclude<ModelRouteKey, 'embedding' | 'rerank'>;
   intent?: IntentModelType;
   modelId?: string;
   preferredProvider?: ModelProviderName;
-}): Promise<{ modelId: string; model: LanguageModel }> {
+}): Promise<{ provider: ModelProviderName; modelId: string; model: LanguageModel }> {
   const explicitModelId = params?.modelId?.trim();
-  const resolvedModelId = explicitModelId || await getModelIdByIntent(params?.intent || 'chat');
+  let selection: ModelRouteSelection;
+
+  if (explicitModelId) {
+    selection = normalizeModelRouteSelection(explicitModelId)
+      || (
+        params?.preferredProvider
+          ? {
+              provider: params.preferredProvider,
+              modelId: explicitModelId,
+            }
+          : null
+      )
+      || (
+        inferProviderFromModelId(explicitModelId)
+          ? {
+              provider: inferProviderFromModelId(explicitModelId)!,
+              modelId: explicitModelId,
+            }
+          : null
+      )
+      || DEFAULT_MODEL_ROUTE_MAP.chat;
+  } else {
+    const routeKey = params?.routeKey || params?.intent || 'chat';
+    selection = await getModelRouteSelection(routeKey);
+  }
 
   return {
-    modelId: resolvedModelId,
-    model: getChatModel(resolvedModelId, params?.preferredProvider, { allowFallback: false }),
+    provider: selection.provider,
+    modelId: selection.modelId,
+    model: getChatModel(selection.modelId, params?.preferredProvider || selection.provider, { allowFallback: false }),
   };
 }
 
@@ -188,7 +338,19 @@ export async function rerank(
   documents: string[],
   topK: number = 10
 ): Promise<RerankResponse> {
-  return qwenRerank(query, documents, topK);
+  const selection = await getModelRouteSelection('rerank');
+  const provider = providers[selection.provider];
+
+  if (!provider?.rerank) {
+    throw new Error(`Provider ${selection.provider} does not support rerank`);
+  }
+
+  return provider.rerank({
+    modelId: selection.modelId,
+    query,
+    documents,
+    topK,
+  });
 }
 
 /**
@@ -279,13 +441,15 @@ export async function checkProviderHealth(
  */
 export async function checkAllProvidersHealth(): Promise<Partial<Record<ModelProviderName, boolean>>> {
   const results = await Promise.all([
+    checkProviderHealth('openai'),
     checkProviderHealth('qwen'),
     checkProviderHealth('deepseek'),
   ]);
 
   return {
-    qwen: results[0],
-    deepseek: results[1],
+    openai: results[0],
+    qwen: results[1],
+    deepseek: results[2],
   };
 }
 

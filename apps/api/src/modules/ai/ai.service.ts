@@ -23,13 +23,12 @@ import {
 } from 'ai';
 import { randomUUID } from 'crypto';
 import type { ProcessorLogEntry } from '@juchang/db';
-import type { GenUIBlock } from '@juchang/genui-contract';
+import type { GenUIBlock, GenUITurnContext } from '@juchang/genui-contract';
 
 // 新架构模块
 import { type ClassifyResult } from './intent';
 import { getOrCreateThread, saveMessage, clearUserThreads, deleteThread } from './memory';
 import { resolveToolsForIntent, getToolWidgetType, getToolDisplayName } from './tools';
-import { createPartnerIntent } from './tools/partner-tools';
 import { getSystemPrompt, type PromptContext, type ActivityDraftForPrompt } from './prompts';
 import { resolveChatModelSelection } from './models/router';
 import { runObject, runStream } from './models/runtime';
@@ -63,6 +62,8 @@ import {
 } from './processors';
 // Partner Matching - 找搭子追问流程
 import {
+  buildPartnerAskPreferencePayload,
+  buildPartnerSearchPayloadFromState,
   shouldStartPartnerMatching,
   recoverPartnerMatchingState,
   createPartnerMatchingState,
@@ -72,17 +73,14 @@ import {
   looksLikePartnerAnswer,
   inferPartnerMessageHints,
   persistPartnerMatchingState,
-  buildPartnerIntentPayload,
-  buildPartnerIntentFormPayload,
-  getPartnerActivityTypeLabel,
-  getPartnerTimeLabel,
+  buildPartnerWorkflowIntroText,
   type PartnerMatchingState,
 } from './workflow/partner-matching';
 // Structured Action：结构化动作可直接映射为 UI 响应
 import { handleStructuredAction, type StructuredAction } from './user-action';
 import { buildTurnContextFromBlocks } from './turn-context';
 import { getConfigValue } from './config/config.service';
-import { buildNextBestActions } from './next-best-action.service';
+import { buildNextBestActions, type NextBestActionItem } from './next-best-action.service';
 import { resolveConversationTaskId } from './task-runtime/agent-task.service';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -183,6 +181,8 @@ export interface ChatRequest {
   abortSignal?: AbortSignal;
   /** 结构化动作：跳过 LLM 意图识别直接执行 */
   structuredAction?: StructuredAction;
+  /** v5.4: 最近一次 Assistant Turn 的上下文，用于无登录状态下感知已收集的偏好 */
+  latestAssistantTurnContext?: GenUITurnContext;
 }
 
 export interface TraceStep {
@@ -306,6 +306,167 @@ function writeWidgetEvent(writer: AIStreamWriter, data: Record<string, unknown>)
   });
 }
 
+function shouldEmitExploreWidgetPayload(payload: unknown): boolean {
+  const record = asRecord(payload);
+  if (!record) {
+    return false;
+  }
+
+  const results = Array.isArray(record.results) ? record.results : [];
+  const fetchConfig = asRecord(record.fetchConfig);
+  const preview = asRecord(record.preview);
+
+  return results.length > 0 || !!fetchConfig || !!preview;
+}
+
+function getExploreTypeLabel(type: string | undefined): string | null {
+  switch (type) {
+    case 'sports':
+      return '运动';
+    case 'food':
+      return '约饭';
+    case 'boardgame':
+      return '桌游';
+    case 'entertainment':
+      return '娱乐';
+    case 'other':
+      return '活动';
+    default:
+      return null;
+  }
+}
+
+function formatNextActionLabels(items: NextBestActionItem[]): string {
+  const labels = items
+    .map((item) => item.label.trim())
+    .filter(Boolean)
+    .slice(0, 3);
+
+  if (labels.length === 0) {
+    return '';
+  }
+
+  if (labels.length === 1) {
+    return `“${labels[0]}”`;
+  }
+
+  if (labels.length === 2) {
+    return `“${labels[0]}”或“${labels[1]}”`;
+  }
+
+  return `“${labels[0]}”、“${labels[1]}”或“${labels[2]}”`;
+}
+
+function buildStructuredActionReplyText(params: {
+  actionType: StructuredAction['action'] | undefined;
+  data: Record<string, unknown> | undefined;
+  defaultMessage: string;
+  nextActions: NextBestActionItem[];
+}): string {
+  const { actionType, data, defaultMessage, nextActions } = params;
+  const trimmedDefaultMessage = defaultMessage.trim();
+  const actionLabels = formatNextActionLabels(nextActions);
+  const locationName = typeof data?.locationName === 'string' ? data.locationName.trim() : '';
+  const exploreType = typeof data?.type === 'string' ? data.type : undefined;
+  const exploreTypeLabel = getExploreTypeLabel(exploreType);
+  const explorePayload = isRecord(data?.explore) ? data.explore : null;
+  const exploreCenter = isRecord(explorePayload?.center) ? explorePayload.center : null;
+  const exploreLocationName = typeof exploreCenter?.name === 'string' && exploreCenter.name.trim()
+    ? exploreCenter.name.trim()
+    : locationName;
+  const exploreResults = Array.isArray(explorePayload?.results) ? explorePayload.results : [];
+
+  if (actionType === 'explore_nearby') {
+    if (exploreResults.length === 0) {
+      const locationLabel = exploreLocationName || '附近';
+      const targetLabel = exploreTypeLabel ? `${exploreTypeLabel}局` : '局';
+      const actionGuidance = actionLabels
+        ? `你可以先看看下面这些选择，比如${actionLabels}，`
+        : '';
+      return `${locationLabel}附近这会儿还没刷到合适的${targetLabel}。${actionGuidance}也可以直接告诉我想换的地方、时间、类型或预算，我继续帮你找。`;
+    }
+
+    const locationLabel = exploreLocationName || '附近';
+    const targetLabel = exploreTypeLabel ? `${exploreTypeLabel}局` : '局';
+    return `${locationLabel}附近先帮你找了一批${targetLabel}，你可以先看看有没有想继续了解的；如果想收窄到更具体的片区、时间或类型，也可以直接告诉我。`;
+  }
+
+  if (actionType === 'find_partner' || actionType === 'search_partners' || actionType === 'submit_partner_intent_form') {
+    if (isRecord(data?.partnerIntentForm)) {
+      const partnerStage = typeof data.partnerIntentForm.partnerStage === 'string'
+        ? data.partnerIntentForm.partnerStage
+        : '';
+      if (partnerStage === 'intent_pool') {
+        return `${trimmedDefaultMessage || '我把可补充的偏好都展开了。'}填得越具体，后面替你留意时就会越准。`;
+      }
+
+      return `${trimmedDefaultMessage || '我把可调整的偏好都展开了。'}你可以直接细化这些条件，我会按新的要求继续筛。`;
+    }
+
+    const actionGuidance = actionLabels
+      ? `你可以先试试${actionLabels}，`
+      : '';
+    return `${trimmedDefaultMessage || '我先按现在的条件继续帮你收窄范围。'}${actionGuidance}也可以直接告诉我你想找的人是什么样、希望对方性别或年龄大概怎样、你一般在哪片活动方便，我继续帮你调整。`;
+  }
+
+  if (actionType === 'create_activity' || actionType === 'save_draft_settings' || actionType === 'publish_draft' || actionType === 'confirm_publish') {
+    const actionGuidance = actionLabels
+      ? `你可以直接试试${actionLabels}，`
+      : '';
+    return `${trimmedDefaultMessage || '我先把这场局替你整理好了。'}${actionGuidance}也可以直接告诉我还想改哪里，我继续帮你调。`;
+  }
+
+  if (actionType === 'join_activity' || actionType === 'confirm_match' || actionType === 'cancel_match' || actionType === 'cancel_join') {
+    const actionGuidance = actionLabels
+      ? `你可以先试试${actionLabels}，`
+      : '';
+    return `${trimmedDefaultMessage || '这一步已经接上了。'}${actionGuidance}也可以直接告诉我你接下来想看什么，我继续陪你往下走。`;
+  }
+
+  if (actionLabels) {
+    return `${trimmedDefaultMessage || '我先把接下来能做的路给你收好了。'}你可以先试试${actionLabels}，也可以直接告诉我还想怎么改，我继续帮你处理。`;
+  }
+
+  return trimmedDefaultMessage;
+}
+
+function splitTextForStream(text: string): string[] {
+  const normalized = text.trim();
+  if (!normalized) {
+    return [];
+  }
+
+  const punctuationChunks = normalized
+    .split(/(?<=[，。！？；])/u)
+    .map((chunk) => chunk.trim())
+    .filter(Boolean);
+
+  if (punctuationChunks.length > 1) {
+    return punctuationChunks;
+  }
+
+  const chunks: string[] = [];
+  for (let index = 0; index < normalized.length; index += 8) {
+    chunks.push(normalized.slice(index, index + 8));
+  }
+  return chunks;
+}
+
+async function streamTextDelta(writer: AIStreamWriter, text: string): Promise<void> {
+  const chunks = splitTextForStream(text);
+  for (let index = 0; index < chunks.length; index += 1) {
+    writer.write({
+      type: 'text-delta',
+      delta: chunks[index],
+      id: randomUUID(),
+    });
+
+    if (index < chunks.length - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 16));
+    }
+  }
+}
+
 function writeTraceStartEvent(writer: AIStreamWriter, data: Record<string, unknown>): void {
   writer.write({
     type: 'data-trace-start',
@@ -364,6 +525,10 @@ function inferIntentFromStructuredAction(actionType: StructuredAction['action'] 
 
   if (
     actionType === 'find_partner'
+    || actionType === 'search_partners'
+    || actionType === 'connect_partner'
+    || actionType === 'request_partner_group_up'
+    || actionType === 'opt_in_partner_pool'
     || actionType === 'submit_partner_intent_form'
     || actionType === 'confirm_match'
     || actionType === 'cancel_match'
@@ -403,9 +568,50 @@ function extractToolSchema(tool: unknown): unknown {
 // AI Chat 核心
 // ==========================================
 
+/**
+ * 从 TurnContext 中提取已收集的偏好信息
+ * v5.4: 用于无登录状态下感知当前对话的上下文
+ */
+function buildTransientContextMemory(turnContext?: GenUITurnContext): string | null {
+  if (!turnContext || turnContext.kind !== 'choice') {
+    return null;
+  }
+
+  const choice = turnContext as { kind: 'choice'; question?: string; options: Array<{ label: string; value?: string; action: string; params?: Record<string, unknown> }> };
+  const collectedInfo: string[] = [];
+
+  // 从 question 推断询问类型
+  const question = choice.question || '';
+  const isLocationQuestion = question.includes('哪片') || question.includes('地方') || question.includes('区域');
+  const isTypeQuestion = question.includes('哪类') || question.includes('类型') || question.includes('运动');
+
+  // 从 options 的 params 中提取已收集信息
+  for (const option of choice.options) {
+    const params = option.params;
+    if (!params) continue;
+
+    // 提取位置信息
+    if (typeof params.location === 'string' || typeof params.locationName === 'string') {
+      const location = typeof params.location === 'string' ? params.location : params.locationName;
+      collectedInfo.push(`用户已选择位置：${location}`);
+    }
+
+    // 提取类型信息
+    if (typeof params.activityType === 'string' || typeof params.type === 'string') {
+      const type = typeof params.activityType === 'string' ? params.activityType : params.type;
+      collectedInfo.push(`用户已选择类型：${type}`);
+    }
+
+    // 如果已经有信息了，不需要遍历所有选项
+    if (collectedInfo.length > 0) break;
+  }
+
+  return collectedInfo.length > 0 ? collectedInfo.join('；') : null;
+}
+
 export async function handleChatStream(request: ChatRequest): Promise<Response> {
   return runWithTrace(async () => {
-  const { messages, userId, rateLimitUserId, conversationId, location, source, draftContext, trace, ai, abortSignal, structuredAction } = request;
+  const { messages, userId, rateLimitUserId, conversationId, location, source, draftContext, trace, ai, abortSignal, structuredAction, latestAssistantTurnContext } = request;
   let effectiveMessages = messages;
   const startTime = Date.now();
   const latestMessage = messages[messages.length - 1];
@@ -539,12 +745,22 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
   const userNickname = userId ? await getUserNickname(userId) : undefined;
   const userProfile = userId ? await getEnhancedUserProfile(userId) : null;
 
+  // v5.4: 从无登录 transientTurns 中提取当前对话已收集的偏好
+  const transientMemory = buildTransientContextMemory(latestAssistantTurnContext);
+  const baseMemory = userProfile ? buildProfilePrompt(userProfile) : null;
+  // 合并记忆：用户档案 + 当前对话上下文
+  const workingMemory = transientMemory
+    ? baseMemory
+      ? `${baseMemory}\n\n当前对话已收集：${transientMemory}`
+      : `当前对话已收集：${transientMemory}`
+    : baseMemory;
+
   const promptContext: PromptContext = {
     currentTime: new Date(),
     userLocation: location ? { lat: location[1], lng: location[0], name: locationName } : undefined,
     userNickname,
     draftContext,
-    workingMemory: userProfile ? buildProfilePrompt(userProfile) : null,
+    workingMemory,
   };
 
   // 构建初始 ProcessorContext（所有处理器间数据通过 context.metadata 传递）
@@ -1042,6 +1258,12 @@ function createStructuredActionResponse(
     : null;
   const shouldWritePrimaryText = !authRequiredPayload && !successWidgetPayload;
   const nextActions = buildNextBestActions({ actionType, data });
+  const assistantReplyText = buildStructuredActionReplyText({
+    actionType,
+    data,
+    defaultMessage: actionMessage,
+    nextActions,
+  });
   const actionDurationMs = typeof result.durationMs === 'number' && Number.isFinite(result.durationMs)
     ? Math.max(0, result.durationMs)
     : 0;
@@ -1054,7 +1276,7 @@ function createStructuredActionResponse(
   const activityId = typeof data?.activityId === 'string' ? data.activityId : null;
 
   const stream = createUIMessageStream({
-    execute: ({ writer }) => {
+    execute: async ({ writer }) => {
       if (trace) {
         writeTraceStartEvent(writer, {
           requestId,
@@ -1099,16 +1321,11 @@ function createStructuredActionResponse(
         });
       }
 
-      // 返回 action 结果作为 data
-      writeWidgetEvent(writer, {
-        type: 'action_result',
-        success: result.success,
-        data: result.data,
-        error: result.error,
-        nextActions,
-      });
+      if (shouldWritePrimaryText && assistantReplyText) {
+        await streamTextDelta(writer, assistantReplyText);
+      }
 
-      if (explorePayload) {
+      if (explorePayload && shouldEmitExploreWidgetPayload(explorePayload)) {
         writeWidgetEvent(writer, {
           type: 'widget_explore',
           payload: explorePayload,
@@ -1126,6 +1343,13 @@ function createStructuredActionResponse(
         writeWidgetEvent(writer, {
           type: 'widget_partner_intent_form',
           payload: data.partnerIntentForm,
+        });
+      }
+
+      if (data?.partnerSearchResults && typeof data.partnerSearchResults === 'object') {
+        writeWidgetEvent(writer, {
+          type: 'widget_partner_search_results',
+          payload: data.partnerSearchResults,
         });
       }
 
@@ -1160,9 +1384,14 @@ function createStructuredActionResponse(
         });
       }
 
-      if (shouldWritePrimaryText && actionMessage) {
-        writer.write({ type: 'text-delta', delta: actionMessage, id: randomUUID() });
-      }
+      // 返回 action 结果作为 data，CTA 应该跟在说明文本之后出现。
+      writeWidgetEvent(writer, {
+        type: 'action_result',
+        success: result.success,
+        data: result.data,
+        error: result.error,
+        nextActions,
+      });
       
       if (trace) {
         writeTraceStepEvent(writer, {
@@ -1174,7 +1403,7 @@ function createStructuredActionResponse(
           status: result.success ? 'success' : 'error',
           duration: 0,
           data: {
-            text: actionMessage,
+            text: assistantReplyText,
             executionPath: 'structured_action',
             structuredAction: actionType,
           },
@@ -1187,7 +1416,7 @@ function createStructuredActionResponse(
           status: result.success ? 'completed' : 'failed',
           executionPath: 'structured_action',
           output: {
-            text: actionMessage,
+            text: assistantReplyText,
             structuredAction: actionType,
             success: result.success,
             ...(activityId ? { activityId } : {}),
@@ -1240,8 +1469,7 @@ async function handlePartnerMatchingFlow(
   userMessage: string,
   _intentResult: ClassifyResult
 ): Promise<Response> {
-  const { userId, trace, location } = request;
-  const userLocation = location ? { lat: location[1], lng: location[0] } : null;
+  const { userId, trace } = request;
 
   let state = existingState || createPartnerMatchingState(userMessage);
 
@@ -1279,125 +1507,45 @@ async function handlePartnerMatchingFlow(
       updatedAt: new Date(),
     };
 
-    const fallbackLocationHint = completedState.collectedPreferences.location?.trim()
-      || (userLocation ? await reverseGeocode(userLocation.lat, userLocation.lng) : '附近');
-    const partnerIntentParams = buildPartnerIntentPayload(completedState, fallbackLocationHint);
-    const partnerResult = await createPartnerIntent(userId, userLocation, partnerIntentParams);
-
-    logger.info('Partner workflow completed', {
-      userId,
-      activityType: partnerIntentParams.activityType,
-      matchFound: partnerResult.success ? partnerResult.matchFound : false,
-      success: partnerResult.success,
-    });
-
     if (userId) {
       await persistPartnerMatchingState(threadId, userId, completedState);
     }
 
-    const summaryLines = [
-      '📋 需求确认：',
-      `- 🎯 活动类型：${getPartnerActivityTypeLabel(partnerIntentParams.activityType)}`,
-      `- ⏰ 时间：${partnerIntentParams.timePreference || getPartnerTimeLabel(completedState.collectedPreferences.timeRange)}`,
-      `- 📍 地点：${partnerIntentParams.locationHint}`,
-    ];
-
-    const statusText = partnerResult.success
-      ? partnerResult.matchFound
-        ? '🎉 已经给你拉到一组待确认搭子，等临时召集人点头就能成局。'
-        : '已帮你进入匹配池，有合适的人我会第一时间叫你。'
-      : partnerResult.error;
-
-    const confirmText = `${summaryLines.join('\n')}\n\n${statusText}`;
-    const traceToolCalls = [{ name: 'createPartnerIntent', input: partnerIntentParams, output: partnerResult }];
-
-    const exploreParams: Record<string, unknown> = {
-      locationName: partnerIntentParams.locationHint,
-      type: partnerIntentParams.activityType,
-    };
-
-    const widgetOptions = partnerResult.success
-      ? [
-          {
-            label: '看看附近同类局',
-            value: 'explore_similar',
-            action: 'explore_nearby',
-            params: exploreParams,
-          },
-          partnerResult.matchFound
-            ? {
-                label: '看看我的搭子进展',
-                value: 'review_partner_status',
-                action: 'quick_prompt',
-                params: { prompt: '看看我的搭子进度' },
-              }
-            : {
-                label: '继续补充偏好',
-                value: 'refine_preference',
-                action: 'quick_prompt',
-                params: { prompt: '我想再补充一下偏好' },
-              },
-        ]
-      : [];
-
-    const widgetQuestion = partnerResult.success && partnerResult.matchFound
-      ? '匹配进度 2/2：已经帮你凑到一组人，接下来你想做什么？'
-      : '匹配进度 2/2：已进入匹配池，接下来你想做什么？';
-
-    const stream = createUIMessageStream({
-      execute: ({ writer }) => {
-        writer.write({ type: 'text-delta', delta: confirmText, id: randomUUID() });
-
-        if (widgetOptions.length > 0) {
-          writeWidgetEvent(writer, {
-            type: 'widget_ask_preference',
-            payload: {
-              status: 'completed',
-              preferences: completedState.collectedPreferences,
-              questionType: 'result',
-              question: widgetQuestion,
-              options: widgetOptions,
-            },
-          });
-        }
-
-        if (trace) {
-          const now = new Date().toISOString();
-          writeTraceStartEvent(writer, {
-            requestId: randomUUID(),
-            startedAt: now,
-            intent: 'partner',
-            intentMethod: 'partner_matching',
-          });
-          writeTraceEndEvent(writer, {
-            completedAt: now,
-            status: 'completed',
-            output: { text: confirmText, toolCalls: traceToolCalls },
-          });
-        }
+    return createStructuredActionResponse(
+      await handleStructuredAction(
+        {
+          action: 'search_partners',
+          payload: buildPartnerSearchPayloadFromState(completedState),
+          source: 'partner_matching_workflow',
+          originalText: completedState.rawInput,
+        },
+        userId,
+      ),
+      trace,
+      {
+        action: 'search_partners',
+        payload: buildPartnerSearchPayloadFromState(completedState),
+        source: 'partner_matching_workflow',
+        originalText: completedState.rawInput,
       },
-    });
-    return createUIMessageStreamResponse({ stream });
+    );
   }
 
   if (userId) {
     await persistPartnerMatchingState(threadId, userId, state);
   }
 
-  const fallbackLocationHint = state.collectedPreferences.location?.trim()
-    || (userLocation ? await reverseGeocode(userLocation.lat, userLocation.lng) : '附近');
-  const formPayload = buildPartnerIntentFormPayload({
-    state,
-    fallbackLocationHint,
-  });
-  const introText = '附近还没有合适的人选，填一下偏好，我帮你找找有没有同意向的人。';
+  const introText = buildPartnerWorkflowIntroText(state);
+  const askPreferencePayload = buildPartnerAskPreferencePayload(state);
   const stream = createUIMessageStream({
     execute: ({ writer }) => {
       writer.write({ type: 'text-delta', delta: introText, id: randomUUID() });
-      writeWidgetEvent(writer, {
-        type: 'widget_partner_intent_form',
-        payload: formPayload,
-      });
+      if (askPreferencePayload) {
+        writeWidgetEvent(writer, {
+          type: 'widget_ask_preference',
+          payload: askPreferencePayload,
+        });
+      }
       if (trace) {
         const now = new Date().toISOString();
         writeTraceStartEvent(writer, {
@@ -2153,7 +2301,7 @@ function summarizeAssistantBlocks(blocks: GenUIBlock[]): string {
     }
 
     if (block.type === 'cta-group') {
-      return '下一步操作';
+      return '可继续操作';
     }
   }
 
@@ -2508,11 +2656,9 @@ export async function getActivityConversationMessages(activityId: string) {
 
 export interface WelcomeSection {
   id: string;
-  icon: string;
   title: string;
   items: Array<{
     type: 'draft' | 'suggestion' | 'explore';
-    icon?: string;
     label: string;
     prompt: string;
     context?: unknown;
@@ -2540,7 +2686,6 @@ export interface WelcomePendingActivity {
 
 // 快捷入口 (v4.4 新增)
 export interface QuickPrompt {
-  icon: string;
   text: string;
   prompt: string;
 }
@@ -2589,7 +2734,6 @@ interface WelcomeUiConfig {
     prompt: string;
   };
   suggestionItems: Array<{
-    icon: string;
     label: string;
     prompt: string;
   }>;
@@ -2627,15 +2771,15 @@ const DEFAULT_WELCOME_UI_CONFIG: WelcomeUiConfig = {
     prompt: '看看{locationName}附近有什么活动',
   },
   suggestionItems: [
-    { icon: '🍜', label: '约饭局', prompt: '帮我组一个吃饭的局' },
-    { icon: '🎮', label: '打游戏', prompt: '想找人一起打游戏' },
-    { icon: '🏃', label: '运动', prompt: '想找人一起运动' },
-    { icon: '☕', label: '喝咖啡', prompt: '想约人喝咖啡聊天' },
+    { label: '约饭局', prompt: '帮我组一个吃饭的局' },
+    { label: '打游戏', prompt: '想找人一起打游戏' },
+    { label: '运动', prompt: '想找人一起运动' },
+    { label: '喝咖啡', prompt: '想约人喝咖啡聊天' },
   ],
   quickPrompts: [
-    { icon: '🗓️', text: '周末附近有什么活动？', prompt: '周末附近有什么活动' },
-    { icon: '🤝', text: '帮我找个运动搭子', prompt: '帮我找个运动搭子' },
-    { icon: '🎉', text: '想组个周五晚的局', prompt: '想组个周五晚的局' },
+    { text: '周末附近有什么活动？', prompt: '周末附近有什么活动' },
+    { text: '帮我找个运动搭子', prompt: '帮我找个运动搭子' },
+    { text: '想组个周五晚的局', prompt: '想组个周五晚的局' },
   ],
   bottomQuickActions: ['快速组局', '找搭子', '附近活动', '我的草稿'],
   profileHints: {
@@ -2703,20 +2847,18 @@ function normalizeWelcomeUiConfig(raw: unknown): WelcomeUiConfig {
           return null;
         }
 
-        const icon = getNonEmptyString(item.icon);
         const label = getNonEmptyString(item.label);
         const prompt = getNonEmptyString(item.prompt);
-        if (!icon || !label || !prompt) {
+        if (!label || !prompt) {
           return null;
         }
 
         return {
-          icon,
           label,
           prompt,
         };
       })
-      .filter((item): item is { icon: string; label: string; prompt: string } => Boolean(item?.label && item.prompt))
+      .filter((item): item is { label: string; prompt: string } => Boolean(item?.label && item.prompt))
     : [];
 
   const quickPrompts = Array.isArray(raw.quickPrompts)
@@ -2726,15 +2868,13 @@ function normalizeWelcomeUiConfig(raw: unknown): WelcomeUiConfig {
           return null;
         }
 
-        const icon = getNonEmptyString(item.icon);
         const text = getNonEmptyString(item.text);
         const prompt = getNonEmptyString(item.prompt);
-        if (!icon || !text || !prompt) {
+        if (!text || !prompt) {
           return null;
         }
 
         return {
-          icon,
           text,
           prompt,
         };
@@ -2927,12 +3067,10 @@ export async function getWelcomeCard(
       hasDraftActivity = true;
       sections.push({
         id: 'draft',
-        icon: '📝',
         title: '继续上次草稿',
         items: [
           {
             type: 'draft',
-            icon: '✍️',
             label: `继续完善「${clampWelcomeTitle(draft.title)}」`,
             prompt: `继续完善我的活动草稿：${draft.title}`,
             context: { activityId: draft.id },
@@ -2957,11 +3095,9 @@ export async function getWelcomeCard(
   // 快速组局建议
   const suggestions: WelcomeSection = {
     id: 'suggestions',
-    icon: '💡',
     title: welcomeUi.sectionTitles.suggestions,
     items: welcomeUi.suggestionItems.map((item) => ({
       type: 'suggestion' as const,
-      icon: item.icon,
       label: item.label,
       prompt: item.prompt,
     })),
@@ -2973,12 +3109,10 @@ export async function getWelcomeCard(
     const locationName = await reverseGeocode(location.lat, location.lng);
     const explore: WelcomeSection = {
       id: 'explore',
-      icon: '📍',
       title: welcomeUi.sectionTitles.explore,
       items: [
         {
           type: 'explore',
-          icon: '🔍',
           label: renderTemplate(welcomeUi.exploreTemplates.label, { locationName, location: locationName }),
           prompt: renderTemplate(welcomeUi.exploreTemplates.prompt, { locationName, location: locationName }),
           context: { locationName, lat: location.lat, lng: location.lng },
@@ -3026,7 +3160,6 @@ export async function getWelcomeCard(
 import { jsonSchema } from 'ai';
 import { t } from 'elysia';
 import { toJsonSchema } from '@juchang/utils';
-import { getQwenModelByIntent } from './models/adapters/qwen';
 import type { ContentGenerationRequest, ContentGenerationResponse } from './ai.model';
 
 // AI 输出 Schema
@@ -3101,9 +3234,10 @@ export async function generateContent(
     }
 
     const fullPrompt = `${DEFAULT_SYSTEM_PROMPT}\n\n${contentPrompt}`;
+    const { model } = await resolveChatModelSelection({ routeKey: 'content_generation' });
 
     const result = await runObject<NoteOutput>({
-      model: getQwenModelByIntent('chat'),
+      model,
       schema: jsonSchema<NoteOutput>(toJsonSchema(NoteOutputSchema)),
       prompt: fullPrompt,
     });

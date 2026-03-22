@@ -8,15 +8,11 @@ import {
   Play,
   Shield,
   TrendingUp,
-  Image,
-  Sparkles,
   FileText,
-  Library,
-  BarChart3,
 } from 'lucide-react'
 import { type SidebarData } from '../types'
 
-// v4.7: Admin Cockpit Redesign - AI 驾驶舱 + 增长军火库
+// v4.7: Admin Cockpit Redesign - AI 驾驶舱 + 内容运营工作台
 export const sidebarData: SidebarData = {
   user: {
     name: '管理员',
@@ -79,34 +75,14 @@ export const sidebarData: SidebarData = {
         },
       ],
     },
-    // 🚀 增长 - MCN 工具箱
+    // 📝 内容运营
     {
-      title: '增长',
+      title: '内容运营',
       items: [
         {
-          title: '文案工厂',
-          url: '/growth/poster',
-          icon: Image,
-        },
-        {
-          title: '热门洞察',
-          url: '/growth/trends',
-          icon: Sparkles,
-        },
-        {
           title: '内容生成',
-          url: '/growth/content',
+          url: '/content',
           icon: FileText,
-        },
-        {
-          title: '内容库',
-          url: '/growth/library',
-          icon: Library,
-        },
-        {
-          title: '效果分析',
-          url: '/growth/analytics',
-          icon: BarChart3,
         },
       ],
     },

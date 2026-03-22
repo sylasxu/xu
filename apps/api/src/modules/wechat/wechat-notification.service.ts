@@ -1,7 +1,12 @@
 import { db, users, eq } from '@juchang/db';
 import { clearTokenCache, getAccessToken } from '../content-security';
 
-type ServiceNotificationScene = 'post_activity' | 'activity_reminder' | 'match_reassigned';
+type ServiceNotificationScene =
+  | 'post_activity'
+  | 'activity_reminder'
+  | 'match_reassigned'
+  | 'partner_connect_request'
+  | 'partner_group_up_request';
 type MiniProgramState = 'developer' | 'trial' | 'formal';
 type NotificationLang = 'zh_CN' | 'en_US' | 'zh_HK' | 'zh_TW';
 
@@ -60,6 +65,32 @@ const SCENE_CONFIGS: Record<ServiceNotificationScene, SceneConfig> = {
   match_reassigned: {
     templateIdEnvKeys: ['WECHAT_NOTIFY_TEMPLATE_ID_MATCH_REASSIGNED', 'WECHAT_TEMPLATE_ID_MATCH_REASSIGNED'],
     pageEnvKeys: ['WECHAT_NOTIFY_PAGE_MATCH_REASSIGNED'],
+    defaultPage: 'pages/message/index',
+  },
+  partner_connect_request: {
+    templateIdEnvKeys: [
+      'WECHAT_NOTIFY_TEMPLATE_ID_PARTNER_CONNECT_REQUEST',
+      'WECHAT_TEMPLATE_ID_PARTNER_CONNECT_REQUEST',
+      'WECHAT_NOTIFY_TEMPLATE_ID_MATCH_REASSIGNED',
+      'WECHAT_TEMPLATE_ID_MATCH_REASSIGNED',
+    ],
+    pageEnvKeys: [
+      'WECHAT_NOTIFY_PAGE_PARTNER_CONNECT_REQUEST',
+      'WECHAT_NOTIFY_PAGE_MATCH_REASSIGNED',
+    ],
+    defaultPage: 'pages/message/index',
+  },
+  partner_group_up_request: {
+    templateIdEnvKeys: [
+      'WECHAT_NOTIFY_TEMPLATE_ID_PARTNER_GROUP_UP_REQUEST',
+      'WECHAT_TEMPLATE_ID_PARTNER_GROUP_UP_REQUEST',
+      'WECHAT_NOTIFY_TEMPLATE_ID_MATCH_REASSIGNED',
+      'WECHAT_TEMPLATE_ID_MATCH_REASSIGNED',
+    ],
+    pageEnvKeys: [
+      'WECHAT_NOTIFY_PAGE_PARTNER_GROUP_UP_REQUEST',
+      'WECHAT_NOTIFY_PAGE_MATCH_REASSIGNED',
+    ],
     defaultPage: 'pages/message/index',
   },
 };

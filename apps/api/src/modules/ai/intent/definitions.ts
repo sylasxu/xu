@@ -62,7 +62,7 @@ export const intentPatterns: Record<IntentType, RegExp[]> = {
   ],
 
   partner: [
-    /找搭子|谁组我就去|懒得组局|等人约/,
+    /找搭子|求搭子|找[^，。！？\s]{0,12}搭子|谁组我就去|懒得组局|等人约/,
     /我的意向|我的搭子意向/,
     /确认匹配|确认发布/,
   ],

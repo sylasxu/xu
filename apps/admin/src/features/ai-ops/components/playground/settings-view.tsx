@@ -1,9 +1,10 @@
 /**
  * SettingsView Component
  *
- * Drawer 配置视图：Mock 设置 + 模型选择 + Temperature + MaxTokens + Trace 开关
+ * Drawer 配置视图：Mock 设置 + 当前后台链路 + 可选模型覆盖 + Temperature + MaxTokens + Trace 开关
  */
 
+import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Separator } from '@/components/ui/separator'
@@ -16,7 +17,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import type { ModelParams } from '../../types/trace'
+import { FOLLOW_ROUTE_MAP_MODEL, type ModelParams } from '../../types/trace'
+import {
+  CHAT_ROUTE_KEYS,
+  getChatChainLabel,
+  getProviderLabel,
+  PLAYGROUND_MANUAL_MODEL_OPTIONS,
+  splitRouteIdentifier,
+  type ChatRouteKey,
+  type RouteMapConfig,
+} from '../../model-routing'
 import type { MockSettings } from './mock-settings-panel'
 
 interface SettingsViewProps {
@@ -24,6 +34,8 @@ interface SettingsViewProps {
   onMockSettingsChange: (settings: MockSettings) => void
   modelParams: ModelParams
   onModelParamsChange: (params: ModelParams) => void
+  routeMap: RouteMapConfig
+  routeMapLoading?: boolean
   traceEnabled: boolean
   onTraceEnabledChange: (enabled: boolean) => void
 }
@@ -40,9 +52,20 @@ export function SettingsView({
   onMockSettingsChange,
   modelParams,
   onModelParamsChange,
+  routeMap,
+  routeMapLoading = false,
   traceEnabled,
   onTraceEnabledChange,
 }: SettingsViewProps) {
+  const followsRouteMap = modelParams.model === FOLLOW_ROUTE_MAP_MODEL
+  const effectiveChatRoute = followsRouteMap ? routeMap.chat : modelParams.model
+
+  const chatRouteLabels: Record<ChatRouteKey, string> = {
+    chat: '主对话',
+    reasoning: '深度推理',
+    agent: 'Agent / Tool',
+  }
+
   return (
     <div className="space-y-6 p-4">
       {/* Mock 设置 */}
@@ -100,24 +123,81 @@ export function SettingsView({
           模型配置
         </Label>
 
+        <div className="rounded-xl border bg-muted/20 p-4 space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium">后台当前聊天链路</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                这里直接读 <code>model.route_map</code>，后台切完会在这里马上反映出来。
+              </p>
+            </div>
+            <Badge variant="outline">
+              {routeMapLoading ? '读取中...' : getChatChainLabel(routeMap)}
+            </Badge>
+          </div>
+
+          <div className="grid gap-3">
+            {CHAT_ROUTE_KEYS.map((routeKey) => (
+              <div
+                key={routeKey}
+                className="flex items-center justify-between rounded-lg border bg-background/70 px-3 py-2"
+              >
+                <div>
+                  <p className="text-sm font-medium">{chatRouteLabels[routeKey]}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{routeMap[routeKey]}</p>
+                </div>
+                <Badge variant="secondary">{getProviderLabel(routeMap[routeKey])}</Badge>
+              </div>
+            ))}
+          </div>
+        </div>
+
         <div className="space-y-3">
           <div className="space-y-1.5">
-            <Label className="text-sm">模型</Label>
+            <Label className="text-sm">本次 Playground 请求模型</Label>
             <Select
               value={modelParams.model}
               onValueChange={(v) =>
-                onModelParamsChange({ ...modelParams, model: v as ModelParams['model'] })
+                onModelParamsChange({ ...modelParams, model: v })
               }
             >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="qwen-flash">Qwen Flash（极速闲聊）</SelectItem>
-                <SelectItem value="qwen-plus">Qwen Plus（深度思考）</SelectItem>
-                <SelectItem value="qwen3-max">Qwen3 Max（Agent）</SelectItem>
+                <SelectItem value={FOLLOW_ROUTE_MAP_MODEL}>跟随后台聊天链路（推荐）</SelectItem>
+                {PLAYGROUND_MANUAL_MODEL_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
+            <div className="rounded-lg border bg-background/60 px-3 py-2 text-xs text-muted-foreground">
+              {followsRouteMap ? (
+                <span>
+                  当前会跟随 <code>chat = {routeMap.chat}</code>。
+                  后台的 <code>reasoning</code> 和 <code>agent</code> 也继续按 route map 生效。
+                </span>
+              ) : (
+                <span>
+                  当前会手动覆盖为 <code>{effectiveChatRoute}</code>，只影响这个 playground 请求，不会改后台配置。
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-lg border bg-background/60 px-3 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium">当前实际发送的主模型</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  playground 现在会按后端真实协议发送 <code>ai.model</code>。
+                </p>
+              </div>
+              <Badge>{splitRouteIdentifier(effectiveChatRoute).provider}</Badge>
+            </div>
+            <p className="mt-3 text-sm font-mono break-all">{effectiveChatRoute}</p>
           </div>
 
           <div className="space-y-1.5">

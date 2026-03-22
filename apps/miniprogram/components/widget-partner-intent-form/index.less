@@ -5,8 +5,85 @@
   margin: @spacing-2 0;
 }
 
+.widget-partner-intent-form--frameless {
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+
+  &::before {
+    display: none;
+  }
+}
+
 .header {
   margin-bottom: @spacing-4;
+}
+
+.header-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: @spacing-2;
+  padding: 8rpx 18rpx;
+  border-radius: @rounded-full;
+  background: rgba(255, 255, 255, 0.84);
+  border: 2rpx solid rgba(91, 117, 251, 0.12);
+  box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.75);
+}
+
+.header-badge__text {
+  font-size: @text-xs;
+  font-weight: 600;
+  color: @color-primary;
+}
+
+.progress-chip {
+  display: inline-flex;
+  align-items: center;
+  margin-top: @spacing-2;
+  padding: 6rpx 16rpx;
+  border-radius: @rounded-full;
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.progress-chip__text {
+  font-size: @text-xs;
+  color: var(--text-secondary, @text-secondary);
+}
+
+.field-section {
+  margin-bottom: @spacing-4;
+  padding: @spacing-3;
+  border-radius: @rounded-xl;
+}
+
+.field-section--required {
+  background: rgba(255, 244, 245, 0.88);
+  border: 2rpx solid rgba(251, 113, 133, 0.14);
+}
+
+.field-section--optional {
+  background: rgba(248, 250, 252, 0.92);
+  border: 2rpx solid rgba(148, 163, 184, 0.14);
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: @spacing-2;
+  margin-bottom: @spacing-3;
+}
+
+.section-title {
+  font-size: @text-sm;
+  font-weight: 600;
+  color: var(--text-main, @text-main);
+}
+
+.section-meta {
+  font-size: @text-xs;
+  color: var(--text-secondary, @text-secondary);
 }
 
 .title {
@@ -61,10 +138,10 @@
   align-items: center;
   justify-content: center;
   padding: @spacing-2 @spacing-4;
-  background: var(--bg-card, #FFFFFF);
-  border: 2rpx solid rgba(91, 117, 251, 0.12);
+  background: rgba(255, 255, 255, 0.9);
+  border: 2rpx solid rgba(148, 163, 184, 0.18);
   border-radius: @rounded-full;
-  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.05);
+  box-shadow: 0 8rpx 18rpx -14rpx rgba(51, 65, 85, 0.24);
 }
 
 .option-chip__text {
@@ -74,12 +151,13 @@
 }
 
 .option-chip--selected {
-  border-color: rgba(91, 117, 251, 0.36);
-  background: linear-gradient(135deg, rgba(91, 117, 251, 0.14) 0%, rgba(134, 143, 255, 0.1) 100%);
+  border-color: transparent;
+  background: linear-gradient(135deg, #5B75FB 0%, #7481FF 55%, #8B5CF6 100%);
+  box-shadow: 0 16rpx 28rpx -20rpx rgba(91, 117, 251, 0.58);
 }
 
 .option-chip__text--selected {
-  color: @color-primary;
+  color: #FFFFFF;
   font-weight: 600;
 }
 
@@ -89,10 +167,11 @@
 }
 
 .textarea-wrap {
-  background: rgba(255, 255, 255, 0.72);
-  border: 2rpx solid rgba(91, 117, 251, 0.12);
+  background: rgba(255, 255, 255, 0.84);
+  border: 2rpx solid rgba(148, 163, 184, 0.16);
   border-radius: @rounded-lg;
   padding: @spacing-3;
+  box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.72);
 }
 
 .textarea {
@@ -103,8 +182,16 @@
   line-height: 1.6;
 }
 
+.textarea--input {
+  min-height: 72rpx;
+  line-height: 72rpx;
+}
+
 .submit-wrap {
   margin-top: @spacing-2;
+  display: flex;
+  flex-direction: column;
+  gap: @spacing-2;
 }
 
 .submit-btn {
@@ -114,7 +201,7 @@
   padding: @spacing-3 @spacing-4;
   border-radius: @rounded-full;
   background: linear-gradient(135deg, #5B75FB 0%, #7C4DFF 100%);
-  box-shadow: 0 8rpx 20rpx rgba(91, 117, 251, 0.18);
+  box-shadow: 0 20rpx 32rpx -24rpx rgba(91, 117, 251, 0.62);
 }
 
 .submit-btn__text {
@@ -123,11 +210,33 @@
   color: #FFFFFF;
 }
 
+.submit-btn--blocked {
+  background: linear-gradient(135deg, #B6C0E1 0%, #97A4CC 100%);
+  box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.35);
+}
+
 .submit-btn--disabled {
   opacity: 0.6;
   pointer-events: none;
 }
 
+.submit-hint {
+  font-size: @text-xs;
+  line-height: 1.6;
+  color: var(--text-secondary, @text-secondary);
+  padding: 0 @spacing-1;
+}
+
 .widget--disabled {
   opacity: 0.78;
+}
+
+.widget-partner-intent-form--frameless {
+  .field-section {
+    box-shadow: inset 0 1rpx 0 rgba(255, 255, 255, 0.8);
+  }
+
+  .submit-btn {
+    box-shadow: 0 18rpx 28rpx -22rpx rgba(91, 117, 251, 0.54);
+  }
 }

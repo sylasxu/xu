@@ -6,11 +6,13 @@ import { basePlugins, verifyAuth } from '../../setup';
 import { contentModel, type ErrorResponse, ContentNoteResponseSchema } from './content.model';
 import {
   generateNotes,
+  generateTopicSuggestions,
   getLibrary,
   getNoteById,
   deleteNote,
   updatePerformance,
   getAnalytics,
+  normalizeContentAiErrorMessage,
 } from './content.service';
 
 export const contentController = new Elysia({ prefix: '/content' })
@@ -31,6 +33,7 @@ export const contentController = new Elysia({ prefix: '/content' })
       try {
         const notes = await generateNotes({
           topic: body.topic,
+          platform: body.platform ?? 'xiaohongshu',
           contentType: body.contentType,
           count: body.count ?? 1,
           trendKeywords: body.trendKeywords,
@@ -38,18 +41,58 @@ export const contentController = new Elysia({ prefix: '/content' })
         return notes;
       } catch (error: any) {
         set.status = 500;
-        return { code: 500, msg: error.message || '生成失败' } satisfies ErrorResponse;
+        return {
+          code: 500,
+          msg: normalizeContentAiErrorMessage(error instanceof Error ? error.message : '生成失败'),
+        } satisfies ErrorResponse;
       }
     },
     {
       detail: {
         tags: ['Content'],
-        summary: '生成小红书笔记',
-        description: 'AI 生成小红书风格的内容笔记。从 Growth 模块迁移。',
+        summary: '生成多平台内容',
+        description: 'AI 按平台（小红书 / 抖音 / 微信）和内容类型生成内容稿。',
       },
       body: 'content.generateRequest',
       response: {
         200: t.Array(ContentNoteResponseSchema),
+        401: 'content.error',
+        500: 'content.error',
+      },
+    }
+  )
+
+  .post(
+    '/topic-suggestions',
+    async ({ body, set, jwt, headers }) => {
+      const user = await verifyAuth(jwt, headers);
+      if (!user) {
+        set.status = 401;
+        return { code: 401, msg: '未授权' } satisfies ErrorResponse;
+      }
+      try {
+        return await generateTopicSuggestions({
+          platform: body.platform,
+          contentType: body.contentType,
+          seed: body.seed,
+        });
+      } catch (error: any) {
+        set.status = 500;
+        return {
+          code: 500,
+          msg: normalizeContentAiErrorMessage(error instanceof Error ? error.message : '主题建议生成失败'),
+        } satisfies ErrorResponse;
+      }
+    },
+    {
+      detail: {
+        tags: ['Content'],
+        summary: '生成主题建议',
+        description: 'AI 按平台和内容类型生成可直接填入的主题建议。',
+      },
+      body: 'content.topicSuggestionRequest',
+      response: {
+        200: 'content.topicSuggestionResponse',
         401: 'content.error',
         500: 'content.error',
       },
@@ -71,6 +114,7 @@ export const contentController = new Elysia({ prefix: '/content' })
         const result = await getLibrary({
           page: query.page ?? 1,
           limit: query.limit ?? 20,
+          platform: query.platform,
           contentType: query.contentType,
           keyword: query.keyword,
         });

@@ -38,7 +38,11 @@ export const STRUCTURED_ACTION_TYPES = [
   'filter_activities',       // 筛选活动
   // 找搭子相关
   'find_partner',            // 找搭子
-  'submit_partner_intent_form', // 提交找搭子表单
+  'search_partners',         // 搜索搭子结果
+  'connect_partner',         // 对某个候选人发起“搭一下”
+  'request_partner_group_up', // 询问是否一起组局
+  'opt_in_partner_pool',     // 继续帮我留意（显式入池）
+  'submit_partner_intent_form', // 兼容别名：旧找搭子表单提交，现统一归到 search_partners
   'confirm_match',           // 确认匹配成局
   'cancel_match',            // 取消待确认匹配
   'select_preference',       // 选择偏好（多轮对话）

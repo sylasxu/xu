@@ -1,45 +1,120 @@
-<view class="widget-partner-intent-form halo-card {{(disabled || isSubmitting) ? 'widget--disabled' : ''}}">
-  <view class="header">
+<view class="widget-partner-intent-form halo-card {{showHeader ? '' : 'widget-partner-intent-form--frameless'}} {{(disabled || isSubmitting) ? 'widget--disabled' : ''}}">
+  <view wx:if="{{showHeader}}" class="header">
+    <view class="header-badge">
+      <text class="header-badge__text">搭子偏好表</text>
+    </view>
     <text class="title">{{title}}</text>
-    <text class="subtitle">填一下偏好，我帮你找同意向的人</text>
+    <text class="subtitle">{{summaryText}}</text>
+    <view wx:if="{{requiredFieldCount > 0}}" class="progress-chip">
+      <text class="progress-chip__text">{{progressText}}</text>
+    </view>
   </view>
 
-  <view wx:for="{{renderFields}}" wx:key="name" class="field-block">
-    <view class="field-head">
-      <text class="field-label">{{item.label}}</text>
-      <text wx:if="{{item.required}}" class="field-required">必填</text>
+  <view wx:if="{{requiredFields.length > 0}}" class="field-section field-section--required">
+    <view class="section-head">
+      <text class="section-title">先填这几项</text>
+      <text class="section-meta">{{missingRequiredCount > 0 ? ('还差 ' + missingRequiredCount + ' 项') : '已补齐'}}</text>
     </view>
 
-    <view wx:if="{{item.type === 'textarea'}}" class="textarea-wrap">
-      <textarea
-        class="textarea"
-        maxlength="{{item.maxLength || 80}}"
-        placeholder="{{item.placeholder}}"
-        value="{{item.value}}"
-        data-field="{{item.name}}"
-        bindinput="onTextInput"
-        auto-height
-      />
+    <view wx:for="{{requiredFields}}" wx:key="name" class="field-block">
+      <view class="field-head">
+        <text class="field-label">{{item.label}}</text>
+        <text wx:if="{{item.required}}" class="field-required">必填</text>
+      </view>
+
+      <view wx:if="{{item.type === 'textarea'}}" class="textarea-wrap">
+        <textarea
+          class="textarea"
+          maxlength="{{item.maxLength || 80}}"
+          placeholder="{{item.placeholder}}"
+          value="{{item.value}}"
+          data-field="{{item.name}}"
+          bindinput="onTextInput"
+          auto-height
+        />
+      </view>
+
+      <view wx:elif="{{item.type === 'text'}}" class="textarea-wrap">
+        <input
+          class="textarea textarea--input"
+          maxlength="{{item.maxLength || 80}}"
+          placeholder="{{item.placeholder}}"
+          value="{{item.value}}"
+          data-field="{{item.name}}"
+          bindinput="onTextInput"
+        />
+      </view>
+
+      <view wx:else class="options-wrap">
+        <view
+          wx:for="{{item.options}}"
+          wx:key="value"
+          class="option-chip {{option.selected ? 'option-chip--selected' : ''}} {{(disabled || isSubmitting) ? 'option-chip--disabled' : ''}}"
+          data-field="{{item.name}}"
+          data-value="{{option.value}}"
+          data-multi="{{item.type === 'multi-select'}}"
+          bindtap="onSelectOption"
+        >
+          <text class="option-chip__text {{option.selected ? 'option-chip__text--selected' : ''}}">{{option.label}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{optionalFields.length > 0}}" class="field-section field-section--optional">
+    <view class="section-head">
+      <text class="section-title">有空再补</text>
+      <text class="section-meta">选填，能帮我筛得更准</text>
     </view>
 
-    <view wx:else class="options-wrap">
-      <view
-        wx:for="{{item.options}}"
-        wx:key="value"
-        class="option-chip {{option.selected ? 'option-chip--selected' : ''}} {{(disabled || isSubmitting) ? 'option-chip--disabled' : ''}}"
-        data-field="{{item.name}}"
-        data-value="{{option.value}}"
-        data-multi="{{item.type === 'multi-select'}}"
-        bindtap="onSelectOption"
-      >
-        <text class="option-chip__text {{option.selected ? 'option-chip__text--selected' : ''}}">{{option.label}}</text>
+    <view wx:for="{{optionalFields}}" wx:key="name" class="field-block">
+      <view class="field-head">
+        <text class="field-label">{{item.label}}</text>
+      </view>
+
+      <view wx:if="{{item.type === 'textarea'}}" class="textarea-wrap">
+        <textarea
+          class="textarea"
+          maxlength="{{item.maxLength || 80}}"
+          placeholder="{{item.placeholder}}"
+          value="{{item.value}}"
+          data-field="{{item.name}}"
+          bindinput="onTextInput"
+          auto-height
+        />
+      </view>
+
+      <view wx:elif="{{item.type === 'text'}}" class="textarea-wrap">
+        <input
+          class="textarea textarea--input"
+          maxlength="{{item.maxLength || 80}}"
+          placeholder="{{item.placeholder}}"
+          value="{{item.value}}"
+          data-field="{{item.name}}"
+          bindinput="onTextInput"
+        />
+      </view>
+
+      <view wx:else class="options-wrap">
+        <view
+          wx:for="{{item.options}}"
+          wx:key="value"
+          class="option-chip {{option.selected ? 'option-chip--selected' : ''}} {{(disabled || isSubmitting) ? 'option-chip--disabled' : ''}}"
+          data-field="{{item.name}}"
+          data-value="{{option.value}}"
+          data-multi="{{item.type === 'multi-select'}}"
+          bindtap="onSelectOption"
+        >
+          <text class="option-chip__text {{option.selected ? 'option-chip__text--selected' : ''}}">{{option.label}}</text>
+        </view>
       </view>
     </view>
   </view>
 
   <view class="submit-wrap">
-    <view class="submit-btn {{(disabled || isSubmitting) ? 'submit-btn--disabled' : ''}}" bindtap="onSubmit">
-      <text class="submit-btn__text">{{isSubmitting ? '正在提交...' : submitLabel}}</text>
+    <view class="submit-btn {{(disabled || isSubmitting) ? 'submit-btn--disabled' : ''}} {{(!canSubmit && !(disabled || isSubmitting)) ? 'submit-btn--blocked' : ''}}" bindtap="onSubmit">
+      <text class="submit-btn__text">{{isSubmitting ? '正在提交...' : submitButtonText}}</text>
     </view>
+    <text class="submit-hint">{{submitHintText}}</text>
   </view>
 </view>

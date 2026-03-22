@@ -54,7 +54,7 @@ export type MessageRole = 'user' | 'assistant'
  */
 export interface WidgetPart {
   type: 'widget'
-  widgetType: 'dashboard' | 'draft' | 'explore' | 'share' | 'ask_preference' | 'partner_intent_form' | 'draft_settings_form' | 'auth_required' | 'error'
+  widgetType: 'dashboard' | 'draft' | 'explore' | 'partner_search_results' | 'share' | 'ask_preference' | 'action_chips' | 'partner_intent_form' | 'draft_settings_form' | 'auth_required' | 'error'
   data: unknown
 }
 
@@ -130,13 +130,6 @@ export function isStreaming(message: UIMessage, streamingId: StreamingMessageId)
 }
 
 const CALL_LEAK_PATTERN = /^\.?call\s+[a-zA-Z0-9_]+\s*\(/i
-
-function normalizePromptKey(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/\s+/g, '')
-    .replace(/[?？!！。,.，、;；:：'"`~\-_/\\()[\]{}]/g, '')
-}
 
 function shouldSuppressAssistantText(text: string): boolean {
   return CALL_LEAK_PATTERN.test(text.trim())
@@ -300,6 +293,7 @@ function readMessagePrimaryBlockType(message: UIMessage): GenUITransientTurn['pr
     case 'ask_preference':
       return 'choice'
     case 'explore':
+    case 'partner_search_results':
       return 'list'
     case 'draft':
     case 'share':
@@ -345,38 +339,6 @@ function buildTransientTurns(messages: UIMessage[]): GenUITransientTurn[] {
     .filter((turn): turn is GenUITransientTurn => Boolean(turn))
 }
 
-function extractAskPreferenceQuestion(data: unknown): string {
-  if (!isRecord(data)) {
-    return ''
-  }
-
-  const question = typeof data.question === 'string' ? data.question.trim() : ''
-  return question
-}
-
-function hasDuplicateAskPreferenceQuestion(text: string, question: string): boolean {
-  const normalizedText = normalizePromptKey(text)
-  const normalizedQuestion = normalizePromptKey(question)
-
-  if (!normalizedText || !normalizedQuestion) {
-    return false
-  }
-
-  if (normalizedText === normalizedQuestion) {
-    return true
-  }
-
-  const delta = Math.abs(normalizedText.length - normalizedQuestion.length)
-  if (delta > 6) {
-    return false
-  }
-
-  return (
-    normalizedText.includes(normalizedQuestion) ||
-    normalizedQuestion.includes(normalizedText)
-  )
-}
-
 function upsertWidgetPart(message: UIMessage, widgetPart: WidgetPart): void {
   const existingIndex = message.parts.findIndex(
     (part) =>
@@ -405,46 +367,37 @@ function sanitizeAssistantMessage(message: UIMessage): void {
   if (text && shouldSuppressAssistantText(text)) {
     removeAssistantText(message)
   }
-
-  const currentText = getAssistantText(message)
-  if (!currentText) {
-    return
-  }
-
-  message.parts = message.parts.filter((part) => {
-    if (!isWidgetPart(part)) {
-      return true
-    }
-
-    if (part.widgetType !== 'ask_preference') {
-      return true
-    }
-
-    const question = extractAskPreferenceQuestion(part.data)
-    if (!question) {
-      return true
-    }
-
-    return !hasDuplicateAskPreferenceQuestion(currentText, question)
-  })
 }
 
 function inferChoiceQuestionType(block: GenUIChoiceBlock): 'location' | 'type' {
-  const question = block.question.toLowerCase()
-
-  if (question.includes('哪') || question.includes('地点') || question.includes('位置')) {
-    return 'location'
+  const metaQuestionType = isRecord(block.meta) && typeof block.meta.choiceQuestionType === 'string'
+    ? block.meta.choiceQuestionType
+    : ''
+  if (metaQuestionType === 'location' || metaQuestionType === 'type') {
+    return metaQuestionType
   }
 
   const hasLocationParam = block.options.some((option) => {
     const params = option.params
-    return isRecord(params) && typeof params.location === 'string'
+    return isRecord(params) && (
+      params.questionType === 'location'
+      || typeof params.location === 'string'
+      || typeof params.locationName === 'string'
+    )
   })
   if (hasLocationParam) {
     return 'location'
   }
 
   return 'type'
+}
+
+function inferChoiceInputMode(block: GenUIChoiceBlock): 'none' | 'free-text-optional' {
+  const metaInputMode = isRecord(block.meta) && typeof block.meta.choiceInputMode === 'string'
+    ? block.meta.choiceInputMode
+    : ''
+
+  return metaInputMode === 'free-text-optional' ? 'free-text-optional' : 'none'
 }
 
 function toChoiceOptionValue(option: GenUIChoiceOption): string {
@@ -620,6 +573,30 @@ function applyCompletionEffectsFromBlocks(blocks: GenUIBlock[]): void {
       return
     }
 
+    if (meta && meta.navigationIntent === 'open_message_center') {
+      const focusIntent = isRecord(meta.navigationPayload)
+        ? {
+            ...(typeof meta.navigationPayload.taskId === 'string' ? { taskId: meta.navigationPayload.taskId } : {}),
+            ...(typeof meta.navigationPayload.matchId === 'string' ? { matchId: meta.navigationPayload.matchId } : {}),
+          }
+        : null
+
+      if (focusIntent && !focusIntent.taskId && !focusIntent.matchId) {
+        return
+      }
+
+      if (focusIntent) {
+        useAppStore.getState().setMessageCenterFocus(focusIntent)
+      }
+
+      setTimeout(() => {
+        wx.navigateTo({
+          url: '/pages/message/index',
+        })
+      }, onHomePage ? 320 : 900)
+      return
+    }
+
     if (onHomePage || !block.message.trim()) {
       continue
     }
@@ -761,7 +738,73 @@ function readExploreBlockMeta(block: GenUIListBlock): {
   }
 }
 
+function readListKind(block: GenUIListBlock): string {
+  const meta = isRecord(block.meta) ? block.meta : null
+  return typeof meta?.listKind === 'string' ? meta.listKind : ''
+}
+
+function readListPresentation(block: GenUIListBlock): 'compact-stack' | 'immersive-carousel' | 'partner-carousel' {
+  const meta = isRecord(block.meta) ? block.meta : null
+  const presentation = meta?.listPresentation
+
+  if (
+    presentation === 'compact-stack' ||
+    presentation === 'immersive-carousel' ||
+    presentation === 'partner-carousel'
+  ) {
+    return presentation
+  }
+
+  return 'compact-stack'
+}
+
+function readListShowHeader(block: GenUIListBlock): boolean {
+  const meta = isRecord(block.meta) ? block.meta : null
+  return meta?.listShowHeader !== false
+}
+
 function mapListToWidgetPart(block: GenUIListBlock): WidgetPart {
+  const listKind = readListKind(block)
+  const presentation = readListPresentation(block)
+  const showHeader = readListShowHeader(block)
+  if (listKind === 'partner_search_results') {
+    const results = block.items
+      .filter((item): item is Record<string, unknown> => isRecord(item))
+      .map((item, index) => ({
+        id: toStringValue(item.id, `partner_result_${index}`),
+        partnerIntentId: toStringValue(item.partnerIntentId, toStringValue(item.id, `partner_result_${index}`)),
+        candidateUserId: toStringValue(item.candidateUserId, ''),
+        title: toStringValue(item.title, `搭子 ${index + 1}`),
+        avatarUrl: toStringValue(item.avatarUrl, ''),
+        type: toStringValue(item.type, '搭子'),
+        locationName: toStringValue(item.locationName, '待沟通'),
+        locationHint: toStringValue(item.locationHint, ''),
+        timePreference: toStringValue(item.timePreference, ''),
+        summary: toStringValue(item.summary, ''),
+        matchReason: toStringValue(item.matchReason, ''),
+        score: toNumberValue(item.score, 0),
+        tags: Array.isArray(item.tags)
+          ? item.tags.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0)
+          : [],
+        actions: Array.isArray(item.actions)
+          ? item.actions.filter((action): action is Record<string, unknown> => (
+            isRecord(action) && typeof action.label === 'string' && typeof action.action === 'string'
+          ))
+          : [],
+      }))
+
+    return {
+      type: 'widget',
+      widgetType: 'partner_search_results',
+      data: {
+        title: block.title || '先看看这些搭子',
+        presentation,
+        showHeader,
+        results,
+      },
+    }
+  }
+
   const results = block.items
     .filter((item): item is Record<string, unknown> => isRecord(item))
     .map((item, index) => {
@@ -794,6 +837,8 @@ function mapListToWidgetPart(block: GenUIListBlock): WidgetPart {
         name: first?.locationName ?? '附近',
       },
       title: block.title || '',
+      presentation,
+      showHeader,
       semanticQuery: exploreMeta.semanticQuery,
       fetchConfig: exploreMeta.fetchConfig,
       interaction: exploreMeta.interaction,
@@ -805,17 +850,13 @@ function mapListToWidgetPart(block: GenUIListBlock): WidgetPart {
 function mapCtaGroupToWidgetPart(block: GenUICtaGroupBlock): WidgetPart {
   return {
     type: 'widget',
-    widgetType: 'ask_preference',
+    widgetType: 'action_chips',
     data: {
-      questionType: 'type',
-      question: '接下来你想怎么做？',
-      options: block.items.map((item) => ({
+      items: block.items.map((item) => ({
         label: item.label,
-        value: item.label,
         action: item.action,
         ...(isRecord(item.params) ? { params: item.params } : {}),
       })),
-      allowSkip: false,
       disabled: false,
     },
   }
@@ -825,6 +866,8 @@ function mapFormToWidgetPart(block: GenUIFormBlock): WidgetPart {
   const initial = isRecord(block.initialValues) ? block.initialValues : {}
   const schema = isRecord(block.schema) ? block.schema : {}
   const formType = typeof schema.formType === 'string' ? schema.formType : ''
+  const meta = isRecord(block.meta) ? block.meta : null
+  const showHeader = meta?.formShowHeader !== false
 
   if (formType === 'partner_intent') {
     return {
@@ -834,6 +877,7 @@ function mapFormToWidgetPart(block: GenUIFormBlock): WidgetPart {
         title: typeof block.title === 'string' ? block.title : '找搭子偏好',
         schema,
         initialValues: initial,
+        showHeader,
         disabled: false,
       },
     }
@@ -887,6 +931,7 @@ function buildAssistantPartsFromBlocks(blocks: GenUIBlock[]): (UIMessagePart | W
         widgetType: 'ask_preference',
         data: {
           questionType: inferChoiceQuestionType(block),
+          inputMode: inferChoiceInputMode(block),
           question: block.question,
           options: block.options.map((option) => ({
             label: option.label,
@@ -988,6 +1033,7 @@ type ChatGatewayTurnsRequest = {
     entry?: string
     transientTurns?: GenUIRequestContext['transientTurns']
   }
+  trace?: boolean
   stream?: boolean
   [key: string]: unknown
 }
@@ -1000,8 +1046,17 @@ interface ChatGatewayStreamCallbacks {
   onFinish?: () => void
 }
 
+type RequestHeadersReceivedResult = {
+  statusCode?: number
+  header?: WechatMiniprogram.IAnyObject
+}
+
+type RequestTaskWithHeadersListener = WechatMiniprogram.RequestTask & {
+  onHeadersReceived?: (callback: (result: RequestHeadersReceivedResult) => void) => void
+}
+
 const CHAT_GATEWAY_URL = `${API_CONFIG.BASE_URL}/ai/chat`
-const TYPEWRITER_INTERVAL_MS = 16
+const TYPEWRITER_INTERVAL_MS = 60  // v5.5: 调慢打字机速度，提升可读性
 
 function buildChatGatewayTurnsRequest(
   conversationId: string | null,
@@ -1020,6 +1075,7 @@ function buildChatGatewayTurnsRequest(
   return {
     ...(conversationId ? { conversationId } : {}),
     input,
+    trace: false,
     context: {
       client: 'miniprogram',
       locale: context.locale,
@@ -1067,6 +1123,28 @@ function parseSSEPacket(packet: string): { eventName: string; dataText: string }
     eventName,
     dataText: dataLines.join('\n'),
   }
+}
+
+function readStreamEventData(payload: unknown): unknown {
+  if (isRecord(payload) && payload.data !== undefined) {
+    return payload.data
+  }
+
+  return payload
+}
+
+function normalizeChatErrorMessage(message: string): string {
+  const normalized = message.trim()
+  const lowerCased = normalized.toLowerCase()
+
+  if (
+    lowerCased.includes('free tier of the model has been exhausted')
+    || (lowerCased.includes('use free tier only') && lowerCased.includes('management console'))
+  ) {
+    return 'AI 服务额度暂时用完了，请稍后再试。'
+  }
+
+  return normalized || '请求失败，请稍后再试'
 }
 
 function arrayBufferToString(buffer: ArrayBuffer): string {
@@ -1168,6 +1246,10 @@ function streamChatGatewayTurns(
     timeout: 60000,
     enableChunked: true,
     success: () => {
+      if (finished) {
+        return
+      }
+
       parseBuffer()
       if (!finished) {
         callbacks.onDone?.()
@@ -1182,6 +1264,20 @@ function streamChatGatewayTurns(
       callbacks.onError?.(message)
       finishOnce()
     },
+  })
+
+  const requestTaskWithHeaders = requestTask as RequestTaskWithHeadersListener
+  requestTaskWithHeaders.onHeadersReceived?.((result) => {
+    if (finished) {
+      return
+    }
+
+    const statusCode = typeof result.statusCode === 'number' ? result.statusCode : null
+    if (statusCode !== null && (statusCode < 200 || statusCode >= 300)) {
+      callbacks.onError?.(`请求失败（${statusCode}）`)
+      finishOnce()
+      requestTask.abort()
+    }
   })
 
   requestTask.onChunkReceived((chunk) => {
@@ -1263,7 +1359,323 @@ interface ChatState {
 
 export const useChatStore = create<ChatState>()(
   persist(
-    immer((set, get) => ({
+    immer((set, get) => {
+      const streamAssistantTurn = (params: {
+        aiMessageId: string
+        chatRequest: ChatGatewayTurnsRequest
+        fallbackConversationId: string
+        turnErrorFallbackMessage: string
+        buildErrorWidgetData: (normalizedError: string) => WidgetPart['data']
+      }) => {
+        let currentEnvelope: GenUITurnEnvelope | null = null
+        let settled = false
+        let eventQueue: Promise<void> = Promise.resolve()
+        let controller: SSEController | null = null
+        let controllerRegistered = false
+
+        const isCurrentController = () => (
+          controller !== null && (!controllerRegistered || get()._controller === controller)
+        )
+
+        const updateAssistantFromEnvelope = (envelope: GenUITurnEnvelope, status: ChatStatus) => {
+          if (!isCurrentController()) {
+            return
+          }
+
+          const assistantParts = buildAssistantPartsFromBlocks(envelope.turn.blocks)
+
+          set((draft) => {
+            const msgIndex = draft.messages.findIndex((message) => message.id === params.aiMessageId)
+            if (msgIndex !== -1) {
+              draft.messages[msgIndex].parts = assistantParts
+              draft.messages[msgIndex].turnContext = envelope.turn.turnContext
+              sanitizeAssistantMessage(draft.messages[msgIndex])
+            }
+            draft.conversationId = envelope.conversationId
+            draft.status = status
+            draft.error = null
+          })
+        }
+
+        const ensureEnvelope = (): GenUITurnEnvelope => {
+          if (currentEnvelope) {
+            return currentEnvelope
+          }
+
+          currentEnvelope = {
+            traceId: `trace_${Date.now()}`,
+            conversationId: params.fallbackConversationId,
+            turn: {
+              turnId: `turn_${Date.now()}`,
+              role: 'assistant',
+              status: 'streaming',
+              blocks: [],
+            },
+          }
+          return currentEnvelope
+        }
+
+        const upsertStreamedBlock = (block: GenUIBlock, mode: 'append' | 'replace'): number => {
+          const envelope = ensureEnvelope()
+          const blocks = [...envelope.turn.blocks]
+          let targetIndex = -1
+
+          if (mode === 'replace') {
+            targetIndex = blocks.findIndex((item) => item.blockId === block.blockId)
+          }
+
+          if (targetIndex >= 0) {
+            blocks[targetIndex] = block
+          } else {
+            blocks.push(block)
+            targetIndex = blocks.length - 1
+          }
+
+          currentEnvelope = {
+            ...envelope,
+            turn: {
+              ...envelope.turn,
+              blocks,
+            },
+          }
+          updateAssistantFromEnvelope(currentEnvelope, 'streaming')
+          return targetIndex
+        }
+
+        const streamTextBlockIntoEnvelope = async (block: GenUIBlock, mode: 'append' | 'replace') => {
+          if (block.type !== 'text') {
+            upsertStreamedBlock(block, mode)
+            return
+          }
+
+          const fullText = block.content || ''
+          if (!fullText) {
+            // v5.5: 空内容不切换状态，保持 loading 直到有实际内容
+            return
+          }
+          const index = upsertStreamedBlock({ ...block, content: '' }, mode)
+
+          for (let cursor = 1; cursor <= fullText.length; cursor += 1) {
+            if (!isCurrentController()) {
+              return
+            }
+
+            const envelope = ensureEnvelope()
+            const blocks = [...envelope.turn.blocks]
+            const currentBlock = blocks[index]
+            if (!currentBlock || currentBlock.type !== 'text') {
+              break
+            }
+
+            blocks[index] = {
+              ...currentBlock,
+              content: fullText.slice(0, cursor),
+            }
+
+            currentEnvelope = {
+              ...envelope,
+              turn: {
+                ...envelope.turn,
+                blocks,
+              },
+            }
+
+            // v5.5: 第一次有内容时立即切到 streaming，隐藏 loading，开始打字机
+            const targetStatus = cursor === 1 ? 'streaming' : get().status
+            updateAssistantFromEnvelope(currentEnvelope, targetStatus)
+            await delay(TYPEWRITER_INTERVAL_MS)
+          }
+        }
+
+        const finalizeSuccessfulTurn = () => {
+          if (settled || !isCurrentController()) {
+            return
+          }
+          settled = true
+
+          set((draft) => {
+            if (currentEnvelope) {
+              const assistantParts = buildAssistantPartsFromBlocks(currentEnvelope.turn.blocks)
+              const msgIndex = draft.messages.findIndex((message) => message.id === params.aiMessageId)
+              if (msgIndex !== -1) {
+                draft.messages[msgIndex].parts = assistantParts
+                sanitizeAssistantMessage(draft.messages[msgIndex])
+              }
+              draft.conversationId = currentEnvelope.conversationId
+            }
+
+            draft.status = 'idle'
+            draft.streamingMessageId = null
+            draft.error = null
+            if (draft._controller === controller) {
+              draft._controller = null
+            }
+          })
+
+          if (currentEnvelope) {
+            applyCompletionEffectsFromBlocks(currentEnvelope.turn.blocks)
+          }
+        }
+
+        const finalizeFailedTurn = (errorMessage: string) => {
+          if (settled || !isCurrentController()) {
+            return
+          }
+          settled = true
+          const normalizedError = normalizeChatErrorMessage(errorMessage)
+
+          set((draft) => {
+            draft.status = 'idle'
+            draft.streamingMessageId = null
+            draft.error = new Error(normalizedError)
+
+            const msgIndex = draft.messages.findIndex((message) => message.id === params.aiMessageId)
+            if (msgIndex !== -1) {
+              draft.messages[msgIndex].parts = [
+                {
+                  type: 'widget',
+                  widgetType: 'error',
+                  data: params.buildErrorWidgetData(normalizedError),
+                },
+              ]
+            }
+
+            if (draft._controller === controller) {
+              draft._controller = null
+            }
+          })
+        }
+
+        const consumeStreamEvent = async (eventName: string, payload: unknown) => {
+          if (!isCurrentController()) {
+            return
+          }
+
+          const eventData = readStreamEventData(payload)
+
+          if (eventName === 'trace') {
+            return
+          }
+
+          if (eventName === 'turn-error') {
+            const errorData = isRecord(eventData) ? eventData : null
+            const message =
+              errorData && typeof errorData.message === 'string'
+                ? normalizeChatErrorMessage(errorData.message)
+                : params.turnErrorFallbackMessage
+            throw new Error(message)
+          }
+
+          if (eventName === 'turn-start') {
+            const data = isRecord(eventData) ? eventData : null
+            const traceId = data && typeof data.traceId === 'string' ? data.traceId : `trace_${Date.now()}`
+            const conversationId =
+              data && typeof data.conversationId === 'string'
+                ? data.conversationId
+                : params.fallbackConversationId
+            const turnId = data && typeof data.turnId === 'string' ? data.turnId : `turn_${Date.now()}`
+
+            currentEnvelope = {
+              traceId,
+              conversationId,
+              turn: {
+                turnId,
+                role: 'assistant',
+                status: 'streaming',
+                blocks: [],
+              },
+            }
+
+            // v5.5: turn-start 时保持 submitted 状态（显示 loading），等有内容再切到 streaming
+            updateAssistantFromEnvelope(currentEnvelope, 'submitted')
+            return
+          }
+
+          if (eventName === 'turn-status') {
+            const data = isRecord(eventData) ? eventData : null
+            const status = data && typeof data.status === 'string' ? data.status : ''
+            if (status !== 'streaming' && status !== 'completed' && status !== 'error') {
+              return
+            }
+
+            const envelope = ensureEnvelope()
+            currentEnvelope = {
+              ...envelope,
+              turn: {
+                ...envelope.turn,
+                status,
+              },
+            }
+            updateAssistantFromEnvelope(currentEnvelope, 'streaming')
+            return
+          }
+
+          if (eventName === 'turn-complete') {
+            if (!isGenUITurnEnvelope(eventData)) {
+              return
+            }
+
+            currentEnvelope = eventData
+            updateAssistantFromEnvelope(currentEnvelope, 'streaming')
+            return
+          }
+
+          if (eventName === 'block-append' || eventName === 'block-replace') {
+            const data = isRecord(eventData) ? eventData : null
+            const block = data ? data.block : null
+            if (!isGenUIBlock(block)) {
+              return
+            }
+
+            const mode = eventName === 'block-replace' ? 'replace' : 'append'
+            await streamTextBlockIntoEnvelope(block, mode)
+          }
+        }
+
+        controller = streamChatGatewayTurns(params.chatRequest, {
+          onEvent: (eventName, payload) => {
+            eventQueue = eventQueue
+              .then(() => consumeStreamEvent(eventName, payload))
+              .catch((error) => {
+                const message = normalizeChatErrorMessage(
+                  error instanceof Error ? error.message : '流式处理失败'
+                )
+                finalizeFailedTurn(message)
+              })
+          },
+          onDone: () => {
+            void eventQueue
+              .then(() => finalizeSuccessfulTurn())
+              .catch((error) => {
+                const message = normalizeChatErrorMessage(
+                  error instanceof Error ? error.message : '流式处理失败'
+                )
+                finalizeFailedTurn(message)
+              })
+          },
+          onError: (message) => {
+            void eventQueue.then(() => {
+              finalizeFailedTurn(
+                normalizeChatErrorMessage(message || params.turnErrorFallbackMessage)
+              )
+            })
+          },
+          onFinish: () => {
+            set((draft) => {
+              if (draft._controller === controller) {
+                draft._controller = null
+              }
+            })
+          },
+        })
+
+        set((draft) => {
+          draft._controller = controller
+        })
+        controllerRegistered = true
+      }
+
+      return ({
       // ========== 初始状态 ==========
       messages: [],
       conversationId: null,
@@ -1338,306 +1750,17 @@ export const useChatStore = create<ChatState>()(
           }
         )
         chatRequest.stream = true
-
-        const fallbackConversationId = state.conversationId || `conv_${Date.now()}`
-        let currentEnvelope: GenUITurnEnvelope | null = null
-        let settled = false
-        let eventQueue: Promise<void> = Promise.resolve()
-        let controller: SSEController | null = null
-        let controllerRegistered = false
-
-        const isCurrentController = () => (
-          controller !== null && (!controllerRegistered || get()._controller === controller)
-        )
-
-        const updateAssistantFromEnvelope = (envelope: GenUITurnEnvelope, status: ChatStatus) => {
-          if (!isCurrentController()) {
-            return
-          }
-
-          const assistantParts = buildAssistantPartsFromBlocks(envelope.turn.blocks)
-
-          set((draft) => {
-            const msgIndex = draft.messages.findIndex((message) => message.id === aiMessageId)
-            if (msgIndex !== -1) {
-              draft.messages[msgIndex].parts = assistantParts
-              draft.messages[msgIndex].turnContext = envelope.turn.turnContext
-              sanitizeAssistantMessage(draft.messages[msgIndex])
-            }
-            draft.conversationId = envelope.conversationId
-            draft.status = status
-            draft.error = null
-          })
-        }
-
-        const ensureEnvelope = (): GenUITurnEnvelope => {
-          if (currentEnvelope) {
-            return currentEnvelope
-          }
-
-          currentEnvelope = {
-            traceId: `trace_${Date.now()}`,
-            conversationId: fallbackConversationId,
-            turn: {
-              turnId: `turn_${Date.now()}`,
-              role: 'assistant',
-              status: 'streaming',
-              blocks: [],
-            },
-          }
-          return currentEnvelope
-        }
-
-        const upsertBlock = (block: GenUIBlock, mode: 'append' | 'replace'): number => {
-          const envelope = ensureEnvelope()
-          const blocks = [...envelope.turn.blocks]
-          let targetIndex = -1
-
-          if (mode === 'replace') {
-            targetIndex = blocks.findIndex((item) => item.blockId === block.blockId)
-          }
-
-          if (targetIndex >= 0) {
-            blocks[targetIndex] = block
-          } else {
-            blocks.push(block)
-            targetIndex = blocks.length - 1
-          }
-
-          currentEnvelope = {
-            ...envelope,
-            turn: {
-              ...envelope.turn,
-              blocks,
-            },
-          }
-          updateAssistantFromEnvelope(currentEnvelope, 'streaming')
-          return targetIndex
-        }
-
-        const typewriteTextBlock = async (block: GenUIBlock, mode: 'append' | 'replace') => {
-          if (block.type !== 'text') {
-            upsertBlock(block, mode)
-            return
-          }
-
-          const fullText = block.content || ''
-          const index = upsertBlock({ ...block, content: '' }, mode)
-          if (!fullText) {
-            return
-          }
-
-          for (let cursor = 1; cursor <= fullText.length; cursor += 1) {
-            if (!isCurrentController()) {
-              return
-            }
-
-            const envelope = ensureEnvelope()
-            const blocks = [...envelope.turn.blocks]
-            const currentBlock = blocks[index]
-            if (!currentBlock || currentBlock.type !== 'text') {
-              break
-            }
-
-            blocks[index] = {
-              ...currentBlock,
-              content: fullText.slice(0, cursor),
-            }
-
-            currentEnvelope = {
-              ...envelope,
-              turn: {
-                ...envelope.turn,
-                blocks,
-              },
-            }
-
-            updateAssistantFromEnvelope(currentEnvelope, 'streaming')
-            await delay(TYPEWRITER_INTERVAL_MS)
-          }
-        }
-
-        const completeSuccess = () => {
-          if (settled || !isCurrentController()) {
-            return
-          }
-          settled = true
-
-          set((draft) => {
-            if (currentEnvelope) {
-              const assistantParts = buildAssistantPartsFromBlocks(currentEnvelope.turn.blocks)
-              const msgIndex = draft.messages.findIndex((message) => message.id === aiMessageId)
-              if (msgIndex !== -1) {
-                draft.messages[msgIndex].parts = assistantParts
-                sanitizeAssistantMessage(draft.messages[msgIndex])
-              }
-              draft.conversationId = currentEnvelope.conversationId
-            }
-
-            draft.status = 'idle'
-            draft.streamingMessageId = null
-            draft.error = null
-            if (draft._controller === controller) {
-              draft._controller = null
-            }
-          })
-
-          if (currentEnvelope) {
-            applyCompletionEffectsFromBlocks(currentEnvelope.turn.blocks)
-          }
-        }
-
-        const completeError = (errorMessage: string) => {
-          if (settled || !isCurrentController()) {
-            return
-          }
-          settled = true
-
-          set((draft) => {
-            draft.status = 'idle'
-            draft.streamingMessageId = null
-            draft.error = new Error(errorMessage)
-
-            const msgIndex = draft.messages.findIndex((message) => message.id === aiMessageId)
-            if (msgIndex !== -1) {
-              draft.messages[msgIndex].parts = [
-                {
-                  type: 'widget',
-                  widgetType: 'error',
-                  data: {
-                    message: '抱歉，这次没生成成功，试试再说一次～',
-                    showRetry: true,
-                    originalText: normalizedText,
-                  },
-                },
-              ]
-            }
-
-            if (draft._controller === controller) {
-              draft._controller = null
-            }
-          })
-        }
-
-        const processEvent = async (eventName: string, payload: unknown) => {
-          if (!isCurrentController()) {
-            return
-          }
-
-          if (eventName === 'trace') {
-            return
-          }
-
-          if (eventName === 'turn-error') {
-            const errorData = isRecord(payload) && isRecord(payload.data) ? payload.data : null
-            const message =
-              errorData && typeof errorData.message === 'string'
-                ? errorData.message
-                : '生成失败，请稍后再试'
-            throw new Error(message)
-          }
-
-          if (eventName === 'turn-start') {
-            const data = isRecord(payload) && isRecord(payload.data) ? payload.data : null
-            const traceId = data && typeof data.traceId === 'string' ? data.traceId : `trace_${Date.now()}`
-            const conversationId =
-              data && typeof data.conversationId === 'string'
-                ? data.conversationId
-                : fallbackConversationId
-            const turnId = data && typeof data.turnId === 'string' ? data.turnId : `turn_${Date.now()}`
-
-            currentEnvelope = {
-              traceId,
-              conversationId,
-              turn: {
-                turnId,
-                role: 'assistant',
-                status: 'streaming',
-                blocks: [],
-              },
-            }
-
-            updateAssistantFromEnvelope(currentEnvelope, 'streaming')
-            return
-          }
-
-          if (eventName === 'turn-status') {
-            const data = isRecord(payload) && isRecord(payload.data) ? payload.data : null
-            const status = data && typeof data.status === 'string' ? data.status : ''
-            if (status !== 'streaming' && status !== 'completed' && status !== 'error') {
-              return
-            }
-
-            const envelope = ensureEnvelope()
-            currentEnvelope = {
-              ...envelope,
-              turn: {
-                ...envelope.turn,
-                status,
-              },
-            }
-            updateAssistantFromEnvelope(currentEnvelope, 'streaming')
-            return
-          }
-
-          if (eventName === 'turn-complete') {
-            const data = isRecord(payload) ? payload.data : null
-            if (!isGenUITurnEnvelope(data)) {
-              return
-            }
-
-            currentEnvelope = data
-            updateAssistantFromEnvelope(currentEnvelope, 'streaming')
-            return
-          }
-
-          if (eventName === 'block-append' || eventName === 'block-replace') {
-            const data = isRecord(payload) && isRecord(payload.data) ? payload.data : null
-            const block = data ? data.block : null
-            if (!isGenUIBlock(block)) {
-              return
-            }
-
-            const mode = eventName === 'block-replace' ? 'replace' : 'append'
-            await typewriteTextBlock(block, mode)
-          }
-        }
-
-        controller = streamChatGatewayTurns(chatRequest, {
-          onEvent: (eventName, payload) => {
-            eventQueue = eventQueue
-              .then(() => processEvent(eventName, payload))
-              .catch((error) => {
-                const message = error instanceof Error ? error.message : '流式处理失败'
-                completeError(message)
-              })
-          },
-          onDone: () => {
-            void eventQueue
-              .then(() => completeSuccess())
-              .catch((error) => {
-                const message = error instanceof Error ? error.message : '流式处理失败'
-                completeError(message)
-              })
-          },
-          onError: (message) => {
-            void eventQueue.then(() => {
-              completeError(message || '请求失败，请稍后再试')
-            })
-          },
-          onFinish: () => {
-            set((draft) => {
-              if (draft._controller === controller) {
-                draft._controller = null
-              }
-            })
-          },
+        streamAssistantTurn({
+          aiMessageId,
+          chatRequest,
+          fallbackConversationId: state.conversationId || `conv_${Date.now()}`,
+          turnErrorFallbackMessage: '生成失败，请稍后再试',
+          buildErrorWidgetData: () => ({
+            message: '抱歉，这次没生成成功，试试再说一次～',
+            showRetry: true,
+            originalText: normalizedText,
+          }),
         })
-
-        set((draft) => {
-          draft._controller = controller
-        })
-        controllerRegistered = true
       },
       
       /**
@@ -1775,306 +1898,17 @@ export const useChatStore = create<ChatState>()(
           }
         )
         chatRequest.stream = true
-
-        const fallbackConversationId = state.conversationId || `conv_${Date.now()}`
-        let currentEnvelope: GenUITurnEnvelope | null = null
-        let settled = false
-        let eventQueue: Promise<void> = Promise.resolve()
-        let controller: SSEController | null = null
-        let controllerRegistered = false
-
-        const isCurrentController = () => (
-          controller !== null && (!controllerRegistered || get()._controller === controller)
-        )
-
-        const updateAssistantFromEnvelope = (envelope: GenUITurnEnvelope, status: ChatStatus) => {
-          if (!isCurrentController()) {
-            return
-          }
-
-          const assistantParts = buildAssistantPartsFromBlocks(envelope.turn.blocks)
-
-          set((draft) => {
-            const msgIndex = draft.messages.findIndex((message) => message.id === aiMessageId)
-            if (msgIndex !== -1) {
-              draft.messages[msgIndex].parts = assistantParts
-              draft.messages[msgIndex].turnContext = envelope.turn.turnContext
-              sanitizeAssistantMessage(draft.messages[msgIndex])
-            }
-            draft.conversationId = envelope.conversationId
-            draft.status = status
-            draft.error = null
-          })
-        }
-
-        const ensureEnvelope = (): GenUITurnEnvelope => {
-          if (currentEnvelope) {
-            return currentEnvelope
-          }
-
-          currentEnvelope = {
-            traceId: `trace_${Date.now()}`,
-            conversationId: fallbackConversationId,
-            turn: {
-              turnId: `turn_${Date.now()}`,
-              role: 'assistant',
-              status: 'streaming',
-              blocks: [],
-            },
-          }
-          return currentEnvelope
-        }
-
-        const upsertBlock = (block: GenUIBlock, mode: 'append' | 'replace'): number => {
-          const envelope = ensureEnvelope()
-          const blocks = [...envelope.turn.blocks]
-          let targetIndex = -1
-
-          if (mode === 'replace') {
-            targetIndex = blocks.findIndex((item) => item.blockId === block.blockId)
-          }
-
-          if (targetIndex >= 0) {
-            blocks[targetIndex] = block
-          } else {
-            blocks.push(block)
-            targetIndex = blocks.length - 1
-          }
-
-          currentEnvelope = {
-            ...envelope,
-            turn: {
-              ...envelope.turn,
-              blocks,
-            },
-          }
-          updateAssistantFromEnvelope(currentEnvelope, 'streaming')
-          return targetIndex
-        }
-
-        const typewriteTextBlock = async (block: GenUIBlock, mode: 'append' | 'replace') => {
-          if (block.type !== 'text') {
-            upsertBlock(block, mode)
-            return
-          }
-
-          const fullText = block.content || ''
-          const index = upsertBlock({ ...block, content: '' }, mode)
-          if (!fullText) {
-            return
-          }
-
-          for (let cursor = 1; cursor <= fullText.length; cursor += 1) {
-            if (!isCurrentController()) {
-              return
-            }
-
-            const envelope = ensureEnvelope()
-            const blocks = [...envelope.turn.blocks]
-            const currentBlock = blocks[index]
-            if (!currentBlock || currentBlock.type !== 'text') {
-              break
-            }
-
-            blocks[index] = {
-              ...currentBlock,
-              content: fullText.slice(0, cursor),
-            }
-
-            currentEnvelope = {
-              ...envelope,
-              turn: {
-                ...envelope.turn,
-                blocks,
-              },
-            }
-
-            updateAssistantFromEnvelope(currentEnvelope, 'streaming')
-            await delay(TYPEWRITER_INTERVAL_MS)
-          }
-        }
-
-        const completeSuccess = () => {
-          if (settled || !isCurrentController()) {
-            return
-          }
-          settled = true
-
-          set((draft) => {
-            if (currentEnvelope) {
-              const assistantParts = buildAssistantPartsFromBlocks(currentEnvelope.turn.blocks)
-              const msgIndex = draft.messages.findIndex((message) => message.id === aiMessageId)
-              if (msgIndex !== -1) {
-                draft.messages[msgIndex].parts = assistantParts
-                sanitizeAssistantMessage(draft.messages[msgIndex])
-              }
-              draft.conversationId = currentEnvelope.conversationId
-            }
-
-            draft.status = 'idle'
-            draft.streamingMessageId = null
-            draft.error = null
-            if (draft._controller === controller) {
-              draft._controller = null
-            }
-          })
-
-          if (currentEnvelope) {
-            applyCompletionEffectsFromBlocks(currentEnvelope.turn.blocks)
-          }
-        }
-
-        const completeError = (errorMessage: string) => {
-          if (settled || !isCurrentController()) {
-            return
-          }
-          settled = true
-
-          set((draft) => {
-            draft.status = 'idle'
-            draft.streamingMessageId = null
-            draft.error = new Error(errorMessage)
-
-            const msgIndex = draft.messages.findIndex((message) => message.id === aiMessageId)
-            if (msgIndex !== -1) {
-              draft.messages[msgIndex].parts = [
-                {
-                  type: 'widget',
-                  widgetType: 'error',
-                  data: {
-                    message: errorMessage,
-                    showRetry: true,
-                    originalText: action.originalText,
-                  },
-                },
-              ]
-            }
-
-            if (draft._controller === controller) {
-              draft._controller = null
-            }
-          })
-        }
-
-        const processEvent = async (eventName: string, payload: unknown) => {
-          if (!isCurrentController()) {
-            return
-          }
-
-          if (eventName === 'trace') {
-            return
-          }
-
-          if (eventName === 'turn-error') {
-            const errorData = isRecord(payload) && isRecord(payload.data) ? payload.data : null
-            const message =
-              errorData && typeof errorData.message === 'string'
-                ? errorData.message
-                : '操作失败，请稍后再试'
-            throw new Error(message)
-          }
-
-          if (eventName === 'turn-start') {
-            const data = isRecord(payload) && isRecord(payload.data) ? payload.data : null
-            const traceId = data && typeof data.traceId === 'string' ? data.traceId : `trace_${Date.now()}`
-            const conversationId =
-              data && typeof data.conversationId === 'string'
-                ? data.conversationId
-                : fallbackConversationId
-            const turnId = data && typeof data.turnId === 'string' ? data.turnId : `turn_${Date.now()}`
-
-            currentEnvelope = {
-              traceId,
-              conversationId,
-              turn: {
-                turnId,
-                role: 'assistant',
-                status: 'streaming',
-                blocks: [],
-              },
-            }
-
-            updateAssistantFromEnvelope(currentEnvelope, 'streaming')
-            return
-          }
-
-          if (eventName === 'turn-status') {
-            const data = isRecord(payload) && isRecord(payload.data) ? payload.data : null
-            const status = data && typeof data.status === 'string' ? data.status : ''
-            if (status !== 'streaming' && status !== 'completed' && status !== 'error') {
-              return
-            }
-
-            const envelope = ensureEnvelope()
-            currentEnvelope = {
-              ...envelope,
-              turn: {
-                ...envelope.turn,
-                status,
-              },
-            }
-            updateAssistantFromEnvelope(currentEnvelope, 'streaming')
-            return
-          }
-
-          if (eventName === 'turn-complete') {
-            const data = isRecord(payload) ? payload.data : null
-            if (!isGenUITurnEnvelope(data)) {
-              return
-            }
-
-            currentEnvelope = data
-            updateAssistantFromEnvelope(currentEnvelope, 'streaming')
-            return
-          }
-
-          if (eventName === 'block-append' || eventName === 'block-replace') {
-            const data = isRecord(payload) && isRecord(payload.data) ? payload.data : null
-            const block = data ? data.block : null
-            if (!isGenUIBlock(block)) {
-              return
-            }
-
-            const mode = eventName === 'block-replace' ? 'replace' : 'append'
-            await typewriteTextBlock(block, mode)
-          }
-        }
-
-        controller = streamChatGatewayTurns(chatRequest, {
-          onEvent: (eventName, payload) => {
-            eventQueue = eventQueue
-              .then(() => processEvent(eventName, payload))
-              .catch((error) => {
-                const message = error instanceof Error ? error.message : '流式处理失败'
-                completeError(message)
-              })
-          },
-          onDone: () => {
-            void eventQueue
-              .then(() => completeSuccess())
-              .catch((error) => {
-                const message = error instanceof Error ? error.message : '流式处理失败'
-                completeError(message)
-              })
-          },
-          onError: (message) => {
-            void eventQueue.then(() => {
-              completeError(message || '操作失败，请稍后再试')
-            })
-          },
-          onFinish: () => {
-            set((draft) => {
-              if (draft._controller === controller) {
-                draft._controller = null
-              }
-            })
-          },
+        streamAssistantTurn({
+          aiMessageId,
+          chatRequest,
+          fallbackConversationId: state.conversationId || `conv_${Date.now()}`,
+          turnErrorFallbackMessage: '操作失败，请稍后再试',
+          buildErrorWidgetData: (normalizedError) => ({
+            message: normalizedError,
+            showRetry: true,
+            originalText: action.originalText,
+          }),
         })
-
-        set((draft) => {
-          draft._controller = controller
-        })
-        controllerRegistered = true
       },
       
       /**
@@ -2104,7 +1938,8 @@ export const useChatStore = create<ChatState>()(
           draft._controller = controller
         })
       },
-    })),
+      })
+    }),
     {
       name: 'chat-store',
       storage: createJSONStorage(() => wechatStorage),

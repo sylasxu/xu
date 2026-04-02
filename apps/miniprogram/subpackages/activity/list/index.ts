@@ -1,7 +1,7 @@
 /**
  * 活动列表页
  * Requirements: 8.5, 8.6, 8.7
- * 支持三种类型：created（我发布的）、joined（我参与的）、archived（历史归档）
+ * 支持三种类型：created（我发布的）、joined（我参与的）、archived（已结束活动）
  */
 import { getActivitiesUserByUserId } from '../../../src/api/endpoints/activities/activities';
 import type { ActivityMyActivitiesResponseDataItem } from '../../../src/api/model';
@@ -47,13 +47,13 @@ Page({
     const titleMap: Record<ListType, string> = {
       created: '我发布的',
       joined: '我参与的',
-      archived: '历史归档',
+      archived: '已结束活动',
     };
 
     const emptyTextMap: Record<ListType, string> = {
       created: '还没有发布过活动',
       joined: '还没有参与过活动',
-      archived: '没有历史归档',
+      archived: '还没有已结束活动',
     };
 
     this.setData({

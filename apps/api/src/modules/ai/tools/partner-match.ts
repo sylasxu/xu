@@ -459,11 +459,18 @@ async function notifyManualPartnerMatchCreated(params: {
 }
 
 /**
- * 确认匹配 → 转为活动 (3表精简版)
+ * 确认匹配 → 转为活动 (简化版)
+ * 
+ * 直接使用匹配时的信息创建活动，无需Temp Organizer再次填写
  */
 export async function confirmMatch(matchId: string, userId: string): Promise<{
   success: boolean;
   activityId?: string;
+  discussionEntry?: {
+    activityId: string;
+    title: string;
+    entry: string;
+  };
   error?: string;
 }> {
   const [match] = await db
@@ -500,17 +507,24 @@ export async function confirmMatch(matchId: string, userId: string): Promise<{
     return { success: false, error: '找不到相关意向' };
   }
 
-  const firstIntent = intentList[0];
+  // 提取双方的时间偏好，智能设置活动时间
+  const startAt = resolveActivityStartTime(intentList);
+  
+  // 生成更自然的活动标题
+  const title = generatePartnerActivityTitle(match, intentList);
+  
+  // 生成简洁的活动描述
+  const description = generatePartnerActivityDescription(match, intentList);
 
   const [activity] = await db.insert(activities).values({
     creatorId: userId,
-    title: `🤝 ${getPartnerIntentDisplayType(firstIntent)}搭子局`,
-    description: `由搭子匹配自动创建。共同偏好：${match.commonTags.join('、') || '无'}`,
+    title,
+    description,
     location: match.centerLocation,
     locationName: match.centerLocationHint,
     locationHint: match.centerLocationHint,
-    startAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
-    type: firstIntent.activityType,
+    startAt,
+    type: intentList[0].activityType,
     maxParticipants: userIds.length + 2,
     currentParticipants: userIds.length,
     status: 'active',
@@ -541,7 +555,138 @@ export async function confirmMatch(matchId: string, userId: string): Promise<{
     activityId: activity.id,
   });
 
-  return { success: true, activityId: activity.id };
+  return { 
+    success: true, 
+    activityId: activity.id,
+    discussionEntry: {
+      activityId: activity.id,
+      title: activity.title,
+      entry: 'match_confirmed',
+    },
+  };
+}
+
+/**
+ * 根据意向列表解析活动时间
+ * 优先使用共同的时间偏好，如果没有则默认2小时后
+ */
+function resolveActivityStartTime(intents: PartnerIntent[]): Date {
+  const now = new Date();
+  
+  // 收集所有时间偏好
+  const timePreferences = intents
+    .map(i => i.timePreference)
+    .filter((t): t is string => Boolean(t));
+  
+  // 如果有共同的时间偏好，尝试解析
+  if (timePreferences.length > 0) {
+    const commonTime = findCommonTimePreference(timePreferences);
+    if (commonTime) {
+      const parsed = parseTimePreference(commonTime);
+      if (parsed && parsed > now) {
+        return parsed;
+      }
+    }
+  }
+  
+  // 默认2小时后
+  return new Date(now.getTime() + 2 * 60 * 60 * 1000);
+}
+
+/**
+ * 查找共同的时间偏好
+ */
+function findCommonTimePreference(preferences: string[]): string | null {
+  const counts = preferences.reduce((acc, p) => {
+    acc[p] = (acc[p] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+  
+  // 返回出现次数最多的
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  return sorted[0]?.[0] || null;
+}
+
+/**
+ * 解析时间偏好为具体日期
+ * 支持：今晚、明天、周末、明天下午等
+ */
+function parseTimePreference(pref: string): Date | null {
+  const now = new Date();
+  const hour = now.getHours();
+  
+  const normalized = pref.toLowerCase().trim();
+  
+  if (normalized.includes('今晚')) {
+    // 今晚 = 今天19:00，如果已经过了则明天19:00
+    const target = new Date(now);
+    target.setHours(19, 0, 0, 0);
+    if (hour >= 19) {
+      target.setDate(target.getDate() + 1);
+    }
+    return target;
+  }
+  
+  if (normalized.includes('明天')) {
+    const target = new Date(now);
+    target.setDate(target.getDate() + 1);
+    
+    if (normalized.includes('下午')) {
+      target.setHours(14, 0, 0, 0);
+    } else if (normalized.includes('晚上')) {
+      target.setHours(19, 0, 0, 0);
+    } else {
+      target.setHours(12, 0, 0, 0);
+    }
+    return target;
+  }
+  
+  if (normalized.includes('周末')) {
+    const target = new Date(now);
+    const day = target.getDay();
+    // 调整到周六
+    const daysUntilSaturday = day === 0 ? 6 : 6 - day;
+    target.setDate(target.getDate() + daysUntilSaturday);
+    target.setHours(14, 0, 0, 0);
+    return target;
+  }
+  
+  return null;
+}
+
+/**
+ * 生成搭子活动标题
+ */
+function generatePartnerActivityTitle(match: IntentMatch, intents: PartnerIntent[]): string {
+  const firstIntent = intents[0];
+  const sportType = readPartnerSportType(firstIntent);
+  const typeName = getPartnerIntentDisplayType(firstIntent);
+  const location = match.centerLocationHint || '附近';
+  
+  // 简洁自然的标题
+  return `${location}${typeName}局`;
+}
+
+/**
+ * 生成搭子活动描述
+ */
+function generatePartnerActivityDescription(match: IntentMatch, intents: PartnerIntent[]): string {
+  const parts: string[] = ['由搭子匹配创建'];
+  
+  if (match.commonTags.length > 0) {
+    parts.push(`共同偏好：${match.commonTags.join('、')}`);
+  }
+  
+  // 添加双方的时间偏好
+  const timePrefs = intents
+    .map(i => i.timePreference)
+    .filter(Boolean)
+    .join('、');
+  if (timePrefs) {
+    parts.push(`时间意向：${timePrefs}`);
+  }
+  
+  return parts.join(' · ');
 }
 
 /**

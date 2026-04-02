@@ -2408,6 +2408,24 @@ function mapPartnerSearchResultsPayloadToBlock(
   });
 }
 
+function mapPublishedActivityPayloadToBlock(
+  payload: Record<string, unknown>,
+  traceRef: string,
+  dedupeKey = 'published_activity'
+): GenUIBlock | null {
+  const fields = sanitizePrimitiveFields(payload, 16);
+  if (!fields.activityId || !fields.title || !fields.startAt || !fields.locationName) {
+    return null;
+  }
+
+  return createEntityCardBlock({
+    title: '活动已创建',
+    fields,
+    dedupeKey,
+    traceRef,
+  });
+}
+
 function mapToolOutputToBlocks(params: {
   request?: GenUIRequest;
   toolName: string;
@@ -2489,6 +2507,7 @@ function mapToolOutputToBlocks(params: {
 
   if (outputRecord) {
     const draft = isRecord(outputRecord.draft) ? outputRecord.draft : null;
+    const publishedActivity = isRecord(outputRecord.publishedActivity) ? outputRecord.publishedActivity : null;
     if (draft) {
       const fields = sanitizePrimitiveFields({
         activityId: toStringValue(outputRecord.activityId),
@@ -2504,12 +2523,19 @@ function mapToolOutputToBlocks(params: {
       );
     }
 
+    if (publishedActivity) {
+      const publishedBlock = mapPublishedActivityPayloadToBlock(publishedActivity, traceRef);
+      if (publishedBlock) {
+        blocks.push(publishedBlock);
+      }
+    }
+
     const exploreList = mapExplorePayloadToList(outputRecord, traceRef, `tool_${toolName}_list`);
     if (exploreList) {
       blocks.push(exploreList);
     }
 
-    if (!draft && !exploreList) {
+    if (!draft && !publishedActivity && !exploreList) {
       const fields = sanitizePrimitiveFields(outputRecord);
       if (Object.keys(fields).length > 0) {
         blocks.push(
@@ -2734,6 +2760,10 @@ function mapWidgetDataToBlock(params: {
 
   if (widgetType === 'widget_partner_search_results') {
     return mapPartnerSearchResultsPayloadToBlock(payload, traceRef, 'widget_partner_search_results');
+  }
+
+  if (widgetType === 'widget_share') {
+    return mapPublishedActivityPayloadToBlock(payload, traceRef);
   }
 
   if (widgetType === 'widget_partner_intent_form') {

@@ -301,7 +301,7 @@ export async function getUserNickname(userId: string): Promise<string | undefine
 }
 
 // ==========================================
-// 用户统计 (从 dashboard 迁移)
+// 用户统计
 // ==========================================
 
 /**

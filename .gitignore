@@ -212,6 +212,7 @@ apps/miniprogram/.openapi/
 **/*.test.ts
 **/*.spec.js
 **/*.spec.ts
+!apps/api/src/modules/ai/__tests__/agent-task-runtime.integration.test.ts
 test-*.js
 test-*.ts
 

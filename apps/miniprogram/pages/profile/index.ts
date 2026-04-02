@@ -4,7 +4,7 @@
  * 
  * Inset Grouped List 风格
  * - Header: 头像、昵称、Slogan
- * - Group 1: [我发布的]、[我参与的]、[历史归档]
+ * - Group 1: [我发布的]、[我参与的]、[已结束活动]
  * - Group 2: [手机绑定]、[隐私设置]
  * - Group 3: [关于聚场]、[意见反馈]
  */
@@ -126,7 +126,7 @@ Page({
   },
 
   /**
-   * 跳转到历史归档
+   * 跳转到已结束活动
    * Requirements: 8.7
    */
   goToArchived() {

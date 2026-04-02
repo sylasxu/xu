@@ -768,6 +768,13 @@ function mapListToWidgetPart(block: GenUIListBlock): WidgetPart {
   const presentation = readListPresentation(block)
   const showHeader = readListShowHeader(block)
   if (listKind === 'partner_search_results') {
+    // 从 block.meta 读取搜索摘要和全局动作
+    const meta = isRecord(block.meta) ? block.meta : null
+    const searchSummary = isRecord(meta?.searchSummary) ? meta.searchSummary as Record<string, unknown> : null
+    const primaryAction = isRecord(meta?.primaryAction) ? meta.primaryAction as Record<string, unknown> : null
+    const secondaryAction = isRecord(meta?.secondaryAction) ? meta.secondaryAction as Record<string, unknown> : null
+
+    // 解析候选人列表
     const results = block.items
       .filter((item): item is Record<string, unknown> => isRecord(item))
       .map((item, index) => ({
@@ -798,9 +805,25 @@ function mapListToWidgetPart(block: GenUIListBlock): WidgetPart {
       widgetType: 'partner_search_results',
       data: {
         title: block.title || '先看看这些搭子',
+        subtitle: block.subtitle,
         presentation,
         showHeader,
         results,
+        // 全局搜索摘要
+        searchSummary: searchSummary ? {
+          locationHint: toStringValue(searchSummary.locationHint, ''),
+          timeHint: toStringValue(searchSummary.timeHint, ''),
+          count: toNumberValue(searchSummary.count, results.length),
+        } : undefined,
+        // 全局动作（"帮我继续留意"和"再看看其他人"）
+        primaryAction: primaryAction ? {
+          label: toStringValue(primaryAction.label, '帮我继续留意'),
+          action: toStringValue(primaryAction.action, 'opt_in_partner_pool'),
+        } : undefined,
+        secondaryAction: secondaryAction ? {
+          label: toStringValue(secondaryAction.label, '再看看其他人'),
+          action: toStringValue(secondaryAction.action, 'refresh_search'),
+        } : undefined,
       },
     }
   }

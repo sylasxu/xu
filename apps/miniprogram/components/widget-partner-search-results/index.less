@@ -210,6 +210,29 @@
   color: var(--text-secondary, @text-secondary);
 }
 
+/* 全局动作区：固定在卡片下方的 "帮我继续留意" 和 "再看看其他人" */
+.global-actions {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: @spacing-3;
+  margin-top: @spacing-4;
+  padding: 0 @spacing-4;
+}
+
+.global-actions .action-btn {
+  flex: 1;
+  max-width: 280rpx;
+}
+
+.global-actions .action-btn--large {
+  height: 96rpx;
+  line-height: 96rpx;
+  border-radius: 28rpx;
+  font-size: @text-base;
+}
+
 .widget-partner-search-results--frameless {
   .swiper-shell {
     margin-top: @spacing-1;

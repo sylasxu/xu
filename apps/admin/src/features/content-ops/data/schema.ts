@@ -99,3 +99,21 @@ export interface ContentLibraryResult {
   page: number
   limit: number
 }
+
+export interface ContentTypeAnalytics {
+  contentType: ContentType
+  avgViews: number
+  avgLikes: number
+  avgCollects: number
+  count: number
+}
+
+export interface ContentAnalyticsResult {
+  byType: ContentTypeAnalytics[]
+  topNotes: ContentNote[]
+  totalNotes: number
+  totalWithPerformance: number
+  pendingPerformanceCount: number
+  highPerformingCount: number
+  newFollowersTotal: number
+}

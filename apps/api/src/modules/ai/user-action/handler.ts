@@ -8,7 +8,7 @@ import type { StructuredAction, StructuredActionResult, StructuredActionType } f
 import { createLogger } from '../observability/logger';
 
 // 复用现有 Service 函数
-import { joinActivity, quitActivity, getActivityById } from '../../activities/activity.service';
+import { joinActivity, quitActivity, getActivityById, getNearbyActivities } from '../../activities/activity.service';
 import { search } from '../rag';
 import { confirmMatch, cancelMatch, createManualPartnerMatch } from '../tools/partner-match';
 import { buildCreateDraftParamsFromActionPayload, createActivityDraftRecord, publishActivityRecord, updateActivityDraftRecord } from '../tools/activity-tools';
@@ -46,6 +46,53 @@ function getPartnerSearchTargetLabel(activityType: string, sportType?: string): 
   }
 
   return `${getPartnerActivityTypeLabel(activityType)}搭子`;
+}
+
+function mergeExploreResultsWithNearbyFallback(params: {
+  primary: ExploreResultItem[];
+  fallback: Array<{
+    id: string;
+    title: string;
+    lat: number;
+    lng: number;
+    locationName: string;
+    locationHint: string;
+    distance: number;
+    startAt: string;
+    type: string;
+    maxParticipants: number;
+    currentParticipants: number;
+  }>;
+  limit: number;
+}): ExploreResultItem[] {
+  const merged = [...params.primary];
+  const seenIds = new Set(params.primary.map((item) => item.id));
+
+  for (const item of params.fallback) {
+    if (seenIds.has(item.id)) {
+      continue;
+    }
+
+    merged.push({
+      id: item.id,
+      title: item.title,
+      type: item.type,
+      lat: item.lat,
+      lng: item.lng,
+      locationName: item.locationName,
+      distance: item.distance,
+      startAt: item.startAt,
+      currentParticipants: item.currentParticipants,
+      maxParticipants: item.maxParticipants,
+    });
+    seenIds.add(item.id);
+
+    if (merged.length >= params.limit) {
+      break;
+    }
+  }
+
+  return merged;
 }
 
 function buildPendingStructuredAction(action: StructuredAction): Record<string, unknown> {
@@ -200,7 +247,7 @@ const STRUCTURED_ACTION_HANDLERS: Record<StructuredActionType, {
   submit_partner_intent_form: {
     handler: handleSearchPartners,
     requiresAuth: false,
-    description: '兼容：提交找搭子表单并搜索',
+    description: '提交找搭子表单并搜索',
   },
   confirm_match: {
     handler: handleConfirmMatch,
@@ -381,13 +428,19 @@ const EXPLORE_ACTIVITY_TYPE_OPTIONS = [
   { label: '娱乐', value: 'entertainment' },
 ] as const;
 
-function normalizeExploreActivityType(value: string): string | undefined {
+type ExploreActivityType = 'food' | 'sports' | 'boardgame' | 'entertainment' | 'other';
+
+function normalizeExploreActivityType(value: string | undefined): ExploreActivityType | undefined {
+  if (!value) {
+    return undefined;
+  }
+
   const normalized = value.trim().toLowerCase();
   if (!normalized || normalized === 'all' || normalized === '全部' || normalized === '先看全部') {
     return undefined;
   }
 
-  const aliases: Record<string, string> = {
+  const aliases: Record<string, ExploreActivityType> = {
     food: 'food',
     '约饭': 'food',
     '吃饭': 'food',
@@ -401,6 +454,8 @@ function normalizeExploreActivityType(value: string): string | undefined {
     '娱乐': 'entertainment',
     'ktv': 'entertainment',
     'k歌': 'entertainment',
+    other: 'other',
+    '其他': 'other',
   };
 
   return aliases[normalized];
@@ -978,11 +1033,12 @@ async function handleExploreNearby(
   try {
     const locationName = toTextValue(payload.locationName, '附近') || '附近';
     const radius = toNumericValue(payload.radiusKm) ?? 5;
-    const type = toTextValue(payload.type) || undefined;
+    const type = normalizeExploreActivityType(toTextValue(payload.type) || undefined);
     const semanticQuery = typeof payload.semanticQuery === 'string' && payload.semanticQuery.trim()
       ? payload.semanticQuery.trim()
       : `${locationName}附近的活动`;
 
+    const resultLimit = 10;
     const scoredResults = await search({
       semanticQuery,
       filters: {
@@ -997,12 +1053,12 @@ async function handleExploreNearby(
           : {}),
         type: type ?? undefined,
       },
-      limit: 10,
+      limit: resultLimit,
       includeMatchReason: false,
       userId: userId ?? undefined,
     });
 
-    const results: ExploreResultItem[] = scoredResults.map((scored) => {
+    let results: ExploreResultItem[] = scoredResults.map((scored) => {
       const { activity, score, distance } = scored;
       const point = readActivityPoint(activity.location);
 
@@ -1020,6 +1076,22 @@ async function handleExploreNearby(
         score,
       };
     });
+
+    if (location && results.length < 2) {
+      const nearby = await getNearbyActivities({
+        lat: location.lat,
+        lng: location.lng,
+        radius: radius * 1000,
+        limit: resultLimit,
+        ...(type ? { type } : {}),
+      });
+
+      results = mergeExploreResultsWithNearbyFallback({
+        primary: results,
+        fallback: nearby.data,
+        limit: resultLimit,
+      });
+    }
 
     return {
       success: true,
@@ -1474,7 +1546,15 @@ async function handleConfirmMatch(
     data: {
       matchId,
       activityId: result.activityId,
-      message: '匹配已确认，活动已创建',
+      discussionEntry: result.discussionEntry,
+      message: '活动已创建',
+      // 用于前端直接跳转
+      navigationIntent: 'open_discussion',
+      navigationPayload: {
+        activityId: result.activityId,
+        title: result.discussionEntry?.title,
+        entry: 'match_confirmed',
+      },
     },
   };
 }

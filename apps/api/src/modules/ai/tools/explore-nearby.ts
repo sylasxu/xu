@@ -227,6 +227,16 @@ export function buildExploreNearbyResult(params: {
       title,
       ...(semanticQuery ? { semanticQuery } : {}),
     },
+    ...(results.length > 1 ? {
+      interaction: {
+        swipeable: true,
+        halfScreenDetail: true,
+        actions: [
+          { type: 'join', label: '报名', params: {} },
+          { type: 'share', label: '分享', params: {} },
+        ],
+      },
+    } : {}),
   };
 }
 

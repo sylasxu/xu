@@ -4,7 +4,6 @@
     "t-icon": "tdesign-miniprogram/icon/icon",
     "custom-navbar": "/components/custom-navbar/index",
     "ai-dock": "/components/ai-dock/index",
-    "agent-task-panel": "/components/agent-task-panel/index",
     "hot-chips": "/components/hot-chips/index",
     "message-bubble": "/components/message-bubble/index",
     "widget-dashboard": "/components/widget-dashboard/index",

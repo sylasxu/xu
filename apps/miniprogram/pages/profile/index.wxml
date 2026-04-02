@@ -66,7 +66,7 @@
         <view class="cell-icon cell-icon--purple">
           <t-icon name="time" size="40rpx" />
         </view>
-        <text class="cell-title">历史归档</text>
+        <text class="cell-title">已结束活动</text>
         <t-icon name="chevron-right" size="40rpx" color="#9CA3AF" />
       </view>
     </view>

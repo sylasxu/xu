@@ -160,6 +160,7 @@ export interface GenUIEntityCardBlock extends GenUIBlockBase {
 export interface GenUIListBlock extends GenUIBlockBase {
   type: "list";
   title?: string;
+  subtitle?: string;
   items: Record<string, unknown>[];
   center?: { lat: number; lng: number; name: string };
   semanticQuery?: string;

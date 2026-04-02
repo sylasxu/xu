@@ -571,7 +571,7 @@ export const aiController = new Elysia({ prefix: '/ai' })
   )
 
   // ==========================================
-  // AI 内容生成 (从 Growth 迁移)
+  // AI 内容生成
   // ==========================================
   .post(
     '/generate/content',
@@ -601,7 +601,7 @@ export const aiController = new Elysia({ prefix: '/ai' })
       detail: {
         tags: ['AI'],
         summary: 'AI 生成内容',
-        description: '根据主题生成海报文案、小红书笔记等社交媒体内容。从 Growth 模块迁移。',
+        description: '根据主题生成海报文案、小红书笔记等社交媒体内容。',
       },
       body: 'ai.contentGenerationRequest',
       response: {

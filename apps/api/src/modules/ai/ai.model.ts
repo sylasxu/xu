@@ -243,6 +243,7 @@ const GenUIListBlockSchema = t.Object({
   blockId: t.String({ minLength: 1 }),
   type: t.Literal('list'),
   title: t.Optional(t.String()),
+  subtitle: t.Optional(t.String()),
   items: t.Array(GenericObjectSchema),
   center: t.Optional(t.Object({
     lat: t.Number(),
@@ -452,6 +453,7 @@ const QuickItem = t.Object({
   type: QuickItemType,
   label: t.String({ description: '显示文案' }),
   prompt: t.String({ description: '点击后发送的 prompt' }),
+  icon: t.Optional(t.String({ description: '展示用图标' })),
   context: t.Optional(t.Any({ description: '附加上下文数据' })),
 });
 
@@ -459,6 +461,7 @@ const QuickItem = t.Object({
 const WelcomeSection = t.Object({
   id: t.String({ description: '分组 ID' }),
   title: t.String({ description: '分组标题' }),
+  icon: t.Optional(t.String({ description: '分组图标' })),
   items: t.Array(QuickItem),
 });
 
@@ -488,6 +491,7 @@ const WelcomeResponse = t.Object({
   socialProfile: t.Optional(SocialProfile),
   pendingActivities: t.Optional(t.Array(WelcomePendingActivity, { description: '待参加活动列表（最多 3 个）' })),
   quickPrompts: t.Array(t.Object({
+    icon: t.String({ description: '展示用图标' }),
     text: t.String(),
     prompt: t.String(),
   }), { description: '快捷入口' }),
@@ -813,7 +817,7 @@ const ViolationStatsResponse = t.Object({
 });
 
 // ==========================================
-// AI 内容生成 Schema (从 Growth 迁移)
+// AI 内容生成 Schema
 // ==========================================
 
 // 内容生成请求
@@ -1069,7 +1073,7 @@ export const aiModel = new Elysia({ name: 'aiModel' })
     'ai.securityEventsResponse': SecurityEventsResponse,
     'ai.securityStatsDBResponse': SecurityStatsDBResponse,
     // ==========================================
-    // AI 内容生成 (从 Growth 迁移)
+    // AI 内容生成
     // ==========================================
     'ai.contentGenerationRequest': ContentGenerationRequest,
     'ai.contentGenerationResponse': ContentGenerationResponse,
@@ -1116,7 +1120,7 @@ export type MetricsUsageResponse = Static<typeof MetricsUsageResponse>;
 // Prompt 类型导出 (v3.4 新增)
 export type PromptInfoResponse = Static<typeof PromptInfoResponse>;
 
-// AI 内容生成类型导出 (从 Growth 迁移)
+// AI 内容生成类型导出
 export type ContentGenerationRequest = Static<typeof ContentGenerationRequest>;
 export type GeneratedContentItem = Static<typeof GeneratedContentItem>;
 export type ContentGenerationResponse = Static<typeof ContentGenerationResponse>;

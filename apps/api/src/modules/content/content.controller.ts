@@ -1,5 +1,4 @@
 // Content Controller - 内容运营领域路由
-// 从 Growth/content 迁移内容库管理、AI 生成、效果追踪
 
 import { Elysia, t } from 'elysia';
 import { basePlugins, verifyAuth } from '../../setup';
@@ -253,14 +252,14 @@ export const contentController = new Elysia({ prefix: '/content' })
 
   .get(
     '/analytics',
-    async ({ set, jwt, headers }) => {
+    async ({ query, set, jwt, headers }) => {
       const user = await verifyAuth(jwt, headers);
       if (!user) {
         set.status = 401;
         return { code: 401, msg: '未授权' } satisfies ErrorResponse;
       }
       try {
-        const analytics = await getAnalytics();
+        const analytics = await getAnalytics(query);
         return analytics;
       } catch (error: any) {
         set.status = 500;
@@ -271,8 +270,9 @@ export const contentController = new Elysia({ prefix: '/content' })
       detail: {
         tags: ['Content'],
         summary: '效果分析统计',
-        description: '分析生成内容的互动数据表现。',
+        description: '分析生成内容的互动数据表现，支持按内容类型和时间范围筛选。',
       },
+      query: 'content.analyticsQuery',
       response: {
         200: 'content.analyticsResponse',
         401: 'content.error',

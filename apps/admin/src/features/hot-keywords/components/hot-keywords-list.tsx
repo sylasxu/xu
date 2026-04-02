@@ -32,8 +32,8 @@ export function HotKeywordsList() {
   return (
     <HotKeywordsListProvider>
       <ListPage
-        title='全局关键词管理'
-        description='管理热词库，配置关键词匹配规则和响应内容'
+        title='热词运营'
+        description='统一看直播间、海报和群分发入口里的热词命中、承接内容和转化效果'
         icon={Zap}
         isLoading={isLoading}
         error={error ?? undefined}

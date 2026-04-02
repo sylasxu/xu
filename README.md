@@ -1,609 +1,312 @@
 # 聚场 (JuChang)
 
-> **Personal Social Agent** —— AI 碎片化社交找搭子平台
-> 
-> 不是传统工具，是你的社交秘书。首页即对话，AI 理解意图，动态生成界面。
+聚场是一个面向线下社交场景的 AI 组局助手。
 
----
+用户不用先学会点哪个页面，而是可以直接说：
 
-## 🎯 产品定位：从工具到 Agent
+- 附近有没有局
+- 观音桥饭搭子有没有
+- 我想组个局
+- 麻将三缺一有没有人
 
-| 维度 | 传统社交工具 | 聚场 (Agent as a Service) |
-|------|-------------|--------------------------|
-| **交互模式** | 用户填表单、点按钮 | 用户说话，AI 理解并执行 |
-| **界面生成** | 静态 UI，所有人看到一样的 | **Generative UI**，根据意图动态生成 |
-| **服务对象** | 只服务"群主" | 服务每一个人（发起者 + 参与者）|
-| **用户关系** | 用完即走 | **记住你**，下次更懂你 |
+系统会继续帮用户找活动、找搭子、整理草稿、报名活动，并把后续动作接下去。
 
-**核心 Slogan**：想怎么玩？跟小聚说说。
+## 现在可以直接体验什么
 
----
+当前版本已经重点打通了几条最核心的主场景：
 
-## 🏗️ 技术架构全景
+- 找局
+  例如“附近有没有局”“观音桥附近有什么活动”“这个我能直接报吗”
+- 找搭子
+  例如“有没有饭搭子”“帮我找个羽毛球搭子”“观音桥饭搭子有没有”
+- 自己组局
+  例如“我想组个局”“帮我组一个周五晚的桌游局”
+- 补位与快速成局
+  例如“麻将三缺一有没有人”“差一个能不能帮我找”
+- 对话式续接
+  用户不用每轮都重说一遍，系统会尽量沿着上一件事继续往下接
 
-### 1. 前端架构：Chat-First + Generative UI
+## 项目在做什么
 
-#### 1.1 架构哲学
+聚场要解决的，不是“做一个社交工具”，而是把群聊里那些高频、碎片化、口语化的需求真正接住：
 
-聚场的前端架构围绕 **"对话即界面"** 的理念设计，彻底颠覆传统 App 的"货架式"交互：
+- 找局：附近有没有活动，这个局我能不能直接报
+- 找搭子：有没有饭搭子、球搭子、桌游搭子
+- 组局：我想自己发一个局，帮我先整理成草稿
+- 承接后续：报名之后、讨论区里、活动结束后还能继续接
 
-```
-传统 App: 首页 → 列表/地图 → 详情页 → 表单 → 提交
-聚场:     首页对话 → AI 理解意图 → 动态生成 Widget → 完成
-```
+对外，聚场是“组局助手”。
+对内，系统会用持续任务、结构化动作和工作记忆，把同一件事尽量连续地推进到结果。
 
-**Generative UI（生成式界面）** 是聚场的核心创新：
-- AI 根据用户意图，实时生成最合适的界面组件（Widget）
-- 同样是"探索附近"，不同用户在不同场景下看到不同的界面形态
-- 界面不是静态页面，而是流动的、上下文感知的对话流
+## 仓库结构
 
-#### 1.2 三端架构
+这是一个基于 Bun + Turborepo 的 monorepo：
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              Client Layer                                    │
-├─────────────────────────────┬─────────────────────────┬─────────────────────┤
-│    📱 微信小程序            │    🖥️ Admin 后台         │    🌐 H5 Web 应用   │
-│  ┌───────────────────────┐  │  ┌───────────────────┐  │  ┌───────────────┐ │
-│  │ Native WXML + TS      │  │  │ Vite + React 19   │  │  │ Next.js 15    │ │
-│  │ Zustand Vanilla       │  │  │ TanStack Router   │  │  │ SSR + OG 标签  │ │
-│  │ (~2KB 零运行时)       │  │  │ Eden Treaty       │  │  │ AI SDK Elements│ │
-│  │ Orval SDK (自动生成)   │  │  │ 类型安全 RPC      │  │  │ React Bits    │ │
-│  ├───────────────────────┤  │  ├───────────────────┤  │  ├───────────────┤ │
-│  │ Chat-First 架构        │  │  │ AI Playground     │  │  │ 跨平台邀请函   │ │
-│  │ • Chat Stream 对话流   │  │  │ • 对话审计        │  │  │ • 动态主题背景 │ │
-│  │ • Widget 组件系统      │  │  │ • 用量统计        │  │  │ • 微信一键跳转 │ │
-│  │ • AI Dock 超级输入坞   │  │  │ • 热词管理        │  │  │ • H5↔小程序   │ │
-│  │ • Hot Chips 热词胶囊   │  │  │ • God View 指挥舱 │  │  │   双向流量     │ │
-│  └───────────────────────┘  │  └───────────────────┘  │  └───────────────┘ │
-└─────────────────────────────┴─────────────────────────┴─────────────────────┘
-```
+- `apps/api`
+  Elysia API，负责 AI Chat、结构化动作、活动、搭子、通知等领域能力。
+- `apps/admin`
+  运营后台，负责活动运营、AI Ops、内容与安全管理。
+- `apps/miniprogram`
+  微信原生小程序，是当前最核心的用户端。
+- `apps/web`
+  Web / H5 入口，承接邀请页和 Web Chat 等场景。
+- `packages/db`
+  Drizzle ORM 数据源，是整个项目的单一数据真源。
+- `docs/PRD.md`
+  完整产品需求文档。
+- `docs/TAD.md`
+  完整技术架构文档。
 
-#### 1.3 小程序架构详解
-
-**Chat Stream 对话流架构** —— 首页即对话：
-
-```
-首页结构（去 Tabbar 化）
-┌─────────────────────────────────────────────────────────┐
-│  [≡]              聚场              [⋮]                │  ← Custom Navbar
-├─────────────────────────────────────────────────────────┤
-│  ┌─────────────────────────────────────────────────┐   │
-│  │ 🤖 晚上好～✨ 渣渣辉，今天想约啥？               │   │  ← Widget Dashboard
-│  │                                                 │   │     (进场欢迎卡片)
-│  │ 📅 今日待参加                                   │   │
-│  │ ┌─────────────────────────────────────────┐    │   │
-│  │ │ 🍲 观音桥火锅局 · 今晚 19:00            │    │   │
-│  │ └─────────────────────────────────────────┘    │   │
-│  └─────────────────────────────────────────────────┘   │
-│                                                         │
-│                    Chat Stream                          │  ← 无限滚动对话流
-│  ┌─────────────────────────────────────────────────┐   │
-│  │ [用户] 明晚观音桥打麻将，3缺1                    │   │
-│  └─────────────────────────────────────────────────┘   │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │ [AI] 收到！帮你整理一下：                        │   │
-│  │ 🀄 观音桥麻将局                                  │   │  ← Widget Draft
-│  │ ⏰ 明晚 20:00 · 📍 观音桥                        │   │     (意图解析卡片)
-│  │ [确认发布] [调整位置]                            │   │
-│  └─────────────────────────────────────────────────┘   │
-├─────────────────────────────────────────────────────────┤
-│  🔥 仙女山  🍲 观音桥火锅  🀄 麻将3缺1               │  ← Hot Chips 热词胶囊
-├─────────────────────────────────────────────────────────┤
-│  ┌─────────────────────────────────────────────────┐   │
-│  │ 想找点乐子？还是想约人？跟我说说... [📋] [🎤]  │   │  ← AI Dock
-│  └─────────────────────────────────────────────────┘   │     (超级输入坞)
-└─────────────────────────────────────────────────────────┘
-```
-
-**Widget 组件系统** —— Generative UI 的核心实现：
-
-| Widget | 触发场景 | 功能说明 |
-|--------|---------|---------|
-| `Widget_Dashboard` | 首次进入/新对话 | 进场欢迎 + 社交档案 + 快捷入口 |
-| `Widget_Draft` | AI 识别"创建意图" | 活动草稿卡片，支持地图预览、编辑、发布 |
-| `Widget_Share` | 活动发布成功 | 分享引导卡片，一键转发微信 |
-| `Widget_Explore` | AI 识别"探索意图" | 附近活动探索，支持 Swiper 滑动、半屏详情 |
-| `Widget_Launcher` | 查询"我的活动" | 活动发射台，管理我参与/发起的活动 |
-| `Widget_AskPreference` | 信息不足需追问 | 多轮对话偏好询问卡片 |
-
-**Widget 数据架构（A2UI - AI-to-UI）**：
-
-```typescript
-// AI Tool 返回的 WidgetChunk 数据结构
-interface WidgetChunk {
-  messageType: string;           // Widget 类型标识
-  payload: Record<string, any>;  // Widget 数据
-  fetchConfig?: {                // 引用模式数据源声明
-    source: 'nearby_activities' | 'activity_detail' | ...;
-    params: Record<string, unknown>;
-  };
-  interaction?: {                // 交互能力声明
-    swipeable?: boolean;         // 是否支持 Swiper 滑动
-    halfScreenDetail?: boolean;  // 是否支持半屏详情
-    actions?: WidgetAction[];    // 卡内操作按钮
-  };
-}
-```
-
-支持两种数据模式：
-- **自包含模式**：数据量小（≤5 条），零请求直接渲染
-- **引用模式**：数据量大（>5 条），Widget 自主调用 REST API 获取完整数据
-
-#### 1.4 H5 Web 应用（Digital Ascension 战略）
-
-```
-流量模型：外部曝光 → H5 邀请函 → 微信内转化
-
-抖音/小红书/直播间/线下海报
-        ↓
-  ┌─────────────────────────────────────┐
-  │  https://juchang.app/invite/xxx     │  ← H5 邀请函 (SSR + OG 标签)
-  │  • React Bits 动态背景               │
-  │  • 主题化视觉 (极光/派对/霓虹...)     │
-  │  • 社交氛围渲染 (报名人数/讨论预览)   │
-  │  • [打开小程序] 一键跳转             │
-  └─────────────────────────────────────┘
-        ↓
-  微信小程序 (报名/参与/讨论)
-```
-
-**技术亮点**：
-- **SSR 渲染**：Next.js 15 App Router，自动生成 OG meta 标签
-- **主题系统**：6 种预设主题（极光/派对/简约/霓虹/暖色/运动），AI 自动匹配
-- **动态背景**：React Bits 提供 Aurora、Ballpit、Particles 等动效
-- **微信跳转**：智能环境检测，微信内 URL Scheme 跳转，外部显示小程序码
-
----
-
-### 2. AI 架构：Vercel AI SDK + 模块化设计
-
-#### 2.1 架构概览
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           AI Module (AI 模块)                                │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                     Processor 管线 (v5.1)                            │   │
-│  │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────────┐   │   │
-│  │  │ Input   │ │ Keyword │ │ Intent  │ │ Profile │ │ Semantic    │   │   │
-│  │  │ Guard   │ │ Match   │ │ Classify│ │ Inject  │ │ Recall      │   │   │
-│  │  │ (P0层)   │ │ (P0层)   │ │ (P1+P2) │ │ (上下文) │ │ (记忆召回)   │   │   │
-│  │  └─────────┘ └─────────┘ └─────────┘ └─────────┘ └─────────────┘   │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                    │                                        │
-│  ┌─────────────────────────────────▼─────────────────────────────────┐    │
-│  │                         模型路由层                                   │    │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌───────────┐ │    │
-│  │  │ qwen-flash  │  │ qwen-plus   │  │ qwen3-max   │  │ deepseek  │ │    │
-│  │  │ (极速闲聊)   │  │ (深度思考)   │  │ (Tool Call)│  │ (备选)    │ │    │
-│  │  └─────────────┘  └─────────────┘  └─────────────┘  └───────────┘ │    │
-│  └───────────────────────────────────────────────────────────────────┘    │
-│                                    │                                        │
-│  ┌─────────────────────────────────▼─────────────────────────────────┐    │
-│  │                         Agent 执行层                                │    │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌───────────┐ │    │
-│  │  │ Tool Call   │  │ Widget Gen  │  │ Stream Out  │  │ Memory    │ │    │
-│  │  │ (工具调用)   │  │ (界面生成)   │  │ (流式输出)   │  │ (持久化)   │ │    │
-│  │  └─────────────┘  └─────────────┘  └─────────────┘  └───────────┘ │    │
-│  └───────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐   │
-│  │ Guardrails  │  │ Workflow    │  │ Evals       │  │ Observability   │   │
-│  │ (安全护栏)   │  │ (HITL流程)   │  │ (评估系统)   │  │ (可观测性)       │   │
-│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-#### 2.2 三层意图识别漏斗 (P0 → P1 → P2)
-
-```
-用户输入
-    │
-    ▼
-┌─────────────────┐
-│ P0: 全局关键词匹配 │ ← keyword-match-processor
-│ (Global Keywords) │   • 完全匹配/前缀匹配/模糊匹配
-│  响应: <0.5s      │   • 命中直接返回预设响应，零 AI 成本
-└────────┬────────┘
-         │ 未命中
-         ▼
-┌─────────────────┐
-│ P1: Feature Combo │ ← intent/feature-combination.ts
-│ (规则引擎)        │   • 多信号组合规则匹配
-│  置信度 ≥0.7      │   • 可配置化规则，支持动态加载
-└────────┬────────┘
-         │ 置信度 <0.7
-         ▼
-┌─────────────────┐
-│ P2: LLM Few-shot │ ← intent/llm-classifier.ts
-│ (LLM 分类器)     │   • 5-8 个标注样例 Few-shot
-│  兜底保障         │   • Edit Distance 缓存 (TTL 5min)
-└─────────────────┘
-```
-
-**意图类型**：
-- `create` - 创建活动 | `explore` - 探索附近 | `manage` - 管理活动
-- `partner` - 找搭子 | `chitchat` - 闲聊 | `unknown` - 未知兜底
-
-#### 2.3 记忆系统 (Memory System)
-
-三层记忆架构：
-
-| 记忆类型 | 存储位置 | 功能说明 |
-|---------|---------|---------|
-| **工作记忆** | `users.workingMemory` (JSONB) | 用户画像、偏好、禁忌、常去地点 |
-| **对话历史** | `conversations` + `conversation_messages` | 24h 会话窗口，持久化对话 |
-| **语义回忆** | `activities.embedding` (pgvector) | 向量检索相关活动和对话 |
-
-**工作记忆数据结构**：
-```typescript
-interface EnhancedUserProfile {
-  version: 2;
-  preferences: EnhancedPreference[];  // 偏好列表，带置信度和时间衰减
-  frequentLocations: string[];        // 常去地点
-  interestVectors: InterestVector[];  // MaxSim 个性化推荐向量
-  lastUpdated: Date;
-}
-
-interface EnhancedPreference {
-  category: 'activity_type' | 'time' | 'location' | 'social' | 'food';
-  sentiment: 'like' | 'dislike' | 'neutral';
-  value: string;
-  confidence: number;      // 0-1 置信度
-  mentionCount: number;    // 提及次数
-  updatedAt: Date;         // 用于时间衰减计算
-}
-```
-
-**时间衰减函数**：偏好有效性随时间递减
-```typescript
-// 0-7天: 完全有效 (1.0)
-// 7-30天: 线性衰减至 0.3
-// 30-90天: 线性衰减至 0.1
-// >90天: 完全失效 (0)
-```
-
-#### 2.4 RAG 语义检索系统
-
-```
-用户查询 "想找人一起打羽毛球"
-    │
-    ▼
-┌─────────────────┐
-│ 1. 生成查询向量  │ ← Qwen text-embedding-v4 (1536 维)
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ 2. Hard Filter   │ ← SQL 过滤 (位置、类型、时间、状态)
-│   (SQL 层)       │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ 3. Soft Rank     │ ← pgvector 余弦相似度排序
-│   (向量层)       │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ 4. MaxSim Boost  │ ← 用户兴趣向量个性化 (相似度>0.5 提升 20%)
-│   (个性化层)     │
-└────────┬────────┘
-         │
-         ▼
-    返回 ScoredActivity[]
-```
-
-**文本富集化**：活动在索引前进行语义增强
-```typescript
-// 原始: { title: "🏸 羽毛球", type: "sports", startAt: "..." }
-// 富集后: "🏸 羽毛球 运动 周三 晚上 活力"
-```
-
-#### 2.5 工具系统 (Tool System)
-
-Mastra 风格的 Tool 工厂：
-
-```typescript
-export const exploreNearbyTool = createToolFactory<ExploreNearbyParams, ExploreData>({
-  name: 'exploreNearby',
-  description: '探索附近活动，支持语义搜索',
-  parameters: exploreNearbySchema,
-  execute: async (params, context) => {
-    // context 自动注入 userId, location
-    const results = await search({
-      semanticQuery: params.semanticQuery,
-      filters: { location: params.center },
-      userId: context.userId,  // 用于 MaxSim 个性化
-    });
-    return { 
-      success: true, 
-      explore: results,
-      // 自动生成 WidgetChunk
-      widget: buildExploreWidget(results) 
-    };
-  },
-});
-```
-
-**工具类型**：
-- `createActivityDraft` - 创建活动草稿
-- `exploreNearby` - 探索附近活动（RAG 语义搜索）
-- `joinActivity` - 报名活动
-- `createPartnerIntent` - 创建搭子意向
-- `getMyActivities` - 获取我的活动
-
-#### 2.6 模型路由与降级策略
-
-```typescript
-// 意图 → 模型映射
-function getModelByIntent(intent: 'chat' | 'reasoning' | 'agent' | 'vision') {
-  switch (intent) {
-    case 'chat':      return qwen('qwen-flash');     // 极速闲聊
-    case 'reasoning': return qwen('qwen-plus');      // 深度思考
-    case 'agent':     return qwen('qwen3-max');      // Tool Calling
-    case 'vision':    return qwen('qwen-vl-max');    // 视觉理解
-  }
-}
-
-// 降级策略：Qwen 失败自动 fallback 到 DeepSeek
-const result = await withFallback(
-  () => generateText({ model: qwen('qwen-flash'), prompt }),
-  () => generateText({ model: deepseek('deepseek-chat'), prompt })
-);
-```
-
----
-
-### 3. AI Workflow：从输入到输出的完整链路
-
-#### 3.1 核心流程图
-
-```
-用户消息
-    │
-    ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 输入层                                                           │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐               │
-│  │ 提取消息内容 │ │ 频率限制检查 │ │ P0 热词匹配 │               │
-│  │             │ │ (30次/分钟)  │ │ (全局关键词)│               │
-│  └─────────────┘ └─────────────┘ └─────────────┘               │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │ 命中 → 直接返回预设响应
-                              ▼ 未命中
-┌─────────────────────────────────────────────────────────────────┐
-│ 处理层 (Processor 管线)                                          │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌───────────┐ │
-│  │ Input Guard │ │ Intent      │ │ User Profile│ │ Semantic  │ │
-│  │ (输入护栏)   │ │ Classify    │ │ (用户画像)   │ │ Recall    │ │
-│  │ • 敏感词过滤 │ │ (P1+P2)     │ │ • 偏好注入   │ │ (语义召回) │ │
-│  │ • 注入检测   │ │ • 三层漏斗   │ │ • 常去地点   │ │ • pgvector │ │
-│  │ • 长度限制   │ │             │ │             │ │ • Rerank  │ │
-│  └─────────────┘ └─────────────┘ └─────────────┘ └───────────┘ │
-└─────────────────────────────────┬───────────────────────────────┘
-                                  ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 执行层 (Agent Execution)                                         │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐               │
-│  │ LLM 推理    │ │ Tool Call   │ │ Widget Gen  │               │
-│  │ (流式输出)   │ │ (工具调用)   │ │ (界面生成)   │               │
-│  │ • streamText│ │ • 动态加载   │ │ • A2UI 协议  │               │
-│  │ • SSE 传输  │ │ • 执行结果   │ │ • 组件渲染   │               │
-│  └─────────────┘ └─────────────┘ └─────────────┘               │
-└─────────────────────────────────┬───────────────────────────────┘
-                                  ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 输出层                                                           │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌───────────┐ │
-│  │ 保存对话历史 │ │ 提取偏好    │ │ 记录指标    │ │ 流式响应  │ │
-│  │ (conversation│ │ (异步)      │ │ (Token/延迟)│ │ (SSE)     │ │
-│  │ _messages)   │ │             │ │             │ │           │ │
-│  └─────────────┘ └─────────────┘ └─────────────┘ └───────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-#### 3.2 HITL (Human-in-the-Loop) 工作流
-
-| 工作流类型 | 场景 | 交互步骤 |
-|-----------|------|---------|
-| **Draft Flow** | 活动创建 | AI 生成草稿 → 用户确认/修改 → 正式发布 |
-| **Match Flow** | 找搭子匹配 | AI 发现匹配 → 双向确认 → 交换联系方式 |
-| **Preference Flow** | 信息不足 | AI 追问 → 收集偏好 → 完成意图 |
-
-**找搭子追问流程示例**：
-```
-用户: "想找人一起打球"
-AI: "想玩点什么？" [选项: 羽毛球/篮球/乒乓球]
-用户: "羽毛球"
-AI: "什么时候有空？" [选项: 今晚/明天/周末]
-用户: "今晚"
-AI: "在哪附近？" [选项: 观音桥/解放碑/南坪]
-用户: "观音桥"
-AI: "OK！已为你生成[羽毛球·找搭子意向卡片]，系统将在后台持续寻找匹配..."
-```
-
-#### 3.3 安全护栏与可观测性
-
-**安全护栏**：
-- **输入检测**：敏感词过滤、注入攻击检测、长度限制
-- **输出检测**：内容安全审查、输出格式化
-- **频率限制**：30 次/分钟，防止滥用
-
-**可观测性**：
-- **追踪 (Tracing)**：完整请求链路追踪，记录每个 Processor 执行时间
-- **日志 (Logging)**：结构化日志，支持 `userId`、`intent`、`model` 等维度查询
-- **指标 (Metrics)**：
-  - Token 用量统计 (input/output)
-  - 延迟分布 (P50/P95/P99)
-  - 意图分类准确率
-  - Tool 调用成功率
-
----
-
-## 📁 项目结构
-
-```
-juchang/
-├── apps/
-│   ├── miniprogram/          # 微信原生小程序 (Chat-First UI)
-│   │   ├── pages/            # 主包页面 (首页/个人中心/消息)
-│   │   ├── subpackages/      # 分包
-│   │   │   ├── activity/     # 活动详情/创建/确认/探索/讨论区
-│   │   │   ├── chat/         # 活动群聊
-│   │   │   └── setting/      # 偏好设置
-│   │   ├── components/       # 37 个公共组件
-│   │   │   ├── ai-dock/          # 超级输入坞
-│   │   │   ├── chat-stream/      # 对话流容器
-│   │   │   ├── widget-*/         # 各类 Widget 组件
-│   │   │   └── hot-chips/        # 热词胶囊
-│   │   └── src/
-│   │       ├── stores/       # Zustand Vanilla
-│   │       └── api/          # Orval 生成的 SDK
-│   │
-│   ├── admin/                # Vite + React 19 管理后台
-│   │   └── src/features/
-│   │       ├── dashboard/        # God View 指挥舱
-│   │       ├── ai-ops/           # AI Playground/对话审计/用量统计
-│   │       ├── hot-keywords/     # P0 层热词管理
-│   │       └── safety/           # 风险审核
-│   │
-│   ├── web/                  # Next.js 15 H5 Web 应用
-│   │   ├── app/
-│   │   │   ├── invite/[id]/      # SSR 活动邀请函
-│   │   │   └── chat/             # H5 版小聚对话
-│   │   └── components/
-│   │       ├── ai-elements/      # AI SDK Elements
-│   │       └── invite/           # 邀请函页面组件
-│   │
-│   └── api/                  # ElysiaJS API 服务器
-│       └── src/modules/
-│           ├── ai/               # AI 模块 (核心)
-│           │   ├── processors/       # Processor 管线 (v5.1)
-│           │   ├── intent/           # 意图识别 (P1+P2)
-│           │   ├── memory/           # 记忆系统
-│           │   ├── tools/            # Tool 系统
-│           │   ├── models/           # 模型路由
-│           │   ├── rag/              # RAG 语义检索
-│           │   ├── workflow/         # HITL 工作流
-│           │   └── guardrails/       # 安全护栏
-│           ├── activities/       # 活动 CRUD
-│           ├── chat/             # WebSocket 讨论区
-│           └── hot-keywords/     # P0 层热词管理
-│
-├── packages/
-│   ├── db/                   # Drizzle ORM (16 张核心表)
-│   ├── utils/                # 通用工具
-│   └── ts-config/            # TypeScript 配置
-│
-└── docker/                   # PostgreSQL + PostGIS + pgvector
-```
-
----
-
-## 🚀 快速开始
+## 快速开始
 
 ### 前置要求
 
-- **Bun** >= 1.1.0 ([安装 Bun](https://bun.sh))
-- **Docker** (PostgreSQL 数据库)
-- **微信开发者工具** (小程序开发)
+- Bun `>= 1.3.4`
+- Docker
+- 微信开发者工具
 
 ### 一键启动
 
 ```bash
-# 克隆并进入项目
-git clone <repository-url>
-cd juchang
-
-# 一键设置并启动
-bun run setup && bun run dev:full
+bun run setup
+bun run dev
 ```
 
-### 分步设置
+`bun run setup` 会做这些事：
+
+- 初始化环境变量
+- 安装依赖
+- 启动数据库容器
+- 执行 `db:push`
+
+### 手动启动
 
 ```bash
-# 1. 初始化环境变量
 bun run env:init
-
-# 2. 安装依赖
 bun install
-
-# 3. 启动数据库
 bun run docker:up
-
-# 4. 推送 Schema
-sleep 5 && bun run db:push
-
-# 5. 启动开发环境
-bun run dev:full
+bun run db:push
+bun run dev
 ```
 
----
+### 小程序启动
 
-## 🔧 开发命令
+小程序不通过命令行热启动，使用微信开发者工具打开 [apps/miniprogram](/Users/sylas/Documents/GitHub/juchang/apps/miniprogram) 即可。
+
+如果 API 契约有更新，先执行：
 
 ```bash
-# 开发服务
-bun run dev           # 启动所有服务
-bun run dev:api       # 仅启动 API
-bun run dev:admin     # 仅启动 Admin
-bun run dev:web       # 仅启动 Web
-bun run dev:full      # API + 自动 SDK 生成
+bun run gen:api
+```
+
+## 常用命令
+
+```bash
+# 开发
+bun run dev            # 启动 api + admin + web
+bun run dev:api        # 仅启动 API
+bun run dev:admin      # 仅启动 Admin
+bun run dev:web        # 仅启动 Web
+bun run dev:mp         # 提示你去微信开发者工具打开小程序目录
+bun run dev:full       # API + 自动 SDK 生成链路
 
 # 数据库
-bun run db:migrate    # 执行迁移
-bun run db:generate   # 生成迁移文件
-bun run db:studio     # Drizzle Studio
+bun run db:push
+bun run db:generate
+bun run db:migrate
+bun run db:studio
+bun run db:reset
 
-# 代码生成
-bun run gen:api       # 生成 Orval SDK (小程序)
+# 协议 / 代码生成
+bun run gen:api
+bun run gen:genui-contract
 
-# Docker
-bun run docker:up     # 启动数据库
-bun run docker:down   # 停止数据库
+# 质量检查
+bun run test
+bun run type-check
+bun run arch:check
 ```
 
----
+## 本地服务地址
 
-## 🔗 服务地址
+- API: [http://localhost:3000](http://localhost:3000)
+- OpenAPI: [http://localhost:3000/openapi/json](http://localhost:3000/openapi/json)
+- Admin: [http://localhost:5173](http://localhost:5173)
+- Web: [http://localhost:1114](http://localhost:1114)
 
-| 服务 | 地址 |
-|------|------|
-| API | http://localhost:3000 |
-| OpenAPI | http://localhost:3000/openapi/json |
-| Admin | http://localhost:5173 |
-| Web | http://localhost:3001 |
-| Drizzle Studio | `bun run db:studio` |
+## 技术概览
 
----
+如果从开发视角快速理解，聚场当前的主干可以概括为：
 
-## 📚 文档
+- Chat-First
+  首页从对话进入，而不是从货架、地图或表单进入。
+- Structured Action
+  用户的一句话会优先被翻译成“找局 / 找搭子 / 组局 / 报名”等领域动作。
+- Processor Pipeline
+  AI 请求会经过输入护栏、关键词命中、意图分流、画像注入、语义召回等处理器。
+- Working Memory
+  系统会记住用户明确表达过的偏好、地点和部分身份线索，但不会乱编。
+- Generative UI
+  对话不是只回文字，还会返回活动结果卡、搭子结果卡、偏好追问、草稿卡等界面块。
 
-- [PRD 产品需求文档](docs/PRD.md) - 完整产品功能与用户体验设计
-- [TAD 技术架构文档](docs/TAD.md) - 完整技术架构、数据库设计、API 设计
+简单说，用户看到的是一个会接话、会接事的组局助手；系统内部则用领域动作、处理器管线和任务上下文把这件事稳稳接住。
 
----
+如果你想快速理解项目，不需要先读完整源码，建议先看下面两份总纲文档。
 
-## 🛠️ 技术栈
+## 为什么这套技术实现不只是“套了个 AI 聊天壳”
 
-| 领域 | 技术选型 | 说明 |
-|------|---------|------|
-| **小程序** | 微信原生 + TS + LESS + Zustand | 零运行时，极致性能 |
-| **Admin** | Vite + React 19 + TanStack Router | Eden Treaty 类型安全 RPC |
-| **Web** | Next.js 15 + React 19 + Tailwind CSS 4 | SSR + AI SDK Elements |
-| **API** | ElysiaJS + Bun | TypeBox Schema 契约驱动 |
-| **数据库** | PostgreSQL + PostGIS + pgvector | LBS + 向量语义搜索 |
-| **ORM** | Drizzle ORM + drizzle-typebox | TypeScript Native |
-| **AI** | Vercel AI SDK + Qwen3 | Agent 架构 + RAG + Rerank |
-| **部署** | Docker + 微信云托管 | 容器化部署 |
+如果从面试或技术交流视角看，聚场的难点不在“接一个大模型”，而在于怎么把自然语言稳定地落到真实业务动作上。
 
----
+这个项目当前主要解决了几类工程问题：
 
-## 📝 许可证
+- 自然语言到领域动作的转换
+  用户说的是“附近有没有局”“观音桥饭搭子有没有”“麻将三缺一有没有人”，系统内部要把它们收敛成 `explore_nearby`、`find_partner`、`search_partners`、`create_activity` 等明确动作，而不是只回一段文本。
+- 单轮聊天到连续任务的转换
+  用户不会每轮都把信息说完整，所以系统要能把“周末也可以”“那就观音桥”“我来组一个”理解成同一件事的后续推进，而不是全新问题。
+- 结构化能力和自然语言体验之间的平衡
+  内部需要有 Processor、结构化动作、任务上下文、工作记忆；但对外回复又不能像规则引擎播报，必须保留“像一个组局助手在接话”的感觉。
+- 多端一致性
+  同一个领域能力需要同时服务 API、小程序、Admin、Web，而不是每个端各写一套后端接口。
 
-MIT License
+## 技术亮点
+
+### 1. Chat Runtime 不是直接把用户输入丢给 LLM
+
+Chat 主链路大致是：
+
+```text
+用户输入
+  -> Chat Gateway
+  -> Structured Action Inference
+  -> Processor Pipeline
+  -> Tool / Workflow / LLM
+  -> Generative UI / Stream Response
+```
+
+这意味着系统会先判断：
+
+- 这句话能不能直接落成结构化动作
+- 当前是不是在续接一条已有任务
+- 是否需要补问一个关键条件
+- 是否应该直接返回结果卡，而不是继续闲聊
+
+核心模块：
+
+- `apps/api/src/modules/ai/ai-chat-gateway.service.ts`
+- `apps/api/src/modules/ai/ai.service.ts`
+- `apps/api/src/modules/ai/user-action/`
+- `apps/api/src/modules/ai/processors/`
+
+### 2. Processor Pipeline 负责“稳定理解”，不把复杂逻辑全塞进 prompt
+
+AI 请求会经过一条显式处理链，当前包括但不限于：
+
+- 输入护栏
+- 关键词命中
+- 意图分流
+- 用户画像注入
+- 语义召回
+- 输出护栏
+- 指标记录与请求持久化
+
+这让系统具备几个优点：
+
+- 易观察：每一步都能 trace
+- 易回归：可以针对某一层补回归，而不是整条链路只能黑盒试
+- 易演进：新增能力时，不需要把所有逻辑都塞进一份系统 prompt
+
+### 3. Structured Action + Generative UI，让聊天真正“办事”
+
+聚场不是“聊完再跳页面”，而是把聊天直接接到业务能力：
+
+- `explore_nearby`
+- `find_partner`
+- `search_partners`
+- `create_activity`
+- `join_activity`
+- `publish_draft`
+
+这些动作的结果不会只变成一句话，而会继续生成：
+
+- 活动结果卡
+- 搭子结果卡
+- 偏好追问
+- 活动草稿卡
+- 下一步 CTA
+
+也就是说，对话本身就是界面组织方式，而不只是输入方式。
+
+### 4. Database-First + Contract-Driven，保证多端一致
+
+这个仓库很强调“数据库是单一数据真源”：
+
+- 数据结构来自 `@juchang/db`
+- API 契约围绕领域能力定义
+- 小程序通过 Orval SDK 消费协议
+- Admin 通过 Eden Treaty 调用 API
+
+这样做的好处是：
+
+- 避免前后端各写一份类型
+- 避免为了某个页面反向拆后端接口
+- 更适合持续演进多端场景
+
+### 5. Working Memory 不是“假装记住你”，而是记录明确事实
+
+系统会记住用户明确表达过的内容，比如：
+
+- 偏好
+- 常去地点
+- 部分身份线索
+- 部分社交关系线索
+
+但不会乱编、不会脑补。这样设计的目标不是“做一个会装懂的聊天机器人”，而是做一个在真实社交场景里越来越懂你的助手。
+
+### 6. 工程质量依赖回归，而不是只靠人工点点看
+
+当前项目已经有比较明确的回归思路：
+
+- `bun test` 负责业务规则、服务函数、API 集成
+- `scripts/*.ts` 负责多用户流程和结果导向回归
+- 流式协议用真实 SSE / HTTP 回归验证
+
+常用质量命令：
+
+```bash
+bun run test
+bun run type-check
+bun run regression:flow
+bun run regression:protocol
+```
+
+如果从工程完成度来看，这套系统更像一个“任务型 AI 产品后端”，而不是一个只有 prompt 和聊天框的 demo。
+
+## 文档入口
+
+- [产品需求文档 PRD](./docs/PRD.md)
+- [技术架构文档 TAD](./docs/TAD.md)
+
+如果你主要关心 Chat 架构，建议重点阅读：
+
+- [docs/PRD.md](/Users/sylas/Documents/GitHub/juchang/docs/PRD.md)
+  关注“第一性用户场景”和“核心业务流程”
+- [docs/TAD.md](/Users/sylas/Documents/GitHub/juchang/docs/TAD.md)
+  关注 AI 模块、Structured Action、Agent Task Runtime、数据库与协议设计
+
+## 开发约定
+
+项目当前有几条非常重要的约定：
+
+- `@juchang/db` 是单一数据真源
+- Schema 从数据库派生，避免手写重复协议
+- API 按领域建模，不按客户端拆后端接口
+- 小程序使用 Orval 生成 SDK，不直接手写 `wx.request`
+- 日常本地联调以 `bun run db:push` 为主
+
+更多协作与编码规范见：
+
+- [AGENTS.md](/Users/sylas/Documents/GitHub/juchang/AGENTS.md)
+
+## 许可证
+
+MIT

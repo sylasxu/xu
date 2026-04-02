@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, unwrap } from '@/lib/eden'
 import { toast } from 'sonner'
 import type {
+  ContentAnalyticsResult,
   ContentFilters,
   ContentLibraryResult,
   ContentNote,
@@ -13,15 +14,35 @@ import type {
 
 /**
  * Content Hooks - 内容运营
- * 已迁移到领域化架构：/content/*
  */
+
+const EMPTY_TOPIC_SUGGESTIONS: TopicSuggestionResult = {
+  items: [],
+}
+
+const EMPTY_CONTENT_LIBRARY: ContentLibraryResult = {
+  items: [],
+  total: 0,
+  page: 1,
+  limit: 10,
+}
+
+const EMPTY_CONTENT_ANALYTICS: ContentAnalyticsResult = {
+  byType: [],
+  topNotes: [],
+  totalNotes: 0,
+  totalWithPerformance: 0,
+  pendingPerformanceCount: 0,
+  highPerformingCount: 0,
+  newFollowersTotal: 0,
+}
 
 export function useGenerateNotes() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (params: GenerateRequest) =>
+    mutationFn: async (params: GenerateRequest): Promise<ContentNote[]> =>
       // 内容生成统一走 /content/generate
-      unwrap(api.content.generate.post(params)),
+      (await unwrap(api.content.generate.post(params))) ?? [],
     onSuccess: async (notes) => {
       for (const note of notes) {
         queryClient.setQueryData(['content-detail', note.id], note)
@@ -36,19 +57,35 @@ export function useGenerateNotes() {
 export function useTopicSuggestions(params: TopicSuggestionRequest, refreshKey = 0) {
   return useQuery<TopicSuggestionResult>({
     queryKey: ['content-topic-suggestions', params, refreshKey],
-    queryFn: () => unwrap(api.content['topic-suggestions'].post(params)),
+    queryFn: async () =>
+      (await unwrap(api.content['topic-suggestions'].post(params))) ?? EMPTY_TOPIC_SUGGESTIONS,
   })
 }
 
 export function useContentLibrary(filters: ContentFilters) {
   return useQuery<ContentLibraryResult>({
     queryKey: ['content-library', filters],
-    queryFn: () => unwrap(api.content.library.get({ query: filters })),
+    queryFn: async () => {
+      const result = await unwrap(api.content.library.get({ query: filters }))
+
+      return result ?? {
+        ...EMPTY_CONTENT_LIBRARY,
+        page: filters.page,
+        limit: filters.limit,
+      }
+    },
+  })
+}
+
+export function useContentAnalytics() {
+  return useQuery<ContentAnalyticsResult>({
+    queryKey: ['content-analytics'],
+    queryFn: async () => (await unwrap(api.content.analytics.get())) ?? EMPTY_CONTENT_ANALYTICS,
   })
 }
 
 export function useContentDetail(id: string) {
-  return useQuery<ContentNote>({
+  return useQuery<ContentNote | null>({
     queryKey: ['content-detail', id],
     queryFn: () => unwrap(api.content.library({ id }).get()),
     enabled: !!id,

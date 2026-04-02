@@ -77,6 +77,12 @@ const PerformanceUpdateRequestSchema = t.Object({
   newFollowers: t.Optional(t.Integer({ minimum: 0, description: '新增粉丝' })),
 })
 
+const ContentAnalyticsQuerySchema = t.Object({
+  contentType: t.Optional(ContentTypeSchema),
+  startDate: t.Optional(t.String({ description: '开始日期 YYYY-MM-DD' })),
+  endDate: t.Optional(t.String({ description: '结束日期 YYYY-MM-DD' })),
+})
+
 const ContentAnalyticsResponseSchema = t.Object({
   byType: t.Array(t.Object({
     contentType: ContentTypeSchema,
@@ -88,6 +94,9 @@ const ContentAnalyticsResponseSchema = t.Object({
   topNotes: t.Array(ContentNoteResponseSchema),
   totalNotes: t.Integer(),
   totalWithPerformance: t.Integer(),
+  pendingPerformanceCount: t.Integer(),
+  highPerformingCount: t.Integer(),
+  newFollowersTotal: t.Integer(),
 })
 
 const ErrorResponseSchema = t.Object({
@@ -108,6 +117,7 @@ export const contentModel = new Elysia({ name: 'contentModel' }).model({
   'content.libraryQuery': ContentLibraryQuerySchema,
   'content.libraryResponse': ContentLibraryResponseSchema,
   'content.performanceUpdate': PerformanceUpdateRequestSchema,
+  'content.analyticsQuery': ContentAnalyticsQuerySchema,
   'content.analyticsResponse': ContentAnalyticsResponseSchema,
   'content.error': ErrorResponseSchema,
   'content.success': SuccessResponseSchema,
@@ -120,6 +130,7 @@ export type TopicSuggestionResponse = Static<typeof TopicSuggestionResponseSchem
 export type ContentLibraryQuery = Static<typeof ContentLibraryQuerySchema>
 export type ContentLibraryResponse = Static<typeof ContentLibraryResponseSchema>
 export type PerformanceUpdateRequest = Static<typeof PerformanceUpdateRequestSchema>
+export type ContentAnalyticsQuery = Static<typeof ContentAnalyticsQuerySchema>
 export type ContentAnalyticsResponse = Static<typeof ContentAnalyticsResponseSchema>
 export type ErrorResponse = Static<typeof ErrorResponseSchema>
 export type SuccessResponse = Static<typeof SuccessResponseSchema>

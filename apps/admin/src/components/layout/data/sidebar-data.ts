@@ -9,6 +9,7 @@ import {
   Shield,
   TrendingUp,
   FileText,
+  Zap,
 } from 'lucide-react'
 import { type SidebarData } from '../types'
 
@@ -27,23 +28,41 @@ export const sidebarData: SidebarData = {
     },
   ],
   navGroups: [
-    // 📊 指挥舱 - God View
     {
-      title: '指挥舱',
+      title: '运营主线',
       items: [
         {
-          title: '仪表盘',
+          title: '首页',
           url: '/',
           icon: LayoutDashboard,
         },
+        {
+          title: '内容工作台',
+          url: '/content',
+          icon: FileText,
+        },
+        {
+          title: '热词运营',
+          url: '/hot-keywords',
+          icon: Zap,
+        },
+        {
+          title: '活动与搭子',
+          url: '/activities',
+          icon: Calendar,
+        },
+        {
+          title: '风险审核',
+          url: '/safety/moderation',
+          icon: Shield,
+        },
       ],
     },
-    // 🧠 AI Ops - 大脑调优
     {
-      title: 'AI Ops',
+      title: '辅助工具',
       items: [
         {
-          title: 'Playground',
+          title: 'AI 调试',
           url: '/ai-ops/playground',
           icon: Play,
         },
@@ -57,50 +76,11 @@ export const sidebarData: SidebarData = {
           url: '/ai-ops/usage',
           icon: TrendingUp,
         },
-      ],
-    },
-    // 🛡️ 安全 - 保命模块
-    {
-      title: '安全',
-      items: [
-        {
-          title: '风险审核',
-          url: '/safety/moderation',
-          icon: Shield,
-        },
-        {
-          title: '活动管理',
-          url: '/safety/activities',
-          icon: Calendar,
-        },
-      ],
-    },
-    // 📝 内容运营
-    {
-      title: '内容运营',
-      items: [
-        {
-          title: '内容生成',
-          url: '/content',
-          icon: FileText,
-        },
-      ],
-    },
-    // 👥 用户 - 私域运营
-    {
-      title: '用户',
-      items: [
         {
           title: '用户管理',
           url: '/users',
           icon: Users,
         },
-      ],
-    },
-    // ⚙️ 设置
-    {
-      title: '设置',
-      items: [
         {
           title: '系统配置',
           url: '/settings',

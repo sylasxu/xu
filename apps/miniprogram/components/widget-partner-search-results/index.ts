@@ -22,9 +22,24 @@ interface PartnerSearchResultItem {
   actions: ActionItem[]
 }
 
+interface SearchSummary {
+  locationHint: string
+  timeHint?: string
+  count: number
+}
+
+interface GlobalAction {
+  label: string
+  action: string
+}
+
 interface ComponentData {
   activeIndex: number
   renderResults: PartnerSearchResultItem[]
+  renderSubtitle: string
+  renderSearchSummary?: SearchSummary
+  renderPrimaryAction?: GlobalAction
+  renderSecondaryAction?: GlobalAction
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -109,6 +124,7 @@ function normalizeResults(value: unknown): PartnerSearchResultItem[] {
 const INITIAL_DATA: ComponentData = {
   activeIndex: 0,
   renderResults: [],
+  renderSubtitle: '先看看这些已经注册过、方向也比较接近的搭子。',
 }
 
 Component({
@@ -121,6 +137,10 @@ Component({
       type: String,
       value: '先看看这些搭子',
     },
+    subtitle: {
+      type: String,
+      value: '先看看这些已经注册过、方向也比较接近的搭子。',
+    },
     presentation: {
       type: String,
       value: 'partner-carousel',
@@ -132,6 +152,18 @@ Component({
     results: {
       type: Array,
       value: [],
+    },
+    searchSummary: {
+      type: Object,
+      value: undefined,
+    },
+    primaryAction: {
+      type: Object,
+      value: undefined,
+    },
+    secondaryAction: {
+      type: Object,
+      value: undefined,
     },
   },
 
@@ -151,10 +183,15 @@ Component({
 
   methods: {
     syncResults() {
-      const renderResults = normalizeResults(this.properties.results)
+      const props = this.properties as Record<string, unknown>
+      const renderResults = normalizeResults(props.results)
       this.setData({
         renderResults,
         activeIndex: renderResults.length > 0 ? Math.min(this.data.activeIndex, renderResults.length - 1) : 0,
+        renderSubtitle: (props.subtitle as string | undefined) || '先看看这些已经注册过、方向也比较接近的搭子。',
+        renderSearchSummary: (props.searchSummary as SearchSummary | undefined) || undefined,
+        renderPrimaryAction: (props.primaryAction as GlobalAction | undefined) || undefined,
+        renderSecondaryAction: (props.secondaryAction as GlobalAction | undefined) || undefined,
       })
     },
 

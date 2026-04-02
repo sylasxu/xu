@@ -355,12 +355,11 @@ async function main(): Promise<void> {
     },
   ];
 
-  const logs: string[] = [];
   for (const scenario of scenarios) {
-    logs.push(...(await runScenario(scenario)));
+    const lines = await runScenario(scenario);
+    console.log(lines.join("\n"));
   }
 
-  console.log(logs.join("\n"));
   console.log("\nGenUI parity regression passed: web/mini semantic rendering is aligned.");
 }
 

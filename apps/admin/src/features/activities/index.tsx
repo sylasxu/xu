@@ -7,6 +7,7 @@ import { activitiesColumns } from './components/activities-columns'
 import { ActivitiesDialogs } from './components/activities-dialogs'
 import { ActivitiesPrimaryButtons } from './components/activities-primary-buttons'
 import { DataTableBulkActions } from './components/data-table-bulk-actions'
+import { PartnerProgressOverview } from './components/partner-progress-overview'
 import { ActivitiesListProvider } from './list-context'
 
 const route = getRouteApi('/_authenticated/activities/')
@@ -45,49 +46,53 @@ export function Activities() {
   return (
     <ActivitiesListProvider>
       <ListPage
-        title='活动管理'
-        description='管理平台活动，查看活动信息和状态'
+        title='活动与搭子'
+        description='看哪些活动和搭子结果值得继续扩散，哪些匹配还需要跟进'
         icon={Calendar}
         isLoading={isLoading}
         error={error ?? undefined}
         headerActions={<ActivitiesPrimaryButtons />}
         dialogs={<ActivitiesDialogs />}
       >
-        <DataTable
-          data={activities}
-          columns={activitiesColumns}
-          pageCount={Math.ceil(total / pageSize)}
-          search={search}
-          navigate={navigate}
-          getRowId={(row) => row.id}
-          searchPlaceholder='按标题、ID或地点搜索...'
-          emptyMessage='暂无活动'
-          enableRowSelection={true}
-          facetedFilters={[
-            {
-              columnId: 'status',
-              title: '状态',
-              options: [
-                { label: '草稿', value: 'draft' },
-                { label: '进行中', value: 'active' },
-                { label: '已完成', value: 'completed' },
-                { label: '已取消', value: 'cancelled' },
-              ],
-            },
-            {
-              columnId: 'type',
-              title: '类型',
-              options: [
-                { label: '美食', value: 'food' },
-                { label: '运动', value: 'sports' },
-                { label: '娱乐', value: 'entertainment' },
-                { label: '桌游', value: 'boardgame' },
-                { label: '其他', value: 'other' },
-              ],
-            },
-          ]}
-          bulkActions={(table) => <DataTableBulkActions table={table} />}
-        />
+        <div className='space-y-6'>
+          <PartnerProgressOverview />
+
+          <DataTable
+            data={activities}
+            columns={activitiesColumns}
+            pageCount={Math.ceil(total / pageSize)}
+            search={search}
+            navigate={navigate}
+            getRowId={(row) => row.id}
+            searchPlaceholder='按标题、ID或地点搜索...'
+            emptyMessage='暂无活动'
+            enableRowSelection={true}
+            facetedFilters={[
+              {
+                columnId: 'status',
+                title: '状态',
+                options: [
+                  { label: '草稿', value: 'draft' },
+                  { label: '进行中', value: 'active' },
+                  { label: '已完成', value: 'completed' },
+                  { label: '已取消', value: 'cancelled' },
+                ],
+              },
+              {
+                columnId: 'type',
+                title: '类型',
+                options: [
+                  { label: '美食', value: 'food' },
+                  { label: '运动', value: 'sports' },
+                  { label: '娱乐', value: 'entertainment' },
+                  { label: '桌游', value: 'boardgame' },
+                  { label: '其他', value: 'other' },
+                ],
+              },
+            ]}
+            bulkActions={(table) => <DataTableBulkActions table={table} />}
+          />
+        </div>
       </ListPage>
     </ActivitiesListProvider>
   )

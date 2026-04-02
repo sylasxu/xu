@@ -1,11 +1,9 @@
 // Analytics Service - 数据分析领域业务逻辑
-// 从 Growth 模块迁移趋势分析能力
 
 import {
   db,
   conversationMessages,
   aiConversationMetrics,
-  contentNotes,
   activities,
   participants,
   reports,
@@ -22,7 +20,6 @@ import {
   lt,
   inArray,
   not,
-  type SQL,
 } from '@juchang/db';
 import { generateObject, jsonSchema } from 'ai';
 import { t } from 'elysia';
@@ -30,8 +27,6 @@ import { toJsonSchema } from '@juchang/utils';
 import type { 
   TrendsQuery, 
   TrendsResponse, 
-  ContentPerformanceQuery, 
-  ContentPerformanceResponse,
   BenchmarkStatus,
   J2CMetric,
   WeeklyCompletedMetric,
@@ -42,10 +37,9 @@ import type {
 import { intentDisplayNames } from '../ai/intent/definitions';
 import type { IntentType } from '../ai/intent/types';
 import { getDeepSeekChat } from '../ai/models/adapters/deepseek';
-import { formatContentNote } from '../content/content.service';
 
 // ==========================================
-// 趋势分析 (从 Growth 迁移)
+// 趋势分析
 // ==========================================
 
 interface TrendWord {
@@ -91,7 +85,7 @@ function readConversationTextContent(value: unknown): string | null {
 
 /**
  * 获取趋势洞察
- * 从 Growth 模块迁移，使用 LLM 分析用户消息提取高频词
+ * 使用 LLM 分析用户消息提取高频词
  */
 export async function getTrendInsights(query: TrendsQuery): Promise<TrendsResponse> {
   const { period = '7d', source = 'conversations' } = query;
@@ -180,98 +174,6 @@ ${texts.join('\n')}`
     intentDistribution,
     period,
     generatedAt: new Date().toISOString(),
-  };
-}
-
-// ==========================================
-// 内容效果分析 (从 Content 迁移)
-// ==========================================
-
-// 综合互动指标计算 SQL 表达式
-const engagementScoreExpr = sql<number>`
-  coalesce(${contentNotes.views}, 0)
-  + coalesce(${contentNotes.likes}, 0) * 2
-  + coalesce(${contentNotes.collects}, 0) * 3
-  + coalesce(${contentNotes.comments}, 0) * 2
-`;
-
-/**
- * 获取内容效果分析
- * 从 Content 模块迁移
- */
-export async function getContentPerformance(
-  query: ContentPerformanceQuery
-): Promise<ContentPerformanceResponse> {
-  const { contentType, startDate, endDate } = query;
-  const contentConditions: SQL<unknown>[] = [];
-  if (contentType) {
-    contentConditions.push(eq(contentNotes.contentType, contentType));
-  }
-  if (startDate) {
-    contentConditions.push(gte(contentNotes.createdAt, new Date(startDate)));
-  }
-  if (endDate) {
-    const end = new Date(endDate);
-    end.setDate(end.getDate() + 1);
-    contentConditions.push(lt(contentNotes.createdAt, end));
-  }
-
-  const performanceConditions: SQL<unknown>[] = [
-    ...contentConditions,
-    isNotNull(contentNotes.views),
-  ];
-
-  const contentWhere = contentConditions.length > 0 ? and(...contentConditions) : undefined;
-  const performanceWhere = and(...performanceConditions);
-
-  // 按内容类型聚合
-  const byType = await db
-    .select({
-      contentType: contentNotes.contentType,
-      avgViews: sql<number>`coalesce(avg(${contentNotes.views}), 0)::float`,
-      avgLikes: sql<number>`coalesce(avg(${contentNotes.likes}), 0)::float`,
-      avgCollects: sql<number>`coalesce(avg(${contentNotes.collects}), 0)::float`,
-      count: sql<number>`count(*)::int`,
-    })
-    .from(contentNotes)
-    .where(performanceWhere)
-    .groupBy(contentNotes.contentType);
-
-  // 总笔记数
-  const [totalResult] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(contentNotes)
-    .where(contentWhere);
-
-  // 已回填效果数据的笔记数
-  const [perfResult] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(contentNotes)
-    .where(performanceWhere);
-
-  const totalNotes = totalResult?.count ?? 0;
-  const totalWithPerformance = perfResult?.count ?? 0;
-
-  // 热门内容排行榜
-  const topNotes = await db
-    .select()
-    .from(contentNotes)
-    .where(performanceWhere)
-    .orderBy(desc(engagementScoreExpr))
-    .limit(10);
-
-  return {
-    byType: byType.map(t => ({
-      contentType: t.contentType,
-      avgViews: t.avgViews,
-      avgLikes: t.avgLikes,
-      avgCollects: t.avgCollects,
-      count: t.count,
-    })),
-    topNotes: topNotes.map(formatContentNote),
-    totalNotes,
-    totalWithPerformance,
-    period: `${startDate || 'all'} to ${endDate || 'now'}`,
   };
 }
 

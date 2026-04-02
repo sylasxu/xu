@@ -1,3 +1,16 @@
+import { Link } from '@tanstack/react-router'
+import {
+  ArrowRight,
+  Calendar,
+  RefreshCw,
+  TrendingUp,
+  UserPlus,
+  Zap,
+} from 'lucide-react'
+import { Header } from '@/components/layout/header'
+import { Main } from '@/components/layout/main'
+import { ProfileDropdown } from '@/components/profile-dropdown'
+import { ThemeSwitch } from '@/components/theme-switch'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -6,28 +19,72 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Header } from '@/components/layout/header'
-import { Main } from '@/components/layout/main'
-import { ProfileDropdown } from '@/components/profile-dropdown'
-import { ThemeSwitch } from '@/components/theme-switch'
-import { useGodViewData } from '@/hooks/use-dashboard'
-import { 
-  RefreshCw, 
-  Users, 
-  Calendar, 
-  Coins, 
-  MessageSquare,
-  TrendingUp, 
-  TrendingDown,
-  Brain,
-  AlertTriangle,
-  Shield,
-  Clock,
-} from 'lucide-react'
-import { Link } from '@tanstack/react-router'
+import {
+  CONTENT_PLATFORM_OPTIONS,
+  CONTENT_TYPE_OPTIONS,
+} from '@/features/content-ops/data/schema'
+import { useOperationsDashboardData } from '@/hooks/use-dashboard'
+
+const contentTypeLabelMap = Object.fromEntries(
+  CONTENT_TYPE_OPTIONS.map((option) => [option.value, option.label])
+)
+
+const platformLabelMap = Object.fromEntries(
+  CONTENT_PLATFORM_OPTIONS.map((option) => [option.value, option.label])
+)
 
 export function Dashboard() {
-  const { data, isLoading, error, refetch } = useGodViewData()
+  const { data, isLoading, error, refetch } = useOperationsDashboardData()
+
+  const metrics = data?.businessMetrics
+  const topContentTypes = [...(data?.content.byType ?? [])]
+    .sort((a, b) => {
+      if (b.avgViews !== a.avgViews) {
+        return b.avgViews - a.avgViews
+      }
+
+      return b.count - a.count
+    })
+    .slice(0, 3)
+
+  const priorityItems = [
+    {
+      key: 'content-pending',
+      show: (data?.content.pendingPerformanceCount ?? 0) > 0,
+      title: `${data?.content.pendingPerformanceCount ?? 0} 篇内容还没补效果`,
+      description: '先把浏览、点赞和评论补完整，后面才知道哪些方向值得继续做。',
+      to: '/content' as const,
+      action: '去内容工作台',
+    },
+    {
+      key: 'keyword-attention',
+      show: !!data?.hotKeywords.needsAttention,
+      title: data?.hotKeywords.needsAttention
+        ? `热词「${data.hotKeywords.needsAttention.keyword}」命中 ${data.hotKeywords.needsAttention.hitCount} 次，但转化只有 ${data.hotKeywords.needsAttention.conversionRate.toFixed(1)}%`
+        : '热词需要关注',
+      description: '入口有人点，但承接内容还不够强，优先优化这一条的返回内容。',
+      to: '/hot-keywords' as const,
+      action: '去看热词',
+    },
+    {
+      key: 'content-winning',
+      show: (data?.content.highPerformingCount ?? 0) > 0,
+      title: `已经有 ${data?.content.highPerformingCount ?? 0} 篇高表现内容`,
+      description: '优先沿着已经跑出来的方向再出 1 到 2 个变体，不要从零猜题。',
+      to: '/content' as const,
+      action: '继续扩写',
+    },
+    {
+      key: 'activity-push',
+      show: true,
+      title: `本周成局 ${metrics?.weeklyCompletedCount.value ?? 0} 个`,
+      description: metrics?.weeklyCompletedCount.comparison
+        ? `${metrics.weeklyCompletedCount.comparison}，继续把能成局的活动往外推。`
+        : '优先继续扩散已经有承接势能的活动和搭子结果。',
+      to: '/activities' as const,
+      action: '去看活动',
+    },
+  ].filter((item) => item.show).slice(0, 3)
 
   return (
     <>
@@ -39,282 +96,296 @@ export function Dashboard() {
       </Header>
 
       <Main>
-        <div className='mb-4 flex items-center justify-between'>
-          <h1 className='text-2xl font-bold tracking-tight'>指挥舱</h1>
+        <div className='mb-4 flex flex-wrap items-end justify-between gap-3'>
+          <div>
+            <h1 className='text-2xl font-bold tracking-tight'>指挥舱</h1>
+            <p className='text-muted-foreground'>先看转化，再决定今天推什么。</p>
+          </div>
           <Button
-            variant="outline"
-            size="sm"
+            variant='outline'
+            size='sm'
             onClick={() => refetch()}
-            className="flex items-center gap-2"
+            className='flex items-center gap-2'
           >
-            <RefreshCw className="h-4 w-4" />
+            <RefreshCw className='h-4 w-4' />
             刷新
           </Button>
         </div>
 
         {error && (
-          <div className="mb-4 p-4 bg-red-50 text-red-600 rounded-lg">
+          <div className='mb-4 rounded-lg bg-red-50 p-4 text-red-600'>
             加载失败，请刷新重试
           </div>
         )}
 
-        {/* 实时概览 - 4 个核心指标 */}
-        <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6'>
-          {/* 今日活跃 */}
+        <div className='mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
+          <MetricCard
+            title='本周成局数'
+            icon={Calendar}
+            isLoading={isLoading}
+            value={metrics?.weeklyCompletedCount.value ?? 0}
+            hint={metrics?.weeklyCompletedCount.comparison ?? '先看这周真实跑通了多少活动。'}
+          />
+          <MetricCard
+            title='J2C 转化率'
+            icon={TrendingUp}
+            isLoading={isLoading}
+            value={`${metrics?.j2cRate.value.toFixed(1) ?? '0.0'}%`}
+            hint={metrics?.j2cRate.comparison ?? '先参局后组局，才说明链路真的在转。'}
+          />
+          <MetricCard
+            title='热词整体转化率'
+            icon={Zap}
+            isLoading={isLoading}
+            value={`${data?.hotKeywords.overallConversionRate.toFixed(1) ?? '0.0'}%`}
+            hint={`${data?.hotKeywords.totalConversions ?? 0} 次转化 / ${data?.hotKeywords.totalHits ?? 0} 次命中`}
+          />
+          <MetricCard
+            title='累计涨粉'
+            icon={UserPlus}
+            isLoading={isLoading}
+            value={data?.content.newFollowersTotal ?? 0}
+            hint='先看内容有没有带来真实新增关注，再决定要不要继续投。'
+          />
+        </div>
+
+        <div className='mb-6 grid gap-4 lg:grid-cols-2'>
           <Card>
-            <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
-              <CardTitle className='text-sm font-medium'>今日活跃</CardTitle>
-              <Users className='text-muted-foreground h-4 w-4' />
+            <CardHeader className='flex flex-row items-center justify-between'>
+              <CardTitle>今天优先处理</CardTitle>
+              <Link to='/activities' className='text-sm text-primary hover:underline'>
+                去活动与搭子
+              </Link>
             </CardHeader>
             <CardContent>
               {isLoading ? (
-                <Skeleton className="h-8 w-20" />
-              ) : (
-                <div className='text-2xl font-bold'>
-                  {data?.realtime.activeUsers || 0}
+                <LoadingRows count={3} />
+              ) : priorityItems.length > 0 ? (
+                <div className='space-y-4'>
+                  {priorityItems.map((item) => (
+                    <PriorityRow
+                      key={item.key}
+                      title={item.title}
+                      description={item.description}
+                      to={item.to}
+                      action={item.action}
+                    />
+                  ))}
                 </div>
+              ) : (
+                <EmptyHint text='今天暂时没有特别紧急的处理项，先去看内容和热词表现。' />
               )}
-              <p className='text-xs text-muted-foreground'>活跃用户数</p>
             </CardContent>
           </Card>
 
-          {/* 今日成局 */}
           <Card>
-            <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
-              <CardTitle className='text-sm font-medium'>今日成局</CardTitle>
-              <Calendar className='text-muted-foreground h-4 w-4' />
+            <CardHeader className='flex flex-row items-center justify-between'>
+              <CardTitle>热词 Top 3</CardTitle>
+              <Link to='/hot-keywords' className='text-sm text-primary hover:underline'>
+                去热词运营
+              </Link>
             </CardHeader>
             <CardContent>
               {isLoading ? (
-                <Skeleton className="h-8 w-20" />
-              ) : (
-                <div className='text-2xl font-bold'>
-                  {data?.realtime.todayActivities || 0}
+                <LoadingRows count={3} />
+              ) : data?.hotKeywords.topKeywords.length ? (
+                <div className='space-y-4'>
+                  {data.hotKeywords.topKeywords.map((item, index) => (
+                    <RankedRow
+                      key={item.keyword}
+                      rank={index + 1}
+                      title={item.keyword}
+                      subtitle={`${item.hitCount} 次命中 · ${item.conversionCount} 次转化`}
+                      meta={`${item.conversionRate.toFixed(1)}%`}
+                    />
+                  ))}
                 </div>
-              )}
-              <p className='text-xs text-muted-foreground'>完成的活动</p>
-            </CardContent>
-          </Card>
-
-          {/* Token 用量 */}
-          <Card>
-            <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
-              <CardTitle className='text-sm font-medium'>Token 用量</CardTitle>
-              <Coins className='text-muted-foreground h-4 w-4' />
-            </CardHeader>
-            <CardContent>
-              {isLoading ? (
-                <Skeleton className="h-8 w-20" />
               ) : (
-                <div className='text-2xl font-bold'>
-                  {Math.round(data?.realtime.tokenUsage || 0).toLocaleString()}
-                </div>
-              )}
-              <p className='text-xs text-muted-foreground'>
-                {data?.realtime.totalConversations || 0} 次对话 · tokens
-              </p>
-            </CardContent>
-          </Card>
-
-          {/* J2C 转化率 - 北极星指标 */}
-          <Card className="border-primary/50">
-            <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
-              <CardTitle className='text-sm font-medium'>J2C 转化率</CardTitle>
-              <TrendingUp className='text-primary h-4 w-4' />
-            </CardHeader>
-            <CardContent>
-              {isLoading ? (
-                <Skeleton className="h-8 w-20" />
-              ) : (
-                <>
-                  <div className='text-2xl font-bold'>
-                    {data?.northStar.value?.toFixed(1) || 0}%
-                  </div>
-                  <p className='text-xs text-muted-foreground'>
-                    {data?.northStar.comparison}
-                  </p>
-                </>
+                <EmptyHint text='还没有足够的热词数据，先从直播间和内容主推词开始积累。' />
               )}
             </CardContent>
           </Card>
         </div>
 
-        {/* AI 健康度 + 异常警报 */}
-        <div className='grid gap-4 lg:grid-cols-2 mb-6'>
-          {/* AI 健康度 */}
+        <div className='grid gap-4 lg:grid-cols-2'>
           <Card>
             <CardHeader className='flex flex-row items-center justify-between'>
-              <CardTitle className='flex items-center gap-2'>
-                <Brain className='h-5 w-5' />
-                AI 健康度
-              </CardTitle>
-              <Link to="/ai-ops/conversations" className="text-sm text-primary hover:underline">
-                查看详情 →
+              <CardTitle>内容方向</CardTitle>
+              <Link to='/content' className='text-sm text-primary hover:underline'>
+                去内容工作台
               </Link>
             </CardHeader>
             <CardContent>
               {isLoading ? (
-                <div className="space-y-4">
-                  <Skeleton className="h-16 w-full" />
+                <LoadingRows count={3} />
+              ) : topContentTypes.length ? (
+                <div className='space-y-4'>
+                  {topContentTypes.map((item, index) => (
+                    <RankedRow
+                      key={item.contentType}
+                      rank={index + 1}
+                      title={contentTypeLabelMap[item.contentType] ?? item.contentType}
+                      subtitle={`${item.count} 篇内容 · 平均点赞 ${Math.round(item.avgLikes)}`}
+                      meta={`平均浏览 ${Math.round(item.avgViews)}`}
+                    />
+                  ))}
                 </div>
               ) : (
-                <div className='grid grid-cols-3 gap-4'>
-                  {/* Bad Case 率 */}
-                  <div className='text-center p-3 bg-muted/50 rounded-lg'>
-                    <div className='text-2xl font-bold'>
-                      {data?.aiHealth.badCaseRate?.toFixed(1) || 0}%
-                    </div>
-                    <div className='text-xs text-muted-foreground mb-1'>Bad Case</div>
-                    <div className={`flex items-center justify-center text-xs ${
-                      (data?.aiHealth.badCaseTrend || 0) <= 0 
-                        ? 'text-green-600' 
-                        : 'text-red-600'
-                    }`}>
-                      {(data?.aiHealth.badCaseTrend || 0) <= 0 ? (
-                        <TrendingDown className='h-3 w-3 mr-1' />
-                      ) : (
-                        <TrendingUp className='h-3 w-3 mr-1' />
-                      )}
-                      {Math.abs(data?.aiHealth.badCaseTrend || 0).toFixed(1)}%
-                    </div>
-                  </div>
-
-                  {/* Tool 错误率 */}
-                  <div className='text-center p-3 bg-muted/50 rounded-lg'>
-                    <div className='text-2xl font-bold'>
-                      {data?.aiHealth.toolErrorRate?.toFixed(1) || 0}%
-                    </div>
-                    <div className='text-xs text-muted-foreground mb-1'>Tool Error</div>
-                    <div className={`flex items-center justify-center text-xs ${
-                      (data?.aiHealth.toolErrorTrend || 0) <= 0 
-                        ? 'text-green-600' 
-                        : 'text-red-600'
-                    }`}>
-                      {(data?.aiHealth.toolErrorTrend || 0) <= 0 ? (
-                        <TrendingDown className='h-3 w-3 mr-1' />
-                      ) : (
-                        <TrendingUp className='h-3 w-3 mr-1' />
-                      )}
-                      {Math.abs(data?.aiHealth.toolErrorTrend || 0).toFixed(1)}%
-                    </div>
-                  </div>
-
-                  {/* 平均响应时长 */}
-                  <div className='text-center p-3 bg-muted/50 rounded-lg'>
-                    <div className='text-2xl font-bold flex items-center justify-center'>
-                      <Clock className='h-4 w-4 mr-1' />
-                      {((data?.aiHealth.avgResponseTime || 0) / 1000).toFixed(1)}s
-                    </div>
-                    <div className='text-xs text-muted-foreground'>响应时长</div>
-                  </div>
-                </div>
+                <EmptyHint text='内容还不够多，先持续积累 1 到 2 周，再看哪个方向更稳。' />
               )}
             </CardContent>
           </Card>
 
-          {/* 异常警报 */}
           <Card>
             <CardHeader className='flex flex-row items-center justify-between'>
-              <CardTitle className='flex items-center gap-2'>
-                <AlertTriangle className='h-5 w-5' />
-                异常警报
-              </CardTitle>
-              <Link to="/safety/moderation" className="text-sm text-primary hover:underline">
-                去处理 →
+              <CardTitle>最近值得继续做的内容</CardTitle>
+              <Link to='/content' className='text-sm text-primary hover:underline'>
+                查看内容库
               </Link>
             </CardHeader>
             <CardContent>
               {isLoading ? (
-                <div className="space-y-3">
-                  <Skeleton className="h-10 w-full" />
-                  <Skeleton className="h-10 w-full" />
-                  <Skeleton className="h-10 w-full" />
+                <LoadingRows count={3} />
+              ) : data?.content.topNotes.length ? (
+                <div className='space-y-4'>
+                  {data.content.topNotes.map((note) => (
+                    <ContentNoteRow
+                      key={note.id}
+                      id={note.id}
+                      title={note.title}
+                      description={`${platformLabelMap[note.platform] ?? note.platform} · ${contentTypeLabelMap[note.contentType] ?? note.contentType}`}
+                    />
+                  ))}
                 </div>
               ) : (
-                <div className='space-y-3'>
-                  {/* 24h 报错 */}
-                  <div className='flex items-center justify-between p-3 bg-muted/50 rounded-lg'>
-                    <div className='flex items-center gap-2'>
-                      <div className={`w-2 h-2 rounded-full ${
-                        (data?.alerts.errorCount24h || 0) > 5 ? 'bg-red-500' : 
-                        (data?.alerts.errorCount24h || 0) > 0 ? 'bg-yellow-500' : 'bg-green-500'
-                      }`} />
-                      <span className='text-sm'>24h 报错</span>
-                    </div>
-                    <span className='font-bold'>{data?.alerts.errorCount24h || 0}</span>
-                  </div>
-
-                  {/* 敏感词触发 */}
-                  <div className='flex items-center justify-between p-3 bg-muted/50 rounded-lg'>
-                    <div className='flex items-center gap-2'>
-                      <div className={`w-2 h-2 rounded-full ${
-                        (data?.alerts.sensitiveWordHits || 0) > 10 ? 'bg-yellow-500' : 'bg-green-500'
-                      }`} />
-                      <span className='text-sm'>敏感词触发</span>
-                    </div>
-                    <span className='font-bold'>{data?.alerts.sensitiveWordHits || 0}</span>
-                  </div>
-
-                  {/* 待审核 */}
-                  <div className='flex items-center justify-between p-3 bg-muted/50 rounded-lg'>
-                    <div className='flex items-center gap-2'>
-                      <Shield className='h-4 w-4 text-muted-foreground' />
-                      <span className='text-sm'>待审核</span>
-                    </div>
-                    <span className='font-bold'>{data?.alerts.pendingModeration || 0}</span>
-                  </div>
-                </div>
+                <EmptyHint text='先补一些内容效果，后面这里就能更稳地告诉你哪些内容值得继续发。' />
               )}
             </CardContent>
           </Card>
         </div>
-
-        {/* 快捷入口 */}
-        <Card>
-          <CardHeader>
-            <CardTitle>快捷入口</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className='grid grid-cols-2 md:grid-cols-4 gap-4'>
-              <Link 
-                to="/ai-ops/playground" 
-                className="flex flex-col items-center p-4 bg-muted/50 rounded-lg hover:bg-muted transition-colors"
-              >
-                <MessageSquare className='h-8 w-8 mb-2 text-primary' />
-                <span className='text-sm font-medium'>Playground</span>
-                <span className='text-xs text-muted-foreground'>调试 AI</span>
-              </Link>
-
-              <Link 
-                to="/ai-ops/conversations" 
-                className="flex flex-col items-center p-4 bg-muted/50 rounded-lg hover:bg-muted transition-colors"
-              >
-                <Brain className='h-8 w-8 mb-2 text-primary' />
-                <span className='text-sm font-medium'>对话审计</span>
-                <span className='text-xs text-muted-foreground'>查看 Bad Case</span>
-              </Link>
-
-              <Link 
-                to="/safety/moderation" 
-                className="flex flex-col items-center p-4 bg-muted/50 rounded-lg hover:bg-muted transition-colors"
-              >
-                <Shield className='h-8 w-8 mb-2 text-primary' />
-                <span className='text-sm font-medium'>风险审核</span>
-                <span className='text-xs text-muted-foreground'>处理违规</span>
-              </Link>
-
-              <Link 
-                to="/content" 
-                className="flex flex-col items-center p-4 bg-muted/50 rounded-lg hover:bg-muted transition-colors"
-              >
-                <TrendingUp className='h-8 w-8 mb-2 text-primary' />
-                <span className='text-sm font-medium'>内容运营</span>
-                <span className='text-xs text-muted-foreground'>继续做内容</span>
-              </Link>
-            </div>
-          </CardContent>
-        </Card>
       </Main>
     </>
   )
+}
+
+function MetricCard({
+  title,
+  value,
+  hint,
+  icon: Icon,
+  isLoading,
+}: {
+  title: string
+  value: string | number
+  hint: string
+  icon: typeof Calendar
+  isLoading: boolean
+}) {
+  return (
+    <Card>
+      <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
+        <CardTitle className='text-sm font-medium'>{title}</CardTitle>
+        <Icon className='text-muted-foreground h-4 w-4' />
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <Skeleton className='h-8 w-20' />
+        ) : (
+          <div className='text-2xl font-bold'>{value}</div>
+        )}
+        <p className='text-xs text-muted-foreground'>{hint}</p>
+      </CardContent>
+    </Card>
+  )
+}
+
+function PriorityRow({
+  title,
+  description,
+  to,
+  action,
+}: {
+  title: string
+  description: string
+  to: '/activities' | '/content' | '/hot-keywords'
+  action: string
+}) {
+  return (
+    <div className='flex items-start justify-between gap-4 border-b pb-4 last:border-0 last:pb-0'>
+      <div className='min-w-0 space-y-1'>
+        <p className='font-medium'>{title}</p>
+        <p className='text-sm text-muted-foreground'>{description}</p>
+      </div>
+      <Button asChild variant='ghost' size='sm' className='shrink-0'>
+        <Link to={to}>
+          {action}
+          <ArrowRight className='ml-1 h-4 w-4' />
+        </Link>
+      </Button>
+    </div>
+  )
+}
+
+function ContentNoteRow({
+  id,
+  title,
+  description,
+}: {
+  id: string
+  title: string
+  description: string
+}) {
+  return (
+    <div className='flex items-start justify-between gap-4 border-b pb-4 last:border-0 last:pb-0'>
+      <div className='min-w-0 space-y-1'>
+        <p className='font-medium'>{title}</p>
+        <p className='text-sm text-muted-foreground'>{description}</p>
+      </div>
+      <Button asChild variant='ghost' size='sm' className='shrink-0'>
+        <Link to='/content/$id' params={{ id }}>
+          打开详情
+          <ArrowRight className='ml-1 h-4 w-4' />
+        </Link>
+      </Button>
+    </div>
+  )
+}
+
+function RankedRow({
+  rank,
+  title,
+  subtitle,
+  meta,
+}: {
+  rank: number
+  title: string
+  subtitle: string
+  meta: string
+}) {
+  return (
+    <div className='flex items-start justify-between gap-4 border-b pb-4 last:border-0 last:pb-0'>
+      <div className='flex min-w-0 items-start gap-3'>
+        <span className='text-muted-foreground w-5 shrink-0 text-sm font-medium'>{rank}</span>
+        <div className='min-w-0 space-y-1'>
+          <p className='font-medium'>{title}</p>
+          <p className='text-sm text-muted-foreground'>{subtitle}</p>
+        </div>
+      </div>
+      <span className='shrink-0 text-sm font-medium'>{meta}</span>
+    </div>
+  )
+}
+
+function LoadingRows({ count }: { count: number }) {
+  return (
+    <div className='space-y-4'>
+      {Array.from({ length: count }).map((_, index) => (
+        <Skeleton key={index} className='h-14 w-full' />
+      ))}
+    </div>
+  )
+}
+
+function EmptyHint({ text }: { text: string }) {
+  return <p className='text-sm text-muted-foreground'>{text}</p>
 }

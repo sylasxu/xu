@@ -90,35 +90,7 @@ type ComposerStatus = "ready" | "submitted";
 type TurnContextOverrides = Pick<GenUIRequestContext, "activityId" | "followUpMode" | "entry">;
 type GenUITransientTurn = NonNullable<GenUIRequestContext["transientTurns"]>[number];
 const MAX_TRANSIENT_TURNS = 8;
-type CurrentTaskActionKind = "structured_action" | "navigate" | "switch_tab";
 type PendingActionAuthMode = "login" | "bind_phone";
-
-type CurrentTaskAction = {
-  kind: CurrentTaskActionKind;
-  label: string;
-  action?: string;
-  payload?: Record<string, unknown>;
-  source?: string;
-  originalText?: string;
-  url?: string;
-};
-
-type CurrentTaskItem = {
-  id: string;
-  taskType: "join_activity" | "find_partner" | "create_activity";
-  taskTypeLabel: string;
-  currentStage: string;
-  stageLabel: string;
-  status: string;
-  goalText: string;
-  headline: string;
-  summary: string;
-  updatedAt: string;
-  activityId?: string;
-  activityTitle?: string;
-  primaryAction?: CurrentTaskAction;
-  secondaryAction?: CurrentTaskAction;
-};
 
 type StructuredPendingAction = {
   type: "structured_action";
@@ -132,13 +104,6 @@ type StructuredPendingAction = {
 type PendingAgentActionState = {
   action: StructuredPendingAction;
   message?: string;
-};
-
-type TaskChatPromptPayload = {
-  prompt: string;
-  activityId?: string;
-  followUpMode?: "review" | "rebook" | "kickoff";
-  entry?: string;
 };
 
 type MessageCenterFocusIntent = {
@@ -343,87 +308,6 @@ function persistPendingAgentActionState(state: PendingAgentActionState | null): 
   }
 
   window.sessionStorage.setItem(PENDING_AGENT_ACTION_STORAGE_KEY, JSON.stringify(state));
-}
-
-function readCurrentTaskAction(value: unknown): CurrentTaskAction | null {
-  if (!isRecord(value) || typeof value.kind !== "string" || typeof value.label !== "string") {
-    return null;
-  }
-
-  if (value.kind !== "structured_action" && value.kind !== "navigate" && value.kind !== "switch_tab") {
-    return null;
-  }
-
-  return {
-    kind: value.kind,
-    label: value.label,
-    ...(typeof value.action === "string" ? { action: value.action } : {}),
-    ...(isRecord(value.payload) ? { payload: value.payload } : {}),
-    ...(typeof value.source === "string" ? { source: value.source } : {}),
-    ...(typeof value.originalText === "string" ? { originalText: value.originalText } : {}),
-    ...(typeof value.url === "string" ? { url: value.url } : {}),
-  };
-}
-
-function readCurrentTaskItem(value: unknown): CurrentTaskItem | null {
-  if (
-    !isRecord(value) ||
-    typeof value.id !== "string" ||
-    typeof value.taskType !== "string" ||
-    typeof value.taskTypeLabel !== "string" ||
-    typeof value.currentStage !== "string" ||
-    typeof value.stageLabel !== "string" ||
-    typeof value.status !== "string" ||
-    typeof value.goalText !== "string" ||
-    typeof value.headline !== "string" ||
-    typeof value.summary !== "string" ||
-    typeof value.updatedAt !== "string"
-  ) {
-    return null;
-  }
-
-  if (
-    value.taskType !== "join_activity" &&
-    value.taskType !== "find_partner" &&
-    value.taskType !== "create_activity"
-  ) {
-    return null;
-  }
-
-  return {
-    id: value.id,
-    taskType: value.taskType,
-    taskTypeLabel: value.taskTypeLabel,
-    currentStage: value.currentStage,
-    stageLabel: value.stageLabel,
-    status: value.status,
-    goalText: value.goalText,
-    headline: value.headline,
-    summary: value.summary,
-    updatedAt: value.updatedAt,
-    ...(typeof value.activityId === "string" ? { activityId: value.activityId } : {}),
-    ...(typeof value.activityTitle === "string" ? { activityTitle: value.activityTitle } : {}),
-    ...(value.primaryAction ? { primaryAction: readCurrentTaskAction(value.primaryAction) ?? undefined } : {}),
-    ...(value.secondaryAction ? { secondaryAction: readCurrentTaskAction(value.secondaryAction) ?? undefined } : {}),
-  };
-}
-
-function readTaskChatPromptPayload(value: unknown): TaskChatPromptPayload | null {
-  if (!isRecord(value) || typeof value.prompt !== "string" || !value.prompt.trim()) {
-    return null;
-  }
-
-  const followUpMode =
-    value.followUpMode === "review" || value.followUpMode === "rebook" || value.followUpMode === "kickoff"
-      ? value.followUpMode
-      : undefined;
-
-  return {
-    prompt: value.prompt.trim(),
-    ...(typeof value.activityId === "string" ? { activityId: value.activityId } : {}),
-    ...(followUpMode ? { followUpMode } : {}),
-    ...(typeof value.entry === "string" ? { entry: value.entry } : {}),
-  };
 }
 
 function readMessageCenterFocusIntent(value: unknown): MessageCenterFocusIntent | null {
@@ -678,53 +562,6 @@ function countGenUIFormMissingRequiredFields(
   }
 
   return missingCount;
-}
-
-function extractActivityIdFromMiniProgramUrl(url: string): string | null {
-  try {
-    const parsed = new URL(url, GROUP_INVITE_URL);
-    return readString(parsed.searchParams.get("id"));
-  } catch {
-    return null;
-  }
-}
-
-function resolveWebTaskNavigation(action: CurrentTaskAction): { url?: string; focusIntent?: MessageCenterFocusIntent } {
-  if (!action.url) {
-    return {};
-  }
-
-  if (action.kind === "switch_tab" && action.url === "/pages/message/index") {
-    return {
-      focusIntent: readMessageCenterFocusIntent(action.payload) ?? undefined,
-    };
-  }
-
-  if (action.url.startsWith("/subpackages/activity/discussion/index")) {
-    const activityId = extractActivityIdFromMiniProgramUrl(action.url);
-    if (!activityId) {
-      return {};
-    }
-
-    return {
-      url: `/invite/${activityId}?entry=task_runtime_panel`,
-    };
-  }
-
-  if (action.url.startsWith("/subpackages/activity/detail/index")) {
-    const activityId = extractActivityIdFromMiniProgramUrl(action.url);
-    if (!activityId) {
-      return {};
-    }
-
-    return {
-      url: `/invite/${activityId}`,
-    };
-  }
-
-  return {
-    url: action.url,
-  };
 }
 
 function parseSSEPacket(packet: string): { eventName: string; dataText: string } | null {
@@ -1337,42 +1174,6 @@ function formatWelcomeActivityTime(startAt: string): string {
   }).format(date);
 }
 
-function formatRelativeTime(dateString: string | null | undefined): string {
-  if (!dateString) {
-    return "刚刚";
-  }
-
-  const date = new Date(dateString);
-  if (Number.isNaN(date.getTime())) {
-    return dateString;
-  }
-
-  const now = new Date();
-  const diff = now.getTime() - date.getTime();
-  if (diff < 60 * 1000) {
-    return "刚刚";
-  }
-
-  if (diff < 60 * 60 * 1000) {
-    return `${Math.floor(diff / (60 * 1000))} 分钟前`;
-  }
-
-  if (date.toDateString() === now.toDateString()) {
-    return `${date.getHours().toString().padStart(2, "0")}:${date
-      .getMinutes()
-      .toString()
-      .padStart(2, "0")}`;
-  }
-
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (date.toDateString() === yesterday.toDateString()) {
-    return "昨天";
-  }
-
-  return `${date.getMonth() + 1}/${date.getDate()}`;
-}
-
 function getProfileHint(
   completeness: number,
   profileHints: WelcomeUiPayload["profileHints"] = DEFAULT_PROFILE_HINTS
@@ -1426,10 +1227,9 @@ export default function ChatPage() {
   });
   const [clientLocation, setClientLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [welcomeLocationResolved, setWelcomeLocationResolved] = useState(false);
-  const [currentTasks, setCurrentTasks] = useState<CurrentTaskItem[]>([]);
   const [pendingAgentAction, setPendingAgentAction] = useState<PendingAgentActionState | null>(null);
   const [pendingAgentActionHydrated, setPendingAgentActionHydrated] = useState(false);
-  const [taskPanelNotice, setTaskPanelNotice] = useState<string | null>(null);
+  const [pendingActionNotice, setPendingActionNotice] = useState<string | null>(null);
   const [messageCenterOpenSignal, setMessageCenterOpenSignal] = useState(0);
   const [messageCenterFocusMatchId, setMessageCenterFocusMatchId] = useState<string | null>(null);
   const isDarkMode = false;
@@ -1596,68 +1396,6 @@ export default function ChatPage() {
     };
   }, [clientLocation, welcomeLocationResolved]);
 
-  const loadCurrentTasks = useCallback(async () => {
-    if (!authToken) {
-      setCurrentTasks([]);
-      return;
-    }
-
-    try {
-      const response = await fetch(`${API_BASE}/ai/tasks/current`, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-        },
-        cache: "no-store",
-      });
-
-      if (!response.ok) {
-        setCurrentTasks([]);
-        return;
-      }
-
-      const payload = (await response.json()) as unknown;
-      if (!isRecord(payload) || !Array.isArray(payload.items)) {
-        setCurrentTasks([]);
-        return;
-      }
-
-      setCurrentTasks(
-        payload.items
-          .map((item) => readCurrentTaskItem(item))
-          .filter((item): item is CurrentTaskItem => item !== null)
-      );
-    } catch {
-      setCurrentTasks([]);
-    }
-  }, [authToken]);
-
-  useEffect(() => {
-    void loadCurrentTasks();
-  }, [loadCurrentTasks]);
-
-  const recordRebookFollowUp = useCallback(
-    async (activityId?: string) => {
-      if (!activityId || !authToken) {
-        return;
-      }
-
-      try {
-        await fetch(`${API_BASE}/participants/rebook-follow-up`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${authToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ activityId }),
-        });
-      } catch {
-        // best effort only
-      }
-    },
-    [authToken]
-  );
-
   const applyCompletionEffectsFromBlocks = useCallback((blocks: GenUIBlock[]) => {
     for (const block of blocks) {
       if (block.type !== "alert") {
@@ -1677,7 +1415,7 @@ export default function ChatPage() {
             },
             ...(block.message.trim() ? { message: block.message.trim() } : {}),
           });
-          setTaskPanelNotice(null);
+          setPendingActionNotice(null);
         }
         return;
       }
@@ -2134,12 +1872,9 @@ export default function ChatPage() {
         );
       } finally {
         setStatus("ready");
-        if (authToken) {
-          void loadCurrentTasks();
-        }
       }
     },
-    [applyCompletionEffectsFromBlocks, authToken, clientLocation, conversationId, isSending, loadCurrentTasks, messages]
+    [applyCompletionEffectsFromBlocks, authToken, clientLocation, conversationId, isSending, messages]
   );
 
   const resumeStructuredPendingAction = useCallback(async () => {
@@ -2149,7 +1884,7 @@ export default function ChatPage() {
     }
 
     if (!nextToken) {
-      setTaskPanelNotice(
+      setPendingActionNotice(
         pendingAgentAction.action.authMode === "bind_phone"
           ? "先完成绑定手机号，再回到这里继续这一步。"
           : "先完成登录，再回到这里继续这一步。"
@@ -2160,7 +1895,7 @@ export default function ChatPage() {
     setAuthToken(nextToken);
     const actionToResume = pendingAgentAction.action;
     setPendingAgentAction(null);
-    setTaskPanelNotice(null);
+    setPendingActionNotice(null);
 
     await sendTurn(
       {
@@ -2184,69 +1919,6 @@ export default function ChatPage() {
       hasResumedPendingActionRef.current = false;
     });
   }, [authToken, isSending, pendingAgentAction, resumeStructuredPendingAction]);
-
-  const executeCurrentTaskAction = useCallback(
-    async (action: CurrentTaskAction) => {
-      if (isSending) {
-        return;
-      }
-
-      if (action.kind === "structured_action") {
-        if (!action.action) {
-          return;
-        }
-
-        if (action.action === "start_follow_up_chat") {
-          const promptPayload = readTaskChatPromptPayload(action.payload);
-          if (!promptPayload) {
-            return;
-          }
-
-          if (promptPayload.followUpMode === "rebook" && promptPayload.activityId) {
-            await recordRebookFollowUp(promptPayload.activityId);
-          }
-
-          await sendTurn(
-            {
-              type: "text",
-              text: promptPayload.prompt,
-            },
-            action.originalText || action.label,
-            {
-              ...(promptPayload.activityId ? { activityId: promptPayload.activityId } : {}),
-              ...(promptPayload.followUpMode ? { followUpMode: promptPayload.followUpMode } : {}),
-              ...(promptPayload.entry ? { entry: promptPayload.entry } : {}),
-            }
-          );
-          return;
-        }
-
-        await sendTurn(
-          {
-            type: "action",
-            action: action.action,
-            actionId: randomId("action"),
-            params: action.payload,
-            displayText: action.originalText || action.label,
-          },
-          action.originalText || action.label
-        );
-        return;
-      }
-
-      const navigation = resolveWebTaskNavigation(action);
-      if (navigation.focusIntent) {
-        setMessageCenterFocusMatchId(navigation.focusIntent.matchId ?? null);
-        setMessageCenterOpenSignal((value) => value + 1);
-        return;
-      }
-
-      if (navigation.url && typeof window !== "undefined") {
-        window.location.href = navigation.url;
-      }
-    },
-    [isSending, recordRebookFollowUp, sendTurn]
-  );
 
   const handleSubmit = useCallback(
     async ({ text }: { text: string }) => {
@@ -2427,7 +2099,7 @@ export default function ChatPage() {
           </div>
         </header>
 
-        {pendingAgentAction || currentTasks.length > 0 ? (
+        {pendingAgentAction ? (
           <div className="shrink-0 space-y-2 px-3 pb-2">
             {pendingAgentAction ? (
               <section
@@ -2449,8 +2121,8 @@ export default function ChatPage() {
                         ? "完成绑定手机号后回到这里，我会自动继续。"
                         : "完成登录后回到这里，我会自动继续。"}
                     </p>
-                    {taskPanelNotice ? (
-                      <p className={cn("text-xs", isDarkMode ? "text-amber-100/80" : "text-amber-700")}>{taskPanelNotice}</p>
+                    {pendingActionNotice ? (
+                      <p className={cn("text-xs", isDarkMode ? "text-amber-100/80" : "text-amber-700")}>{pendingActionNotice}</p>
                     ) : null}
                   </div>
                   <button
@@ -2469,76 +2141,6 @@ export default function ChatPage() {
                 </div>
               </section>
             ) : null}
-
-            {currentTasks.map((task) => (
-              <section
-                key={task.id}
-                className={cn(
-                  "rounded-[24px] border px-4 py-3 shadow-[0_18px_34px_-30px_rgba(52,72,158,0.5)]",
-                  isDarkMode
-                    ? "border-[#334185] bg-[#141c45]/88 text-[#eef2ff]"
-                    : "border-white/70 bg-white/72 text-[#1b2558]"
-                )}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={cn(
-                          "rounded-full px-2 py-0.5 text-[11px] font-medium",
-                          isDarkMode ? "bg-white/10 text-[#dce1ff]" : "bg-[#eef2ff] text-[#4250a7]"
-                        )}
-                      >
-                        {task.taskTypeLabel}
-                      </span>
-                      <span className={cn("text-[11px]", isDarkMode ? "text-[#aeb7e7]" : "text-[#6d78a8]")}>
-                        {task.stageLabel}
-                      </span>
-                    </div>
-                    <p className="truncate text-[15px] font-semibold">{task.headline}</p>
-                    <p className={cn("text-xs leading-5", isDarkMode ? "text-[#c6cef5]" : "text-[#5f6b9d]")}>{task.summary}</p>
-                  </div>
-                  <span className={cn("shrink-0 text-[11px]", isDarkMode ? "text-[#9ca8df]" : "text-[#7280b0]")}>
-                    {formatRelativeTime(task.updatedAt)}
-                  </span>
-                </div>
-
-                {task.primaryAction || task.secondaryAction ? (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {task.primaryAction ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void executeCurrentTaskAction(task.primaryAction!);
-                        }}
-                        disabled={isSending}
-                        className={cn(
-                          "rounded-full px-3 py-1.5 text-xs font-medium transition disabled:opacity-45",
-                          isDarkMode ? "bg-[#5b67f4] text-white hover:bg-[#6a75ff]" : "bg-[#5b67f4] text-white hover:bg-[#4d59ec]"
-                        )}
-                      >
-                        {task.primaryAction.label}
-                      </button>
-                    ) : null}
-                    {task.secondaryAction ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void executeCurrentTaskAction(task.secondaryAction!);
-                        }}
-                        disabled={isSending}
-                        className={cn(
-                          "rounded-full px-3 py-1.5 text-xs font-medium transition disabled:opacity-45",
-                          isDarkMode ? "bg-white/10 text-white hover:bg-white/15" : "bg-[#edf1ff] text-[#33407c] hover:bg-[#e4eaff]"
-                        )}
-                      >
-                        {task.secondaryAction.label}
-                      </button>
-                    ) : null}
-                  </div>
-                ) : null}
-              </section>
-            ))}
           </div>
         ) : null}
 
@@ -3592,6 +3194,69 @@ function ResultCarousel({
   );
 }
 
+function ListBlockGlobalActions({
+  meta,
+  disabled,
+  onActionSelect,
+}: {
+  meta: Record<string, unknown>;
+  disabled: boolean;
+  onActionSelect?: (option: ActionOption) => Promise<void>;
+}) {
+  const primaryAction = isRecord(meta.primaryAction) ? meta.primaryAction : null;
+  const secondaryAction = isRecord(meta.secondaryAction) ? meta.secondaryAction : null;
+
+  if (!primaryAction && !secondaryAction) {
+    return null;
+  }
+
+  const primaryLabel = typeof primaryAction?.label === "string" ? primaryAction.label : "";
+  const primaryActionType = typeof primaryAction?.action === "string" ? primaryAction.action : "";
+  const secondaryLabel = typeof secondaryAction?.label === "string" ? secondaryAction.label : "";
+  const secondaryActionType = typeof secondaryAction?.action === "string" ? secondaryAction.action : "";
+
+  return (
+    <div className="mt-4 flex items-center justify-center gap-3 px-4">
+      {secondaryActionType && secondaryLabel ? (
+        <button
+          type="button"
+          onClick={() => {
+            if (onActionSelect) {
+              void onActionSelect({
+                label: secondaryLabel,
+                action: secondaryActionType,
+                params: {},
+              });
+            }
+          }}
+          disabled={disabled}
+          className="rounded-[22px] border border-white/80 bg-white/84 px-5 py-3 text-sm font-medium text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] transition-all disabled:opacity-45"
+        >
+          {secondaryLabel}
+        </button>
+      ) : null}
+      {primaryActionType && primaryLabel ? (
+        <button
+          type="button"
+          onClick={() => {
+            if (onActionSelect) {
+              void onActionSelect({
+                label: primaryLabel,
+                action: primaryActionType,
+                params: {},
+              });
+            }
+          }}
+          disabled={disabled}
+          className="rounded-[22px] bg-[linear-gradient(135deg,#5b67f4_0%,#6f7cff_100%)] px-5 py-3 text-sm font-semibold text-white shadow-[0_18px_30px_-22px_rgba(81,96,236,0.72)] transition-all disabled:opacity-45"
+        >
+          {primaryLabel}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function ListBlockCard({
   block,
   disabled,
@@ -3631,6 +3296,10 @@ function ListBlockCard({
         />
       ) : null}
 
+      {block.subtitle ? (
+        <p className="mt-2 text-sm text-slate-500">{block.subtitle}</p>
+      ) : null}
+
       {browseable ? (
         <ResultCarousel
           items={block.items}
@@ -3667,6 +3336,15 @@ function ListBlockCard({
           ))}
         </div>
       )}
+
+      {/* 全局动作按钮（如"帮我继续留意"） */}
+      {partnerMode && isRecord(block.meta) ? (
+        <ListBlockGlobalActions
+          meta={block.meta}
+          disabled={disabled}
+          onActionSelect={onActionSelect}
+        />
+      ) : null}
     </div>
   );
 }

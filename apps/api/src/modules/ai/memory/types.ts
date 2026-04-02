@@ -37,6 +37,10 @@ export interface UserProfile {
   dislikes: string[];
   /** 常去地点：朝阳区、望京 */
   frequentLocations: string[];
+  /** 用户明确说过的身份线索 */
+  identityFacts: string[];
+  /** 用户明确提过的重要人物/关系线索 */
+  socialContextFacts: string[];
   /** 行为模式：经常组局、喜欢小规模 */
   behaviorPatterns: string[];
 }

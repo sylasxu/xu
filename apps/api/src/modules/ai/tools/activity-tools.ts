@@ -77,8 +77,27 @@ export type GetDraftParams = typeof getDraftSchema.static;
 export type RefineDraftParams = typeof refineDraftSchema.static;
 export type PublishActivityParams = typeof publishActivitySchema.static;
 
+interface PublishedActivityCardPayload {
+  activityId: string;
+  title: string;
+  type: string;
+  startAt: string;
+  lat: number;
+  lng: number;
+  locationName: string;
+  locationHint: string;
+  maxParticipants: number;
+  currentParticipants: number;
+  shareUrl: string;
+  sharePath: string;
+}
+
 function generateShareUrl(activityId: string): string {
   return `https://juchang.app/activity/${activityId}`;
+}
+
+function generateSharePath(activityId: string): string {
+  return `/subpackages/activity/detail/index?id=${activityId}&share=1`;
 }
 
 function buildLoginRequiredResult(action: string) {
@@ -494,6 +513,23 @@ export async function publishActivityRecord(userId: string, activityId: string) 
       .limit(1);
 
     await publishDraftActivity(activityId, userId);
+
+    const [publishedActivity] = await db
+      .select({
+        id: activities.id,
+        title: activities.title,
+        type: activities.type,
+        startAt: activities.startAt,
+        location: activities.location,
+        locationName: activities.locationName,
+        locationHint: activities.locationHint,
+        maxParticipants: activities.maxParticipants,
+        currentParticipants: activities.currentParticipants,
+      })
+      .from(activities)
+      .where(eq(activities.id, activityId))
+      .limit(1);
+
     await recordCreateTaskPublished({
       userId,
       activityId,
@@ -502,13 +538,34 @@ export async function publishActivityRecord(userId: string, activityId: string) 
     });
     const quota = await getQuota(userId);
 
+
+    const shareUrl = generateShareUrl(activityId);
+    const sharePath = generateSharePath(activityId);
+    const publishedActivityCard = publishedActivity
+      ? {
+          activityId: publishedActivity.id,
+          title: publishedActivity.title,
+          type: publishedActivity.type,
+          startAt: publishedActivity.startAt.toISOString(),
+          lat: publishedActivity.location?.y ?? 29.58567,
+          lng: publishedActivity.location?.x ?? 106.52988,
+          locationName: publishedActivity.locationName,
+          locationHint: publishedActivity.locationHint,
+          maxParticipants: publishedActivity.maxParticipants,
+          currentParticipants: publishedActivity.currentParticipants,
+          shareUrl,
+          sharePath,
+        } satisfies PublishedActivityCardPayload
+      : null;
+
     return {
       success: true as const,
       activityId,
       title: existingActivity?.title || '活动',
-      shareUrl: generateShareUrl(activityId),
+      shareUrl,
       message: '活动发布成功！快分享给朋友吧',
       quotaRemaining: quota?.aiCreateQuota ?? 0,
+      ...(publishedActivityCard ? { publishedActivity: publishedActivityCard } : {}),
     };
   } catch (error) {
     console.error('[publishActivity] Error:', error);

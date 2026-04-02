@@ -73,6 +73,22 @@ interface WidgetExploreProperties {
   preview?: PreviewData;
 }
 
+function shouldUseSwiperMode(params: {
+  presentation?: string;
+  interaction?: Interaction | null;
+  resultCount: number;
+}): boolean {
+  if (params.interaction?.swipeable === true) {
+    return true;
+  }
+
+  if (params.presentation === 'immersive-carousel' && params.resultCount > 1) {
+    return true;
+  }
+
+  return false;
+}
+
 const DEFAULT_CENTER: CenterPoint = {
   lat: 29.5647,
   lng: 106.5507,
@@ -329,20 +345,29 @@ Component({
   },
 
   observers: {
-    'results, center, title': function (
+    'results, center, title, presentation, interaction': function (
       results: ExploreResult[],
       center: CenterPoint,
       title: string,
+      presentation: string,
+      interaction: Interaction | null,
     ) {
       // 自包含模式：直接用 results 渲染
       const fetchConfig = readFetchConfig(this.properties.fetchConfig);
       if (fetchConfig) return; // 引用模式由 fetchConfig observer 处理
 
-      const displayResults = readExploreResults(results).slice(0, 3);
+      const normalizedResults = readExploreResults(results);
+      const resolvedInteraction = readInteraction(interaction);
+      const swiperMode = shouldUseSwiperMode({
+        presentation,
+        interaction: resolvedInteraction,
+        resultCount: normalizedResults.length,
+      });
+      const displayResults = swiperMode ? normalizedResults : normalizedResults.slice(0, 3);
       const resolvedCenter = readCenterPoint(center);
       const headerTitle =
-        readString(title) || this.generateTitle(resolvedCenter, displayResults.length);
-      this.setData({ displayResults, headerTitle });
+        readString(title) || this.generateTitle(resolvedCenter, normalizedResults.length || displayResults.length);
+      this.setData({ displayResults, headerTitle, swiperMode, activeIndex: 0 });
     },
 
     'fetchConfig, interaction, preview': function (
@@ -356,7 +381,11 @@ Component({
       // 引用模式初始化
       const resolvedInteraction = readInteraction(interaction);
       const resolvedPreview = readPreviewData(preview);
-      const swiperMode = resolvedInteraction?.swipeable === true;
+      const swiperMode = shouldUseSwiperMode({
+        presentation: typeof this.properties.presentation === 'string' ? this.properties.presentation : 'compact-stack',
+        interaction: resolvedInteraction,
+        resultCount: resolvedPreview?.total ?? 0,
+      });
       const title = readString(this.properties.title);
       const headerTitle =
         title ||

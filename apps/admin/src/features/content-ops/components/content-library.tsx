@@ -2,7 +2,8 @@ import { useMemo } from 'react'
 import { getRouteApi } from '@tanstack/react-router'
 import { FileText } from 'lucide-react'
 import { DataTable, ListPage, type FacetedFilterConfig } from '@/components/list-page'
-import { useContentLibrary, useDeleteNote } from '../hooks/use-content'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { useContentAnalytics, useContentLibrary, useDeleteNote } from '../hooks/use-content'
 import {
   CONTENT_PLATFORM_OPTIONS,
   CONTENT_TYPE_OPTIONS,
@@ -36,6 +37,7 @@ export function ContentLibrary() {
     contentType: activeContentType,
     keyword: search.filter,
   })
+  const { data: analytics } = useContentAnalytics()
   const deleteMutation = useDeleteNote()
 
   const notes = data?.items ?? []
@@ -78,8 +80,8 @@ export function ContentLibrary() {
 
   return (
     <ListPage
-      title='内容生成'
-      description='先出内容版本，再判断哪个方向值得继续做。'
+      title='内容工作台'
+      description='先批量出稿、补效果，再判断哪个方向值得继续做。'
       icon={FileText}
       isLoading={isLoading}
       error={error instanceof Error ? error : undefined}
@@ -90,6 +92,29 @@ export function ContentLibrary() {
         heading='快速生成'
         description='先出 1 到 3 版小红书、抖音或微信内容，再决定要不要继续做这个方向。'
       />
+
+      <section className='grid gap-4 md:grid-cols-2 xl:grid-cols-4'>
+        <SummaryCard
+          title='内容总数'
+          value={analytics?.totalNotes ?? 0}
+          hint='已经进入内容库、可继续追踪结果的内容版本。'
+        />
+        <SummaryCard
+          title='待补效果'
+          value={analytics?.pendingPerformanceCount ?? 0}
+          hint='这些内容还没补浏览、点赞或涨粉数据。'
+        />
+        <SummaryCard
+          title='高表现内容'
+          value={analytics?.highPerformingCount ?? 0}
+          hint='基于当前互动综合分，值得继续沿同方向扩写。'
+        />
+        <SummaryCard
+          title='累计涨粉'
+          value={analytics?.newFollowersTotal ?? 0}
+          hint='先看内容有没有带来真实新增关注，再决定要不要继续投。'
+        />
+      </section>
 
       <section className='space-y-4'>
         <div>
@@ -114,5 +139,27 @@ export function ContentLibrary() {
         />
       </section>
     </ListPage>
+  )
+}
+
+function SummaryCard({
+  title,
+  value,
+  hint,
+}: {
+  title: string
+  value: number
+  hint: string
+}) {
+  return (
+    <Card>
+      <CardHeader className='pb-2'>
+        <CardTitle className='text-sm font-medium text-muted-foreground'>{title}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className='text-2xl font-bold'>{value.toLocaleString()}</div>
+        <p className='mt-1 text-xs text-muted-foreground'>{hint}</p>
+      </CardContent>
+    </Card>
   )
 }

@@ -91,11 +91,27 @@ export interface SearchPartnerCandidate {
   tags: string[];
 }
 
+export interface SearchSummary {
+  total: number;
+  locationHint: string;
+  timeHint: string;
+}
+
+export interface SearchNextAction {
+  type: 'opt_in_partner_pool' | 'refresh_search';
+  label: string;
+  description?: string;
+}
+
 export type SearchPartnerCandidatesResult =
   | {
       success: true;
       items: SearchPartnerCandidate[];
       total: number;
+      // 新增：搜索摘要和下一步动作
+      searchSummary: SearchSummary;
+      nextAction: SearchNextAction;
+      secondaryAction?: SearchNextAction;
     }
   | {
       success: false;
@@ -155,6 +171,41 @@ function getPartnerIntentTypeName(activityType: string, sportType?: string): str
   }
 
   return TYPE_NAMES[activityType] || activityType;
+}
+
+/**
+ * 提取共同地点提示
+ */
+function extractCommonLocationHint(candidates: SearchPartnerCandidate[], queryLocation: string): string {
+  if (candidates.length === 0) return '附近';
+  
+  // 如果所有候选人都包含查询地点，返回统一描述
+  const allMatchLocation = candidates.every(c => 
+    c.locationHint.includes(queryLocation) || queryLocation.includes(c.locationHint)
+  );
+  
+  if (allMatchLocation) {
+    return `都在${queryLocation}附近`;
+  }
+  
+  // 否则返回第一个候选人的地点
+  return `在${candidates[0].locationHint}附近`;
+}
+
+/**
+ * 提取共同时间提示
+ */
+function extractCommonTimeHint(candidates: SearchPartnerCandidate[], queryTime?: string): string {
+  if (!queryTime) return '时间灵活';
+  
+  // 检查是否有候选人时间偏好一致
+  const matchingTime = candidates.filter(c => c.timePreference === queryTime);
+  
+  if (matchingTime.length >= 2) {
+    return `${queryTime}有空`;
+  }
+  
+  return '时间待确认';
 }
 
 function normalizeSearchText(value: string): string {
@@ -282,10 +333,33 @@ export async function searchPartnerCandidates(
       .sort((left, right) => right.score - left.score)
       .slice(0, Math.max(1, Math.min(params.limit ?? 6, 12)));
 
+    // 构建搜索摘要
+    const searchSummary: SearchSummary = {
+      total: scored.length,
+      locationHint: extractCommonLocationHint(scored, params.locationHint),
+      timeHint: extractCommonTimeHint(scored, params.timePreference),
+    };
+
+    // 主要下一步动作：入池等待
+    const nextAction: SearchNextAction = {
+      type: 'opt_in_partner_pool',
+      label: '帮我继续留意',
+      description: '系统将持续为你寻找更合适的搭子，匹配成功会通知你',
+    };
+
+    // 次要动作：刷新搜索
+    const secondaryAction: SearchNextAction = {
+      type: 'refresh_search',
+      label: '再看看其他人',
+    };
+
     return {
       success: true,
       items: scored,
       total: scored.length,
+      searchSummary,
+      nextAction,
+      secondaryAction,
     };
   } catch (error) {
     console.error('[searchPartnerCandidates] Error:', error);

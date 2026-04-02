@@ -121,6 +121,12 @@ const OPEN_TASK_STATUSES: AgentTaskStatus[] = [
   'waiting_async_result',
 ];
 
+const TERMINAL_TASK_STATUSES: AgentTaskStatus[] = [
+  'completed',
+  'cancelled',
+  'expired',
+];
+
 const KNOWN_LOCATION_CENTERS = [
   { name: '南坪万达', lat: 29.53012, lng: 106.57221 },
   { name: '观音桥', lat: 29.58567, lng: 106.52988 },
@@ -167,6 +173,10 @@ function getStageRank(taskType: AgentTaskType, stage: AgentTaskStage): number {
   const order = TASK_STAGE_ORDER[taskType];
   const index = order.indexOf(stage);
   return index >= 0 ? index : -1;
+}
+
+function isTerminalTaskStatus(status: AgentTaskStatus): boolean {
+  return TERMINAL_TASK_STATUSES.includes(status);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1541,7 +1551,12 @@ async function updateJoinTask(params: {
       : params.task.currentStage;
   })();
 
-  const nextStatus = params.status ?? params.task.status;
+  const nextStatus = (() => {
+    const requestedStatus = params.status ?? params.task.status;
+    return isTerminalTaskStatus(params.task.status)
+      ? params.task.status
+      : requestedStatus;
+  })();
   const updates: Partial<NewAgentTask> = {
     currentStage: nextStage,
     status: nextStatus,
@@ -1670,10 +1685,19 @@ export async function syncJoinTaskFromChatTurn(params: {
   const followUpActivityId = readTextValue(params.request.context?.activityId);
 
   if (followUpMode && followUpActivityId) {
-    const existingTask = await findLatestJoinTaskByActivity({
+    const existingOpenTask = await findOpenJoinTask({
       userId: params.userId,
       activityId: followUpActivityId,
     });
+    const existingTask = existingOpenTask ?? await findLatestJoinTaskByActivity({
+      userId: params.userId,
+      activityId: followUpActivityId,
+    });
+
+    if (existingTask && isTerminalTaskStatus(existingTask.status)) {
+      return;
+    }
+
     const task = existingTask ?? await ensureTask({
       userId: params.userId,
       taskType: 'join_activity',
@@ -1697,7 +1721,11 @@ export async function syncJoinTaskFromChatTurn(params: {
       goalText,
       slotSummary,
       pendingAction: null,
-      eventType: 'stage_changed',
+      ...(task.currentStage === 'post_activity'
+        ? {}
+        : {
+            eventType: 'stage_changed' as const,
+          }),
       eventPayload: {
         followUpMode,
         entry: entry ?? null,
@@ -1756,7 +1784,7 @@ export async function syncJoinTaskFromChatTurn(params: {
     task = await updateJoinTask({
       task,
       stage: 'action_selected',
-      status: 'active',
+      status: task.status === 'waiting_auth' ? task.status : 'active',
       conversationId: params.conversationId,
       activityId: joinActivityId ?? undefined,
       source: entry ?? 'join_action',
@@ -1873,7 +1901,11 @@ export async function syncPartnerTaskFromChatTurn(params: {
   });
 
   if (hasPartnerForm || isPartnerEntryAction || hasPartnerSearchResults) {
-    const nextStage = hasPartnerSearchResults ? 'match_ready' : 'preference_collecting';
+    // Search-first partner flows can return candidate lists before any real
+    // partner_intent / intent_match is created. Keep those turns in the
+    // pre-match stage so inbox/task panels do not misclassify them as a
+    // pending match that requires confirmation.
+    const nextStage = 'preference_collecting';
     task = task ?? await ensureTask({
       userId: params.userId,
       taskType: 'find_partner',
@@ -2749,10 +2781,21 @@ export async function markJoinTaskDiscussionEntered(params: {
   entry?: string;
   source?: string;
 }): Promise<void> {
-  const task = await findLatestJoinTaskByActivity({
+  const openTask = await findOpenJoinTask({
     userId: params.userId,
     activityId: params.activityId,
   });
+  const task = openTask ?? await findLatestJoinTaskByActivity({
+    userId: params.userId,
+    activityId: params.activityId,
+  });
+
+  if (task) {
+    const hasReachedDiscussion = getStageRank(task.taskType, task.currentStage) >= getStageRank(task.taskType, 'discussion');
+    if (hasReachedDiscussion || isTerminalTaskStatus(task.status)) {
+      return;
+    }
+  }
 
   const ensuredTask = task ?? await ensureTask({
     userId: params.userId,
@@ -2786,7 +2829,11 @@ async function markJoinTaskOutcome(params: {
   resultSummary: string;
   source: string;
 }): Promise<void> {
-  const task = await findLatestJoinTaskByActivity({
+  const openTask = await findOpenJoinTask({
+    userId: params.userId,
+    activityId: params.activityId,
+  });
+  const task = openTask ?? await findLatestJoinTaskByActivity({
     userId: params.userId,
     activityId: params.activityId,
   });
@@ -2799,6 +2846,7 @@ async function markJoinTaskOutcome(params: {
     defaultStage: 'done',
     source: params.source,
   });
+  const wasAlreadyCompleted = isTerminalTaskStatus(ensuredTask.status);
 
   const completedTask = await updateJoinTask({
     task: ensuredTask,
@@ -2815,6 +2863,10 @@ async function markJoinTaskOutcome(params: {
       resultOutcome: params.resultOutcome,
     },
   });
+
+  if (wasAlreadyCompleted) {
+    return;
+  }
 
   await appendAgentTaskEvent({
     taskId: completedTask.id,

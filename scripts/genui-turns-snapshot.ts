@@ -274,13 +274,12 @@ async function runFixture(fixture: SnapshotFixture): Promise<string[]> {
 
 async function main(): Promise<void> {
   const fixtures = loadFixtures();
-  const lines: string[] = [];
 
   for (const fixture of fixtures) {
-    lines.push(...(await runFixture(fixture)));
+    const lines = await runFixture(fixture);
+    console.log(lines.join("\n"));
   }
 
-  console.log(lines.join("\n"));
   console.log("\nGenUI snapshot regression passed.");
 }
 

@@ -1,8 +1,6 @@
 // Analytics Model - 数据分析领域 Schema
 
 import { Elysia, t, type Static } from 'elysia'
-import { ContentNoteResponseSchema } from '../content/content.model'
-import { ContentTypeSchema } from '../content/content-type'
 
 const TrendsQuerySchema = t.Object({
   period: t.Optional(t.Union([
@@ -34,28 +32,6 @@ const TrendsResponseSchema = t.Object({
   intentDistribution: t.Array(IntentDistributionSchema),
   period: t.Union([t.Literal('7d'), t.Literal('30d')]),
   generatedAt: t.String(),
-})
-
-const ContentPerformanceQuerySchema = t.Object({
-  contentType: t.Optional(ContentTypeSchema),
-  startDate: t.Optional(t.String({ description: '开始日期 YYYY-MM-DD' })),
-  endDate: t.Optional(t.String({ description: '结束日期 YYYY-MM-DD' })),
-})
-
-const ContentTypeAggregationSchema = t.Object({
-  contentType: ContentTypeSchema,
-  avgViews: t.Number(),
-  avgLikes: t.Number(),
-  avgCollects: t.Number(),
-  count: t.Integer(),
-})
-
-const ContentPerformanceResponseSchema = t.Object({
-  byType: t.Array(ContentTypeAggregationSchema),
-  topNotes: t.Array(ContentNoteResponseSchema),
-  totalNotes: t.Integer(),
-  totalWithPerformance: t.Integer(),
-  period: t.String(),
 })
 
 const BenchmarkStatusSchema = t.Union([
@@ -130,8 +106,6 @@ const ErrorResponseSchema = t.Object({
 export const analyticsModel = new Elysia({ name: 'analyticsModel' }).model({
   'analytics.trendsQuery': TrendsQuerySchema,
   'analytics.trendsResponse': TrendsResponseSchema,
-  'analytics.contentPerformanceQuery': ContentPerformanceQuerySchema,
-  'analytics.contentPerformanceResponse': ContentPerformanceResponseSchema,
   'analytics.metricsResponse': BusinessMetricsResponseSchema,
   'analytics.platformOverviewResponse': PlatformOverviewResponseSchema,
   'analytics.error': ErrorResponseSchema,
@@ -141,10 +115,6 @@ export type TrendsQuery = Static<typeof TrendsQuerySchema>
 export type TrendWord = Static<typeof TrendWordSchema>
 export type IntentDistribution = Static<typeof IntentDistributionSchema>
 export type TrendsResponse = Static<typeof TrendsResponseSchema>
-
-export type ContentPerformanceQuery = Static<typeof ContentPerformanceQuerySchema>
-export type ContentTypeAggregation = Static<typeof ContentTypeAggregationSchema>
-export type ContentPerformanceResponse = Static<typeof ContentPerformanceResponseSchema>
 
 export type BenchmarkStatus = Static<typeof BenchmarkStatusSchema>
 export type MetricValue = Static<typeof MetricValueSchema>

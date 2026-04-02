@@ -23,11 +23,12 @@ import { notificationController } from './modules/notifications/notification.con
 import { reportController } from './modules/reports/report.controller';
 import { moderationController } from './modules/ai/moderation/moderation.controller';
 import { anomalyController } from './modules/ai/anomaly/anomaly.controller';
-import { growthController } from './modules/growth/growth.controller';
 import { hotKeywordsController } from './modules/hot-keywords/hot-keywords.controller';
 import { configController } from './modules/ai/config/config.controller';
 import { analyticsController } from './modules/analytics/analytics.controller';
 import { contentController } from './modules/content/content.controller';
+import { partnerIntentController } from './modules/partner-intents/partner-intent.controller';
+import { intentMatchController } from './modules/intent-matches/intent-match.controller';
 import { ensureSystemPromptConfigured } from './modules/ai/prompts';
 
 // 导入定时任务调度器
@@ -62,6 +63,8 @@ const openApiPlugin = openapi({
       { name: 'Hot Keywords', description: '全局关键词' },
       { name: 'Analytics', description: '数据分析' },
       { name: 'Content', description: '内容运营' },
+      { name: 'Partner Intents', description: '搭子意向' },
+      { name: 'Intent Matches', description: '搭子匹配' },
     ],
   },
   scalar: {
@@ -145,10 +148,11 @@ export const app = appWithBase
   .use(reportController)
   .use(moderationController)
   .use(anomalyController)
-  .use(growthController)
   .use(hotKeywordsController)
   .use(configController)
   .use(analyticsController)
+  .use(partnerIntentController)
+  .use(intentMatchController)
   .use(contentController);
 
 if (import.meta.main) {

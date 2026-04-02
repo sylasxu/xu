@@ -30,12 +30,6 @@
     enhanced
     show-scrollbar="{{false}}"
   >
-    <agent-task-panel
-      wx:if="{{currentTasks.length > 0}}"
-      tasks="{{currentTasks}}"
-      bind:actiontap="onCurrentTaskActionTap"
-    />
-
     <!-- Hot Chips 热词快捷入口 (v4.7) -->
     <hot-chips 
       keywords="{{hotKeywords}}"

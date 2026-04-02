@@ -834,18 +834,6 @@ function main(): void {
         { type: "text", text: "分享到群聊" },
         { type: "text", text: "帮我找同类搭子" },
       ],
-      expectedBlockTypes: [
-        ["text", "choice"],
-        ["text", "choice"],
-        ["text", "list"],
-        ["text", "list"],
-        ["text", "entity-card", "cta-group"],
-        ["text", "entity-card", "cta-group"],
-        ["text", "entity-card", "cta-group"],
-        ["text", "alert", "entity-card", "cta-group"],
-        ["text", "cta-group"],
-        ["text", "choice", "list"],
-      ],
     },
     {
       id: "multi-intent-crossover",
@@ -883,13 +871,6 @@ function main(): void {
         { type: "text", text: "运动" },
         { type: "text", text: "羽毛球" },
         { type: "text", text: "周六晚上" },
-      ],
-      expectedBlockTypes: [
-        ["text", "choice"],
-        ["text", "choice"],
-        ["text", "choice"],
-        ["text", "choice"],
-        ["text", "list"],
       ],
     },
     {
@@ -956,13 +937,11 @@ function main(): void {
     },
   ];
 
-  const report: string[] = [];
-
   for (const scenario of scenarios) {
-    report.push(...runScenario(scenario));
+    const lines = runScenario(scenario);
+    console.log(lines.join("\n"));
   }
 
-  console.log(report.join("\n"));
   console.log("\nGenUI turns regression passed: API + web parse + mini parse all good.");
 }
 

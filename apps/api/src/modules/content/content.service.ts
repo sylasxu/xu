@@ -6,8 +6,10 @@ import {
   db,
   desc,
   eq,
+  gte,
   ilike,
   isNotNull,
+  lt,
   or,
   sql,
   type ContentNote,
@@ -19,6 +21,7 @@ import { t } from 'elysia'
 import { toJsonSchema } from '@juchang/utils'
 import type {
   ContentAnalyticsResponse,
+  ContentAnalyticsQuery,
   ContentLibraryQuery,
   ContentLibraryResponse,
   ContentNoteResponse,
@@ -875,13 +878,38 @@ export async function updatePerformance(
   return formatContentNote(updated)
 }
 
-export async function getAnalytics(): Promise<ContentAnalyticsResponse> {
+export async function getAnalytics(
+  query: ContentAnalyticsQuery = {},
+): Promise<ContentAnalyticsResponse> {
   const engagementScoreExpr = sql<number>`
     coalesce(${contentNotes.views}, 0)
     + coalesce(${contentNotes.likes}, 0) * 2
     + coalesce(${contentNotes.collects}, 0) * 3
     + coalesce(${contentNotes.comments}, 0) * 2
   `
+
+  const { contentType, startDate, endDate } = query
+  const contentConditions: SQL<unknown>[] = []
+
+  if (contentType) {
+    contentConditions.push(eq(contentNotes.contentType, contentType))
+  }
+
+  if (startDate) {
+    contentConditions.push(gte(contentNotes.createdAt, new Date(startDate)))
+  }
+
+  if (endDate) {
+    const end = new Date(endDate)
+    end.setDate(end.getDate() + 1)
+    contentConditions.push(lt(contentNotes.createdAt, end))
+  }
+
+  const contentWhere = contentConditions.length > 0 ? and(...contentConditions) : undefined
+  const performanceWhere = and(
+    ...(contentWhere ? [contentWhere] : []),
+    isNotNull(contentNotes.views),
+  )
 
   const byType = await db
     .select({
@@ -892,26 +920,47 @@ export async function getAnalytics(): Promise<ContentAnalyticsResponse> {
       count: sql<number>`count(*)::int`,
     })
     .from(contentNotes)
-    .where(isNotNull(contentNotes.views))
+    .where(performanceWhere)
     .groupBy(contentNotes.contentType)
 
   const [totalResult] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(contentNotes)
+    .where(contentWhere)
 
   const [perfResult] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(contentNotes)
-    .where(isNotNull(contentNotes.views))
+    .where(performanceWhere)
+
+  const [followersResult] = await db
+    .select({
+      total: sql<number>`coalesce(sum(${contentNotes.newFollowers}), 0)::int`,
+    })
+    .from(contentNotes)
+    .where(contentWhere)
+
+  const scoredNotes = await db
+    .select({
+      score: sql<number>`${engagementScoreExpr}::float`,
+    })
+    .from(contentNotes)
+    .where(performanceWhere)
 
   const totalNotes = totalResult?.count ?? 0
   const totalWithPerformance = perfResult?.count ?? 0
+  const pendingPerformanceCount = Math.max(0, totalNotes - totalWithPerformance)
+  const newFollowersTotal = followersResult?.total ?? 0
+  const averageScore = scoredNotes.length > 0
+    ? scoredNotes.reduce((sum, item) => sum + item.score, 0) / scoredNotes.length
+    : 0
+  const highPerformingCount = scoredNotes.filter((item) => item.score >= averageScore && item.score > 0).length
 
   const topNotes = totalWithPerformance >= 5
     ? await db
         .select()
         .from(contentNotes)
-        .where(isNotNull(contentNotes.views))
+        .where(performanceWhere)
         .orderBy(desc(engagementScoreExpr))
         .limit(10)
     : []
@@ -927,6 +976,9 @@ export async function getAnalytics(): Promise<ContentAnalyticsResponse> {
     topNotes: topNotes.map(formatContentNote),
     totalNotes,
     totalWithPerformance,
+    pendingPerformanceCount,
+    highPerformingCount,
+    newFollowersTotal,
   }
 }
 

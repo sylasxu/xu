@@ -44,6 +44,8 @@ export interface ExtractedPreference {
 export interface PreferenceExtraction {
   preferences: ExtractedPreference[];
   frequentLocations: string[];
+  identityFacts: string[];
+  socialContextFacts: string[];
 }
 
 /**
@@ -63,7 +65,126 @@ const PreferenceExtractionSchema = t.Object({
     confidence: t.Number({ minimum: 0, maximum: 1, description: '置信度 0-1' }),
   })),
   frequentLocations: t.Array(t.String({ description: '提到的地点名称' })),
+  identityFacts: t.Array(t.String({ description: '用户明确说过的个人身份线索' })),
+  socialContextFacts: t.Array(t.String({ description: '用户明确提过的重要人物或关系线索' })),
 });
+
+function trimCapturedValue(value: string): string {
+  return value
+    .replace(/[“”"'`]/g, '')
+    .replace(/[，。！？,.!?\s]+$/g, '')
+    .trim();
+}
+
+function normalizeStoredFact(value: string): string {
+  return value
+    .replace(/[“”"'`]/g, '')
+    .replace(/[，。！？,.!?\s]+$/g, '')
+    .trim();
+}
+
+function appendUniqueFact(target: string[], fact: string): void {
+  const normalized = normalizeStoredFact(fact);
+  if (!normalized) {
+    return;
+  }
+
+  if (!target.some((item) => item.toLowerCase() === normalized.toLowerCase())) {
+    target.push(normalized);
+  }
+}
+
+function looksLikeQuestion(content: string): boolean {
+  // 以疑问词或疑问语气结尾，且包含第二人称代词
+  return /[吗呢吧？?]$/.test(content) && /你|谁|什么|怎么|为什么/.test(content);
+}
+
+function extractIdentityFactsFromMessage(content: string): string[] {
+  // 疑问句不参与身份事实提取，防止"你知道我是谁吗"被误解析
+  if (looksLikeQuestion(content)) {
+    return [];
+  }
+
+  const identityFacts: string[] = [];
+  const namePatterns = [
+    /我叫([^\s，。！？,.]{1,16})/g,
+    /我的名字是([^\s，。！？,.]{1,16})/g,
+  ];
+  const locationPatterns = [
+    { pattern: /我住在([^，。！？,.]{1,18})/g, format: (value: string) => `住在${trimCapturedValue(value)}` },
+    { pattern: /我在([^，。！？,.]{1,18})(上班|工作)/g, format: (value: string, suffix: string) => `在${trimCapturedValue(value)}${suffix}` },
+  ];
+  const rolePatterns = [
+    /我是(一个|个)?([^，。！？,.]{1,16})/g,
+  ];
+
+  for (const pattern of namePatterns) {
+    for (const match of content.matchAll(pattern)) {
+      if (match[1]) {
+        appendUniqueFact(identityFacts, `名字是${match[1]}`);
+      }
+    }
+  }
+
+  for (const { pattern, format } of locationPatterns) {
+    for (const match of content.matchAll(pattern)) {
+      if (match[1]) {
+        appendUniqueFact(identityFacts, format(match[1], match[2] || ''));
+      }
+    }
+  }
+
+  for (const pattern of rolePatterns) {
+    for (const match of content.matchAll(pattern)) {
+      const rawRole = trimCapturedValue(match[2] || '');
+      if (!rawRole) {
+        continue;
+      }
+
+      if (/^(想|要|来|找|准备|打算|刚|正在|不是|有点|谁|什么|哪里|怎么|为什么|多少|几)/.test(rawRole)) {
+        continue;
+      }
+
+      appendUniqueFact(identityFacts, `是${rawRole}`);
+    }
+  }
+
+  return identityFacts.slice(0, 4);
+}
+
+function extractSocialContextFactsFromMessage(content: string): string[] {
+  const socialFacts: string[] = [];
+  const patterns = [
+    {
+      pattern: /我喜欢一个叫([^，。！？,.]{1,12})的(女生|男生|女孩|男孩)/g,
+      format: (name: string, role: string) => `喜欢一个叫${trimCapturedValue(name)}的${role}`,
+    },
+    {
+      pattern: /(她|他)住在([^，。！？,.]{1,18})/g,
+      format: (pronoun: string, value: string) => `${pronoun}住在${trimCapturedValue(value)}`,
+    },
+    {
+      pattern: /(她|他)在([^，。！？,.]{1,18})(上班|工作)/g,
+      format: (pronoun: string, value: string, suffix: string) => `${pronoun}在${trimCapturedValue(value)}${suffix}`,
+    },
+    {
+      pattern: /(她|他)性格([^，。！？,.]{1,18})/g,
+      format: (pronoun: string, value: string) => `${pronoun}性格${trimCapturedValue(value)}`,
+    },
+    {
+      pattern: /(她|他)喜欢([^，。！？,.]{1,18})/g,
+      format: (pronoun: string, value: string) => `${pronoun}喜欢${trimCapturedValue(value)}`,
+    },
+  ] as const;
+
+  for (const { pattern, format } of patterns) {
+    for (const match of content.matchAll(pattern)) {
+      appendUniqueFact(socialFacts, format(match[1] || '', match[2] || '', match[3] || ''));
+    }
+  }
+
+  return socialFacts.slice(0, 4);
+}
 
 /**
  * 使用 LLM 从对话中提取用户偏好
@@ -81,12 +202,12 @@ export async function extractPreferencesWithLLM(
     .join('\n');
 
   if (!userMessages.trim()) {
-    return { preferences: [], frequentLocations: [] };
+    return { preferences: [], frequentLocations: [], identityFacts: [], socialContextFacts: [] };
   }
 
   // 消息太短，不值得调用 LLM
   if (userMessages.length < 10) {
-    return { preferences: [], frequentLocations: [] };
+    return { preferences: [], frequentLocations: [], identityFacts: [], socialContextFacts: [] };
   }
 
   try {
@@ -109,7 +230,9 @@ ${userMessages}
    - 比较明确（"想吃火锅"）: 0.7-0.9
    - 一般（"火锅也行"）: 0.5-0.7
 5. 提取提到的重庆地点名称到 frequentLocations（如观音桥、解放碑、南坪等）
-6. 如果没有明确偏好，返回空数组`,
+6. 提取用户明确说过的身份线索到 identityFacts，例如名字、住在哪、在哪里上班、是什么身份
+7. 提取用户明确提过的重要人物/关系线索到 socialContextFacts，例如喜欢的人、对方住哪、对方性格
+8. 如果没有明确线索，返回空数组`,
       temperature: 0,
     });
 
@@ -118,6 +241,8 @@ ${userMessages}
     logger.debug('Preferences extracted', {
       preferencesCount: extraction.preferences.length,
       locationsCount: extraction.frequentLocations.length,
+      identityFactsCount: extraction.identityFacts.length,
+      socialContextFactsCount: extraction.socialContextFacts.length,
     });
 
     return extraction;
@@ -125,7 +250,7 @@ ${userMessages}
     logger.warn('LLM extraction failed, falling back to empty', {
       error: error instanceof Error ? error.message : 'Unknown error',
     });
-    return { preferences: [], frequentLocations: [] };
+    return { preferences: [], frequentLocations: [], identityFacts: [], socialContextFacts: [] };
   }
 }
 
@@ -140,6 +265,8 @@ export function extractPreferencesSimple(
 ): PreferenceExtraction {
   const preferences: ExtractedPreference[] = [];
   const frequentLocations: string[] = [];
+  const identityFacts: string[] = [];
+  const socialContextFacts: string[] = [];
 
   // 地点关键词
   const locationKeywords = ['观音桥', '解放碑', '南坪', '沙坪坝', '江北', '杨家坪', '大坪', '北碚', '渝北', '九龙坡'];
@@ -168,6 +295,14 @@ export function extractPreferencesSimple(
       if (content.includes(loc) && !frequentLocations.includes(loc)) {
         frequentLocations.push(loc);
       }
+    }
+
+    for (const fact of extractIdentityFactsFromMessage(content)) {
+      appendUniqueFact(identityFacts, fact);
+    }
+
+    for (const fact of extractSocialContextFactsFromMessage(content)) {
+      appendUniqueFact(socialContextFacts, fact);
     }
 
     // 提取喜好
@@ -206,6 +341,8 @@ export function extractPreferencesSimple(
   return {
     preferences: preferences.slice(0, 5),
     frequentLocations: frequentLocations.slice(0, 3),
+    identityFacts: identityFacts.slice(0, 4),
+    socialContextFacts: socialContextFacts.slice(0, 4),
   };
 }
 

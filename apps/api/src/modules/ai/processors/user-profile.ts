@@ -51,7 +51,15 @@ export async function userProfileProcessor(context: ProcessorContext): Promise<P
     // 从数据库加载增强用户画像
     const profile = await getEnhancedUserProfile(userId);
     
-    if (!profile || profile.preferences.length === 0) {
+    const hasProfileSignals = !!profile && (
+      profile.preferences.length > 0 ||
+      profile.frequentLocations.length > 0 ||
+      profile.identityFacts.length > 0 ||
+      profile.socialContextFacts.length > 0 ||
+      (profile.activityOutcomes?.length || 0) > 0
+    );
+
+    if (!hasProfileSignals) {
       const updatedContext: ProcessorContext = {
         ...context,
         metadata: {
@@ -71,26 +79,21 @@ export async function userProfileProcessor(context: ProcessorContext): Promise<P
       };
     }
     
-    // 构建画像 Prompt
+    // 构建画像 Prompt，写入 metadata 由主链路统一注入 systemPrompt
     const profilePrompt = buildProfilePrompt(profile);
-    
+
     // 提取 top 偏好（按置信度排序，取前 5 个）
     const topPreferences = profile.preferences
       .sort((a, b) => b.confidence - a.confidence)
       .slice(0, 5)
       .map(p => `${p.sentiment === 'dislike' ? '不' : ''}${p.value}`);
 
-    // 注入用户画像到系统提示词
-    const updatedSystemPrompt = profilePrompt
-      ? `${context.systemPrompt}\n\n## 用户画像\n${profilePrompt}\n\n请根据用户画像提供个性化的建议和响应。`
-      : context.systemPrompt;
-    
     const updatedContext: ProcessorContext = {
       ...context,
-      systemPrompt: updatedSystemPrompt,
       userProfile: profilePrompt || undefined,
       metadata: {
         ...context.metadata,
+        userProfilePrompt: profilePrompt || undefined,
         userProfile: {
           hasProfile: true,
           preferencesCount: profile.preferences.length,

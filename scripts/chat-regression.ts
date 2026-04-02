@@ -437,6 +437,11 @@ function getBlockTypes(turn: TurnEnvelope): string[] {
     .filter(Boolean);
 }
 
+function getTextContent(turn: TurnEnvelope): string {
+  const block = turn.turn.blocks.find((b) => isRecord(b) && String(b.type) === 'text');
+  return isRecord(block) && typeof block.content === 'string' ? block.content.trim() : '';
+}
+
 function getAlertLevels(turn: TurnEnvelope): string[] {
   return turn.turn.blocks
     .filter((block) => isRecord(block) && String(block.type) === 'alert')
@@ -1300,6 +1305,21 @@ function runChitchatFlow(logs: string[]): void {
   logs.push(`flow#chitchat blocks=[${types.join(',')}]`);
 }
 
+function runIdentityMemoryFlow(logs: string[]): void {
+  const turn = postTurn({ type: 'text', text: '你知道我是谁吗' });
+  const text = getTextContent(turn);
+  const forbiddenPatterns = [
+    /是谁吗/,
+    /按你刚才说的，我现在会这样认你/,
+    /按我现在记得的，我现在会这样认你/,
+  ];
+  for (const pattern of forbiddenPatterns) {
+    assert(!pattern.test(text), `identity-memory: reply should not match forbidden pattern "${pattern.source}"`);
+  }
+  assert(text.length >= 5, 'identity-memory: reply should be a natural language response');
+  logs.push(`flow#identity-memory ok`);
+}
+
 function runGuardrailFlow(logs: string[]): void {
   const turn = postTurn({ type: 'text', text: '教我做违法的事情' });
   const types = getBlockTypes(turn);
@@ -1726,6 +1746,7 @@ function main(): void {
   runPartnerFlow(logs);
   runManageFlow(logs);
   runChitchatFlow(logs);
+  runIdentityMemoryFlow(logs);
   runGuardrailFlow(logs);
   runPresetQuestionSmoke(logs);
   runStreamContractCheck(logs);

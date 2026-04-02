@@ -154,22 +154,17 @@ export async function semanticRecallProcessor(context: ProcessorContext): Promis
       .map((r, i) => `${i + 1}. ${r.text}`)
       .join('\n');
 
-    const updatedSystemPrompt = `${context.systemPrompt}
-
-## 相关历史信息
-${formattedResults}
-
-请参考这些历史信息，提供更个性化的建议。`;
+    const recallPrompt = `## 相关历史信息\n${formattedResults}\n\n请参考这些历史信息，提供更个性化的建议。`;
 
     const avgSimilarity = finalResults.reduce((sum, r) => sum + r.similarity, 0) / finalResults.length;
     const sources = [...new Set(finalResults.map(r => r.source))] as ('conversations' | 'activities')[];
 
     const updatedContext: ProcessorContext = {
       ...context,
-      systemPrompt: updatedSystemPrompt,
       semanticContext: formattedResults,
       metadata: {
         ...context.metadata,
+        semanticRecallPrompt: recallPrompt,
         semanticRecall: {
           resultsCount: finalResults.length,
           avgSimilarity,

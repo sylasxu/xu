@@ -82,6 +82,7 @@ import { buildTurnContextFromBlocks } from './turn-context';
 import { getConfigValue } from './config/config.service';
 import { buildNextBestActions, type NextBestActionItem } from './next-best-action.service';
 import { resolveConversationTaskId } from './task-runtime/agent-task.service';
+import { isIdentityMemoryQuestion } from './identity-reply';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -357,15 +358,98 @@ function formatNextActionLabels(items: NextBestActionItem[]): string {
   return `“${labels[0]}”、“${labels[1]}”或“${labels[2]}”`;
 }
 
+function normalizeSourceText(text: string | undefined): string {
+  return typeof text === 'string' ? text.trim() : '';
+}
+
+function looksLikeAvailabilityQuestion(text: string): boolean {
+  return /有没有|有吗|能不能|还有吗/.test(text);
+}
+
+function looksLikeBrowseRequest(text: string): boolean {
+  return /看看|看下|瞅瞅|刷刷|先看/.test(text);
+}
+
+function looksLikeFillSeatRequest(text: string): boolean {
+  return /三缺一|差一个|缺人|补位/.test(text);
+}
+
+function buildExploreOpening(params: {
+  originalText: string;
+  locationLabel: string;
+  targetLabel: string;
+  hasResults: boolean;
+  actionLabels: string;
+}): string {
+  const { originalText, locationLabel, targetLabel, hasResults, actionLabels } = params;
+
+  if (hasResults) {
+    if (looksLikeAvailabilityQuestion(originalText)) {
+      return `${locationLabel}这边有，我先替你筛了一轮，下面这些${targetLabel}你先看看有没有想继续接的。`;
+    }
+
+    if (looksLikeBrowseRequest(originalText)) {
+      return `先把${locationLabel}这边能接得上的${targetLabel}给你摆出来了，你先往下看。`;
+    }
+
+    return `${locationLabel}这边我先给你收了一批${targetLabel}，你先看看哪几个更对味。`;
+  }
+
+  const nextStepText = actionLabels
+    ? `你可以先试试${actionLabels}，`
+    : '';
+
+  if (looksLikeAvailabilityQuestion(originalText)) {
+    return `${locationLabel}这会儿我还没替你刷到特别合适的${targetLabel}。${nextStepText}也可以直接告诉我想换的地方、时间、类型或预算，我继续帮你找。`;
+  }
+
+  return `${locationLabel}这会儿还没刷到合适的${targetLabel}。${nextStepText}你也可以直接把条件改细一点，我继续往下筛。`;
+}
+
+function buildPartnerOpening(params: {
+  originalText: string;
+  locationLabel: string;
+  targetLabel: string;
+  hasResults: boolean;
+  actionLabels: string;
+}): string {
+  const { originalText, locationLabel, targetLabel, hasResults, actionLabels } = params;
+  const searchTargetLabel = looksLikeFillSeatRequest(originalText) ? '能来补位的人' : targetLabel;
+
+  if (hasResults) {
+    if (looksLikeFillSeatRequest(originalText)) {
+      return `${locationLabel}这边我先按补位方向筛了一圈，下面这几位你先看看能不能接上这桌。`;
+    }
+
+    if (looksLikeAvailabilityQuestion(originalText)) {
+      return `${locationLabel}这边有，我先按${searchTargetLabel}这个方向筛了一轮，你先看看下面这些合不合适。`;
+    }
+
+    return `${locationLabel}这边我先帮你筛了一圈${searchTargetLabel}，你先看看下面这几位顺不顺眼。`;
+  }
+
+  const nextStepText = actionLabels
+    ? `你可以先试试${actionLabels}，`
+    : '';
+
+  if (looksLikeFillSeatRequest(originalText)) {
+    return `${locationLabel}这边我先按补位方向找过一轮了，暂时还没碰到特别合适的人。${nextStepText}你也可以补一句时间、牌风或者具体在哪一片，我继续帮你捞。`;
+  }
+
+  return `${locationLabel}这边我先筛过一轮，暂时还没碰到特别合适的${searchTargetLabel}。${nextStepText}也可以直接告诉我你想找的人是什么样、一般在哪片活动方便，我继续帮你收窄。`;
+}
+
 function buildStructuredActionReplyText(params: {
   actionType: StructuredAction['action'] | undefined;
   data: Record<string, unknown> | undefined;
   defaultMessage: string;
   nextActions: NextBestActionItem[];
+  originalText?: string;
 }): string {
-  const { actionType, data, defaultMessage, nextActions } = params;
+  const { actionType, data, defaultMessage, nextActions, originalText } = params;
   const trimmedDefaultMessage = defaultMessage.trim();
   const actionLabels = formatNextActionLabels(nextActions);
+  const sourceText = normalizeSourceText(originalText);
   const locationName = typeof data?.locationName === 'string' ? data.locationName.trim() : '';
   const exploreType = typeof data?.type === 'string' ? data.type : undefined;
   const exploreTypeLabel = getExploreTypeLabel(exploreType);
@@ -377,18 +461,15 @@ function buildStructuredActionReplyText(params: {
   const exploreResults = Array.isArray(explorePayload?.results) ? explorePayload.results : [];
 
   if (actionType === 'explore_nearby') {
-    if (exploreResults.length === 0) {
-      const locationLabel = exploreLocationName || '附近';
-      const targetLabel = exploreTypeLabel ? `${exploreTypeLabel}局` : '局';
-      const actionGuidance = actionLabels
-        ? `你可以先看看下面这些选择，比如${actionLabels}，`
-        : '';
-      return `${locationLabel}附近这会儿还没刷到合适的${targetLabel}。${actionGuidance}也可以直接告诉我想换的地方、时间、类型或预算，我继续帮你找。`;
-    }
-
     const locationLabel = exploreLocationName || '附近';
     const targetLabel = exploreTypeLabel ? `${exploreTypeLabel}局` : '局';
-    return `${locationLabel}附近先帮你找了一批${targetLabel}，你可以先看看有没有想继续了解的；如果想收窄到更具体的片区、时间或类型，也可以直接告诉我。`;
+    return buildExploreOpening({
+      originalText: sourceText,
+      locationLabel,
+      targetLabel,
+      hasResults: exploreResults.length > 0,
+      actionLabels,
+    });
   }
 
   if (actionType === 'find_partner' || actionType === 'search_partners' || actionType === 'submit_partner_intent_form') {
@@ -403,10 +484,25 @@ function buildStructuredActionReplyText(params: {
       return `${trimmedDefaultMessage || '我把可调整的偏好都展开了。'}你可以直接细化这些条件，我会按新的要求继续筛。`;
     }
 
-    const actionGuidance = actionLabels
-      ? `你可以先试试${actionLabels}，`
-      : '';
-    return `${trimmedDefaultMessage || '我先按现在的条件继续帮你收窄范围。'}${actionGuidance}也可以直接告诉我你想找的人是什么样、希望对方性别或年龄大概怎样、你一般在哪片活动方便，我继续帮你调整。`;
+    if (isRecord(data?.askPreference)) {
+      const actionGuidance = actionLabels
+        ? `你可以先试试${actionLabels}，`
+        : '';
+      return `${trimmedDefaultMessage || '我先按你刚才说的方向收一收，再补一个最关键的条件。'}${actionGuidance}也可以直接告诉我你想找的人是什么样、一般在哪片活动方便，我继续帮你往下接。`;
+    }
+
+    const partnerResults = isRecord(data?.partnerSearchResults) && Array.isArray(data.partnerSearchResults.items)
+      ? data.partnerSearchResults.items
+      : [];
+    const locationLabel = locationName || '你这附近';
+    const targetLabel = exploreTypeLabel ? `${exploreTypeLabel}搭子` : '搭子';
+    return buildPartnerOpening({
+      originalText: sourceText,
+      locationLabel,
+      targetLabel,
+      hasResults: partnerResults.length > 0,
+      actionLabels,
+    });
   }
 
   if (actionType === 'create_activity' || actionType === 'save_draft_settings' || actionType === 'publish_draft' || actionType === 'confirm_publish') {
@@ -855,9 +951,12 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
     }
   }
 
-  // 6. 特殊意图快速响应
-  if (intentResult.intent === 'chitchat') {
-    return handleChitchat(trace, intentResult);
+  // 6. 特殊意图：身份记忆问题需要确保 workingMemory 已注入 systemPrompt，然后继续走 LLM
+  // 闲聊（chitchat）不再短路，统一走轻量 LLM 以支持上下文感知回复
+  if (intentResult.intent === 'chitchat' && isIdentityMemoryQuestion(rawUserInput)) {
+    logger.info('Identity question detected, routing through LLM with workingMemory', {
+      userId: userId || 'anon',
+    });
   }
 
   // 7. 获取工具集
@@ -868,8 +967,17 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
   });
   logger.debug('Tools selected', { tools: Object.keys(tools) });
 
-  // 8. 使用管线处理后的 systemPrompt（已包含 user-profile + semantic-recall + token-limit）
-  const systemPrompt = preLLMContext.systemPrompt;
+  // 8. 统一组装 systemPrompt：基础 prompt + 各 processor 注入的段落
+  const injectedPrompts: string[] = [];
+  if (preLLMContext.metadata.userProfilePrompt) {
+    injectedPrompts.push(preLLMContext.metadata.userProfilePrompt as string);
+  }
+  if (preLLMContext.metadata.semanticRecallPrompt) {
+    injectedPrompts.push(preLLMContext.metadata.semanticRecallPrompt as string);
+  }
+  const systemPrompt = injectedPrompts.length > 0
+    ? `${preLLMContext.systemPrompt}\n\n${injectedPrompts.join('\n\n')}`
+    : preLLMContext.systemPrompt;
 
   const uiMessages: UIMessage[] = effectiveMessages.map((m, i) => ({
     id: `msg-${i}`,
@@ -1263,6 +1371,7 @@ function createStructuredActionResponse(
     data,
     defaultMessage: actionMessage,
     nextActions,
+    originalText: structuredAction?.originalText,
   });
   const actionDurationMs = typeof result.durationMs === 'number' && Number.isFinite(result.durationMs)
     ? Math.max(0, result.durationMs)
@@ -1370,6 +1479,13 @@ function createStructuredActionResponse(
         });
       }
 
+      if (data?.publishedActivity && typeof data.publishedActivity === 'object') {
+        writeWidgetEvent(writer, {
+          type: 'widget_share',
+          payload: data.publishedActivity,
+        });
+      }
+
       if (authRequiredPayload) {
         writeWidgetEvent(writer, {
           type: 'widget_auth_required',
@@ -1429,35 +1545,8 @@ function createStructuredActionResponse(
 }
 
 
-function handleChitchat(trace: boolean | undefined, _intent: ClassifyResult): Response {
-  const responses = [
-    '哈哈，我只会帮你组局约人，闲聊就不太行了～想约点什么？',
-    '聊天我不太擅长，但组局我很在行！想找人一起玩点什么？',
-    '我是组局小助手，帮你约人才是我的强项～有什么想玩的吗？',
-  ];
-  const text = responses[Math.floor(Math.random() * responses.length)];
-
-  const stream = createUIMessageStream({
-    execute: ({ writer }) => {
-      writer.write({ type: 'text-delta', delta: text, id: randomUUID() });
-      if (trace) {
-        const now = new Date().toISOString();
-        writeTraceStartEvent(writer, {
-          requestId: randomUUID(),
-          startedAt: now,
-          intent: _intent.intent,
-          intentMethod: _intent.method,
-        });
-        writeTraceEndEvent(writer, {
-          completedAt: now,
-          status: 'completed',
-          output: { text, toolCalls: [] },
-        });
-      }
-    },
-  });
-  return createUIMessageStreamResponse({ stream });
-}
+// 已删除 handleChitchat 短路逻辑。所有闲聊/身份问题统一走 LLM 主链路，
+// 由 systemPrompt 中的 workingMemory 决定回复质量。
 
 /**
  * 处理 Partner Matching 流程（找搭子追问）
@@ -2657,10 +2746,12 @@ export async function getActivityConversationMessages(activityId: string) {
 export interface WelcomeSection {
   id: string;
   title: string;
+  icon?: string;
   items: Array<{
     type: 'draft' | 'suggestion' | 'explore';
     label: string;
     prompt: string;
+    icon?: string;
     context?: unknown;
   }>;
 }
@@ -2686,6 +2777,7 @@ export interface WelcomePendingActivity {
 
 // 快捷入口 (v4.4 新增)
 export interface QuickPrompt {
+  icon: string;
   text: string;
   prompt: string;
 }
@@ -2736,6 +2828,7 @@ interface WelcomeUiConfig {
   suggestionItems: Array<{
     label: string;
     prompt: string;
+    icon?: string;
   }>;
   quickPrompts: QuickPrompt[];
   bottomQuickActions: string[];
@@ -2771,15 +2864,15 @@ const DEFAULT_WELCOME_UI_CONFIG: WelcomeUiConfig = {
     prompt: '看看{locationName}附近有什么活动',
   },
   suggestionItems: [
-    { label: '约饭局', prompt: '帮我组一个吃饭的局' },
-    { label: '打游戏', prompt: '想找人一起打游戏' },
-    { label: '运动', prompt: '想找人一起运动' },
-    { label: '喝咖啡', prompt: '想约人喝咖啡聊天' },
+    { label: '约饭局', prompt: '帮我组一个吃饭的局', icon: '🍜' },
+    { label: '打游戏', prompt: '想找人一起打游戏', icon: '🎮' },
+    { label: '运动', prompt: '想找人一起运动', icon: '🏃' },
+    { label: '喝咖啡', prompt: '想约人喝咖啡聊天', icon: '☕' },
   ],
   quickPrompts: [
-    { text: '周末附近有什么活动？', prompt: '周末附近有什么活动' },
-    { text: '帮我找个运动搭子', prompt: '帮我找个运动搭子' },
-    { text: '想组个周五晚的局', prompt: '想组个周五晚的局' },
+    { icon: '📍', text: '周末附近有什么活动？', prompt: '周末附近有什么活动' },
+    { icon: '🏸', text: '帮我找个运动搭子', prompt: '帮我找个运动搭子' },
+    { icon: '✨', text: '想组个周五晚的局', prompt: '想组个周五晚的局' },
   ],
   bottomQuickActions: ['快速组局', '找搭子', '附近活动', '我的草稿'],
   profileHints: {
@@ -2849,6 +2942,7 @@ function normalizeWelcomeUiConfig(raw: unknown): WelcomeUiConfig {
 
         const label = getNonEmptyString(item.label);
         const prompt = getNonEmptyString(item.prompt);
+        const icon = getNonEmptyString(item.icon) ?? undefined;
         if (!label || !prompt) {
           return null;
         }
@@ -2856,9 +2950,10 @@ function normalizeWelcomeUiConfig(raw: unknown): WelcomeUiConfig {
         return {
           label,
           prompt,
+          ...(icon ? { icon } : {}),
         };
       })
-      .filter((item): item is { label: string; prompt: string } => Boolean(item?.label && item.prompt))
+      .filter((item): item is { label: string; prompt: string; icon?: string } => Boolean(item?.label && item.prompt))
     : [];
 
   const quickPrompts = Array.isArray(raw.quickPrompts)
@@ -2870,16 +2965,18 @@ function normalizeWelcomeUiConfig(raw: unknown): WelcomeUiConfig {
 
         const text = getNonEmptyString(item.text);
         const prompt = getNonEmptyString(item.prompt);
-        if (!text || !prompt) {
+        const icon = getNonEmptyString(item.icon);
+        if (!text || !prompt || !icon) {
           return null;
         }
 
         return {
+          icon,
           text,
           prompt,
         };
       })
-      .filter((item): item is QuickPrompt => Boolean(item?.text && item.prompt))
+      .filter((item): item is QuickPrompt => Boolean(item?.icon && item.text && item.prompt))
     : [];
 
   const bottomQuickActions = Array.isArray(raw.bottomQuickActions)
@@ -3096,10 +3193,12 @@ export async function getWelcomeCard(
   const suggestions: WelcomeSection = {
     id: 'suggestions',
     title: welcomeUi.sectionTitles.suggestions,
+    icon: '✨',
     items: welcomeUi.suggestionItems.map((item) => ({
       type: 'suggestion' as const,
       label: item.label,
       prompt: item.prompt,
+      ...(item.icon ? { icon: item.icon } : {}),
     })),
   };
   sections.push(suggestions);
@@ -3110,11 +3209,13 @@ export async function getWelcomeCard(
     const explore: WelcomeSection = {
       id: 'explore',
       title: welcomeUi.sectionTitles.explore,
+      icon: '📍',
       items: [
         {
           type: 'explore',
           label: renderTemplate(welcomeUi.exploreTemplates.label, { locationName, location: locationName }),
           prompt: renderTemplate(welcomeUi.exploreTemplates.prompt, { locationName, location: locationName }),
+          icon: '🗺️',
           context: { locationName, lat: location.lat, lng: location.lng },
         },
       ],
@@ -3154,7 +3255,7 @@ export async function getWelcomeCard(
 
 
 // ==========================================
-// AI 内容生成 (从 Growth 迁移)
+// AI 内容生成
 // ==========================================
 
 import { jsonSchema } from 'ai';
@@ -3191,7 +3292,6 @@ const DEFAULT_CONTENT_PROMPT = `请为以下主题生成一篇小红书笔记：
 
 /**
  * AI 生成内容（文案/笔记）
- * 从 Growth 模块迁移，统一归到 AI 领域
  */
 export async function generateContent(
   request: ContentGenerationRequest

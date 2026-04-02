@@ -346,6 +346,12 @@ export async function classifyByFeatureCombination(
     }
   }
 
+  // P1 对语义类意图只做特征提示，不直接判案，强制走到 P2 LLM
+  const SEMANTIC_INTENTS = new Set<IntentType>(['chitchat', 'explore', 'create', 'partner', 'manage']);
+  if (SEMANTIC_INTENTS.has(bestResult.intent) && bestResult.confidence >= 0.7) {
+    bestResult.confidence = Math.min(bestResult.confidence, 0.65);
+  }
+
   return bestResult;
 }
 

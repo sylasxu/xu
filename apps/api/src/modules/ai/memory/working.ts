@@ -34,6 +34,8 @@ export interface EnhancedUserProfile {
   version: 2;
   preferences: EnhancedPreference[];
   frequentLocations: string[];
+  identityFacts: string[];
+  socialContextFacts: string[];
   lastUpdated: Date;
   activityOutcomes?: ActivityOutcome[];
 }
@@ -53,6 +55,8 @@ interface StoredEnhancedProfile {
     mentionCount?: number;
   }>;
   frequentLocations: string[];
+  identityFacts?: string[];
+  socialContextFacts?: string[];
   lastUpdated: string;
   activityOutcomes?: Array<{
     activityId: string;
@@ -130,6 +134,16 @@ function readStoredLocations(value: unknown): string[] {
   }
 
   return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+}
+
+function readStoredFacts(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .slice(0, 8);
 }
 
 function readStoredEnhancedPreference(
@@ -233,6 +247,8 @@ function readStoredEnhancedProfile(value: unknown): StoredEnhancedProfile | null
     version: 2,
     preferences,
     frequentLocations: readStoredLocations(value.frequentLocations),
+    identityFacts: readStoredFacts(value.identityFacts),
+    socialContextFacts: readStoredFacts(value.socialContextFacts),
     lastUpdated,
     ...(activityOutcomes ? { activityOutcomes } : {}),
   };
@@ -253,6 +269,8 @@ export const EMPTY_PROFILE: UserProfile = {
   preferences: [],
   dislikes: [],
   frequentLocations: [],
+  identityFacts: [],
+  socialContextFacts: [],
   behaviorPatterns: [],
 };
 
@@ -263,6 +281,8 @@ export const EMPTY_ENHANCED_PROFILE: EnhancedUserProfile = {
   version: 2,
   preferences: [],
   frequentLocations: [],
+  identityFacts: [],
+  socialContextFacts: [],
   lastUpdated: new Date(),
   activityOutcomes: [],
 };
@@ -295,6 +315,8 @@ export function parseUserProfile(markdown: string | null): UserProfile {
     preferences: [],
     dislikes: [],
     frequentLocations: [],
+    identityFacts: [],
+    socialContextFacts: [],
     behaviorPatterns: [],
   };
 
@@ -302,6 +324,8 @@ export function parseUserProfile(markdown: string | null): UserProfile {
     '喜好': 'preferences',
     '不喜欢': 'dislikes',
     '常去地点': 'frequentLocations',
+    '身份线索': 'identityFacts',
+    '关系线索': 'socialContextFacts',
     '行为模式': 'behaviorPatterns',
   };
 
@@ -353,6 +377,18 @@ export function serializeUserProfile(profile: UserProfile): string {
     sections.push('');
   }
 
+  if (profile.identityFacts.length > 0) {
+    sections.push('## 身份线索');
+    sections.push(...profile.identityFacts.map((fact) => `- ${fact}`));
+    sections.push('');
+  }
+
+  if (profile.socialContextFacts.length > 0) {
+    sections.push('## 关系线索');
+    sections.push(...profile.socialContextFacts.map((fact) => `- ${fact}`));
+    sections.push('');
+  }
+
   if (profile.behaviorPatterns.length > 0) {
     sections.push('## 行为模式');
     sections.push(...profile.behaviorPatterns.map(b => `- ${b}`));
@@ -390,6 +426,8 @@ export function mergeUserProfile(
     preferences: mergeArrayUnique(existing.preferences, updates.preferences || []),
     dislikes: mergeArrayUnique(existing.dislikes, updates.dislikes || []),
     frequentLocations: mergeArrayUnique(existing.frequentLocations, updates.frequentLocations || []),
+    identityFacts: mergeArrayUnique(existing.identityFacts, updates.identityFacts || []),
+    socialContextFacts: mergeArrayUnique(existing.socialContextFacts, updates.socialContextFacts || []),
     behaviorPatterns: mergeArrayUnique(existing.behaviorPatterns, updates.behaviorPatterns || []),
   };
 }
@@ -538,6 +576,8 @@ export function parseEnhancedProfile(content: string | null): EnhancedUserProfil
       mentionCount: preference.mentionCount ?? 1,
     })),
     frequentLocations: stored.frequentLocations,
+    identityFacts: stored.identityFacts || [],
+    socialContextFacts: stored.socialContextFacts || [],
     lastUpdated: new Date(stored.lastUpdated),
     activityOutcomes: (stored.activityOutcomes || []).map((outcome) => ({
       ...outcome,
@@ -558,6 +598,8 @@ export function serializeEnhancedProfile(profile: EnhancedUserProfile): string {
       updatedAt: p.updatedAt.toISOString(),
     })),
     frequentLocations: profile.frequentLocations,
+    identityFacts: profile.identityFacts,
+    socialContextFacts: profile.socialContextFacts,
     lastUpdated: profile.lastUpdated.toISOString(),
     activityOutcomes: profile.activityOutcomes?.map((outcome) => ({
       ...outcome,
@@ -603,6 +645,8 @@ export function convertToEnhancedProfile(oldProfile: UserProfile): EnhancedUserP
     version: 2,
     preferences,
     frequentLocations: oldProfile.frequentLocations,
+    identityFacts: oldProfile.identityFacts,
+    socialContextFacts: oldProfile.socialContextFacts,
     lastUpdated: now,
     activityOutcomes: [],
   };
@@ -687,12 +731,20 @@ export function extractionToEnhancedPreferences(
  * 排除综合分数为 0（超过 90 天）的偏好。
  */
 export function buildProfilePrompt(profile: EnhancedUserProfile): string {
+  const identityFacts = profile.identityFacts.slice(0, 3);
+  const socialContextFacts = profile.socialContextFacts.slice(0, 3);
   const recentOutcomes = (profile.activityOutcomes || [])
     .slice()
     .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())
     .slice(0, 3);
 
-  if (profile.preferences.length === 0 && profile.frequentLocations.length === 0 && recentOutcomes.length === 0) {
+  if (
+    profile.preferences.length === 0 &&
+    profile.frequentLocations.length === 0 &&
+    identityFacts.length === 0 &&
+    socialContextFacts.length === 0 &&
+    recentOutcomes.length === 0
+  ) {
     return '';
   }
 
@@ -707,6 +759,14 @@ export function buildProfilePrompt(profile: EnhancedUserProfile): string {
   const lines: string[] = ['<user_profile>'];
   lines.push('以下是用户的偏好信息，请在回复时参考：');
   lines.push('');
+
+  if (identityFacts.length > 0) {
+    lines.push('## 用户身份线索');
+    for (const fact of identityFacts) {
+      lines.push(`- ${fact}`);
+    }
+    lines.push('');
+  }
   
   // 喜好（取前 5 个）
   const likes = scoredPrefs
@@ -743,6 +803,14 @@ export function buildProfilePrompt(profile: EnhancedUserProfile): string {
     lines.push('');
   }
 
+  if (socialContextFacts.length > 0) {
+    lines.push('## 用户提过的重要关系线索');
+    for (const fact of socialContextFacts) {
+      lines.push(`- ${fact}`);
+    }
+    lines.push('');
+  }
+
   if (recentOutcomes.length > 0) {
     lines.push('## 最近真实社交结果');
     for (const outcome of recentOutcomes) {
@@ -761,6 +829,7 @@ export function buildProfilePrompt(profile: EnhancedUserProfile): string {
   lines.push('- 如果用户有常去地点，优先推荐该区域的活动');
   lines.push('- 根据用户喜好推荐相关类型的活动');
   lines.push('- 遇到复盘、再约或活动推荐时，优先参考最近真实社交结果，而不是只看聊天表述');
+  lines.push('- 如果用户问“你记得我吗”或“我是谁”，基于上方用户画像自然回应；有画像就简要复述，没有就坦诚说明并邀请用户分享偏好');
   
   return lines.join('\n');
 }
@@ -839,6 +908,8 @@ export async function updateEnhancedUserProfile(
     version: 2,
     preferences: mergeEnhancedPreferences(existing.preferences, newPrefs),
     frequentLocations: mergeArrayUnique(existing.frequentLocations, extraction.frequentLocations).slice(0, 5),
+    identityFacts: mergeArrayUnique(existing.identityFacts, extraction.identityFacts).slice(0, 6),
+    socialContextFacts: mergeArrayUnique(existing.socialContextFacts, extraction.socialContextFacts).slice(0, 6),
     lastUpdated: new Date(),
     activityOutcomes: existing.activityOutcomes || [],
   };
@@ -1074,6 +1145,8 @@ interface StoredEnhancedProfileWithVectors {
     mentionCount?: number;
   }>;
   frequentLocations: string[];
+  identityFacts?: string[];
+  socialContextFacts?: string[];
   lastUpdated: string;
   interestVectors?: Array<{
     activityId: string;
@@ -1212,6 +1285,8 @@ function parseEnhancedProfileWithVectors(content: string | null): EnhancedUserPr
       preferences: [],
       dislikes: [],
       frequentLocations: [],
+      identityFacts: [],
+      socialContextFacts: [],
       behaviorPatterns: [],
       version: 2,
       lastUpdated: new Date(),
@@ -1238,6 +1313,8 @@ function parseEnhancedProfileWithVectors(content: string | null): EnhancedUserPr
       .filter((preference) => preference.sentiment === 'dislike')
       .map((preference) => preference.value),
     frequentLocations: stored.frequentLocations,
+    identityFacts: stored.identityFacts || [],
+    socialContextFacts: stored.socialContextFacts || [],
     behaviorPatterns: [],
     version: 2,
     lastUpdated: new Date(stored.lastUpdated),
@@ -1261,6 +1338,8 @@ function serializeEnhancedProfileWithVectors(profile: EnhancedUserProfileWithVec
     version: 2,
     preferences: profile.preferences.map((preference) => createStoredDefaultPreference(preference)),
     frequentLocations: profile.frequentLocations,
+    identityFacts: profile.identityFacts,
+    socialContextFacts: profile.socialContextFacts,
     lastUpdated: profile.lastUpdated.toISOString(),
     interestVectors: profile.interestVectors?.map(v => ({
       activityId: v.activityId,

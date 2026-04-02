@@ -49,20 +49,9 @@ function main(): void {
   // Extended regression tests (v5.5+)
   const extendedTasks: CheckTask[] = [
     {
-      name: 'Chat full regression with long conversation chains',
+      name: 'Chat regression suite',
       command: 'bun',
-      args: ['scripts/chat-full-regression.ts'],
-    },
-    {
-      name: 'GenUI turns regression with multi-intent scenarios',
-      command: 'bun',
-      args: ['scripts/genui-turns-regression.ts'],
-    },
-    {
-      name: 'Long conversation dedicated regression',
-      command: 'bun',
-      args: ['scripts/long-conversation-regression.ts'],
-      optional: true,
+      args: ['scripts/chat-regression.ts'],
     },
   ];
 

@@ -210,7 +210,7 @@
 
 | 表 | 说明 | 核心字段 |
 |---|------|---------|
-| `users` | 用户表 | wxOpenId, phoneNumber, nickname, avatarUrl, aiCreateQuotaToday（创建活动额度）, workingMemory |
+| `users` | 用户表 | wxOpenId, phoneNumber, nickname, avatarUrl, aiCreateQuotaToday（创建活动额度） |
 | `activities` | 活动表 | title, location, locationName, locationHint, startAt, type, status, embedding, theme, themeConfig |
 | `participants` | 参与者表 | activityId, userId, status, joinedAt, lastReadAt |
 | `conversations` | AI 会话表 | userId, title, messageCount, lastMessageAt |
@@ -351,8 +351,6 @@ export const users = pgTable("users", {
   avatarUrl: varchar("avatar_url", { length: 500 }),
   aiCreateQuotaToday: integer("ai_create_quota_today").default(3).notNull(), // 每日创建活动额度
   aiQuotaResetAt: timestamp("ai_quota_reset_at"),
-  activitiesCreatedCount: integer("activities_created_count").default(0).notNull(),
-  participationCount: integer("participation_count").default(0).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -1168,7 +1166,7 @@ apps/api/src/modules/ai/
 │   ├── input-guard.ts    # 输入安全检查 (敏感词/注入攻击/长度限制)
 │   ├── keyword-match.ts  # P0 关键词匹配 (v5.1 新增，从 handleChatStream 提取)
 │   ├── intent-classify.ts # P1+P2 意图分类 (v5.1 新增，三层漏斗级联)
-│   ├── user-profile.ts   # 用户画像注入 (workingMemory → System Prompt)
+│   ├── user-profile.ts   # 用户画像注入 (memoryContext → System Prompt)
 │   ├── semantic-recall.ts # 语义召回历史 (pgvector + rerank，v5.1 增强)
 │   ├── token-limit.ts    # Token 限制截断 (防止超出模型上下文)
 │   ├── save-history.ts   # 保存对话历史 (conversations 表)
@@ -1350,7 +1348,7 @@ const tools = resolveToolsForIntent(userId, intent, options);
 
 | 记忆类型 | 说明 | 存储位置 | 状态 |
 |---------|------|---------|------|
-| **工作记忆** (Working Memory) | 用户画像、偏好、禁忌 | `users.workingMemory` | ✅ 已实现 |
+| **长期记忆** | 用户画像、偏好、禁忌 | `user_memories` | ✅ 已实现 |
 | **对话历史** (Conversation History) | 会话消息记录 | `conversations` + `conversation_messages` | ✅ 已实现 |
 | **语义回忆** (Semantic Recall) | 向量检索相关活动 + 对话消息 | `activities.embedding` + `conversation_messages` | ✅ v5.1 增强 |
 
@@ -1361,9 +1359,9 @@ conversations (会话)
     └── conversation_messages (消息)
 ```
 
-**工作记忆 (Working Memory)**：
+**长期记忆**：
 
-存储在 `users.workingMemory` 字段，JSON 格式的用户画像：
+存储在 `user_memories` 表，使用 `content + metadata + embedding(1536)` 组织用户画像：
 
 ```typescript
 interface EnhancedUserProfile {
@@ -1487,7 +1485,7 @@ function calculateImportanceScore(factors: ImportanceFactors): number;
 
 **用户兴趣向量 (MaxSim 策略)**：
 
-存储在 `users.workingMemory` 中，最多 3 个最近满意活动的向量：
+存储在 `user_memories` 中，按 `activity_outcome` 记录真实活动结果与兴趣向量：
 
 ```typescript
 interface InterestVector {
@@ -2285,11 +2283,11 @@ interface ProcessorConfig {
 | `inputGuardProcessor` | Pre-LLM (预检查) | 安全检查 | 敏感词过滤、注入攻击检测、长度限制 |
 | `keywordMatchProcessor` | Pre-LLM (预检查) | P0 关键词匹配 | 全局热词精确匹配，命中后直接返回预设响应 |
 | `intentClassifyProcessor` | Pre-LLM (管线) | P1+P2 意图分类 | Feature_Combination → LLM Few-shot 级联 |
-| `userProfileProcessor` | Pre-LLM (管线, 并行) | 用户画像注入 | 从 `workingMemory` 读取偏好，注入 System Prompt |
+| `userProfileProcessor` | Pre-LLM (管线, 并行) | 用户画像注入 | 从 `user_memories` 读取偏好，注入 System Prompt |
 | `semanticRecallProcessor` | Pre-LLM (管线, 并行) | 语义召回 | pgvector 搜索 + qwen3-rerank 重排序 |
 | `tokenLimitProcessor` | Pre-LLM (管线) | Token 限制 | 按模型上下文窗口截断消息历史 |
 | `saveHistoryProcessor` | Post-LLM | 保存对话 | 将用户消息和 AI 响应保存到 `conversation_messages` |
-| `extractPreferencesProcessor` | Async | 偏好提取 | 偏好信号前置检查 + LLM 异步提取，更新 `workingMemory` |
+| `extractPreferencesProcessor` | Async | 偏好提取 | 偏好信号前置检查 + LLM 异步提取，写入 `user_memories` |
 
 **三阶段执行模型**：
 
@@ -2491,7 +2489,7 @@ Widget 按钮点击
 当前时间：{currentTime}
 用户位置：{userLocation}
 用户昵称：{userNickname}
-用户画像：{workingMemory}
+用户画像：{memoryContext}
 </context>
 
 <rules>
@@ -3638,7 +3636,7 @@ bun run gen:api         # 生成 Orval SDK
 ### 12.1 数据一致性
 
 - **CP-1**: `currentParticipants` = `participants` 表中 `status='joined'` 的记录数
-- **CP-2**: `activitiesCreatedCount` = `activities` 表中该用户创建的记录数
+- **CP-2**: `hostedActivities` = `activities` 表中该用户创建的记录数（实时聚合）
 - **CP-3**: `cancelled/completed` 状态的活动不允许新增参与者
 
 ### 12.2 业务规则

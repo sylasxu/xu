@@ -1,12 +1,11 @@
-import { pgTable, uuid, varchar, integer, timestamp, index, text } from "drizzle-orm/pg-core";
+import { pgTable, uuid, varchar, integer, timestamp, index } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-typebox";
 
 /**
  * 用户表 (MVP 精简版)
  * 
- * 保留字段：id, wxOpenId, phoneNumber, nickname, avatarUrl, 
- *          aiCreateQuotaToday, aiQuotaResetAt, activitiesCreatedCount, 
- *          participationCount, workingMemory, createdAt, updatedAt
+ * 保留字段：id, wxOpenId, phoneNumber, nickname, avatarUrl,
+ *          aiCreateQuotaToday, aiQuotaResetAt, createdAt, updatedAt
  * 
  * 移除字段：lastLoginIp, lastLoginAt, bio, gender, fulfillmentCount, 
  *          disputeCount, feedbackReceivedCount, membershipType, 
@@ -27,13 +26,6 @@ export const users = pgTable("users", {
   // --- AI 额度 (MVP 简化) ---
   aiCreateQuotaToday: integer("ai_create_quota_today").default(3).notNull(),
   aiQuotaResetAt: timestamp("ai_quota_reset_at"),
-  
-  // --- AI 工作记忆 (Markdown 格式存储用户画像) ---
-  workingMemory: text("working_memory"),
-  
-  // --- 统计 ---
-  activitiesCreatedCount: integer("activities_created_count").default(0).notNull(),
-  participationCount: integer("participation_count").default(0).notNull(),
   
   // --- 系统 ---
   createdAt: timestamp("created_at").defaultNow().notNull(),

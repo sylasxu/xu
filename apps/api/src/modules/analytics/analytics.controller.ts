@@ -1,10 +1,10 @@
 // Analytics Controller - 数据分析领域路由
 
 import { Elysia } from 'elysia';
-import { basePlugins, verifyAuth, verifyAdmin, AuthError } from '../../setup';
-import { analyticsModel, type ErrorResponse } from './analytics.model';
-import { 
-  getTrendInsights, 
+import { basePlugins, requireAuth, requireAdmin, type ErrorResponse } from '../../setup';
+import { analyticsModel } from './analytics.model';
+import {
+  getTrendInsights,
   getBusinessMetrics,
   getPlatformOverview,
 } from './analytics.service';
@@ -14,60 +14,48 @@ export const analyticsController = new Elysia({ prefix: '/analytics' })
   .use(analyticsModel)
 
   // ==========================================
-  // 趋势分析
+  // 公开/登录即可访问的接口
   // ==========================================
-  .get(
-    '/trends',
-    async ({ query, set, jwt, headers }) => {
-      const user = await verifyAuth(jwt, headers);
-      if (!user) {
-        set.status = 401;
-        return {
-          code: 401,
-          msg: '未授权',
-        } satisfies ErrorResponse;
-      }
-
-      try {
-        const result = await getTrendInsights(query);
-        return result;
-      } catch (error: any) {
-        console.error('获取趋势分析失败:', error);
-        set.status = 500;
-        return {
-          code: 500,
-          msg: error.message || '获取趋势分析失败',
-        } satisfies ErrorResponse;
-      }
-    },
-    {
-      detail: {
-        tags: ['Analytics'],
-        summary: '获取趋势洞察',
-        description: '分析用户高频词和意图分布趋势。',
-      },
-      query: 'analytics.trendsQuery',
-      response: {
-        200: 'analytics.trendsResponse',
-        401: 'analytics.error',
-        500: 'analytics.error',
-      },
-    }
+  // 趋势分析
+  .guard(
+    { beforeHandle: requireAuth },
+    (app) =>
+      app.get(
+        '/trends',
+        async ({ query, set }) => {
+          try {
+            const result = await getTrendInsights(query);
+            return result;
+          } catch (error: any) {
+            console.error('获取趋势分析失败:', error);
+            set.status = 500;
+            return {
+              code: 500,
+              msg: error.message || '获取趋势分析失败',
+            } satisfies ErrorResponse;
+          }
+        },
+        {
+          detail: {
+            tags: ['Analytics'],
+            summary: '获取趋势洞察',
+            description: '分析用户高频词和意图分布趋势。',
+          },
+          query: 'analytics.trendsQuery',
+          response: {
+            200: 'analytics.trendsResponse',
+            401: 'common.error',
+            500: 'common.error',
+          },
+        }
+      )
   )
 
+  // ==========================================
+  // 管理员专属接口
+  // ==========================================
   .guard(
-    {
-      async beforeHandle({ jwt, headers, set }) {
-        try {
-          await verifyAdmin(jwt, headers);
-        } catch (error) {
-          if (error instanceof AuthError) {
-            set.status = error.status;
-            return { code: error.status, msg: error.message };
-          }
-        }
-      },
-    },
+    { beforeHandle: requireAdmin },
     (app) =>
       app
         .get(
@@ -92,9 +80,9 @@ export const analyticsController = new Elysia({ prefix: '/analytics' })
             },
             response: {
               200: 'analytics.metricsResponse',
-              401: 'analytics.error',
-              403: 'analytics.error',
-              500: 'analytics.error',
+              401: 'common.error',
+              403: 'common.error',
+              500: 'common.error',
             },
           }
         )
@@ -121,9 +109,9 @@ export const analyticsController = new Elysia({ prefix: '/analytics' })
             },
             response: {
               200: 'analytics.platformOverviewResponse',
-              401: 'analytics.error',
-              403: 'analytics.error',
-              500: 'analytics.error',
+              401: 'common.error',
+              403: 'common.error',
+              500: 'common.error',
             },
           }
         )

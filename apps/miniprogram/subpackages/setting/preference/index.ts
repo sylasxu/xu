@@ -3,8 +3,8 @@
  * Requirements: 7.2 偏好设置页
  * v4.4 新增
  * 
- * 用户可以设置活动类型、时间偏好、常去地点、社交偏好
- * 数据保存到 users.workingMemory 字段
+ * 用户可以整理自己的偏好线索
+ * 当前版本不再手动写 users 表，偏好由 AI 对话自动学习
  */
 import { useUserStore } from '../../../src/stores/user';
 
@@ -31,60 +31,6 @@ interface PageData {
   // 加载状态
   isLoading: boolean;
   isSaving: boolean;
-}
-
-function parseWorkingMemory(rawValue?: string | null): {
-  preferences?: Array<{ category: string; value: string; sentiment: string }>;
-  frequentLocations?: string[];
-} | null {
-  if (!rawValue) {
-    return null;
-  }
-
-  try {
-    const parsed: unknown = JSON.parse(rawValue);
-    if (!parsed || typeof parsed !== 'object') {
-      return null;
-    }
-
-    const record = parsed as Record<string, unknown>;
-    const preferences = Array.isArray(record.preferences)
-      ? record.preferences
-          .map((item) => {
-            if (!item || typeof item !== 'object') {
-              return null;
-            }
-
-            const preference = item as Record<string, unknown>;
-            if (
-              typeof preference.category !== 'string' ||
-              typeof preference.value !== 'string' ||
-              typeof preference.sentiment !== 'string'
-            ) {
-              return null;
-            }
-
-            return {
-              category: preference.category,
-              value: preference.value,
-              sentiment: preference.sentiment,
-            };
-          })
-          .filter((item): item is { category: string; value: string; sentiment: string } => item !== null)
-      : undefined;
-
-    const frequentLocations = Array.isArray(record.frequentLocations)
-      ? record.frequentLocations.filter((item): item is string => typeof item === 'string')
-      : undefined;
-
-    return {
-      ...(preferences ? { preferences } : {}),
-      ...(frequentLocations ? { frequentLocations } : {}),
-    };
-  } catch (error) {
-    console.error('解析 workingMemory 失败:', error);
-    return null;
-  }
 }
 
 Page<PageData, WechatMiniprogram.Page.CustomOption>({
@@ -127,67 +73,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
    * 加载用户偏好
    */
   async loadPreferences() {
-    const userStore = useUserStore.getState();
-    const user = userStore.user;
-    
-    if (!user) {
-      this.setData({ isLoading: false });
-      return;
-    }
-
-    // 从 workingMemory 中提取偏好
-    const workingMemory = parseWorkingMemory(user.workingMemory);
-
-    if (workingMemory) {
-      const { activityTypes, timePreferences, frequentLocations, socialPreferences } = this.data;
-      
-      // 更新活动类型选中状态
-      const likedActivities = (workingMemory.preferences || [])
-        .filter(p => p.category === 'activity_type' && p.sentiment === 'like')
-        .map(p => p.value);
-      
-      const updatedActivityTypes = activityTypes.map(item => ({
-        ...item,
-        selected: likedActivities.includes(item.label),
-      }));
-
-      // 更新时间偏好选中状态
-      const likedTimes = (workingMemory.preferences || [])
-        .filter(p => p.category === 'time' && p.sentiment === 'like')
-        .map(p => p.value);
-      
-      const updatedTimePreferences = timePreferences.map(item => ({
-        ...item,
-        selected: likedTimes.includes(item.label),
-      }));
-
-      // 更新常去地点选中状态
-      const savedLocations = workingMemory.frequentLocations || [];
-      const updatedFrequentLocations = frequentLocations.map(item => ({
-        ...item,
-        selected: savedLocations.includes(item.value),
-      }));
-
-      // 更新社交偏好选中状态
-      const likedSocial = (workingMemory.preferences || [])
-        .filter(p => p.category === 'social' && p.sentiment === 'like')
-        .map(p => p.value);
-      
-      const updatedSocialPreferences = socialPreferences.map(item => ({
-        ...item,
-        selected: likedSocial.includes(item.label),
-      }));
-
-      this.setData({
-        activityTypes: updatedActivityTypes,
-        timePreferences: updatedTimePreferences,
-        frequentLocations: updatedFrequentLocations,
-        socialPreferences: updatedSocialPreferences,
-        isLoading: false,
-      });
-    } else {
-      this.setData({ isLoading: false });
-    }
+    this.setData({ isLoading: false });
   },
 
   /**
@@ -277,68 +163,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     this.setData({ isSaving: true });
 
     try {
-      const { activityTypes, timePreferences, frequentLocations, socialPreferences } = this.data;
-      
-      // 构建 workingMemory
-      const preferences: Array<{
-        category: string;
-        sentiment: string;
-        value: string;
-        confidence: number;
-        updatedAt: string;
-      }> = [];
-
-      // 活动类型偏好
-      activityTypes.filter(t => t.selected).forEach(t => {
-        preferences.push({
-          category: 'activity_type',
-          sentiment: 'like',
-          value: t.label,
-          confidence: 1,
-          updatedAt: new Date().toISOString(),
-        });
-      });
-
-      // 时间偏好
-      timePreferences.filter(t => t.selected).forEach(t => {
-        preferences.push({
-          category: 'time',
-          sentiment: 'like',
-          value: t.label,
-          confidence: 1,
-          updatedAt: new Date().toISOString(),
-        });
-      });
-
-      // 社交偏好
-      socialPreferences.filter(s => s.selected).forEach(s => {
-        preferences.push({
-          category: 'social',
-          sentiment: 'like',
-          value: s.label,
-          confidence: 1,
-          updatedAt: new Date().toISOString(),
-        });
-      });
-
-      // 常去地点
-      const selectedLocations = frequentLocations
-        .filter(l => l.selected)
-        .map(l => l.value);
-
-      const workingMemory = {
-        version: 2,
-        preferences,
-        frequentLocations: selectedLocations,
-        lastUpdated: new Date().toISOString(),
-      };
-
-      // 调用 API 更新用户信息
-      await userStore.updateProfile({
-        workingMemory: JSON.stringify(workingMemory),
-      });
-
-      wx.showToast({ title: '保存成功', icon: 'success' });
+      wx.showToast({ title: '偏好会在聊天里自动学习', icon: 'none' });
       
       // 返回上一页
       setTimeout(() => {

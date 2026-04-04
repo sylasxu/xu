@@ -138,7 +138,6 @@ function readWidgetType(data: Record<string, unknown>): ToolNodeData['widgetType
     case 'widget_draft':
     case 'widget_explore':
     case 'widget_share':
-    case 'widget_detail':
     case 'widget_ask_preference':
       return value
     default:

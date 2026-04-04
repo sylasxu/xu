@@ -1,15 +1,16 @@
 /**
- * Semantic Recall Processor (v4.8)
- * 
+ * Semantic Recall Processor (v4.9)
+ *
  * 负责语义检索历史活动和对话消息：
  * - 同时搜索 activities 表和 conversation_messages 表
+ * - 搜索独立的长期 user_memories 表
  * - 相似度阈值 0.5
  * - 合并结果后使用 qwen3-rerank 重排序
  * - 返回 top-K 结果（K=5）
  */
 
 import type { ProcessorContext, ProcessorResult } from './types';
-import { db, activities, participants, conversationMessages, eq, sql, and, or } from '@juchang/db';
+import { db, activities, participants, conversationMessages, userMemories, eq, sql, and, or } from '@juchang/db';
 import { generateEmbedding } from '../rag';
 import { rerank } from '../models/router';
 
@@ -18,6 +19,9 @@ const SIMILARITY_THRESHOLD = 0.5;
 
 /** 最终返回的 top-K 结果数 */
 const TOP_K = 5;
+
+/** 太短的输入大多是噪音，不值得做向量检索。 */
+const MIN_RECALL_QUERY_LENGTH = 2;
 
 /** 搜索 activities 表 */
 async function searchActivities(userId: string, queryEmbedding: number[]) {
@@ -66,6 +70,27 @@ async function searchConversationMessages(userId: string, queryEmbedding: number
     .limit(10);
 }
 
+/** 搜索 user_memories 表 */
+async function searchUserMemories(userId: string, queryEmbedding: number[]) {
+  return db
+    .select({
+      content: userMemories.content,
+      memoryType: userMemories.memoryType,
+      similarity: sql<number>`1 - (${userMemories.embedding} <=> ${queryEmbedding}::vector)`,
+    })
+    .from(userMemories)
+    .where(
+      and(
+        eq(userMemories.userId, userId),
+        sql`${userMemories.embedding} IS NOT NULL`,
+        sql`(${userMemories.expiresAt} IS NULL OR ${userMemories.expiresAt} > now())`,
+        sql`1 - (${userMemories.embedding} <=> ${queryEmbedding}::vector) > ${SIMILARITY_THRESHOLD}`,
+      ),
+    )
+    .orderBy(sql`${userMemories.embedding} <=> ${queryEmbedding}::vector`)
+    .limit(10);
+}
+
 /**
  * Semantic Recall Processor
  *
@@ -86,16 +111,27 @@ export async function semanticRecallProcessor(context: ProcessorContext): Promis
       };
     }
 
-    const queryEmbedding = await generateEmbedding(userInput);
+    const normalizedInput = userInput.trim();
+    if (normalizedInput.length < MIN_RECALL_QUERY_LENGTH) {
+      return {
+        success: true,
+        context,
+        executionTime: Date.now() - startTime,
+        data: { skipped: true, reason: 'query-too-short' },
+      };
+    }
 
-    // 并行搜索 activities 和 conversation_messages
-    const [activityResults, messageResults] = await Promise.all([
+    const queryEmbedding = await generateEmbedding(normalizedInput, { textType: 'query' });
+
+    // 并行搜索 activities、conversation_messages 和 user_memories
+    const [activityResults, messageResults, userMemoryResults] = await Promise.all([
       searchActivities(userId, queryEmbedding),
       searchConversationMessages(userId, queryEmbedding),
+      searchUserMemories(userId, queryEmbedding),
     ]);
 
     // 合并结果为统一格式
-    const allDocuments: Array<{ text: string; source: 'activities' | 'conversations'; similarity: number }> = [];
+    const allDocuments: Array<{ text: string; source: 'activities' | 'conversations' | 'user_memories'; similarity: number }> = [];
 
     for (const r of activityResults) {
       allDocuments.push({
@@ -110,6 +146,14 @@ export async function semanticRecallProcessor(context: ProcessorContext): Promis
       allDocuments.push({
         text: `[对话] ${contentStr.slice(0, 200)}`,
         source: 'conversations',
+        similarity: r.similarity ?? 0,
+      });
+    }
+
+    for (const r of userMemoryResults) {
+      allDocuments.push({
+        text: `[记忆/${r.memoryType}] ${r.content.slice(0, 200)}`,
+        source: 'user_memories',
         similarity: r.similarity ?? 0,
       });
     }
@@ -130,7 +174,7 @@ export async function semanticRecallProcessor(context: ProcessorContext): Promis
     try {
       if (allDocuments.length > 1) {
         const rerankResponse = await rerank(
-          userInput,
+          normalizedInput,
           allDocuments.map(d => d.text),
           TOP_K,
         );
@@ -157,7 +201,7 @@ export async function semanticRecallProcessor(context: ProcessorContext): Promis
     const recallPrompt = `## 相关历史信息\n${formattedResults}\n\n请参考这些历史信息，提供更个性化的建议。`;
 
     const avgSimilarity = finalResults.reduce((sum, r) => sum + r.similarity, 0) / finalResults.length;
-    const sources = [...new Set(finalResults.map(r => r.source))] as ('conversations' | 'activities')[];
+    const sources = [...new Set(finalResults.map(r => r.source))] as Array<'conversations' | 'activities' | 'user_memories'>;
 
     const updatedContext: ProcessorContext = {
       ...context,

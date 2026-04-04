@@ -33,8 +33,8 @@ import type {
   GenUIInput,
   GenUIListBlock,
   GenUIRequestContext,
-  GenUITurnContext,
-  GenUITurnEnvelope,
+  GenUISuggestions,
+  GenUIResponseEnvelope,
 } from '../gen/genui-contract'
 import { buildDiscussionEntryUrl, type JoinFlowPayload } from '../utils/join-flow'
 
@@ -81,7 +81,8 @@ export interface UIMessage {
   id: string
   role: MessageRole
   parts: (UIMessagePart | WidgetPart)[]
-  turnContext?: GenUITurnContext
+  suggestions?: GenUISuggestions
+  structuredAction?: (StructuredActionInput & { actionId?: string; displayText?: string })
   createdAt: Date
 }
 
@@ -91,10 +92,17 @@ export type ChatStatus = 'idle' | 'submitted' | 'streaming'
 /** 当前流式消息的 ID */
 export type StreamingMessageId = string | null
 
-type ChatPromptContext = Pick<GenUIRequestContext, 'activityId' | 'followUpMode' | 'entry'>
-type GenUITransientTurn = NonNullable<GenUIRequestContext['transientTurns']>[number]
+type ChatPromptContext = Pick<GenUIRequestContext, 'activityId' | 'activityMode' | 'entry'>
+type GenUIRecentMessage = NonNullable<GenUIRequestContext['recentMessages']>[number]
+type LocalGenUIRecentMessage = GenUIRecentMessage & {
+  action?: string
+  actionId?: string
+  params?: Record<string, unknown>
+  source?: string
+  displayText?: string
+}
 
-const MAX_TRANSIENT_TURNS = 8
+const MAX_TRANSIENT_TURNS = 10
 
 // ============================================================================
 // Protocol and message operations
@@ -143,7 +151,7 @@ function isTextPart(part: UIMessagePart | WidgetPart): part is UIMessagePart & {
   return part.type === 'text'
 }
 
-function isGenUITurnStatus(value: unknown): value is GenUITurnEnvelope['turn']['status'] {
+function isGenUIResponseStatus(value: unknown): value is GenUIResponseEnvelope['response']['status'] {
   return value === 'streaming' || value === 'completed' || value === 'error'
 }
 
@@ -218,21 +226,21 @@ function isGenUIBlock(value: unknown): value is GenUIBlock {
   }
 }
 
-function isGenUITurnEnvelope(value: unknown): value is GenUITurnEnvelope {
+function isGenUIResponseEnvelope(value: unknown): value is GenUIResponseEnvelope {
   if (!isRecord(value) || typeof value.traceId !== 'string' || typeof value.conversationId !== 'string') {
     return false
   }
 
-  if (!isRecord(value.turn)) {
+  if (!isRecord(value.response)) {
     return false
   }
 
   return (
-    typeof value.turn.turnId === 'string' &&
-    value.turn.role === 'assistant' &&
-    isGenUITurnStatus(value.turn.status) &&
-    Array.isArray(value.turn.blocks) &&
-    value.turn.blocks.every(isGenUIBlock)
+    typeof value.response.responseId === 'string' &&
+    value.response.role === 'assistant' &&
+    isGenUIResponseStatus(value.response.status) &&
+    Array.isArray(value.response.blocks) &&
+    value.response.blocks.every(isGenUIBlock)
   )
 }
 
@@ -283,7 +291,7 @@ function readWidgetSummaryText(widget: WidgetPart | null): string {
   return ''
 }
 
-function readMessagePrimaryBlockType(message: UIMessage): GenUITransientTurn['primaryBlockType'] {
+function readMessagePrimaryBlockType(message: UIMessage): GenUIRecentMessage['primaryBlockType'] {
   const widget = getWidgetPart(message)
   if (!widget) {
     return getTextContent(message).trim() ? 'text' : null
@@ -319,10 +327,10 @@ function extractMessageTextForTransientTurn(message: UIMessage): string {
   return readWidgetSummaryText(getWidgetPart(message))
 }
 
-function buildTransientTurns(messages: UIMessage[]): GenUITransientTurn[] {
+function buildTransientTurns(messages: UIMessage[]): LocalGenUIRecentMessage[] {
   return messages
     .slice(-MAX_TRANSIENT_TURNS)
-    .map((message) => {
+    .map((message): LocalGenUIRecentMessage | null => {
       const text = extractMessageTextForTransientTurn(message)
       if (!text) {
         return null
@@ -330,13 +338,23 @@ function buildTransientTurns(messages: UIMessage[]): GenUITransientTurn[] {
 
       const primaryBlockType = readMessagePrimaryBlockType(message)
       return {
+        messageId: message.id,
         role: message.role,
         text,
+        ...(message.role === 'user' && message.structuredAction
+          ? {
+              action: message.structuredAction.action,
+              ...(message.structuredAction.actionId ? { actionId: message.structuredAction.actionId } : {}),
+              ...(message.structuredAction.payload ? { params: message.structuredAction.payload } : {}),
+              ...(message.structuredAction.source ? { source: message.structuredAction.source } : {}),
+              ...(message.structuredAction.displayText ? { displayText: message.structuredAction.displayText } : {}),
+            }
+          : {}),
         ...(primaryBlockType !== undefined ? { primaryBlockType } : {}),
-        ...(message.role === 'assistant' && message.turnContext ? { turnContext: message.turnContext } : {}),
+        ...(message.role === 'assistant' && message.suggestions ? { suggestions: message.suggestions } : {}),
       }
     })
-    .filter((turn): turn is GenUITransientTurn => Boolean(turn))
+    .filter((turn): turn is LocalGenUIRecentMessage => Boolean(turn))
 }
 
 function upsertWidgetPart(message: UIMessage, widgetPart: WidgetPart): void {
@@ -1052,9 +1070,9 @@ type ChatGatewayTurnsRequest = {
     lat?: number
     lng?: number
     activityId?: string
-    followUpMode?: 'review' | 'rebook' | 'kickoff'
+    activityMode?: 'review' | 'rebook' | 'kickoff'
     entry?: string
-    transientTurns?: GenUIRequestContext['transientTurns']
+    recentMessages?: GenUIRequestContext['recentMessages']
   }
   trace?: boolean
   stream?: boolean
@@ -1090,9 +1108,9 @@ function buildChatGatewayTurnsRequest(
     platformVersion: string
     location?: { lat: number; lng: number } | null
     activityId?: string
-    followUpMode?: 'review' | 'rebook' | 'kickoff'
+    activityMode?: 'review' | 'rebook' | 'kickoff'
     entry?: string
-    transientTurns?: GenUIRequestContext['transientTurns']
+    recentMessages?: GenUIRequestContext['recentMessages']
   }
 ): ChatGatewayTurnsRequest {
   return {
@@ -1106,10 +1124,10 @@ function buildChatGatewayTurnsRequest(
       platformVersion: context.platformVersion,
       ...(context.location ? { lat: context.location.lat, lng: context.location.lng } : {}),
       ...(context.activityId ? { activityId: context.activityId } : {}),
-      ...(context.followUpMode ? { followUpMode: context.followUpMode } : {}),
+      ...(context.activityMode ? { activityMode: context.activityMode } : {}),
       ...(context.entry ? { entry: context.entry } : {}),
-      ...(context.transientTurns && context.transientTurns.length > 0
-        ? { transientTurns: context.transientTurns }
+      ...(context.recentMessages && context.recentMessages.length > 0
+        ? { recentMessages: context.recentMessages }
         : {}),
     },
   }
@@ -1390,7 +1408,7 @@ export const useChatStore = create<ChatState>()(
         turnErrorFallbackMessage: string
         buildErrorWidgetData: (normalizedError: string) => WidgetPart['data']
       }) => {
-        let currentEnvelope: GenUITurnEnvelope | null = null
+        let currentEnvelope: GenUIResponseEnvelope | null = null
         let settled = false
         let eventQueue: Promise<void> = Promise.resolve()
         let controller: SSEController | null = null
@@ -1400,18 +1418,18 @@ export const useChatStore = create<ChatState>()(
           controller !== null && (!controllerRegistered || get()._controller === controller)
         )
 
-        const updateAssistantFromEnvelope = (envelope: GenUITurnEnvelope, status: ChatStatus) => {
+        const updateAssistantFromEnvelope = (envelope: GenUIResponseEnvelope, status: ChatStatus) => {
           if (!isCurrentController()) {
             return
           }
 
-          const assistantParts = buildAssistantPartsFromBlocks(envelope.turn.blocks)
+          const assistantParts = buildAssistantPartsFromBlocks(envelope.response.blocks)
 
           set((draft) => {
             const msgIndex = draft.messages.findIndex((message) => message.id === params.aiMessageId)
             if (msgIndex !== -1) {
               draft.messages[msgIndex].parts = assistantParts
-              draft.messages[msgIndex].turnContext = envelope.turn.turnContext
+              draft.messages[msgIndex].suggestions = envelope.response.suggestions
               sanitizeAssistantMessage(draft.messages[msgIndex])
             }
             draft.conversationId = envelope.conversationId
@@ -1420,7 +1438,7 @@ export const useChatStore = create<ChatState>()(
           })
         }
 
-        const ensureEnvelope = (): GenUITurnEnvelope => {
+        const ensureEnvelope = (): GenUIResponseEnvelope => {
           if (currentEnvelope) {
             return currentEnvelope
           }
@@ -1428,8 +1446,8 @@ export const useChatStore = create<ChatState>()(
           currentEnvelope = {
             traceId: `trace_${Date.now()}`,
             conversationId: params.fallbackConversationId,
-            turn: {
-              turnId: `turn_${Date.now()}`,
+            response: {
+              responseId: `turn_${Date.now()}`,
               role: 'assistant',
               status: 'streaming',
               blocks: [],
@@ -1440,7 +1458,7 @@ export const useChatStore = create<ChatState>()(
 
         const upsertStreamedBlock = (block: GenUIBlock, mode: 'append' | 'replace'): number => {
           const envelope = ensureEnvelope()
-          const blocks = [...envelope.turn.blocks]
+          const blocks = [...envelope.response.blocks]
           let targetIndex = -1
 
           if (mode === 'replace') {
@@ -1456,8 +1474,8 @@ export const useChatStore = create<ChatState>()(
 
           currentEnvelope = {
             ...envelope,
-            turn: {
-              ...envelope.turn,
+            response: {
+              ...envelope.response,
               blocks,
             },
           }
@@ -1484,7 +1502,7 @@ export const useChatStore = create<ChatState>()(
             }
 
             const envelope = ensureEnvelope()
-            const blocks = [...envelope.turn.blocks]
+            const blocks = [...envelope.response.blocks]
             const currentBlock = blocks[index]
             if (!currentBlock || currentBlock.type !== 'text') {
               break
@@ -1497,8 +1515,8 @@ export const useChatStore = create<ChatState>()(
 
             currentEnvelope = {
               ...envelope,
-              turn: {
-                ...envelope.turn,
+              response: {
+                ...envelope.response,
                 blocks,
               },
             }
@@ -1518,7 +1536,7 @@ export const useChatStore = create<ChatState>()(
 
           set((draft) => {
             if (currentEnvelope) {
-              const assistantParts = buildAssistantPartsFromBlocks(currentEnvelope.turn.blocks)
+              const assistantParts = buildAssistantPartsFromBlocks(currentEnvelope.response.blocks)
               const msgIndex = draft.messages.findIndex((message) => message.id === params.aiMessageId)
               if (msgIndex !== -1) {
                 draft.messages[msgIndex].parts = assistantParts
@@ -1536,7 +1554,7 @@ export const useChatStore = create<ChatState>()(
           })
 
           if (currentEnvelope) {
-            applyCompletionEffectsFromBlocks(currentEnvelope.turn.blocks)
+            applyCompletionEffectsFromBlocks(currentEnvelope.response.blocks)
           }
         }
 
@@ -1580,7 +1598,7 @@ export const useChatStore = create<ChatState>()(
             return
           }
 
-          if (eventName === 'turn-error') {
+          if (eventName === 'response-error') {
             const errorData = isRecord(eventData) ? eventData : null
             const message =
               errorData && typeof errorData.message === 'string'
@@ -1589,32 +1607,32 @@ export const useChatStore = create<ChatState>()(
             throw new Error(message)
           }
 
-          if (eventName === 'turn-start') {
+          if (eventName === 'response-start') {
             const data = isRecord(eventData) ? eventData : null
             const traceId = data && typeof data.traceId === 'string' ? data.traceId : `trace_${Date.now()}`
             const conversationId =
               data && typeof data.conversationId === 'string'
                 ? data.conversationId
                 : params.fallbackConversationId
-            const turnId = data && typeof data.turnId === 'string' ? data.turnId : `turn_${Date.now()}`
+            const responseId = data && typeof data.responseId === 'string' ? data.responseId : `turn_${Date.now()}`
 
             currentEnvelope = {
               traceId,
               conversationId,
-              turn: {
-                turnId,
+              response: {
+                responseId,
                 role: 'assistant',
                 status: 'streaming',
                 blocks: [],
               },
             }
 
-            // v5.5: turn-start 时保持 submitted 状态（显示 loading），等有内容再切到 streaming
+            // v5.5: response-start 时保持 submitted 状态（显示 loading），等有内容再切到 streaming
             updateAssistantFromEnvelope(currentEnvelope, 'submitted')
             return
           }
 
-          if (eventName === 'turn-status') {
+          if (eventName === 'response-status') {
             const data = isRecord(eventData) ? eventData : null
             const status = data && typeof data.status === 'string' ? data.status : ''
             if (status !== 'streaming' && status !== 'completed' && status !== 'error') {
@@ -1624,8 +1642,8 @@ export const useChatStore = create<ChatState>()(
             const envelope = ensureEnvelope()
             currentEnvelope = {
               ...envelope,
-              turn: {
-                ...envelope.turn,
+              response: {
+                ...envelope.response,
                 status,
               },
             }
@@ -1633,8 +1651,8 @@ export const useChatStore = create<ChatState>()(
             return
           }
 
-          if (eventName === 'turn-complete') {
-            if (!isGenUITurnEnvelope(eventData)) {
+          if (eventName === 'response-complete') {
+            if (!isGenUIResponseEnvelope(eventData)) {
               return
             }
 
@@ -1721,7 +1739,7 @@ export const useChatStore = create<ChatState>()(
         }
 
         const state = get()
-        const transientTurns = !hasAuthenticatedSession()
+        const recentMessages = !hasAuthenticatedSession()
           ? buildTransientTurns(state.messages)
           : undefined
         
@@ -1768,7 +1786,7 @@ export const useChatStore = create<ChatState>()(
             timezone: 'Asia/Shanghai',
             platformVersion: 'miniprogram-vnext',
             location: state.location,
-            ...(transientTurns && transientTurns.length > 0 ? { transientTurns } : {}),
+            ...(recentMessages && recentMessages.length > 0 ? { recentMessages } : {}),
             ...(contextOverrides || {}),
           }
         )
@@ -1865,7 +1883,7 @@ export const useChatStore = create<ChatState>()(
        */
       sendAction: (action: StructuredActionInput) => {
         const state = get()
-        const transientTurns = !hasAuthenticatedSession()
+        const recentMessages = !hasAuthenticatedSession()
           ? buildTransientTurns(state.messages)
           : undefined
         
@@ -1877,10 +1895,16 @@ export const useChatStore = create<ChatState>()(
         // 1. 添加用户消息（显示 action 的原始文本或描述）
         const userMessageId = generateId()
         const displayText = action.originalText || `执行 ${action.action}`
+        const actionId = generateId()
         const userMessage: UIMessage = {
           id: userMessageId,
           role: 'user',
           parts: [{ type: 'text', text: displayText }],
+          structuredAction: {
+            ...action,
+            actionId,
+            displayText,
+          },
           createdAt: new Date(),
         }
         
@@ -1907,7 +1931,7 @@ export const useChatStore = create<ChatState>()(
           {
             type: 'action',
             action: action.action,
-            actionId: generateId(),
+            actionId,
             params: action.payload,
             displayText,
           },
@@ -1917,7 +1941,7 @@ export const useChatStore = create<ChatState>()(
             platformVersion: 'miniprogram-vnext',
             location: state.location,
             ...(action.source ? { entry: action.source } : {}),
-            ...(transientTurns && transientTurns.length > 0 ? { transientTurns } : {}),
+            ...(recentMessages && recentMessages.length > 0 ? { recentMessages } : {}),
           }
         )
         chatRequest.stream = true

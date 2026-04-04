@@ -167,7 +167,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 type PromptContextOverrides = {
   activityId?: string;
-  followUpMode?: 'review' | 'rebook' | 'kickoff';
+  activityMode?: 'review' | 'rebook' | 'kickoff';
   entry?: string;
 }
 
@@ -669,7 +669,7 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
 
     this.openHomeWithPrompt(prompt, {
       ...(activityId ? { activityId } : {}),
-      followUpMode: 'review',
+      activityMode: 'review',
       entry: 'message_center_post_activity',
     });
   },
@@ -684,7 +684,7 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
 
     this.openHomeWithPrompt(prompt, {
       ...(activityId ? { activityId } : {}),
-      followUpMode: 'rebook',
+      activityMode: 'rebook',
       entry: 'message_center_post_activity',
     });
   },

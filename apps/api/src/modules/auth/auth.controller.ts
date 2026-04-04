@@ -71,7 +71,7 @@ export const authController = new Elysia({ prefix: '/auth' })
       body: 'auth.login',
       response: {
         200: 'auth.loginResponse',
-        400: 'auth.error',
+        400: 'common.error',
       },
     }
   )
@@ -134,9 +134,9 @@ export const authController = new Elysia({ prefix: '/auth' })
       body: 'auth.testUsersBootstrap',
       response: {
         200: 'auth.testUsersBootstrapResponse',
-        400: 'auth.error',
-        401: 'auth.error',
-        403: 'auth.error',
+        400: 'common.error',
+        401: 'common.error',
+        403: 'common.error',
       },
     }
   )
@@ -176,8 +176,8 @@ export const authController = new Elysia({ prefix: '/auth' })
       body: 'auth.bindPhone',
       response: {
         200: 'auth.bindPhoneResponse',
-        400: 'auth.error',
-        401: 'auth.error',
+        400: 'common.error',
+        401: 'common.error',
       },
     }
   );

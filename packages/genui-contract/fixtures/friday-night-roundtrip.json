@@ -17,7 +17,7 @@
     "traceId": "trace_fixture_001",
     "conversationId": "conv_fixture_001",
     "turn": {
-      "turnId": "turn_fixture_001",
+      "responseId": "turn_fixture_001",
       "role": "assistant",
       "status": "completed",
       "blocks": [

@@ -99,25 +99,6 @@ export const usersColumns: ColumnDef<User>[] = [
     enableSorting: false,
     enableHiding: false,
   },
-  // v4.6: 发起数列前置
-  {
-    accessorKey: 'activitiesCreatedCount',
-    header: ({ column }) => (
-      <DataTableColumnHeader column={column} title='发起数' />
-    ),
-    cell: ({ row }) => {
-      const count = row.getValue('activitiesCreatedCount') as number
-      const index = row.index
-      // v4.6: Top 10 显示 👑 图标
-      const isTop10 = index < 10 && count > 0
-      return (
-        <span className='font-bold'>
-          {isTop10 && <span className='mr-1'>👑</span>}
-          {count || 0}
-        </span>
-      )
-    },
-  },
   {
     accessorKey: 'nickname',
     header: ({ column }) => (
@@ -143,16 +124,6 @@ export const usersColumns: ColumnDef<User>[] = [
           未绑定
         </Badge>
       )
-    },
-  },
-  {
-    accessorKey: 'participationCount',
-    header: ({ column }) => (
-      <DataTableColumnHeader column={column} title='参与活动' />
-    ),
-    cell: ({ row }) => {
-      const count = row.getValue('participationCount') as number
-      return <span>{count || 0}</span>
     },
   },
   {

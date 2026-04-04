@@ -12,7 +12,7 @@ export type RouteKey =
 
 export type ChatRouteKey = 'chat' | 'reasoning' | 'agent'
 
-export type ProviderName = 'openai' | 'qwen' | 'deepseek' | 'doubao'
+export type ProviderName = 'moonshot' | 'qwen' | 'deepseek' | 'doubao'
 
 export interface RouteMapConfig {
   chat: string
@@ -33,19 +33,19 @@ export interface ChatChainPreset {
 }
 
 export const PROVIDER_OPTIONS: Array<{ value: ProviderName; label: string }> = [
-  { value: 'openai', label: 'OpenAI / 兼容网关' },
+  { value: 'moonshot', label: 'Moonshot / Kimi' },
   { value: 'qwen', label: 'Qwen' },
   { value: 'deepseek', label: 'DeepSeek' },
   { value: 'doubao', label: 'Doubao' },
 ]
 
 export const DEFAULT_ROUTE_MAP: RouteMapConfig = {
-  chat: 'openai/gpt-5.4',
-  reasoning: 'openai/gpt-5.4',
-  agent: 'openai/gpt-5.4',
+  chat: 'moonshot/kimi-k2-32k',
+  reasoning: 'moonshot/kimi-k2-32k',
+  agent: 'moonshot/kimi-k2-32k',
   vision: 'qwen/qwen-vl-max',
-  content_generation: 'openai/gpt-5.4',
-  content_topic_suggestions: 'openai/gpt-5.4',
+  content_generation: 'moonshot/kimi-k2-32k',
+  content_topic_suggestions: 'moonshot/kimi-k2-32k',
   embedding: 'qwen/text-embedding-v4',
   rerank: 'qwen/qwen3-rerank',
 }
@@ -54,13 +54,13 @@ export const CHAT_ROUTE_KEYS: ChatRouteKey[] = ['chat', 'reasoning', 'agent']
 
 export const CHAT_CHAIN_PRESETS: ChatChainPreset[] = [
   {
-    key: 'openai',
-    label: 'OpenAI 主链路',
-    description: '当前最稳，适合主聊天、推理和 Agent 一起走同一条链路。',
+    key: 'moonshot',
+    label: 'Kimi 主链路',
+    description: '境内默认链路，适合主聊天、推理和 Agent 一起走同一条链路。',
     routes: {
-      chat: 'openai/gpt-5.4',
-      reasoning: 'openai/gpt-5.4',
-      agent: 'openai/gpt-5.4',
+      chat: 'moonshot/kimi-k2-32k',
+      reasoning: 'moonshot/kimi-k2-32k',
+      agent: 'moonshot/kimi-k2-32k',
     },
   },
   {
@@ -86,8 +86,7 @@ export const CHAT_CHAIN_PRESETS: ChatChainPreset[] = [
 ]
 
 export const PLAYGROUND_MANUAL_MODEL_OPTIONS = [
-  { value: 'openai/gpt-5.4', label: 'OpenAI GPT-5.4' },
-  { value: 'openai/gpt-5', label: 'OpenAI GPT-5' },
+  { value: 'moonshot/kimi-k2-32k', label: 'Moonshot Kimi K2 32K' },
   { value: 'deepseek/deepseek-chat', label: 'DeepSeek Chat' },
   { value: 'qwen/qwen-flash', label: 'Qwen Flash' },
   { value: 'qwen/qwen-plus', label: 'Qwen Plus' },
@@ -106,13 +105,10 @@ export function inferProviderName(modelId: string): ProviderName | null {
   const normalized = modelId.trim().toLowerCase()
 
   if (
-    normalized.startsWith('openai/')
-    || normalized.startsWith('gpt')
-    || normalized.startsWith('o1')
-    || normalized.startsWith('o3')
-    || normalized.startsWith('o4')
+    normalized.startsWith('moonshot/')
+    || normalized.startsWith('kimi')
   ) {
-    return 'openai'
+    return 'moonshot'
   }
 
   if (
@@ -188,7 +184,7 @@ export function splitRouteIdentifier(routeIdentifier: string): {
     const provider = normalized.slice(0, separatorIndex).trim()
     const modelId = normalized.slice(separatorIndex + 1).trim()
     if (
-      (['openai', 'qwen', 'deepseek', 'doubao'] as const).includes(provider as ProviderName)
+      (['moonshot', 'qwen', 'deepseek', 'doubao'] as const).includes(provider as ProviderName)
       && modelId
     ) {
       return {
@@ -198,7 +194,7 @@ export function splitRouteIdentifier(routeIdentifier: string): {
     }
   }
 
-  const inferredProvider = inferProviderName(normalized) ?? 'openai'
+  const inferredProvider = inferProviderName(normalized) ?? 'moonshot'
   return {
     provider: inferredProvider,
     modelId: normalized,

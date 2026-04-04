@@ -38,8 +38,6 @@ CREATE TABLE "users" (
 	"avatar_url" varchar(500),
 	"ai_create_quota_today" integer DEFAULT 3 NOT NULL,
 	"ai_quota_reset_at" timestamp,
-	"activities_created_count" integer DEFAULT 0 NOT NULL,
-	"participation_count" integer DEFAULT 0 NOT NULL,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL,
 	CONSTRAINT "users_wx_openid_unique" UNIQUE("wx_openid")

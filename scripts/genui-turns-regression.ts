@@ -10,7 +10,13 @@ type InputStep =
       actionId: string;
       displayText: string;
       params?: Record<string, unknown>;
+      source?: string;
     };
+
+interface ExpectedTrace {
+  stage: string;
+  detail?: Record<string, unknown>;
+}
 
 interface Scenario {
   id: string;
@@ -18,6 +24,9 @@ interface Scenario {
   steps: InputStep[];
   authMode?: "anonymous" | "authenticated";
   expectedBlockTypes?: string[][];
+  preserveAnonymousRecentMessages?: boolean;
+  streamTraceStepIndexes?: number[];
+  expectedTraces?: ExpectedTrace[][];
 }
 
 interface HttpResult {
@@ -26,16 +35,39 @@ interface HttpResult {
   stderr: string;
 }
 
-interface TurnEnvelope {
+interface ResponseEnvelope {
   traceId: string;
   conversationId: string;
-  turn: {
-    turnId: string;
+  response: {
+    responseId: string;
     role: "assistant";
     status: "streaming" | "completed" | "error";
     blocks: Array<Record<string, unknown>>;
+    suggestions?: Record<string, unknown>;
   };
 }
+
+interface TracePayload {
+  stage: string;
+  detail?: Record<string, unknown>;
+}
+
+interface SsePacket {
+  eventName: string;
+  dataText: string;
+}
+
+type RecentMessage = {
+  role: "user" | "assistant";
+  text: string;
+  primaryBlockType?: string | null;
+  suggestions?: Record<string, unknown>;
+  action?: string;
+  actionId?: string;
+  params?: Record<string, unknown>;
+  source?: string;
+  displayText?: string;
+};
 
 const BASE_URL =
   process.env.GENUI_CHAT_API_URL ||
@@ -43,11 +75,14 @@ const BASE_URL =
   "http://127.0.0.1:1996/ai/chat";
 const DEFAULT_TEST_MODEL = process.env.GENUI_TEST_MODEL?.trim() || "deepseek-chat";
 const CURL_TIMEOUT_MS = Number.parseInt(process.env.GENUI_CURL_TIMEOUT_MS || "45000", 10);
+const MAX_TRANSIENT_TURNS = 8;
 const ROOT_API_URL = BASE_URL.endsWith("/ai/chat")
   ? BASE_URL.slice(0, -"/ai/chat".length)
   : BASE_URL;
 let authToken = process.env.GENUI_AUTH_TOKEN?.trim() || "";
 let adminToken = process.env.GENUI_ADMIN_TOKEN?.trim() || "";
+const scenarioArgIndex = Bun.argv.indexOf("--scenario");
+const scenarioFilter = scenarioArgIndex >= 0 ? Bun.argv[scenarioArgIndex + 1]?.trim() || "" : "";
 const AUTO_ADMIN_PHONE = process.env.GENUI_ADMIN_PHONE?.trim()
   || process.env.SMOKE_ADMIN_PHONE?.trim()
   || process.env.ADMIN_PHONE_WHITELIST?.split(",").map((phone) => phone.trim()).find(Boolean)
@@ -168,35 +203,23 @@ function ensureAuthenticatedRegressionToken(): string {
   return authToken;
 }
 
-function readTurnCompleteEnvelopeFromStream(streamOutput: string): TurnEnvelope | null {
-  const packets = streamOutput
-    .split(/\n\n+/)
-    .map((packet) => packet.trim())
-    .filter(Boolean);
+function readResponseCompleteEnvelopeFromStream(streamOutput: string): ResponseEnvelope | null {
+  const packets = readSsePackets(streamOutput);
 
   for (const packet of packets) {
-    const lines = packet.split(/\r?\n/);
-    let eventName = "message";
-    const dataLines: string[] = [];
-
-    for (const line of lines) {
-      if (line.startsWith("event:")) {
-        eventName = line.slice(6).trim();
-        continue;
-      }
-
-      if (line.startsWith("data:")) {
-        dataLines.push(line.slice(5).trim());
-      }
-    }
-
-    if (eventName !== "turn-complete" || dataLines.length === 0) {
+    if (packet.eventName !== "response-complete" || !packet.dataText) {
       continue;
     }
 
     try {
-      const payload = JSON.parse(dataLines.join("\n")) as { data?: unknown };
-      return isRecord(payload) && isRecord(payload.data) ? (payload.data as TurnEnvelope) : null;
+      const payload = JSON.parse(packet.dataText) as { data?: unknown } | ResponseEnvelope;
+      if (isRecord(payload) && isRecord(payload.data)) {
+        return payload.data as unknown as ResponseEnvelope;
+      }
+      if (isRecord(payload) && typeof payload.traceId === "string" && typeof payload.conversationId === "string") {
+        return payload as ResponseEnvelope;
+      }
+      return null;
     } catch {
       return null;
     }
@@ -205,7 +228,66 @@ function readTurnCompleteEnvelopeFromStream(streamOutput: string): TurnEnvelope 
   return null;
 }
 
-function postTurn(conversationId: string | null, input: InputStep, token?: string): TurnEnvelope {
+function readSsePackets(streamOutput: string): SsePacket[] {
+  return streamOutput
+    .split(/\n\n+/)
+    .map((packet) => packet.trim())
+    .filter(Boolean)
+    .map((packet) => {
+      const lines = packet.split(/\r?\n/);
+      let eventName = "message";
+      const dataLines: string[] = [];
+
+      for (const line of lines) {
+        if (line.startsWith("event:")) {
+          eventName = line.slice(6).trim();
+          continue;
+        }
+
+        if (line.startsWith("data:")) {
+          dataLines.push(line.slice(5).trim());
+        }
+      }
+
+      return {
+        eventName,
+        dataText: dataLines.join("\n"),
+      };
+    });
+}
+
+function readTracePayloadsFromStream(streamOutput: string): TracePayload[] {
+  const traces: TracePayload[] = [];
+
+  for (const packet of readSsePackets(streamOutput)) {
+    if (packet.eventName !== "trace" || !packet.dataText) {
+      continue;
+    }
+
+    try {
+      const payload = JSON.parse(packet.dataText) as { data?: unknown };
+      if (isRecord(payload) && isRecord(payload.data) && typeof payload.data.stage === "string") {
+        traces.push({
+          stage: payload.data.stage,
+          ...(isRecord(payload.data.detail) ? { detail: payload.data.detail } : {}),
+        });
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return traces;
+}
+
+function postResponse(
+  conversationId: string | null,
+  input: InputStep,
+  options?: {
+    token?: string;
+    recentMessages?: RecentMessage[];
+  }
+): ResponseEnvelope {
   const body = {
     ...(conversationId ? { conversationId } : {}),
     input,
@@ -214,6 +296,9 @@ function postTurn(conversationId: string | null, input: InputStep, token?: strin
       locale: "zh-CN",
       timezone: "Asia/Shanghai",
       platformVersion: "regression",
+      ...(options?.recentMessages && options.recentMessages.length > 0
+        ? { recentMessages: options.recentMessages }
+        : {}),
     },
     ai: {
       model: DEFAULT_TEST_MODEL,
@@ -227,19 +312,27 @@ function postTurn(conversationId: string | null, input: InputStep, token?: strin
     BASE_URL,
     "-H",
     "Content-Type: application/json",
-    ...readAuthHeaderArgs(token),
+    ...readAuthHeaderArgs(options?.token),
     "-d",
     JSON.stringify(body),
   ]);
 
   if (result.status !== 0) {
-    throw new Error(`turn endpoint failed: ${result.stderr}`);
+    throw new Error(`response endpoint failed: ${result.stderr}`);
   }
 
-  return JSON.parse(result.stdout) as TurnEnvelope;
+  return JSON.parse(result.stdout) as ResponseEnvelope;
 }
 
-function postTurnStream(conversationId: string | null, input: InputStep, token?: string): string {
+function postResponseStream(
+  conversationId: string | null,
+  input: InputStep,
+  options?: {
+    token?: string;
+    recentMessages?: RecentMessage[];
+    trace?: boolean;
+  }
+): string {
   const body = {
     ...(conversationId ? { conversationId } : {}),
     input,
@@ -248,10 +341,14 @@ function postTurnStream(conversationId: string | null, input: InputStep, token?:
       locale: "zh-CN",
       timezone: "Asia/Shanghai",
       platformVersion: "regression",
+      ...(options?.recentMessages && options.recentMessages.length > 0
+        ? { recentMessages: options.recentMessages }
+        : {}),
     },
     ai: {
       model: DEFAULT_TEST_MODEL,
     },
+    ...(options?.trace ? { trace: true } : {}),
     stream: true,
   };
 
@@ -263,7 +360,7 @@ function postTurnStream(conversationId: string | null, input: InputStep, token?:
     BASE_URL,
     "-H",
     "Content-Type: application/json",
-    ...readAuthHeaderArgs(token),
+    ...readAuthHeaderArgs(options?.token),
     "-d",
     JSON.stringify(body),
   ]);
@@ -275,18 +372,123 @@ function postTurnStream(conversationId: string | null, input: InputStep, token?:
   return result.stdout;
 }
 
-function assertTurnEnvelope(turn: TurnEnvelope, label: string): void {
+function resolvePrimaryBlockType(blocks: Array<Record<string, unknown>>): string | null {
+  const primaryBlock = blocks.find((block) => String(block.type) !== "text") ?? blocks[0];
+  return primaryBlock ? String(primaryBlock.type) : null;
+}
+
+function summarizeAssistantBlocks(blocks: Array<Record<string, unknown>>): string {
+  const textBlocks = blocks
+    .filter((block) => String(block.type) === "text" && typeof block.content === "string")
+    .map((block) => String(block.content).trim())
+    .filter(Boolean);
+
+  if (textBlocks.length > 0) {
+    return textBlocks.join("\n\n");
+  }
+
+  for (const block of blocks) {
+    if (block.type === "choice" && typeof block.question === "string" && block.question.trim()) {
+      return block.question.trim();
+    }
+
+    if (block.type === "list") {
+      if (typeof block.title === "string" && block.title.trim()) {
+        return block.title.trim();
+      }
+
+      const items = Array.isArray(block.items) ? block.items : [];
+      const firstItem = items.find((item) => isRecord(item) && typeof item.title === "string" && item.title.trim());
+      if (firstItem && typeof firstItem.title === "string") {
+        return firstItem.title.trim();
+      }
+    }
+
+    if ((block.type === "entity-card" || block.type === "form") && typeof block.title === "string" && block.title.trim()) {
+      return block.title.trim();
+    }
+
+    if (block.type === "alert" && typeof block.message === "string" && block.message.trim()) {
+      return block.message.trim();
+    }
+  }
+
+  return "";
+}
+
+function buildUserRecentMessage(step: InputStep): RecentMessage {
+  if (step.type === "text") {
+    return {
+      role: "user",
+      text: step.text,
+    };
+  }
+
+  return {
+    role: "user",
+    text: step.displayText,
+    action: step.action,
+    actionId: step.actionId,
+    ...(step.params ? { params: step.params } : {}),
+    ...(step.source ? { source: step.source } : {}),
+    ...(step.displayText ? { displayText: step.displayText } : {}),
+  };
+}
+
+function buildAssistantRecentMessage(turn: ResponseEnvelope): RecentMessage | null {
+  const text = summarizeAssistantBlocks(turn.response.blocks);
+  if (!text) {
+    return null;
+  }
+
+  const primaryBlockType = resolvePrimaryBlockType(turn.response.blocks);
+
+  return {
+    role: "assistant",
+    text,
+    ...(primaryBlockType !== null ? { primaryBlockType } : {}),
+    ...(isRecord(turn.response.suggestions) ? { suggestions: turn.response.suggestions } : {}),
+  };
+}
+
+function appendRecentMessages(history: RecentMessage[], turns: Array<RecentMessage | null>): RecentMessage[] {
+  return [...history, ...turns.filter((turn): turn is RecentMessage => Boolean(turn))].slice(-MAX_TRANSIENT_TURNS);
+}
+
+function matchesExpectedDetail(actual: Record<string, unknown> | undefined, expected: Record<string, unknown>): boolean {
+  if (!actual) {
+    return false;
+  }
+
+  return Object.entries(expected).every(([key, value]) => actual[key] === value);
+}
+
+function assertTracePayloads(traces: TracePayload[], expected: ExpectedTrace[], label: string): void {
+  for (const traceExpectation of expected) {
+    const matchedTrace = traces.find((trace) => (
+      trace.stage === traceExpectation.stage
+      && (!traceExpectation.detail || matchesExpectedDetail(trace.detail, traceExpectation.detail))
+    ));
+
+    assert(
+      matchedTrace,
+      `${label}: expected trace ${traceExpectation.stage} not found`
+    );
+  }
+}
+
+function assertResponseEnvelope(turn: ResponseEnvelope, label: string): void {
   assert(typeof turn.traceId === "string" && turn.traceId.length > 0, `${label}: traceId missing`);
   assert(
     typeof turn.conversationId === "string" && turn.conversationId.length > 0,
     `${label}: conversationId missing`
   );
-  assert(turn.turn?.role === "assistant", `${label}: assistant role missing`);
-  assert(turn.turn?.status === "completed", `${label}: turn status must be completed`);
-  assert(Array.isArray(turn.turn?.blocks), `${label}: blocks must be array`);
-  assert(turn.turn.blocks.length > 0, `${label}: blocks should not be empty`);
+  assert(turn.response?.role === "assistant", `${label}: assistant role missing`);
+  assert(turn.response?.status === "completed", `${label}: response status must be completed`);
+  assert(Array.isArray(turn.response?.blocks), `${label}: blocks must be array`);
+  assert(turn.response.blocks.length > 0, `${label}: blocks should not be empty`);
 
-  for (const block of turn.turn.blocks) {
+  for (const block of turn.response.blocks) {
     assert(isRecord(block), `${label}: block must be object`);
     assert(typeof block.blockId === "string", `${label}: blockId missing`);
     assert(typeof block.type === "string", `${label}: block type missing`);
@@ -339,13 +541,13 @@ function assertTurnEnvelope(turn: TurnEnvelope, label: string): void {
   }
 }
 
-function assertPublishTurn(turn: TurnEnvelope, label: string, token?: string): void {
-  const alertBlocks = turn.turn.blocks.filter(
+function assertPublishResponse(turn: ResponseEnvelope, label: string, token?: string): void {
+  const alertBlocks = turn.response.blocks.filter(
     (block) => isRecord(block) && String(block.type) === "alert"
   );
   assert(alertBlocks.length > 0, `${label}: confirm_publish must return alert block`);
 
-  const entityCards = turn.turn.blocks.filter(
+  const entityCards = turn.response.blocks.filter(
     (block) => isRecord(block) && String(block.type) === "entity-card"
   );
   const hasPublishedEntityCard = entityCards.some((card) => {
@@ -373,8 +575,8 @@ function assertPublishTurn(turn: TurnEnvelope, label: string, token?: string): v
   }
 }
 
-function renderForWeb(turn: TurnEnvelope): void {
-  for (const block of turn.turn.blocks) {
+function renderForWeb(turn: ResponseEnvelope): void {
+  for (const block of turn.response.blocks) {
     if (block.type === "text") {
       const content = String(block.content || "").trim();
       assert(content.length > 0, "web renderer: text content empty");
@@ -454,10 +656,10 @@ function renderForWeb(turn: TurnEnvelope): void {
   }
 }
 
-function renderForMiniProgram(turn: TurnEnvelope): void {
+function renderForMiniProgram(turn: ResponseEnvelope): void {
   const parts: Array<Record<string, unknown>> = [];
 
-  for (const block of turn.turn.blocks) {
+  for (const block of turn.response.blocks) {
     if (block.type === "text") {
       parts.push({ type: "text", text: String(block.content || "") });
       continue;
@@ -622,6 +824,7 @@ function renderForMiniProgram(turn: TurnEnvelope): void {
 function runScenario(scenario: Scenario): string[] {
   const logs: string[] = [];
   let conversationId: string | null = null;
+  let recentMessages: RecentMessage[] = [];
   const scenarioToken = scenario.authMode === "authenticated"
     ? ensureAuthenticatedRegressionToken()
     : "";
@@ -631,62 +834,148 @@ function runScenario(scenario: Scenario): string[] {
   logs.push(`auth: ${scenarioToken ? "enabled" : "disabled"}`);
 
   scenario.steps.forEach((step, index) => {
-    const turn = postTurn(conversationId, step, scenarioToken);
-    const label = `${scenario.id}#turn${index + 1}`;
+    const label = `${scenario.id}#response${index + 1}`;
+    const shouldPreserveAnonymousTransientTurns =
+      !scenarioToken
+      && scenario.preserveAnonymousRecentMessages === true
+      && recentMessages.length > 0;
+    const requestTransientTurns = shouldPreserveAnonymousTransientTurns ? recentMessages : undefined;
+    const shouldUseTraceStream = scenario.streamTraceStepIndexes?.includes(index) === true;
+    const traceStreamOutput = shouldUseTraceStream
+      ? postResponseStream(conversationId, step, {
+          token: scenarioToken,
+          recentMessages: requestTransientTurns,
+          trace: true,
+        })
+      : null;
+    const turn = traceStreamOutput
+      ? readResponseCompleteEnvelopeFromStream(traceStreamOutput)
+      : postResponse(conversationId, step, {
+          token: scenarioToken,
+          recentMessages: requestTransientTurns,
+        });
 
-    assertTurnEnvelope(turn, label);
-    renderForWeb(turn);
-    renderForMiniProgram(turn);
+    assert(turn, `${label}: stream response-complete envelope missing`);
+    const resolvedTurn = turn;
+
+    assertResponseEnvelope(resolvedTurn, label);
+    renderForWeb(resolvedTurn);
+    renderForMiniProgram(resolvedTurn);
 
     const expectedBlockTypes = scenario.expectedBlockTypes?.[index];
     if (expectedBlockTypes && expectedBlockTypes.length > 0) {
-      const actualBlockTypes = new Set(turn.turn.blocks.map((block) => String(block.type)));
+      const actualBlockTypes = new Set(resolvedTurn.response.blocks.map((block) => String(block.type)));
       for (const expectedType of expectedBlockTypes) {
         assert(actualBlockTypes.has(expectedType), `${label}: expected block type ${expectedType}, got [${Array.from(actualBlockTypes).join(",")}]`);
       }
     }
 
+    if (shouldUseTraceStream) {
+      const actualTraces = readTracePayloadsFromStream(traceStreamOutput ?? "");
+      const expectedTraces = scenario.expectedTraces?.[index];
+      if (expectedTraces && expectedTraces.length > 0) {
+        assertTracePayloads(actualTraces, expectedTraces, label);
+      }
+      logs.push(`turn${index + 1} trace=[${actualTraces.map((trace) => trace.stage).join(",")}]`);
+    }
+
     if (step.type === "action" && step.action === "confirm_publish") {
-      assertPublishTurn(turn, label, scenarioToken);
+      assertPublishResponse(resolvedTurn, label, scenarioToken);
     }
 
     if (conversationId) {
-      assert(turn.conversationId === conversationId, `${label}: conversationId should stay stable`);
+      assert(resolvedTurn.conversationId === conversationId, `${label}: conversationId should stay stable`);
     }
 
-    conversationId = turn.conversationId;
+    conversationId = resolvedTurn.conversationId;
 
-    const blockTypes = turn.turn.blocks.map((block) => String(block.type)).join(",");
+    if (!scenarioToken && scenario.preserveAnonymousRecentMessages === true) {
+      recentMessages = appendRecentMessages(recentMessages, [
+        buildUserRecentMessage(step),
+        buildAssistantRecentMessage(resolvedTurn),
+      ]);
+    }
+
+    const blockTypes = resolvedTurn.response.blocks.map((block) => String(block.type)).join(",");
     logs.push(`turn${index + 1} input=${JSON.stringify(step)} blocks=[${blockTypes}]`);
+    if (requestTransientTurns) {
+      logs.push(`turn${index + 1} recentMessages=${requestTransientTurns.length}`);
+    }
   });
 
-  const streamOutput = postTurnStream(conversationId, {
+  const streamOutput = postResponseStream(conversationId, {
     type: "text",
     text: "继续",
-  }, scenarioToken);
+  }, {
+    token: scenarioToken,
+    recentMessages: !scenarioToken && scenario.preserveAnonymousRecentMessages === true && recentMessages.length > 0
+      ? recentMessages
+      : undefined,
+  });
 
-  assert(streamOutput.includes("event: turn-start"), `${scenario.id}: stream missing turn-start`);
+  assert(streamOutput.includes("event: response-start"), `${scenario.id}: stream missing response-start`);
   const hasBlockAppend = streamOutput.includes("event: block-append");
   const hasBlockReplace = streamOutput.includes("event: block-replace");
-  assert(streamOutput.includes("event: turn-complete"), `${scenario.id}: stream missing turn-complete`);
+  assert(streamOutput.includes("event: response-complete"), `${scenario.id}: stream missing response-complete`);
   assert(streamOutput.includes("data: [DONE]"), `${scenario.id}: stream missing [DONE]`);
 
   if (!hasBlockAppend && !hasBlockReplace) {
-    const turnCompleteEnvelope = readTurnCompleteEnvelopeFromStream(streamOutput);
-    assert(turnCompleteEnvelope, `${scenario.id}: stream missing block event and turn-complete envelope`);
-    assertTurnEnvelope(turnCompleteEnvelope, `${scenario.id}: stream turn-complete envelope`);
-    logs.push("stream check: turn-start/turn-complete-only/[DONE] OK");
+    const turnCompleteEnvelope = readResponseCompleteEnvelopeFromStream(streamOutput);
+    assert(turnCompleteEnvelope, `${scenario.id}: stream missing block event and response-complete envelope`);
+    assertResponseEnvelope(turnCompleteEnvelope, `${scenario.id}: stream response-complete envelope`);
+    logs.push("stream check: response-start/response-complete-only/[DONE] OK");
     return logs;
   }
 
   logs.push(
-    `stream check: turn-start/${hasBlockAppend ? "block-append" : "block-replace"}/turn-complete/[DONE] OK`
+    `stream check: response-start/${hasBlockAppend ? "block-append" : "block-replace"}/response-complete/[DONE] OK`
   );
   return logs;
 }
 
 function main(): void {
   const scenarios: Scenario[] = [
+    {
+      id: "anonymous-action-followup-transient-trace",
+      description: "匿名用户先点 explore action，再发自由文本续接，trace 只保留会话解析信息",
+      authMode: "anonymous",
+      preserveAnonymousRecentMessages: true,
+      streamTraceStepIndexes: [1],
+      expectedBlockTypes: [
+        ["text"],
+        ["text"],
+      ],
+      expectedTraces: [
+        [],
+        [
+          {
+            stage: "conversation_resolved",
+            detail: {
+              authenticated: false,
+              conversationMode: "anonymous_transient",
+              historySource: "request_transient",
+            },
+          },
+        ],
+      ],
+      steps: [
+        {
+          type: "action",
+          action: "explore_nearby",
+          actionId: "act_anon_followup_trace_1",
+          source: "widget_explore",
+          params: {
+            locationName: "观音桥",
+            lat: 29.58567,
+            lng: 106.52988,
+            type: "food",
+            semanticQuery: "观音桥附近火锅局",
+          },
+          displayText: "看看观音桥火锅局",
+        },
+        { type: "text", text: "想安静点" },
+      ],
+    },
     {
       id: "friday-night-core",
       description: "目标用例：附近找局，自由文本续接推进到 explore 结果",
@@ -937,18 +1226,24 @@ function main(): void {
     },
   ];
 
-  for (const scenario of scenarios) {
+  const selectedScenarios = scenarioFilter
+    ? scenarios.filter((scenario) => scenario.id.includes(scenarioFilter))
+    : scenarios;
+
+  assert(selectedScenarios.length > 0, `no genui regression scenarios matched filter: ${scenarioFilter}`);
+
+  for (const scenario of selectedScenarios) {
     const lines = runScenario(scenario);
     console.log(lines.join("\n"));
   }
 
-  console.log("\nGenUI turns regression passed: API + web parse + mini parse all good.");
+  console.log("\nGenUI responses regression passed: API + web parse + mini parse all good.");
 }
 
 try {
   main();
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
-  console.error(`GenUI turns regression failed: ${message}`);
+  console.error(`GenUI responses regression failed: ${message}`);
   process.exit(1);
 }

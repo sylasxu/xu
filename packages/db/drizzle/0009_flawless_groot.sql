@@ -63,7 +63,6 @@ ALTER TABLE "conversations" ADD COLUMN "evaluation_status" "evaluation_status" D
 ALTER TABLE "conversations" ADD COLUMN "evaluation_tags" jsonb DEFAULT '[]'::jsonb;--> statement-breakpoint
 ALTER TABLE "conversations" ADD COLUMN "evaluation_note" text;--> statement-breakpoint
 ALTER TABLE "conversations" ADD COLUMN "has_error" boolean DEFAULT false NOT NULL;--> statement-breakpoint
-ALTER TABLE "users" ADD COLUMN "working_memory" text;--> statement-breakpoint
 ALTER TABLE "intent_matches" ADD COLUMN "intent_ids" uuid[] NOT NULL;--> statement-breakpoint
 ALTER TABLE "intent_matches" ADD COLUMN "user_ids" uuid[] NOT NULL;--> statement-breakpoint
 ALTER TABLE "ai_conversation_metrics" ADD CONSTRAINT "ai_conversation_metrics_conversation_id_conversations_id_fk" FOREIGN KEY ("conversation_id") REFERENCES "public"."conversations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint

@@ -12,7 +12,7 @@ const SOURCE_PROTOCOL = resolve(
 );
 const SOURCE_SCHEMAS = [
   "request.schema.json",
-  "turn-envelope.schema.json",
+  "response-envelope.schema.json",
   "stream-event.schema.json",
 ];
 

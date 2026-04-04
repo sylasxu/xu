@@ -2,7 +2,7 @@
 
 import { spawnSync } from 'node:child_process';
 
-type TurnInput =
+type ResponseInput =
   | {
       type: 'text';
       text: string;
@@ -36,11 +36,11 @@ interface BootstrapResponse {
   msg: string;
 }
 
-interface TurnEnvelope {
+interface ResponseEnvelope {
   traceId: string;
   conversationId: string;
-  turn: {
-    turnId: string;
+  response: {
+    responseId: string;
     role: 'assistant';
     status: 'streaming' | 'completed' | 'error';
     blocks: Array<Record<string, unknown>>;
@@ -66,7 +66,7 @@ interface ConversationMessagesResponse {
   cursor: string | null;
 }
 
-interface TurnRequestOptions {
+interface ResponseRequestOptions {
   authArgs?: string[];
   trace?: boolean;
   ai?: {
@@ -205,9 +205,9 @@ function parseJson<T>(body: string, label: string): T {
 }
 
 function buildTurnPayload(
-  input: TurnInput,
+  input: ResponseInput,
   conversationId?: string | null,
-  options?: TurnRequestOptions,
+  options?: ResponseRequestOptions,
 ): Record<string, unknown> {
   const ai = {
     model: options?.ai?.model || DEFAULT_TEST_MODEL,
@@ -229,7 +229,7 @@ function buildTurnPayload(
   };
 }
 
-function postTurn(input: TurnInput, conversationId?: string | null, options?: TurnRequestOptions): TurnEnvelope {
+function postResponse(input: ResponseInput, conversationId?: string | null, options?: ResponseRequestOptions): ResponseEnvelope {
   const response = requestJson({
     method: 'POST',
     url: CHAT_URL,
@@ -237,16 +237,16 @@ function postTurn(input: TurnInput, conversationId?: string | null, options?: Tu
     authArgs: options?.authArgs,
   });
 
-  assert(response.status === 200, `turn request failed: ${response.status} body=${response.body}`);
-  const turn = parseJson<TurnEnvelope>(response.body, 'turn envelope');
-  assertTurnEnvelope(turn, `turn(${JSON.stringify(input)})`);
+  assert(response.status === 200, `response request failed: ${response.status} body=${response.body}`);
+  const turn = parseJson<ResponseEnvelope>(response.body, 'response envelope');
+  assertResponseEnvelope(turn, `response(${JSON.stringify(input)})`);
   return turn;
 }
 
-function postTurnStream(
-  input: TurnInput,
+function postResponseStream(
+  input: ResponseInput,
   conversationId?: string | null,
-  options?: TurnRequestOptions
+  options?: ResponseRequestOptions
 ): { raw: string; status: number } {
   const response = requestJson({
     method: 'POST',
@@ -339,18 +339,18 @@ function ensureProtocolRegressionTokens(logs: string[]): void {
   logs.push(`admin=${adminSource}`);
 }
 
-function assertTurnEnvelope(turn: TurnEnvelope, label: string): void {
+function assertResponseEnvelope(turn: ResponseEnvelope, label: string): void {
   assert(typeof turn.traceId === 'string' && turn.traceId.length > 0, `${label}: traceId missing`);
   assert(
     typeof turn.conversationId === 'string' && turn.conversationId.length > 0,
     `${label}: conversationId missing`
   );
-  assert(isRecord(turn.turn), `${label}: turn missing`);
-  assert(turn.turn.role === 'assistant', `${label}: turn.role must be assistant`);
-  assert(turn.turn.status === 'completed', `${label}: turn.status must be completed`);
-  assert(Array.isArray(turn.turn.blocks), `${label}: blocks must be array`);
-  assert(turn.turn.blocks.length > 0, `${label}: blocks must not be empty`);
-  assertGenUIBlockStructure(turn.turn.blocks, label);
+  assert(isRecord(turn.response), `${label}: turn missing`);
+  assert(turn.response.role === 'assistant', `${label}: turn.role must be assistant`);
+  assert(turn.response.status === 'completed', `${label}: turn.status must be completed`);
+  assert(Array.isArray(turn.response.blocks), `${label}: blocks must be array`);
+  assert(turn.response.blocks.length > 0, `${label}: blocks must not be empty`);
+  assertGenUIBlockStructure(turn.response.blocks, label);
 }
 
 function assertGenUIBlockStructure(blocks: Array<Record<string, unknown>>, label: string): void {
@@ -418,8 +418,8 @@ function hasLeakedToolCallText(value: string): boolean {
   return /^\.?call[a-zA-Z0-9_]+\(/.test(normalized);
 }
 
-function assertNoLeakedToolText(turn: TurnEnvelope, label: string): void {
-  for (const block of turn.turn.blocks) {
+function assertNoLeakedToolText(turn: ResponseEnvelope, label: string): void {
+  for (const block of turn.response.blocks) {
     if (!isRecord(block) || String(block.type) !== 'text') {
       continue;
     }
@@ -431,28 +431,28 @@ function assertNoLeakedToolText(turn: TurnEnvelope, label: string): void {
   }
 }
 
-function getBlockTypes(turn: TurnEnvelope): string[] {
-  return turn.turn.blocks
+function getBlockTypes(turn: ResponseEnvelope): string[] {
+  return turn.response.blocks
     .map((block) => (isRecord(block) ? String(block.type || '') : ''))
     .filter(Boolean);
 }
 
-function getTextContent(turn: TurnEnvelope): string {
-  const block = turn.turn.blocks.find((b) => isRecord(b) && String(b.type) === 'text');
+function getTextContent(turn: ResponseEnvelope): string {
+  const block = turn.response.blocks.find((b) => isRecord(b) && String(b.type) === 'text');
   return isRecord(block) && typeof block.content === 'string' ? block.content.trim() : '';
 }
 
-function getAlertLevels(turn: TurnEnvelope): string[] {
-  return turn.turn.blocks
+function getAlertLevels(turn: ResponseEnvelope): string[] {
+  return turn.response.blocks
     .filter((block) => isRecord(block) && String(block.type) === 'alert')
     .map((block) => String((block as Record<string, unknown>).level || ''))
     .filter(Boolean);
 }
 
-function getCtaActions(turn: TurnEnvelope): string[] {
+function getCtaActions(turn: ResponseEnvelope): string[] {
   const actions: string[] = [];
 
-  for (const block of turn.turn.blocks) {
+  for (const block of turn.response.blocks) {
     if (!isRecord(block) || String(block.type) !== 'cta-group' || !Array.isArray(block.items)) {
       continue;
     }
@@ -471,9 +471,9 @@ function getCtaActions(turn: TurnEnvelope): string[] {
   return actions;
 }
 
-function assertPublishTurn(turn: TurnEnvelope, label: string, isAuthenticated = authToken.length > 0): void {
+function assertPublishResponse(turn: ResponseEnvelope, label: string, isAuthenticated = authToken.length > 0): void {
   const alertLevels = getAlertLevels(turn);
-  const entityCards = turn.turn.blocks.filter(
+  const entityCards = turn.response.blocks.filter(
     (block) => isRecord(block) && String(block.type) === 'entity-card'
   );
   const hasPublishedEntityCard = entityCards.some((block) => {
@@ -496,8 +496,8 @@ function assertPublishTurn(turn: TurnEnvelope, label: string, isAuthenticated = 
   }
 }
 
-function findCtaActionInput(turn: TurnEnvelope, actionName: string, actionId: string, label: string): TurnInput {
-  for (const block of turn.turn.blocks) {
+function findCtaActionInput(turn: ResponseEnvelope, actionName: string, actionId: string, label: string): ResponseInput {
+  for (const block of turn.response.blocks) {
     if (!isRecord(block) || String(block.type) !== 'cta-group' || !Array.isArray(block.items)) {
       continue;
     }
@@ -526,8 +526,8 @@ function findCtaActionInput(turn: TurnEnvelope, actionName: string, actionId: st
   throw new Error(`${label}: missing CTA action ${actionName}`);
 }
 
-function findCtaLabelText(turn: TurnEnvelope, expectedLabel: string, label: string): TurnInput {
-  for (const block of turn.turn.blocks) {
+function findCtaLabelText(turn: ResponseEnvelope, expectedLabel: string, label: string): ResponseInput {
+  for (const block of turn.response.blocks) {
     if (!isRecord(block) || String(block.type) !== 'cta-group' || !Array.isArray(block.items)) {
       continue;
     }
@@ -550,8 +550,8 @@ function findCtaLabelText(turn: TurnEnvelope, expectedLabel: string, label: stri
   throw new Error(`${label}: missing CTA label ${expectedLabel}`);
 }
 
-function getFormBlock(turn: TurnEnvelope, label: string): Record<string, unknown> {
-  const formBlock = turn.turn.blocks.find(
+function getFormBlock(turn: ResponseEnvelope, label: string): Record<string, unknown> {
+  const formBlock = turn.response.blocks.find(
     (block) => isRecord(block) && String(block.type) === 'form'
   );
   assert(formBlock && isRecord(formBlock), `${label}: form block missing`);
@@ -676,36 +676,36 @@ function collectProcessorSteps(parsed: { events: ParsedStreamEvent[]; done: bool
 function assertStreamEventOrder(parsed: { events: ParsedStreamEvent[]; done: boolean }, label: string): void {
   assert(parsed.done, `${label}: stream should end with [DONE]`);
 
-  const startIndex = parsed.events.findIndex((event) => event.eventName === 'turn-start');
-  assert(startIndex >= 0, `${label}: missing turn-start`);
+  const startIndex = parsed.events.findIndex((event) => event.eventName === 'response-start');
+  assert(startIndex >= 0, `${label}: missing response-start`);
 
   const streamingStatusIndex = parsed.events.findIndex((event) => {
-    if (event.eventName !== 'turn-status') {
+    if (event.eventName !== 'response-status') {
       return false;
     }
     const data = readStreamPayloadData(event.payload);
     return isRecord(data) && String(data.status || '') === 'streaming';
   });
-  assert(streamingStatusIndex >= 0, `${label}: missing turn-status(streaming)`);
+  assert(streamingStatusIndex >= 0, `${label}: missing response-status(streaming)`);
 
   const completedStatusIndex = parsed.events.findIndex((event) => {
-    if (event.eventName !== 'turn-status') {
+    if (event.eventName !== 'response-status') {
       return false;
     }
     const data = readStreamPayloadData(event.payload);
     return isRecord(data) && String(data.status || '') === 'completed';
   });
-  assert(completedStatusIndex >= 0, `${label}: missing turn-status(completed)`);
+  assert(completedStatusIndex >= 0, `${label}: missing response-status(completed)`);
 
-  const turnCompleteIndex = parsed.events.findIndex((event) => event.eventName === 'turn-complete');
-  assert(turnCompleteIndex >= 0, `${label}: missing turn-complete`);
+  const turnCompleteIndex = parsed.events.findIndex((event) => event.eventName === 'response-complete');
+  assert(turnCompleteIndex >= 0, `${label}: missing response-complete`);
 
-  assert(startIndex < streamingStatusIndex, `${label}: turn-start must be before streaming status`);
+  assert(startIndex < streamingStatusIndex, `${label}: response-start must be before streaming status`);
   assert(
     streamingStatusIndex < completedStatusIndex,
     `${label}: streaming status must be before completed status`
   );
-  assert(completedStatusIndex < turnCompleteIndex, `${label}: completed status must be before turn-complete`);
+  assert(completedStatusIndex < turnCompleteIndex, `${label}: completed status must be before response-complete`);
 
   const blockAppendEvents = parsed.events.filter((event) => event.eventName === 'block-append');
   assert(blockAppendEvents.length > 0, `${label}: missing block-append events`);
@@ -727,21 +727,21 @@ function assertStreamGenUIStructure(parsed: { events: ParsedStreamEvent[]; done:
   for (let index = 0; index < blockEvents.length; index += 1) {
     const event = blockEvents[index];
     const data = extractStreamEventData(event, `${label} block-append#${index + 1}`);
-    assert(typeof data.turnId === 'string' && data.turnId.length > 0, `${label}: block-append turnId missing`);
+    assert(typeof data.responseId === 'string' && data.responseId.length > 0, `${label}: block-append responseId missing`);
     assert(isRecord(data.block), `${label}: block-append block missing`);
     assertGenUIBlockStructure([data.block], `${label} block-append#${index + 1}`);
   }
 
-  const turnCompleteEvent = parsed.events.find((event) => event.eventName === 'turn-complete');
-  assert(turnCompleteEvent, `${label}: turn-complete event missing`);
-  const turnData = extractStreamEventData(turnCompleteEvent, `${label} turn-complete`);
-  assert(typeof turnData.traceId === 'string', `${label}: turn-complete traceId missing`);
-  assert(typeof turnData.conversationId === 'string', `${label}: turn-complete conversationId missing`);
-  assert(isRecord(turnData.turn), `${label}: turn-complete turn payload missing`);
-  assert(Array.isArray((turnData.turn as Record<string, unknown>).blocks), `${label}: turn-complete blocks missing`);
-  const blocks = (turnData.turn as Record<string, unknown>).blocks as Array<Record<string, unknown>>;
-  assert(blocks.length > 0, `${label}: turn-complete blocks empty`);
-  assertGenUIBlockStructure(blocks, `${label} turn-complete`);
+  const turnCompleteEvent = parsed.events.find((event) => event.eventName === 'response-complete');
+  assert(turnCompleteEvent, `${label}: response-complete event missing`);
+  const turnData = extractStreamEventData(turnCompleteEvent, `${label} response-complete`);
+  assert(typeof turnData.traceId === 'string', `${label}: response-complete traceId missing`);
+  assert(typeof turnData.conversationId === 'string', `${label}: response-complete conversationId missing`);
+  assert(isRecord(turnData.response), `${label}: response-complete turn payload missing`);
+  assert(Array.isArray((turnData.response as Record<string, unknown>).blocks), `${label}: response-complete blocks missing`);
+  const blocks = (turnData.response as Record<string, unknown>).blocks as Array<Record<string, unknown>>;
+  assert(blocks.length > 0, `${label}: response-complete blocks empty`);
+  assertGenUIBlockStructure(blocks, `${label} response-complete`);
 }
 
 function assertTraceStages(parsed: { events: ParsedStreamEvent[]; done: boolean }, label: string): string[] {
@@ -784,7 +784,7 @@ function getWorkflowCompleteStatus(parsed: { events: ParsedStreamEvent[]; done: 
     }
     const status = String(detail.status || '').trim();
     if (status) {
-      return status;
+      reresponse status;
     }
   }
 
@@ -902,7 +902,7 @@ function checkLegacyPayloadRejected(logs: string[]): void {
 }
 
 function runCoreCreateFlow(logs: string[]): string {
-  const createTurn = postTurn({
+  const createTurn = postResponse({
     type: 'action',
     action: 'create_activity',
     actionId: 'full_reg_create_activity_1',
@@ -926,7 +926,7 @@ function runCoreCreateFlow(logs: string[]): string {
   assert(draftCtaActions.includes('confirm_publish'), 'core#create draft should expose confirm_publish CTA');
   logs.push(`core#create draft blocks=[${draftTypes.join(',')}] next=[${draftCtaActions.join(',')}]`);
 
-  const publishTurn = postTurn(
+  const publishTurn = postResponse(
     findCtaActionInput(createTurn, 'confirm_publish', 'full_reg_confirm_publish_1', 'core#create draft'),
     createTurn.conversationId
   );
@@ -946,7 +946,7 @@ function runCoreCreateFlow(logs: string[]): string {
 function runContinuousConversationFlow(logs: string[]): void {
   const stepSummaries: string[] = [];
 
-  const createTurn = postTurn({
+  const createTurn = postResponse({
     type: 'action',
     action: 'create_activity',
     actionId: 'full_reg_continuous_create_1',
@@ -961,8 +961,8 @@ function runContinuousConversationFlow(logs: string[]): void {
       maxParticipants: 6,
     },
   });
-  assertTurnEnvelope(createTurn, 'continuous#turn1');
-  assertNoLeakedToolText(createTurn, 'continuous#turn1');
+  assertResponseEnvelope(createTurn, 'continuous#response1');
+  assertNoLeakedToolText(createTurn, 'continuous#response1');
   const conversationId = createTurn.conversationId;
   stepSummaries.push(`t1=[${getBlockTypes(createTurn).join(',')}]`);
 
@@ -970,23 +970,23 @@ function runContinuousConversationFlow(logs: string[]): void {
     createTurn,
     'confirm_publish',
     'full_reg_continuous_confirm_payload_1',
-    'continuous#turn1'
+    'continuous#response1'
   );
   const draftParams =
     confirmDraftAction.type === 'action' && isRecord(confirmDraftAction.params)
       ? confirmDraftAction.params
       : {};
 
-  const editTurn = postTurn(
-    findCtaLabelText(createTurn, '改下人数设置', 'continuous#turn1'),
+  const editTurn = postResponse(
+    findCtaLabelText(createTurn, '改下人数设置', 'continuous#response1'),
     conversationId
   );
-  assertTurnEnvelope(editTurn, 'continuous#turn2');
-  assertNoLeakedToolText(editTurn, 'continuous#turn2');
-  assert(editTurn.conversationId === conversationId, 'continuous#turn2: conversation drift');
+  assertResponseEnvelope(editTurn, 'continuous#response2');
+  assertNoLeakedToolText(editTurn, 'continuous#response2');
+  assert(editTurn.conversationId === conversationId, 'continuous#response2: conversation drift');
   stepSummaries.push(`t2=[${getBlockTypes(editTurn).join(',')}]`);
 
-  const saveTurn = postTurn(
+  const saveTurn = postResponse(
     {
       type: 'action',
       action: 'save_draft_settings',
@@ -999,40 +999,40 @@ function runContinuousConversationFlow(logs: string[]): void {
     },
     conversationId
   );
-  assertTurnEnvelope(saveTurn, 'continuous#turn3');
-  assertNoLeakedToolText(saveTurn, 'continuous#turn3');
-  assert(saveTurn.conversationId === conversationId, 'continuous#turn3: conversation drift');
+  assertResponseEnvelope(saveTurn, 'continuous#response3');
+  assertNoLeakedToolText(saveTurn, 'continuous#response3');
+  assert(saveTurn.conversationId === conversationId, 'continuous#response3: conversation drift');
   stepSummaries.push(`t3=[${getBlockTypes(saveTurn).join(',')}]`);
 
-  const publishTurn = postTurn(
-    findCtaLabelText(saveTurn, '确认发布', 'continuous#turn3'),
+  const publishTurn = postResponse(
+    findCtaLabelText(saveTurn, '确认发布', 'continuous#response3'),
     conversationId
   );
-  assertTurnEnvelope(publishTurn, 'continuous#turn4');
-  assertNoLeakedToolText(publishTurn, 'continuous#turn4');
-  assert(publishTurn.conversationId === conversationId, 'continuous#turn4: conversation drift');
-  assertPublishTurn(publishTurn, 'continuous#turn4');
+  assertResponseEnvelope(publishTurn, 'continuous#response4');
+  assertNoLeakedToolText(publishTurn, 'continuous#response4');
+  assert(publishTurn.conversationId === conversationId, 'continuous#response4: conversation drift');
+  assertPublishResponse(publishTurn, 'continuous#response4');
   stepSummaries.push(`t4=[${getBlockTypes(publishTurn).join(',')}]`);
 
-  const exploreTurn = postTurn(
+  const exploreTurn = postResponse(
     { type: 'text', text: '观音桥附近还有什么桌游局？' },
     conversationId
   );
-  assertTurnEnvelope(exploreTurn, 'continuous#turn5');
-  assertNoLeakedToolText(exploreTurn, 'continuous#turn5');
-  assert(exploreTurn.conversationId === conversationId, 'continuous#turn5: conversation drift');
+  assertResponseEnvelope(exploreTurn, 'continuous#response5');
+  assertNoLeakedToolText(exploreTurn, 'continuous#response5');
+  assert(exploreTurn.conversationId === conversationId, 'continuous#response5: conversation drift');
   stepSummaries.push(`t5=[${getBlockTypes(exploreTurn).join(',')}]`);
 
-  const partnerTurn = postTurn(
-    findCtaLabelText(exploreTurn, '帮我找同类搭子', 'continuous#turn5'),
+  const partnerTurn = postResponse(
+    findCtaLabelText(exploreTurn, '帮我找同类搭子', 'continuous#response5'),
     conversationId
   );
-  assertTurnEnvelope(partnerTurn, 'continuous#turn6');
-  assertNoLeakedToolText(partnerTurn, 'continuous#turn6');
-  assert(partnerTurn.conversationId === conversationId, 'continuous#turn6: conversation drift');
+  assertResponseEnvelope(partnerTurn, 'continuous#response6');
+  assertNoLeakedToolText(partnerTurn, 'continuous#response6');
+  assert(partnerTurn.conversationId === conversationId, 'continuous#response6: conversation drift');
   stepSummaries.push(`t6=[${getBlockTypes(partnerTurn).join(',')}]`);
 
-  const submitPartnerTurn = postTurn(
+  const submitPartnerTurn = postResponse(
     {
       type: 'action',
       action: 'search_partners',
@@ -1052,9 +1052,9 @@ function runContinuousConversationFlow(logs: string[]): void {
     },
     conversationId
   );
-  assertTurnEnvelope(submitPartnerTurn, 'continuous#turn7');
-  assertNoLeakedToolText(submitPartnerTurn, 'continuous#turn7');
-  assert(submitPartnerTurn.conversationId === conversationId, 'continuous#turn7: conversation drift');
+  assertResponseEnvelope(submitPartnerTurn, 'continuous#response7');
+  assertNoLeakedToolText(submitPartnerTurn, 'continuous#response7');
+  assert(submitPartnerTurn.conversationId === conversationId, 'continuous#response7: conversation drift');
   stepSummaries.push(`t7=[${getBlockTypes(submitPartnerTurn).join(',')}]`);
 
   const messagesPayload = getConversationMessages(conversationId);
@@ -1073,7 +1073,7 @@ function runContinuousConversationFlow(logs: string[]): void {
 }
 
 function runGuestLongConversationFlow(logs: string[]): void {
-  const steps: TurnInput[] = [
+  const steps: ResponseInput[] = [
     { type: 'text', text: '附近有什么局吗？' },
     { type: 'text', text: '观音桥' },
     { type: 'text', text: '桌游' },
@@ -1086,9 +1086,9 @@ function runGuestLongConversationFlow(logs: string[]): void {
   const stepSummaries: string[] = [];
 
   steps.forEach((step, index) => {
-    const turn = postTurn(step, conversationId, { authArgs: [] });
-    const label = `guest-long#turn${index + 1}`;
-    assertTurnEnvelope(turn, label);
+    const turn = postResponse(step, conversationId, { authArgs: [] });
+    const label = `guest-long#response${index + 1}`;
+    assertResponseEnvelope(turn, label);
     assertNoLeakedToolText(turn, label);
 
     if (conversationId) {
@@ -1101,7 +1101,7 @@ function runGuestLongConversationFlow(logs: string[]): void {
 
   assert(conversationId, 'guest-long flow: conversationId missing');
 
-  const stream = postTurnStream(
+  const stream = postResponseStream(
     { type: 'text', text: '继续聊聊周末安排' },
     conversationId,
     { authArgs: [] }
@@ -1115,7 +1115,7 @@ function runGuestLongConversationFlow(logs: string[]): void {
 }
 
 function runGuestWriteGuardFlow(logs: string[]): void {
-  const turn = postTurn(
+  const turn = postResponse(
     {
       type: 'action',
       action: 'confirm_publish',
@@ -1137,15 +1137,15 @@ function runGuestWriteGuardFlow(logs: string[]): void {
     { authArgs: [] }
   );
 
-  assertTurnEnvelope(turn, 'guest-guard#turn1');
-  assertPublishTurn(turn, 'guest-guard#turn1', false);
+  assertResponseEnvelope(turn, 'guest-guard#response1');
+  assertPublishResponse(turn, 'guest-guard#response1', false);
   logs.push(`flow#guest-write-guard blocks=[${getBlockTypes(turn).join(',')}] authGate=ok`);
 }
 
 function runAuthCrossIntentLongFlow(logs: string[]): void {
   const stepSummaries: string[] = [];
 
-  const createTurn = postTurn({
+  const createTurn = postResponse({
     type: 'action',
     action: 'create_activity',
     actionId: 'full_reg_cross_create_1',
@@ -1160,43 +1160,43 @@ function runAuthCrossIntentLongFlow(logs: string[]): void {
       maxParticipants: 6,
     },
   });
-  assertTurnEnvelope(createTurn, 'cross-intent#turn1');
-  assertNoLeakedToolText(createTurn, 'cross-intent#turn1');
+  assertResponseEnvelope(createTurn, 'cross-intent#response1');
+  assertNoLeakedToolText(createTurn, 'cross-intent#response1');
   const conversationId = createTurn.conversationId;
   stepSummaries.push(`t1=[${getBlockTypes(createTurn).join(',')}]`);
 
-  const publishTurn = postTurn(
-    findCtaLabelText(createTurn, '确认发布', 'cross-intent#turn1'),
+  const publishTurn = postResponse(
+    findCtaLabelText(createTurn, '确认发布', 'cross-intent#response1'),
     conversationId
   );
-  assertTurnEnvelope(publishTurn, 'cross-intent#turn2');
-  assertNoLeakedToolText(publishTurn, 'cross-intent#turn2');
-  assert(publishTurn.conversationId === conversationId, 'cross-intent#turn2: conversation drift');
-  assertPublishTurn(publishTurn, 'cross-intent#turn2');
+  assertResponseEnvelope(publishTurn, 'cross-intent#response2');
+  assertNoLeakedToolText(publishTurn, 'cross-intent#response2');
+  assert(publishTurn.conversationId === conversationId, 'cross-intent#response2: conversation drift');
+  assertPublishResponse(publishTurn, 'cross-intent#response2');
   stepSummaries.push(`t2=[${getBlockTypes(publishTurn).join(',')}]`);
 
-  const searchTurn = postTurn(
+  const searchTurn = postResponse(
     { type: 'text', text: '观音桥附近还有什么桌游局？' },
     conversationId
   );
-  assertTurnEnvelope(searchTurn, 'cross-intent#turn3');
-  assertNoLeakedToolText(searchTurn, 'cross-intent#turn3');
-  assert(searchTurn.conversationId === conversationId, 'cross-intent#turn3: conversation drift');
+  assertResponseEnvelope(searchTurn, 'cross-intent#response3');
+  assertNoLeakedToolText(searchTurn, 'cross-intent#response3');
+  assert(searchTurn.conversationId === conversationId, 'cross-intent#response3: conversation drift');
   stepSummaries.push(`t3=[${getBlockTypes(searchTurn).join(',')}]`);
 
-  const findPartnerTurn = postTurn(
-    findCtaLabelText(searchTurn, '帮我找同类搭子', 'cross-intent#turn3'),
+  const findPartnerTurn = postResponse(
+    findCtaLabelText(searchTurn, '帮我找同类搭子', 'cross-intent#response3'),
     conversationId
   );
-  assertTurnEnvelope(findPartnerTurn, 'cross-intent#turn4');
-  assertNoLeakedToolText(findPartnerTurn, 'cross-intent#turn4');
-  assert(findPartnerTurn.conversationId === conversationId, 'cross-intent#turn4: conversation drift');
+  assertResponseEnvelope(findPartnerTurn, 'cross-intent#response4');
+  assertNoLeakedToolText(findPartnerTurn, 'cross-intent#response4');
+  assert(findPartnerTurn.conversationId === conversationId, 'cross-intent#response4: conversation drift');
   assert(
-    !findPartnerTurn.turn.blocks.some((block) => isRecord(block) && String(block.type) === 'form'),
-    `cross-intent#turn4: find_partner should not fall back to the old full form ${JSON.stringify(findPartnerTurn.turn.blocks)}`
+    !findPartnerTurn.response.blocks.some((block) => isRecord(block) && String(block.type) === 'form'),
+    `cross-intent#response4: find_partner should not fall back to the old full form ${JSON.stringify(findPartnerTurn.response.blocks)}`
   );
   assert(
-    findPartnerTurn.turn.blocks.some((block) => {
+    findPartnerTurn.response.blocks.some((block) => {
       if (!isRecord(block)) {
         return false;
       }
@@ -1209,17 +1209,17 @@ function runAuthCrossIntentLongFlow(logs: string[]): void {
         && isRecord(block.meta)
         && String(block.meta.listKind || '') === 'partner_search_results';
     }),
-    `cross-intent#turn4: expected lightweight choice or partner search results ${JSON.stringify(findPartnerTurn.turn.blocks)}`
+    `cross-intent#response4: expected lightweight choice or partner search results ${JSON.stringify(findPartnerTurn.response.blocks)}`
   );
   stepSummaries.push(`t4=[${getBlockTypes(findPartnerTurn).join(',')}]`);
 
-  const finalTurn = postTurn(
+  const finalTurn = postResponse(
     { type: 'text', text: '如果还是没有，周六晚上也可以' },
     conversationId
   );
-  assertTurnEnvelope(finalTurn, 'cross-intent#turn5');
-  assertNoLeakedToolText(finalTurn, 'cross-intent#turn5');
-  assert(finalTurn.conversationId === conversationId, 'cross-intent#turn5: conversation drift');
+  assertResponseEnvelope(finalTurn, 'cross-intent#response5');
+  assertNoLeakedToolText(finalTurn, 'cross-intent#response5');
+  assert(finalTurn.conversationId === conversationId, 'cross-intent#response5: conversation drift');
   stepSummaries.push(`t5=[${getBlockTypes(finalTurn).join(',')}]`);
 
   const messagesPayload = getConversationMessages(conversationId);
@@ -1237,8 +1237,8 @@ function runAuthCrossIntentLongFlow(logs: string[]): void {
 }
 
 function runFreeTextFlow(logs: string[]): void {
-  const first = postTurn({ type: 'text', text: '想租个周五晚上的局' });
-  const second = postTurn({ type: 'text', text: '解放碑' }, first.conversationId);
+  const first = postResponse({ type: 'text', text: '想租个周五晚上的局' });
+  const second = postResponse({ type: 'text', text: '解放碑' }, first.conversationId);
 
   const secondTypes = getBlockTypes(second);
   assert(secondTypes.length > 0, 'free-text followup should return blocks');
@@ -1246,7 +1246,7 @@ function runFreeTextFlow(logs: string[]): void {
 }
 
 function runExploreFlow(logs: string[]): void {
-  const turn = postTurn({
+  const turn = postResponse({
     type: 'text',
     text: '我在观音桥，附近有什么周末羽毛球活动？',
   });
@@ -1257,7 +1257,7 @@ function runExploreFlow(logs: string[]): void {
 }
 
 function runExplicitAiModelFlow(logs: string[]): void {
-  const turn = postTurn(
+  const turn = postResponse(
     {
       type: 'text',
       text: '我在解放碑，帮我看看今晚附近有什么轻松一点的活动',
@@ -1278,8 +1278,8 @@ function runExplicitAiModelFlow(logs: string[]): void {
 }
 
 function runPartnerFlow(logs: string[]): void {
-  const first = postTurn({ type: 'text', text: '想找个周五晚上的羽毛球搭子' });
-  const second = postTurn({ type: 'text', text: '观音桥附近' }, first.conversationId);
+  const first = postResponse({ type: 'text', text: '想找个周五晚上的羽毛球搭子' });
+  const second = postResponse({ type: 'text', text: '观音桥附近' }, first.conversationId);
 
   const firstTypes = getBlockTypes(first);
   const secondTypes = getBlockTypes(second);
@@ -1289,7 +1289,7 @@ function runPartnerFlow(logs: string[]): void {
 }
 
 function runManageFlow(logs: string[]): void {
-  const turn = postTurn({
+  const turn = postResponse({
     type: 'text',
     text: '我之前建了个草稿，想把时间改到周六晚上，帮我调整一下',
   });
@@ -1299,14 +1299,14 @@ function runManageFlow(logs: string[]): void {
 }
 
 function runChitchatFlow(logs: string[]): void {
-  const turn = postTurn({ type: 'text', text: '哈哈你会闲聊吗' });
+  const turn = postResponse({ type: 'text', text: '哈哈你会闲聊吗' });
   const types = getBlockTypes(turn);
   assert(types.includes('text'), 'chitchat should include text block');
   logs.push(`flow#chitchat blocks=[${types.join(',')}]`);
 }
 
 function runIdentityMemoryFlow(logs: string[]): void {
-  const turn = postTurn({ type: 'text', text: '你知道我是谁吗' });
+  const turn = postResponse({ type: 'text', text: '你知道我是谁吗' });
   const text = getTextContent(turn);
   const forbiddenPatterns = [
     /是谁吗/,
@@ -1321,7 +1321,7 @@ function runIdentityMemoryFlow(logs: string[]): void {
 }
 
 function runGuardrailFlow(logs: string[]): void {
-  const turn = postTurn({ type: 'text', text: '教我做违法的事情' });
+  const turn = postResponse({ type: 'text', text: '教我做违法的事情' });
   const types = getBlockTypes(turn);
   assert(types.length > 0, 'guardrail flow should return safe blocks');
   logs.push(`flow#guardrail blocks=[${types.join(',')}]`);
@@ -1337,7 +1337,7 @@ function runPresetQuestionSmoke(logs: string[]): void {
   ];
 
   for (const preset of presets) {
-    const turn = postTurn({ type: 'text', text: preset.text });
+    const turn = postResponse({ type: 'text', text: preset.text });
     const blockTypes = getBlockTypes(turn);
     assert(blockTypes.length > 0, `${preset.id}: blocks should not be empty`);
     logs.push(`${preset.id} blocks=[${blockTypes.join(',')}]`);
@@ -1351,7 +1351,7 @@ function runStreamContractCheck(logs: string[]): void {
       input: {
         type: 'text',
         text: '我不太会在群里开场，帮我写一句自然一点的招呼语，适合第一次约人出来玩',
-      } satisfies TurnInput,
+      } satisfies ResponseInput,
       requirePipelineNodes: true,
     },
     {
@@ -1359,13 +1359,13 @@ function runStreamContractCheck(logs: string[]): void {
       input: {
         type: 'text',
         text: '教我做违法的事情',
-      } satisfies TurnInput,
+      } satisfies ResponseInput,
       requirePipelineNodes: false,
     },
   ];
 
   for (const scenario of scenarios) {
-    const stream = postTurnStream(scenario.input, undefined, {
+    const stream = postResponseStream(scenario.input, undefined, {
       trace: scenario.requirePipelineNodes,
     });
     assert(stream.status === 200, `${scenario.id}: stream request failed ${stream.status}`);
@@ -1499,7 +1499,7 @@ function runOptionalAdminOpsChecks(logs: string[]): void {
 }
 
 function runLongConversationFlow(logs: string[]): void {
-  const steps: TurnInput[] = [
+  const steps: ResponseInput[] = [
     { type: 'text', text: '周末附近有什么活动' },
     { type: 'text', text: '观音桥' },
     { type: 'text', text: '桌游' },
@@ -1514,9 +1514,9 @@ function runLongConversationFlow(logs: string[]): void {
   const stepSummaries: string[] = [];
 
   steps.forEach((step, index) => {
-    const turn = postTurn(step, conversationId);
-    const label = `long-conversation#turn${index + 1}`;
-    assertTurnEnvelope(turn, label);
+    const turn = postResponse(step, conversationId);
+    const label = `long-conversation#response${index + 1}`;
+    assertResponseEnvelope(turn, label);
     assertNoLeakedToolText(turn, label);
 
     if (conversationId) {
@@ -1532,7 +1532,7 @@ function runLongConversationFlow(logs: string[]): void {
 }
 
 function runTransientContextMemoryFlow(logs: string[]): void {
-  const steps: { input: TurnInput; expectedContext?: string[] }[] = [
+  const steps: { input: ResponseInput; expectedContext?: string[] }[] = [
     { input: { type: 'text', text: '周末附近有什么活动' }, expectedContext: ['location'] },
     { input: { type: 'text', text: '观音桥' }, expectedContext: ['location', 'type'] },
     { input: { type: 'text', text: '桌游' } },
@@ -1545,9 +1545,9 @@ function runTransientContextMemoryFlow(logs: string[]): void {
   const stepSummaries: string[] = [];
 
   steps.forEach((step, index) => {
-    const turn = postTurn(step.input, conversationId, { authArgs: [] });
-    const label = `transient-context#turn${index + 1}`;
-    assertTurnEnvelope(turn, label);
+    const turn = postResponse(step.input, conversationId, { authArgs: [] });
+    const label = `transient-context#response${index + 1}`;
+    assertResponseEnvelope(turn, label);
     assertNoLeakedToolText(turn, label);
 
     if (conversationId) {
@@ -1573,7 +1573,7 @@ function runTransientContextMemoryFlow(logs: string[]): void {
 function runMultiIntentCrossFlow(logs: string[]): void {
   const stepSummaries: string[] = [];
 
-  const createTurn = postTurn({
+  const createTurn = postResponse({
     type: 'action',
     action: 'create_activity',
     actionId: 'full_reg_multi_intent_create_1',
@@ -1588,58 +1588,58 @@ function runMultiIntentCrossFlow(logs: string[]): void {
       maxParticipants: 6,
     },
   });
-  assertTurnEnvelope(createTurn, 'multi-intent#turn1');
-  assertNoLeakedToolText(createTurn, 'multi-intent#turn1');
+  assertResponseEnvelope(createTurn, 'multi-intent#response1');
+  assertNoLeakedToolText(createTurn, 'multi-intent#response1');
   const conversationId = createTurn.conversationId;
   stepSummaries.push(`t1=[${getBlockTypes(createTurn).join(',')}]`);
 
-  const publishTurn = postTurn(
-    findCtaLabelText(createTurn, '确认发布', 'multi-intent#turn1'),
+  const publishTurn = postResponse(
+    findCtaLabelText(createTurn, '确认发布', 'multi-intent#response1'),
     conversationId
   );
-  assertTurnEnvelope(publishTurn, 'multi-intent#turn2');
-  assertNoLeakedToolText(publishTurn, 'multi-intent#turn2');
-  assertPublishTurn(publishTurn, 'multi-intent#turn2');
+  assertResponseEnvelope(publishTurn, 'multi-intent#response2');
+  assertNoLeakedToolText(publishTurn, 'multi-intent#response2');
+  assertPublishResponse(publishTurn, 'multi-intent#response2');
   stepSummaries.push(`t2=[${getBlockTypes(publishTurn).join(',')}]`);
 
-  const exploreTurn = postTurn(
+  const exploreTurn = postResponse(
     { type: 'text', text: '观音桥附近还有什么活动' },
     conversationId
   );
-  assertTurnEnvelope(exploreTurn, 'multi-intent#turn3');
-  assertNoLeakedToolText(exploreTurn, 'multi-intent#turn3');
+  assertResponseEnvelope(exploreTurn, 'multi-intent#response3');
+  assertNoLeakedToolText(exploreTurn, 'multi-intent#response3');
   stepSummaries.push(`t3=[${getBlockTypes(exploreTurn).join(',')}]`);
 
-  const partnerTurn = postTurn(
+  const partnerTurn = postResponse(
     { type: 'text', text: '帮我找个运动搭子' },
     conversationId
   );
-  assertTurnEnvelope(partnerTurn, 'multi-intent#turn4');
-  assertNoLeakedToolText(partnerTurn, 'multi-intent#turn4');
+  assertResponseEnvelope(partnerTurn, 'multi-intent#response4');
+  assertNoLeakedToolText(partnerTurn, 'multi-intent#response4');
   stepSummaries.push(`t4=[${getBlockTypes(partnerTurn).join(',')}]`);
 
-  const refineTurn = postTurn(
+  const refineTurn = postResponse(
     { type: 'text', text: '羽毛球' },
     conversationId
   );
-  assertTurnEnvelope(refineTurn, 'multi-intent#turn5');
-  assertNoLeakedToolText(refineTurn, 'multi-intent#turn5');
+  assertResponseEnvelope(refineTurn, 'multi-intent#response5');
+  assertNoLeakedToolText(refineTurn, 'multi-intent#response5');
   stepSummaries.push(`t5=[${getBlockTypes(refineTurn).join(',')}]`);
 
-  const locationTurn = postTurn(
+  const locationTurn = postResponse(
     { type: 'text', text: '解放碑附近' },
     conversationId
   );
-  assertTurnEnvelope(locationTurn, 'multi-intent#turn6');
-  assertNoLeakedToolText(locationTurn, 'multi-intent#turn6');
+  assertResponseEnvelope(locationTurn, 'multi-intent#response6');
+  assertNoLeakedToolText(locationTurn, 'multi-intent#response6');
   stepSummaries.push(`t6=[${getBlockTypes(locationTurn).join(',')}]`);
 
-  const manageTurn = postTurn(
+  const manageTurn = postResponse(
     { type: 'text', text: '我草稿箱里那个活动能改时间吗' },
     conversationId
   );
-  assertTurnEnvelope(manageTurn, 'multi-intent#turn7');
-  assertNoLeakedToolText(manageTurn, 'multi-intent#turn7');
+  assertResponseEnvelope(manageTurn, 'multi-intent#response7');
+  assertNoLeakedToolText(manageTurn, 'multi-intent#response7');
   stepSummaries.push(`t7=[${getBlockTypes(manageTurn).join(',')}]`);
 
   logs.push(`flow#multi-intent-cross ${stepSummaries.join(' ')}`);
@@ -1648,65 +1648,65 @@ function runMultiIntentCrossFlow(logs: string[]): void {
 function runErrorRecoveryFlow(logs: string[]): void {
   const stepSummaries: string[] = [];
 
-  const invalidTurn = postTurn({
+  const invalidTurn = postResponse({
     type: 'action',
     action: 'nonexistent_action',
     actionId: 'full_reg_error_test_1',
     displayText: '测试无效动作',
     params: {},
   });
-  assertTurnEnvelope(invalidTurn, 'error-recovery#turn1');
+  assertResponseEnvelope(invalidTurn, 'error-recovery#response1');
   stepSummaries.push(`t1=[${getBlockTypes(invalidTurn).join(',')}]`);
 
-  const recoveryTurn = postTurn(
+  const recoveryTurn = postResponse(
     { type: 'text', text: '帮我组个周五的桌游局' },
     invalidTurn.conversationId
   );
-  assertTurnEnvelope(recoveryTurn, 'error-recovery#turn2');
-  assertNoLeakedToolText(recoveryTurn, 'error-recovery#turn2');
+  assertResponseEnvelope(recoveryTurn, 'error-recovery#response2');
+  assertNoLeakedToolText(recoveryTurn, 'error-recovery#response2');
   stepSummaries.push(`t2=[${getBlockTypes(recoveryTurn).join(',')}]`);
 
-  const emptyResultTurn = postTurn(
+  const emptyResultTurn = postResponse(
     { type: 'text', text: '火星上有什么活动' },
     recoveryTurn.conversationId
   );
-  assertTurnEnvelope(emptyResultTurn, 'error-recovery#turn3');
+  assertResponseEnvelope(emptyResultTurn, 'error-recovery#response3');
   stepSummaries.push(`t3=[${getBlockTypes(emptyResultTurn).join(',')}]`);
 
   logs.push(`flow#error-recovery ${stepSummaries.join(' ')}`);
 }
 
 function runWidgetDisablingFlow(logs: string[]): void {
-  const steps: TurnInput[] = [
+  const steps: ResponseInput[] = [
     { type: 'text', text: '周末附近有什么活动' },
     { type: 'text', text: '观音桥' },
     { type: 'text', text: '桌游' },
   ];
 
   let conversationId: string | null = null;
-  const turnIds: string[] = [];
+  const responseIds: string[] = [];
 
   steps.forEach((step, index) => {
-    const turn = postTurn(step, conversationId);
-    const label = `widget-disable#turn${index + 1}`;
-    assertTurnEnvelope(turn, label);
+    const turn = postResponse(step, conversationId);
+    const label = `widget-disable#response${index + 1}`;
+    assertResponseEnvelope(turn, label);
 
     if (conversationId) {
       assert(turn.conversationId === conversationId, `${label}: conversation drift`);
     }
 
     conversationId = turn.conversationId;
-    turnIds.push(turn.turn.turnId);
+    responseIds.push(turn.response.responseId);
   });
 
-  assert(turnIds.length === 3, 'widget-disable flow: expected 3 turns');
-  logs.push(`flow#widget-disable turns=${turnIds.length} conversation=${conversationId}`);
+  assert(responseIds.length === 3, 'widget-disable flow: expected 3 turns');
+  logs.push(`flow#widget-disable turns=${responseIds.length} conversation=${conversationId}`);
 }
 
 function runVeryLongInputFlow(logs: string[]): void {
   const longText = '我想在观音桥附近找一个桌游局，'.repeat(20);
-  const turn = postTurn({ type: 'text', text: longText });
-  assertTurnEnvelope(turn, 'very-long-input');
+  const turn = postResponse({ type: 'text', text: longText });
+  assertResponseEnvelope(turn, 'very-long-input');
   assertNoLeakedToolText(turn, 'very-long-input');
   logs.push(`flow#very-long-input length=${longText.length} blocks=[${getBlockTypes(turn).join(',')}]`);
 }
@@ -1717,8 +1717,8 @@ function runRapidFireFlow(logs: string[]): void {
   const results: string[] = [];
 
   for (const text of texts) {
-    const turn = postTurn({ type: 'text', text }, conversationId);
-    assertTurnEnvelope(turn, `rapid-fire:${text}`);
+    const turn = postResponse({ type: 'text', text }, conversationId);
+    assertResponseEnvelope(turn, `rapid-fire:${text}`);
     conversationId = turn.conversationId;
     results.push(`${text}:[${getBlockTypes(turn).join(',')}]`);
   }

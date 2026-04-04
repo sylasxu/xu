@@ -18,7 +18,7 @@ export const aiMemoryController = new Elysia({ prefix: '/memory' })
     } catch (error) {
       if (error instanceof AuthError) {
         set.status = error.status;
-        return { code: error.status, msg: error.message };
+        return { code: error.status, msg: error.message } satisfies ErrorResponse;
       }
     }
   })
@@ -51,8 +51,8 @@ export const aiMemoryController = new Elysia({ prefix: '/memory' })
       }),
       response: {
         200: 'ai.memoryUsersResponse',
-        401: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -84,9 +84,9 @@ export const aiMemoryController = new Elysia({ prefix: '/memory' })
       }),
       response: {
         200: 'ai.memoryProfileResponse',
-        401: 'ai.error',
-        404: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        404: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -120,8 +120,8 @@ export const aiMemoryController = new Elysia({ prefix: '/memory' })
       }),
       response: {
         200: 'ai.maxSimResponse',
-        401: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        500: 'common.error',
       },
     }
   );

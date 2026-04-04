@@ -160,11 +160,6 @@
         <t-avatar image="{{activity.creator.avatarUrl}}" size="96rpx" icon="user" />
         <view class="flex-1 ml-3 min-w-0">
           <text class="block text-base font-medium text-gray-900 mb-1">{{activity.creator.nickname || '匿名用户'}}</text>
-        <view class="flex items-center text-xs text-gray-400">
-          <text>组织 {{activity.creator.organizationCount || 0}} 场</text>
-          <text class="mx-2 text-gray-200">|</text>
-          <text>参与 {{activity.creator.participationCount || 0}} 场</text>
-        </view>
       </view>
         <t-icon name="chevron-right" size="32rpx" color="#D1D5DB" />
       </view>

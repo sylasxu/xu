@@ -57,21 +57,21 @@ function readSocialProfile(value: unknown): SocialProfile | null {
     return null;
   }
 
-  const participationCount = readNumber(value.participationCount);
-  const activitiesCreatedCount = readNumber(value.activitiesCreatedCount);
+  const joinedActivities = readNumber(value.joinedActivities);
+  const hostedActivities = readNumber(value.hostedActivities);
   const preferenceCompleteness = readNumber(value.preferenceCompleteness);
 
   if (
-    participationCount === null ||
-    activitiesCreatedCount === null ||
+    joinedActivities === null ||
+    hostedActivities === null ||
     preferenceCompleteness === null
   ) {
     return null;
   }
 
   return {
-    participationCount,
-    activitiesCreatedCount,
+    joinedActivities,
+    hostedActivities,
     preferenceCompleteness,
   };
 }

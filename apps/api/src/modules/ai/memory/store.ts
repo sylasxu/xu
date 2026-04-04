@@ -22,6 +22,11 @@ import type { SaveMessageParams, SessionWindowConfig } from './types';
 import { DEFAULT_SESSION_WINDOW } from './types';
 
 const logger = createLogger('MemoryStore');
+const SHORT_TERM_CHAT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+export function getConversationMessageExpiresAt(now = Date.now()): Date {
+  return new Date(now + SHORT_TERM_CHAT_TTL_MS);
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -120,7 +125,10 @@ export async function getMessages(
   const messages = await db
     .select()
     .from(conversationMessages)
-    .where(eq(conversationMessages.conversationId, threadId))
+    .where(
+      sql`${conversationMessages.conversationId} = ${threadId}
+        AND (${conversationMessages.expiresAt} IS NULL OR ${conversationMessages.expiresAt} > NOW())`
+    )
     .orderBy(desc(conversationMessages.createdAt))
     .limit(limit);
 
@@ -135,8 +143,9 @@ export async function getMessages(
  * @returns 保存的消息 ID
  */
 export async function saveMessage(params: SaveMessageParams): Promise<{ id: string }> {
-  const { conversationId, userId, role, messageType, content, activityId, taskId } = params;
-  const titleSource = readMessageTextContent(content);
+  const { conversationId, userId, role, messageType, kind, text, payload, content, activityId, taskId } = params;
+  const normalizedText = typeof text === 'string' ? text.trim() : '';
+  const titleSource = normalizedText || readMessageTextContent(content);
 
   // 1. 插入消息
   const [msg] = await db
@@ -146,9 +155,13 @@ export async function saveMessage(params: SaveMessageParams): Promise<{ id: stri
       userId,
       role,
       messageType,
+      ...(kind ? { kind } : {}),
+      ...(normalizedText ? { text: normalizedText } : {}),
+      ...(payload ? { payload } : {}),
       content,
       activityId,
       taskId,
+      expiresAt: getConversationMessageExpiresAt(),
     })
     .returning({ id: conversationMessages.id });
 
@@ -167,7 +180,11 @@ export async function saveMessage(params: SaveMessageParams): Promise<{ id: stri
 
   // 2. 异步生成 embedding (如果是文本消息且来自用户或助手)
   // 只对 text 类型的文本内容生成，忽略 JSON 卡片数据
-  if (messageType === 'text' && typeof content === 'string' && content.length > 0 && content.length < 8000) {
+  if (normalizedText && normalizedText.length < 8000) {
+    generateAndSaveEmbedding(msg.id, normalizedText).catch(err => {
+      logger.error('Embedding generation failed silently', { error: err });
+    });
+  } else if (messageType === 'text' && typeof content === 'string' && content.length > 0 && content.length < 8000) {
     // 不阻塞主流程
     generateAndSaveEmbedding(msg.id, content).catch(err => {
       logger.error('Embedding generation failed silently', { error: err });
@@ -191,7 +208,7 @@ export async function saveMessage(params: SaveMessageParams): Promise<{ id: stri
  */
 async function generateAndSaveEmbedding(messageId: string, content: string) {
   try {
-    const embedding = await getEmbedding(content);
+    const embedding = await getEmbedding(content, { textType: 'document' });
     await db
       .update(conversationMessages)
       .set({ embedding })
@@ -199,6 +216,16 @@ async function generateAndSaveEmbedding(messageId: string, content: string) {
   } catch (error) {
     logger.error('Failed to generate embedding for message', { messageId, error });
   }
+}
+
+export function refreshMessageEmbedding(messageId: string, content: string): void {
+  if (!content.trim()) {
+    return;
+  }
+
+  generateAndSaveEmbedding(messageId, content).catch((error) => {
+    logger.error('Failed to refresh embedding for message', { messageId, error });
+  });
 }
 
 /**

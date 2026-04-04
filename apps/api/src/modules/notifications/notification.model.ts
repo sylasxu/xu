@@ -1,5 +1,6 @@
 // Notification Model - 通知与消息中心
 import { Elysia, t, type Static } from 'elysia';
+import { ErrorResponseSchema, type ErrorResponse } from "../../common/common.model";
 import { selectNotificationSchema } from '@juchang/db';
 
 /**
@@ -153,11 +154,6 @@ const IdParams = t.Object({
   id: t.String({ format: 'uuid' }),
 });
 
-// 错误响应
-const ErrorResponse = t.Object({
-  code: t.Number(),
-  msg: t.String(),
-});
 
 // 成功响应
 const SuccessResponse = t.Object({
@@ -191,7 +187,7 @@ export const notificationModel = new Elysia({ name: 'notificationModel' })
     'notification.unreadCount': UnreadCountResponse,
     'notification.response': selectNotificationSchema,
     'notification.idParams': IdParams,
-    'notification.error': ErrorResponse,
+    'common.error': ErrorResponseSchema,
     'notification.success': SuccessResponse,
     'notification.matchActionResponse': MatchActionResponse,
   });
@@ -213,6 +209,5 @@ export type MessageCenterChatActivities = Static<typeof MessageCenterChatActivit
 export type MessageCenterResponse = Static<typeof MessageCenterResponse>;
 export type UnreadCountResponse = Static<typeof UnreadCountResponse>;
 export type IdParams = Static<typeof IdParams>;
-export type ErrorResponse = Static<typeof ErrorResponse>;
 export type SuccessResponse = Static<typeof SuccessResponse>;
 export type MatchActionResponse = Static<typeof MatchActionResponse>;

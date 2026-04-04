@@ -17,7 +17,7 @@ const SUPPORTED_VARIABLES = [
   { name: 'tomorrowStr', desc: '明天日期' },
   { name: 'enrichmentXml', desc: '消息增强上下文' },
   { name: 'widgetCatalog', desc: 'Widget 类型描述' },
-  { name: 'workingMemory', desc: '用户画像' },
+  { name: 'memoryContext', desc: '用户画像与记忆上下文' },
 ]
 
 interface Props {
@@ -88,7 +88,7 @@ export function PromptTemplateEditor({ onSelectConfig }: Props) {
         tomorrowStr: '2026-02-26',
         enrichmentXml: '',
         widgetCatalog: '<widget_catalog>\n- widget_draft: 活动草稿卡片\n- widget_explore: 附近活动列表\n</widget_catalog>',
-        workingMemory: '喜欢火锅，不喝酒',
+        memoryContext: '喜欢火锅，不喝酒',
       }
       const result = template.replace(/\{\{(\w+)\}\}/g, (_, key) => mockVars[key] ?? '')
       setPreview(result)

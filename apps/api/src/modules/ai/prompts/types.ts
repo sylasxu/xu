@@ -21,8 +21,8 @@ export interface PromptContext {
     activityId: string;
     currentDraft: ActivityDraftForPrompt;
   };
-  /** 用户工作记忆（Markdown 格式的用户画像） */
-  workingMemory?: string | null;
+  /** 注入给模型的记忆上下文（Markdown 格式） */
+  memoryContext?: string | null;
 }
 
 /**

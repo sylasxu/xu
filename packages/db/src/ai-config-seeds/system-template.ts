@@ -13,7 +13,7 @@ export const SYSTEM_TEMPLATE_SUPPORTED_VARIABLES = [
   'tomorrowStr',
   'enrichmentXml',
   'widgetCatalog',
-  'workingMemory',
+  'memoryContext',
 ] as const;
 
 export const systemTemplateConfigSeed = {
@@ -35,7 +35,7 @@ export const systemTemplateConfigSeed = {
 
 {{widgetCatalog}}
 
-{{workingMemory}}
+{{memoryContext}}
 
 <rules>
 1. Tool First: 有明确动作时必须用 Tool 或结构化动作承接，不要只空聊

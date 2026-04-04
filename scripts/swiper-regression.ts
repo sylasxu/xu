@@ -57,7 +57,7 @@ interface AiChatBlock {
 
 interface AiChatEnvelope {
   conversationId: string;
-  turn: {
+  response: {
     blocks: AiChatBlock[];
   };
 }
@@ -439,7 +439,7 @@ async function verifyExploreSwiper(viewer: BootstrappedUser): Promise<string> {
     },
   });
 
-  const listBlock = findFirstListBlock(envelope.turn.blocks);
+  const listBlock = findFirstListBlock(envelope.response.blocks);
   const items = readBlockItems(listBlock);
   const previewTotal = readPreviewTotal(listBlock);
   const listPresentation = readListPresentation(listBlock);
@@ -472,7 +472,7 @@ async function verifyPartnerSwiper(viewer: BootstrappedUser): Promise<string> {
     },
   });
 
-  const listBlock = findFirstListBlock(envelope.turn.blocks);
+  const listBlock = findFirstListBlock(envelope.response.blocks);
   const items = readBlockItems(listBlock);
   const listKind = readListKind(listBlock);
   const listPresentation = readListPresentation(listBlock);

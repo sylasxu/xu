@@ -117,19 +117,6 @@ export function UsersActionDialog({
                 </span>
               </div>
               
-              <div className='grid grid-cols-6 items-center gap-x-4 gap-y-1'>
-                <span className='col-span-2 text-end text-sm text-muted-foreground'>发布活动</span>
-                <span className='col-span-4 text-sm'>
-                  {currentRow.activitiesCreatedCount} 个
-                </span>
-              </div>
-              
-              <div className='grid grid-cols-6 items-center gap-x-4 gap-y-1'>
-                <span className='col-span-2 text-end text-sm text-muted-foreground'>参与活动</span>
-                <span className='col-span-4 text-sm'>
-                  {currentRow.participationCount} 个
-                </span>
-              </div>
             </form>
           </Form>
         </div>

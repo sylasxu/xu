@@ -2,7 +2,7 @@
  * User Profile Processor (v4.9)
  * 
  * 负责注入用户画像到系统提示词：
- * - 从数据库加载用户的 EnhancedUserProfile（workingMemory）
+ * - 从数据库加载用户的 EnhancedUserProfile（memory context）
  * - 使用 buildProfilePrompt 构建结构化画像 Prompt
  * - 将用户画像注入到 systemPrompt
  * - 将画像元数据写入 context.metadata.userProfile

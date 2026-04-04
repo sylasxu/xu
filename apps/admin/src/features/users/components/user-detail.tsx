@@ -169,24 +169,6 @@ export function UserDetail() {
                   </CardContent>
                 </Card>
 
-                {/* 统计数据 */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle>活动统计</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className='grid grid-cols-2 gap-4'>
-                      <div className='text-center p-4 rounded-lg bg-muted/50'>
-                        <p className='text-2xl font-bold text-blue-600'>{user.activitiesCreatedCount || 0}</p>
-                        <p className='text-sm text-muted-foreground'>创建活动</p>
-                      </div>
-                      <div className='text-center p-4 rounded-lg bg-muted/50'>
-                        <p className='text-2xl font-bold text-green-600'>{user.participationCount || 0}</p>
-                        <p className='text-sm text-muted-foreground'>参与活动</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
               </TabsContent>
 
               <TabsContent value='ai-profile'>

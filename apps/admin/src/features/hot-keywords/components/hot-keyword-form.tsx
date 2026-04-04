@@ -25,8 +25,6 @@ const matchTypeOptions = [
 const responseTypeOptions = [
   { value: 'widget_explore', label: '探索活动' },
   { value: 'widget_draft', label: '创建草稿' },
-  { value: 'widget_launcher', label: '快速发起' },
-  { value: 'widget_action', label: '操作引导' },
   { value: 'widget_ask_preference', label: '偏好询问' },
   { value: 'text', label: '文本回复' },
 ]
@@ -42,7 +40,7 @@ export function HotKeywordForm() {
 
   const [keyword, setKeyword] = useState('')
   const [matchType, setMatchType] = useState<'exact' | 'prefix' | 'fuzzy'>('exact')
-  const [responseType, setResponseType] = useState<'widget_explore' | 'widget_draft' | 'widget_launcher' | 'widget_action' | 'widget_ask_preference' | 'text'>('widget_explore')
+  const [responseType, setResponseType] = useState<'widget_explore' | 'widget_draft' | 'widget_ask_preference' | 'text'>('widget_explore')
   const [responseContent, setResponseContent] = useState('{}')
   const [priority, setPriority] = useState('0')
   const [validFrom, setValidFrom] = useState('')

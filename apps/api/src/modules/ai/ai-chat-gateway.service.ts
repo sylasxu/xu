@@ -6,26 +6,27 @@ import type {
   GenUIRequestAi,
   GenUIRequestContext,
   GenUIStreamEvent,
-  GenUITransientTurn,
+  GenUIRecentMessage,
   GenUITracePayload,
-  GenUITurnContext,
-  GenUITurnEnvelope,
+  GenUISuggestions,
+  GenUIResponseEnvelope,
 } from '@juchang/genui-contract';
 import {
   getConversationMessages,
-  handleChatStream,
+  executeChatTurn,
   isUuidLike,
-  syncConversationTurnSnapshot,
+  syncConversationResponseSnapshot,
+  type ChatExecutionResult,
   type ChatRequest,
 } from './ai.service';
 import { createThread } from './memory';
-import { isStructuredActionType } from './user-action';
-import { applyAiChatTurnPolicies } from './ai-chat-policy.service';
+import { extractStructuredAction, isStructuredActionType } from './user-action';
+import { applyAiChatResponsePolicies } from './ai-chat-policy.service';
 import {
-  buildTurnContextFromBlocks,
-  readTurnContextFromStoredMessage,
-  resolveContinuationFromTurnContext,
-} from './turn-context';
+  buildSuggestionsFromBlocks,
+  readSuggestionsFromStoredMessage,
+  resolveContinuationFromSuggestions,
+} from './suggestions';
 import {
   createChoiceBlock,
   createEntityCardBlock,
@@ -53,12 +54,14 @@ import { normalizeAiProviderErrorMessage } from './models/provider-error';
 const ID_PREFIX = {
   conversation: 'conv',
   trace: 'trace',
-  turn: 'turn',
+  response: 'response',
   block: 'block',
   event: 'evt',
 } as const;
 
-const MAX_HISTORY_MESSAGES = 24;
+const MAX_PRIVATE_HISTORY_MESSAGES = 10;
+const MAX_ACTIVITY_HISTORY_MESSAGES = 6;
+const SUMMARY_SOURCE_MESSAGES = 6;
 
 const KNOWN_LOCATION_CENTERS = [
   { name: '南坪万达', lat: 29.53012, lng: 106.57221 },
@@ -87,17 +90,19 @@ interface ViewerContext {
   role: string;
 }
 
-type FollowUpMode = NonNullable<GenUIRequestContext['followUpMode']>;
+type ActivityMode = NonNullable<GenUIRequestContext['activityMode']>;
 type ChatAiParams = GenUIRequestAi;
 type ExecutionPath = 'llm_orchestrated' | 'structured_action';
 type ConversationMode = 'authenticated_persistent' | 'anonymous_transient';
 type HistorySource = 'db' | 'request_transient' | 'empty';
+type HistoryScope = 'private' | 'activity';
 
-interface BuildAiChatTurnOptions {
+interface AiChatResponseOptions {
   viewer?: ViewerContext | null;
+  abortSignal?: AbortSignal;
 }
 
-interface CreateAiChatBridgeStreamResponseOptions extends BuildAiChatTurnOptions {
+interface AiChatStreamOptions extends AiChatResponseOptions {
   requestAbortSignal?: AbortSignal;
 }
 
@@ -106,8 +111,8 @@ interface ResolvedStreamOptions {
   eventEnvelope: 'full' | 'compact';
 }
 
-interface BuildAiChatTurnResult {
-  envelope: GenUITurnEnvelope;
+interface AiChatResponseResult {
+  envelope: GenUIResponseEnvelope;
   traces: GenUITracePayload[];
   resolvedStructuredAction?: ChatRequest['structuredAction'];
   executionPath: ExecutionPath;
@@ -122,33 +127,14 @@ interface ResolvedAiChatExecution {
   defaultExecutionPath: ExecutionPath;
 }
 
-interface ParsedDataStream {
-  events: DataStreamEvent[];
-  rawEventCount: number;
-  done: boolean;
-}
-
-interface DataStreamEvent {
-  type: string;
-  [key: string]: unknown;
-}
-
 type StreamEventArgs =
-  | ['turn-start', Extract<GenUIStreamEvent, { event: 'turn-start' }>['data']]
+  | ['response-start', Extract<GenUIStreamEvent, { event: 'response-start' }>['data']]
   | ['block-append', Extract<GenUIStreamEvent, { event: 'block-append' }>['data']]
   | ['block-replace', Extract<GenUIStreamEvent, { event: 'block-replace' }>['data']]
-  | ['turn-status', Extract<GenUIStreamEvent, { event: 'turn-status' }>['data']]
-  | ['turn-complete', Extract<GenUIStreamEvent, { event: 'turn-complete' }>['data']]
-  | ['turn-error', Extract<GenUIStreamEvent, { event: 'turn-error' }>['data']]
+  | ['response-status', Extract<GenUIStreamEvent, { event: 'response-status' }>['data']]
+  | ['response-complete', Extract<GenUIStreamEvent, { event: 'response-complete' }>['data']]
+  | ['response-error', Extract<GenUIStreamEvent, { event: 'response-error' }>['data']]
   | ['trace', Extract<GenUIStreamEvent, { event: 'trace' }>['data']];
-
-interface ToolInvocationState {
-  toolCallId: string;
-  toolName: string;
-  input?: Record<string, unknown>;
-  output?: unknown;
-  errorText?: string;
-}
 
 interface ActionResultEvent {
   success: boolean;
@@ -160,33 +146,24 @@ interface ActionResultEvent {
   }>;
 }
 
-function isActionResultNextActions(value: unknown): value is NonNullable<ActionResultEvent['nextActions']> {
-  return Array.isArray(value) && value.every((item) => {
-    if (!isRecord(item)) {
-      return false;
-    }
-
-    if (typeof item.label !== 'string' || typeof item.action !== 'string') {
-      return false;
-    }
-
-    if (item.params !== undefined && !isRecord(item.params)) {
-      return false;
-    }
-
-    return true;
-  });
-}
-
 interface ResolvedConversation {
   conversationId: string;
   historyMessages: ChatRequest['messages'];
-  latestAssistantTurnContext?: GenUITurnContext;
+  conversationSummary?: string;
+  latestAssistantSuggestions?: GenUISuggestions;
   trace: GenUITracePayload;
 }
 
 function createId(prefix: string): string {
   return `${prefix}_${randomUUID().slice(0, 8)}`;
+}
+
+function resolveHistoryScope(request: GenUIRequest): HistoryScope {
+  if (request.context?.activityId || request.context?.activityMode) {
+    return 'activity';
+  }
+
+  return 'private';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -200,121 +177,6 @@ function resolveStreamOptions(request: GenUIRequest): ResolvedStreamOptions {
   return {
     includeTrace,
     eventEnvelope,
-  };
-}
-
-function isDataStreamEvent(value: unknown): value is DataStreamEvent {
-  return isRecord(value) && typeof value.type === 'string';
-}
-
-function parseDataStreamEvent(dataText: string): DataStreamEvent | null {
-  try {
-    const parsed: unknown = JSON.parse(dataText);
-    return isDataStreamEvent(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function parseSSEPacket(packet: string): string {
-  const lines = packet.split(/\r?\n/);
-  const dataLines: string[] = [];
-
-  for (const line of lines) {
-    if (line.startsWith('data:')) {
-      dataLines.push(line.slice(5).trim());
-    }
-  }
-
-  return dataLines.join('\n');
-}
-
-function splitNextSSEPacket(buffer: string): {
-  packet: string;
-  rest: string;
-} | null {
-  const match = /\r?\n\r?\n/.exec(buffer);
-  if (!match || typeof match.index !== 'number') {
-    return null;
-  }
-
-  const separatorIndex = match.index;
-  const separatorLength = match[0].length;
-  return {
-    packet: buffer.slice(0, separatorIndex),
-    rest: buffer.slice(separatorIndex + separatorLength),
-  };
-}
-
-async function parseDataStreamResponse(response: Response): Promise<ParsedDataStream> {
-  if (!response.body) {
-    return {
-      events: [],
-      rawEventCount: 0,
-      done: false,
-    };
-  }
-
-  const decoder = new TextDecoder();
-  const reader = response.body.getReader();
-  const events: DataStreamEvent[] = [];
-  let buffer = '';
-  let rawEventCount = 0;
-  let done = false;
-
-  while (true) {
-    const chunk = await reader.read();
-    if (chunk.done) {
-      break;
-    }
-
-    buffer += decoder.decode(chunk.value, { stream: true });
-
-    let nextPacket = splitNextSSEPacket(buffer);
-    while (nextPacket) {
-      const packet = nextPacket.packet;
-      buffer = nextPacket.rest;
-      rawEventCount += 1;
-
-      const dataText = parseSSEPacket(packet).trim();
-      if (!dataText) {
-        nextPacket = splitNextSSEPacket(buffer);
-        continue;
-      }
-
-      if (dataText === '[DONE]') {
-        done = true;
-        nextPacket = splitNextSSEPacket(buffer);
-        continue;
-      }
-
-      const parsed = parseDataStreamEvent(dataText);
-      if (parsed) {
-        events.push(parsed);
-      }
-
-      nextPacket = splitNextSSEPacket(buffer);
-    }
-  }
-
-  const remaining = buffer.trim();
-  if (remaining) {
-    rawEventCount += 1;
-    const dataText = parseSSEPacket(remaining).trim();
-    if (dataText === '[DONE]') {
-      done = true;
-    } else if (dataText) {
-      const parsed = parseDataStreamEvent(dataText);
-      if (parsed) {
-        events.push(parsed);
-      }
-    }
-  }
-
-  return {
-    events,
-    rawEventCount,
-    done,
   };
 }
 
@@ -404,23 +266,23 @@ function parseRequestAiParams(request: GenUIRequest): ChatAiParams | undefined {
   };
 }
 
-function parseFollowUpMode(value: unknown): FollowUpMode | undefined {
+function parseActivityMode(value: unknown): ActivityMode | undefined {
   if (value === 'review' || value === 'rebook' || value === 'kickoff') {
     return value;
   }
   return undefined;
 }
 
-function parseActivityFollowUpContext(request: GenUIRequest): {
+function parseActivityContext(request: GenUIRequest): {
   activityId?: string;
-  followUpMode?: FollowUpMode;
+  activityMode?: ActivityMode;
   entry?: string;
 } {
   const activityId =
     typeof request.context?.activityId === 'string' && request.context.activityId.trim()
       ? request.context.activityId.trim()
       : undefined;
-  const followUpMode = parseFollowUpMode(request.context?.followUpMode);
+  const activityMode = parseActivityMode(request.context?.activityMode);
   const entry =
     typeof request.context?.entry === 'string' && request.context.entry.trim()
       ? request.context.entry.trim()
@@ -428,7 +290,7 @@ function parseActivityFollowUpContext(request: GenUIRequest): {
 
   return {
     ...(activityId ? { activityId } : {}),
-    ...(followUpMode ? { followUpMode } : {}),
+    ...(activityMode ? { activityMode } : {}),
     ...(entry ? { entry } : {}),
   };
 }
@@ -471,16 +333,16 @@ function extractReviewSummaryFromBlocks(blocks: GenUIBlock[]): string | null {
   return clampText(normalized, REVIEW_SUMMARY_MAX_LENGTH);
 }
 
-async function persistActivityFollowUpResult(params: {
+async function persistActivityReviewResult(params: {
   request: GenUIRequest;
   blocks: GenUIBlock[];
   viewer: ViewerContext | null;
   traces: GenUITracePayload[];
 }): Promise<void> {
   const { request, blocks, viewer, traces } = params;
-  const followUpContext = parseActivityFollowUpContext(request);
+  const activityContext = parseActivityContext(request);
 
-  if (followUpContext.followUpMode !== 'review' || !followUpContext.activityId) {
+  if (activityContext.activityMode !== 'review' || !activityContext.activityId) {
     return;
   }
 
@@ -490,8 +352,8 @@ async function persistActivityFollowUpResult(params: {
       detail: {
         saved: false,
         reason: 'anonymous_user',
-        activityId: followUpContext.activityId,
-        entry: followUpContext.entry || null,
+        activityId: activityContext.activityId,
+        entry: activityContext.entry || null,
       },
     });
     return;
@@ -504,21 +366,21 @@ async function persistActivityFollowUpResult(params: {
       detail: {
         saved: false,
         reason: 'empty_review_summary',
-        activityId: followUpContext.activityId,
-        entry: followUpContext.entry || null,
+        activityId: activityContext.activityId,
+        entry: activityContext.entry || null,
       },
     });
     return;
   }
 
   try {
-    await saveActivityReviewSummary(viewer.id, followUpContext.activityId, reviewSummary);
+    await saveActivityReviewSummary(viewer.id, activityContext.activityId, reviewSummary);
     traces.push({
       stage: 'activity_review_memory',
       detail: {
         saved: true,
-        activityId: followUpContext.activityId,
-        entry: followUpContext.entry || null,
+        activityId: activityContext.activityId,
+        entry: activityContext.entry || null,
         summaryLength: reviewSummary.length,
       },
     });
@@ -528,8 +390,8 @@ async function persistActivityFollowUpResult(params: {
       stage: 'activity_review_memory',
       detail: {
         saved: false,
-        activityId: followUpContext.activityId,
-        entry: followUpContext.entry || null,
+        activityId: activityContext.activityId,
+        entry: activityContext.entry || null,
         error: error instanceof Error ? error.message : 'unknown_error',
       },
     });
@@ -869,370 +731,6 @@ function inferMaxParticipantsFromText(text: string): number | undefined {
   return Number.isFinite(value) && value >= 2 ? value : undefined;
 }
 
-async function inferStructuredActionFromOpenJoinTask(params: {
-  userId: string;
-  conversationId: string;
-  activityId?: string;
-  inputText: string;
-}): Promise<ChatRequest['structuredAction'] | undefined> {
-  const normalized = params.inputText.trim();
-  if (!normalized) {
-    return undefined;
-  }
-
-  const task = await resolveOpenJoinTaskForConversation({
-    userId: params.userId,
-    conversationId: params.conversationId,
-    activityId: params.activityId,
-  });
-  if (!task) {
-    return undefined;
-  }
-
-  if (!['intent_captured', 'explore', 'action_selected', 'auth_gate'].includes(task.currentStage)) {
-    return undefined;
-  }
-
-  const currentCenter = findKnownLocationCenter(normalized);
-  const center = currentCenter || (task.context.location?.name ? {
-    name: task.context.location.name,
-    lat: task.context.location.lat ?? 0,
-    lng: task.context.location.lng ?? 0,
-  } : null);
-  const activityType = inferActivityTypeFromText(normalized) || task.context.activityType;
-  const isBareLocationReply = Boolean(
-    currentCenter
-      && normalized.replace(/附近$/, '') === currentCenter.name
-      && !/[，。,.!?？！；;:：]/.test(normalized)
-      && normalized.length <= 12
-  );
-
-  if (CREATE_FROM_EXPLORE_PATTERN.test(normalized) && center) {
-    return {
-      action: 'create_activity',
-      payload: {
-        description: buildCreatePromptFromExplore({
-          locationName: center.name,
-          originalText: normalized,
-          activityType,
-        }),
-        locationName: center.name,
-        ...(activityType ? { type: activityType } : {}),
-      },
-      source: 'task_runtime_inference',
-      originalText: normalized,
-    };
-  }
-
-  if (currentCenter && isBareLocationReply) {
-    if (!activityType) {
-      return {
-        action: 'ask_preference',
-        payload: buildTypePreferencePayload({
-          center: currentCenter,
-          semanticQuery: buildTaskFirstSemanticQuery({
-            inputText: normalized,
-            taskSemanticQuery: task.context.semanticQuery,
-            locationName: currentCenter.name,
-          }),
-        }),
-        source: 'task_runtime_inference',
-        originalText: normalized,
-      };
-    }
-
-    return {
-      action: 'explore_nearby',
-      payload: {
-        locationName: currentCenter.name,
-        lat: currentCenter.lat,
-        lng: currentCenter.lng,
-        radiusKm: 5,
-        semanticQuery: buildTaskFirstSemanticQuery({
-          inputText: normalized,
-          taskSemanticQuery: task.context.semanticQuery,
-          locationName: currentCenter.name,
-          activityType,
-        }),
-        ...(activityType ? { type: activityType } : {}),
-      },
-      source: 'task_runtime_inference',
-      originalText: normalized,
-    };
-  }
-
-  const shouldContinueExplore = Boolean(
-    center
-      && (
-        EXPLORE_FOLLOWUP_PATTERN.test(normalized)
-        || EXPLORE_TEXT_PATTERN.test(normalized)
-      )
-  );
-
-  if (!shouldContinueExplore || !center) {
-    return undefined;
-  }
-
-  if (!activityType && !(currentCenter || task.context.location?.name)) {
-    return {
-      action: 'ask_preference',
-      payload: buildLocationPreferencePayload(normalized, activityType),
-      source: 'task_runtime_inference',
-      originalText: normalized,
-    };
-  }
-
-  return {
-    action: 'explore_nearby',
-    payload: {
-      locationName: center.name,
-      ...(center.lat ? { lat: center.lat } : {}),
-      ...(center.lng ? { lng: center.lng } : {}),
-      radiusKm: 5,
-      semanticQuery: buildTaskFirstSemanticQuery({
-        inputText: normalized,
-        taskSemanticQuery: task.context.semanticQuery,
-        locationName: center.name,
-        activityType,
-      }),
-      ...(activityType ? { type: activityType } : {}),
-    },
-    source: 'task_runtime_inference',
-    originalText: normalized,
-  };
-}
-
-async function inferStructuredActionFromOpenPartnerTask(params: {
-  userId: string;
-  conversationId: string;
-  inputText: string;
-}): Promise<ChatRequest['structuredAction'] | undefined> {
-  const normalized = params.inputText.trim();
-  if (!normalized) {
-    return undefined;
-  }
-
-  const task = await resolveOpenPartnerTaskForConversation({
-    userId: params.userId,
-    conversationId: params.conversationId,
-  });
-  if (!task) {
-    return undefined;
-  }
-
-  if (!['intent_captured', 'preference_collecting', 'auth_gate'].includes(task.currentStage)) {
-    return undefined;
-  }
-
-  const hasExplicitSignal = PARTNER_FOLLOWUP_PATTERN.test(normalized);
-  const isShortReply = normalized.length <= 18 && !/[。！？!?]/.test(normalized);
-  if (!hasExplicitSignal && !isShortReply) {
-    return undefined;
-  }
-
-  return {
-    action: 'find_partner',
-    payload: {
-      rawInput: buildTaskFirstRawInput(task.goalText, normalized),
-      ...(task.context.activityType ? { type: task.context.activityType } : {}),
-      ...(task.context.locationHint ? { locationName: task.context.locationHint } : {}),
-    },
-    source: 'task_runtime_inference',
-    originalText: normalized,
-  };
-}
-
-async function inferStructuredActionFromOpenCreateTask(params: {
-  userId: string;
-  conversationId: string;
-  activityId?: string;
-  inputText: string;
-}): Promise<ChatRequest['structuredAction'] | undefined> {
-  const normalized = params.inputText.trim();
-  if (!normalized) {
-    return undefined;
-  }
-
-  const task = await resolveOpenCreateTaskForConversation({
-    userId: params.userId,
-    conversationId: params.conversationId,
-    activityId: params.activityId,
-  });
-  if (!task) {
-    return undefined;
-  }
-
-  if (!['intent_captured', 'draft_collecting', 'draft_ready', 'auth_gate'].includes(task.currentStage)) {
-    return undefined;
-  }
-
-  if (task.activityId && CREATE_PUBLISH_PATTERN.test(normalized)) {
-    return {
-      action: 'confirm_publish',
-      payload: {
-        activityId: task.activityId,
-      },
-      source: 'task_runtime_inference',
-      originalText: normalized,
-    };
-  }
-
-  if (task.activityId && CREATE_DRAFT_UPDATE_PATTERN.test(normalized)) {
-    const location = findKnownLocationCenter(normalized);
-    const slot = inferDraftSlotFromText(normalized);
-    const maxParticipants = inferMaxParticipantsFromText(normalized);
-
-    return {
-      action: 'save_draft_settings',
-      payload: {
-        activityId: task.activityId,
-        ...(location?.name ? { locationName: location.name } : {}),
-        ...(location?.lat !== undefined ? { lat: location.lat } : {}),
-        ...(location?.lng !== undefined ? { lng: location.lng } : {}),
-        ...(slot ? { slot } : {}),
-        ...(maxParticipants !== undefined ? { maxParticipants } : {}),
-        ...(task.context.startAt ? { startAt: task.context.startAt } : {}),
-      },
-      source: 'task_runtime_inference',
-      originalText: normalized,
-    };
-  }
-
-  if (task.currentStage === 'intent_captured' || task.currentStage === 'auth_gate') {
-    const location = findKnownLocationCenter(normalized);
-    const activityType = inferActivityTypeFromText(normalized) || task.context.type;
-
-    return {
-      action: 'create_activity',
-      payload: {
-        description: buildTaskFirstRawInput(task.goalText, normalized),
-        ...(location?.name ? { locationName: location.name } : task.context.locationName ? { locationName: task.context.locationName } : {}),
-        ...(activityType ? { type: activityType } : {}),
-      },
-      source: 'task_runtime_inference',
-      originalText: normalized,
-    };
-  }
-
-  return undefined;
-}
-
-function inferStructuredActionFromText(
-  inputText: string,
-  historyMessages: ChatRequest['messages']
-): ChatRequest['structuredAction'] | undefined {
-  const normalized = inputText.trim();
-  if (!normalized) {
-    return undefined;
-  }
-
-  const currentCenter = findKnownLocationCenter(normalized);
-  const historyContext = extractSearchContextFromHistory(historyMessages);
-  const center = currentCenter || historyContext.center;
-  const activityType = inferActivityTypeFromText(normalized) || historyContext.activityType;
-  const isBareLocationReply = Boolean(
-    currentCenter
-      && normalized.replace(/附近$/, '') === currentCenter.name
-      && !/[，。,.!?？！；;:：]/.test(normalized)
-      && normalized.length <= 12
-  );
-  const isShortReply = normalized.length <= 18 && !/[。！？!?]/.test(normalized);
-
-  if (CREATE_FROM_EXPLORE_PATTERN.test(normalized) && center) {
-    return {
-      action: 'create_activity',
-      payload: {
-        description: buildCreatePromptFromExplore({
-          locationName: center.name,
-          originalText: normalized,
-          activityType,
-        }),
-        locationName: center.name,
-        ...(activityType ? { type: activityType } : {}),
-      },
-      source: 'text_action_inference',
-      originalText: normalized,
-    };
-  }
-
-  if (
-    currentCenter
-    && isBareLocationReply
-    && (hasRecentLocationPrompt(historyMessages) || hasRecentCreatePrompt(historyMessages))
-  ) {
-    if (!activityType) {
-      return {
-        action: 'ask_preference',
-        payload: buildTypePreferencePayload({
-          center: currentCenter,
-          semanticQuery: buildExploreSemanticQuery(currentCenter.name),
-        }),
-        source: 'text_action_inference',
-        originalText: normalized,
-      };
-    }
-
-    return {
-      action: 'explore_nearby',
-      payload: {
-        locationName: currentCenter.name,
-        lat: currentCenter.lat,
-        lng: currentCenter.lng,
-        radiusKm: 5,
-        semanticQuery: buildExploreSemanticQuery(currentCenter.name, activityType),
-        ...(activityType ? { type: activityType } : {}),
-      },
-      source: 'text_action_inference',
-      originalText: normalized,
-    };
-  }
-
-  if (PARTNER_ENTRY_PATTERN.test(normalized) || (hasRecentPartnerPrompt(historyMessages) && (PARTNER_FOLLOWUP_PATTERN.test(normalized) || isShortReply))) {
-    return {
-      action: 'find_partner',
-      payload: {
-        rawInput: normalized,
-        ...(activityType ? { type: activityType } : {}),
-        ...(center?.name ? { locationName: center.name } : {}),
-        ...(center?.lat !== undefined ? { lat: center.lat } : {}),
-        ...(center?.lng !== undefined ? { lng: center.lng } : {}),
-      },
-      source: 'text_action_inference',
-      originalText: normalized,
-    };
-  }
-
-  const shouldExplore = EXPLORE_TEXT_PATTERN.test(normalized)
-    || (!!center && EXPLORE_FOLLOWUP_PATTERN.test(normalized));
-
-  if (shouldExplore && !center) {
-    return {
-      action: 'ask_preference',
-      payload: buildLocationPreferencePayload(normalized, activityType),
-      source: 'text_action_inference',
-      originalText: normalized,
-    };
-  }
-
-  if (!shouldExplore || !center) {
-    return undefined;
-  }
-
-  return {
-    action: 'explore_nearby',
-    payload: {
-      locationName: center.name,
-      lat: center.lat,
-      lng: center.lng,
-      radiusKm: 5,
-      semanticQuery: normalized,
-      ...(activityType ? { type: activityType } : {}),
-    },
-    source: 'text_action_inference',
-    originalText: normalized,
-  };
-}
-
 function parseStructuredActionLocation(structuredAction: ChatRequest['structuredAction'] | undefined): [number, number] | undefined {
   if (!structuredAction || !isRecord(structuredAction.payload)) {
     return undefined;
@@ -1251,8 +749,7 @@ function parseStructuredActionLocation(structuredAction: ChatRequest['structured
 
 function resolveStructuredActionFromInput(
   input: GenUIRequest['input'],
-  historyMessages: ChatRequest['messages'],
-  latestAssistantTurnContext?: GenUITurnContext,
+  latestAssistantSuggestions?: GenUISuggestions,
   source?: string
 ): ChatRequest['structuredAction'] | undefined {
   if (input.type === 'action') {
@@ -1268,12 +765,12 @@ function resolveStructuredActionFromInput(
     };
   }
 
-  const continuation = resolveContinuationFromTurnContext(input.text, latestAssistantTurnContext);
+  const continuation = resolveContinuationFromSuggestions(input.text, latestAssistantSuggestions);
   if (continuation) {
     return continuation.structuredAction;
   }
 
-  return inferStructuredActionFromText(input.text, historyMessages);
+  return undefined;
 }
 
 function extractStoredMessageText(content: unknown): string {
@@ -1300,9 +797,54 @@ function extractStoredMessageText(content: unknown): string {
   return '';
 }
 
-function toHistoryMessages(messages: Array<{ role: string; content: unknown }>): ChatRequest['messages'] {
+function buildHistoryMessageFromTextAndAction(params: {
+  role: 'user' | 'assistant';
+  text: string;
+  structuredAction?: ChatRequest['structuredAction'];
+}): ChatRequest['messages'][number] {
+  const textPart = { type: 'text', text: params.text };
+  if (!params.structuredAction) {
+    return {
+      role: params.role,
+      content: params.text,
+      parts: [textPart],
+    };
+  }
+
+  return {
+    role: params.role,
+    content: params.text,
+    parts: [
+      textPart,
+      {
+        type: 'user_action',
+        action: params.structuredAction,
+      },
+    ],
+  };
+}
+
+function extractStructuredActionFromMessage(
+  message: Pick<ChatRequest['messages'][number], 'content' | 'parts'>
+): ChatRequest['structuredAction'] | undefined {
+  const directContentAction = extractStructuredAction(message.content);
+  if (directContentAction) {
+    return directContentAction;
+  }
+
+  const actionPart = message.parts?.find((part) => (
+    isRecord(part)
+    && part.type === 'user_action'
+    && isRecord(part.action)
+  ));
+
+  return actionPart && isRecord(actionPart.action)
+    ? extractStructuredAction(actionPart.action) ?? undefined
+    : undefined;
+}
+
+function toHistoryMessages(messages: Array<{ role: string; content: unknown; messageType?: string }>): ChatRequest['messages'] {
   return messages
-    .slice(-MAX_HISTORY_MESSAGES)
     .map((message) => {
       const role = message.role === 'assistant' ? 'assistant' : 'user';
       const text = extractStoredMessageText(message.content);
@@ -1310,26 +852,171 @@ function toHistoryMessages(messages: Array<{ role: string; content: unknown }>):
         return null;
       }
 
-      return {
+      const structuredAction = message.messageType === 'user_action'
+        ? extractStructuredAction(message.content) ?? undefined
+        : undefined;
+
+      return buildHistoryMessageFromTextAndAction({
         role,
-        content: text,
-      };
+        text,
+        structuredAction,
+      });
     })
-    .filter((item): item is { role: 'assistant' | 'user'; content: string } => Boolean(item));
+    .filter((item): item is ChatRequest['messages'][number] => Boolean(item));
 }
 
-function readLatestAssistantTurnContextFromStoredMessages(
+function summarizeHistoryMessage(message: ChatRequest['messages'][number]): string {
+  const text = extractStoredMessageText(message.content ?? message.parts ?? '');
+  const normalizedText = text.replace(/\s+/g, ' ').trim();
+  if (!normalizedText) {
+    return message.role === 'assistant' ? '助手给出了一条结构化回复。' : '用户给出了一条短回复。';
+  }
+
+  return normalizedText.length > 48
+    ? `${normalizedText.slice(0, 48)}...`
+    : normalizedText;
+}
+
+function summarizeRecentMessage(message: GenUIRecentMessage): string {
+  const normalizedText = message.text.replace(/\s+/g, ' ').trim();
+  if (!normalizedText) {
+    return message.role === 'assistant' ? '助手给出了一条结构化回复。' : '用户给出了一条短回复。';
+  }
+
+  return normalizedText.length > 48
+    ? `${normalizedText.slice(0, 48)}...`
+    : normalizedText;
+}
+
+function readRecentMessageId(message: GenUIRecentMessage): string | undefined {
+  return typeof message.messageId === 'string' && message.messageId.trim()
+    ? message.messageId.trim()
+    : undefined;
+}
+
+function readRecentMessageParentId(message: GenUIRecentMessage): string | undefined {
+  return typeof message.parentId === 'string' && message.parentId.trim()
+    ? message.parentId.trim()
+    : undefined;
+}
+
+function selectActivityRecentMessageIndexes(
+  recentMessages: GenUIRecentMessage[],
+  maxHistoryMessages: number,
+): Set<number> {
+  const messageIndexById = new Map<string, number>();
+  recentMessages.forEach((message, index) => {
+    const messageId = readRecentMessageId(message);
+    if (messageId) {
+      messageIndexById.set(messageId, index);
+    }
+  });
+
+  const selectedIndexes = new Set<number>();
+
+  for (let index = recentMessages.length - 1; index >= 0 && selectedIndexes.size < maxHistoryMessages; index -= 1) {
+    let currentIndex: number | undefined = index;
+
+    while (currentIndex !== undefined && selectedIndexes.size < maxHistoryMessages) {
+      selectedIndexes.add(currentIndex);
+      const parentId = readRecentMessageParentId(recentMessages[currentIndex]);
+      currentIndex = parentId ? messageIndexById.get(parentId) : undefined;
+    }
+  }
+
+  return selectedIndexes;
+}
+
+function compressRecentMessages(
+  recentMessages: GenUIRecentMessage[],
+  scope: HistoryScope,
+): {
+  recentMessages: GenUIRecentMessage[];
+  conversationSummary?: string;
+} {
+  const maxHistoryMessages = scope === 'activity'
+    ? MAX_ACTIVITY_HISTORY_MESSAGES
+    : MAX_PRIVATE_HISTORY_MESSAGES;
+
+  if (recentMessages.length <= maxHistoryMessages) {
+    return { recentMessages };
+  }
+
+  const selectedIndexes = scope === 'activity'
+    ? selectActivityRecentMessageIndexes(recentMessages, maxHistoryMessages)
+    : new Set(
+        recentMessages
+          .slice(-maxHistoryMessages)
+          .map((_, offset) => recentMessages.length - maxHistoryMessages + offset),
+      );
+
+  const keptMessages = recentMessages.filter((_, index) => selectedIndexes.has(index));
+  const omittedMessages = recentMessages.filter((_, index) => !selectedIndexes.has(index));
+  const sampledMessages = omittedMessages.slice(-SUMMARY_SOURCE_MESSAGES);
+  const omittedCount = Math.max(0, omittedMessages.length - sampledMessages.length);
+  const summaryLines = sampledMessages.map((message) => (
+    `${message.role === 'assistant' ? '助手' : '用户'}：${summarizeRecentMessage(message)}`
+  ));
+
+  const conversationSummary = [
+    `更早还有 ${omittedMessages.length} 条历史消息。`,
+    ...(omittedCount > 0 ? [`其中更早的 ${omittedCount} 条已折叠。`] : []),
+    ...summaryLines,
+  ].join('\n');
+
+  return {
+    recentMessages: keptMessages,
+    conversationSummary,
+  };
+}
+
+function compressConversationHistory(
+  historyMessages: ChatRequest['messages'],
+  scope: HistoryScope,
+): {
+  historyMessages: ChatRequest['messages'];
+  conversationSummary?: string;
+} {
+  const maxHistoryMessages = scope === 'activity'
+    ? MAX_ACTIVITY_HISTORY_MESSAGES
+    : MAX_PRIVATE_HISTORY_MESSAGES;
+
+  if (historyMessages.length <= maxHistoryMessages) {
+    return { historyMessages };
+  }
+
+  const recentMessages = historyMessages.slice(-maxHistoryMessages);
+  const olderMessages = historyMessages.slice(0, -maxHistoryMessages);
+  const sampledMessages = olderMessages.slice(-SUMMARY_SOURCE_MESSAGES);
+  const omittedCount = Math.max(0, olderMessages.length - sampledMessages.length);
+  const summaryLines = sampledMessages.map((message) => (
+    `${message.role === 'assistant' ? '助手' : '用户'}：${summarizeHistoryMessage(message)}`
+  ));
+
+  const conversationSummary = [
+    `更早还有 ${olderMessages.length} 条历史消息。`,
+    ...(omittedCount > 0 ? [`其中更早的 ${omittedCount} 条已折叠。`] : []),
+    ...summaryLines,
+  ].join('\n');
+
+  return {
+    historyMessages: recentMessages,
+    conversationSummary,
+  };
+}
+
+function readLatestAssistantSuggestionsFromStoredMessages(
   messages: Array<{ role: string; content: unknown }>
-): GenUITurnContext | undefined {
+): GenUISuggestions | undefined {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message.role !== 'assistant') {
       continue;
     }
 
-    const turnContext = readTurnContextFromStoredMessage(message.content);
-    if (turnContext) {
-      return turnContext;
+    const suggestions = readSuggestionsFromStoredMessage(message.content);
+    if (suggestions) {
+      return suggestions;
     }
   }
 
@@ -1338,16 +1025,17 @@ function readLatestAssistantTurnContextFromStoredMessages(
 
 function readTransientConversationTurnsFromRequest(request: GenUIRequest): {
   historyMessages: ChatRequest['messages'];
-  latestAssistantTurnContext?: GenUITurnContext;
+  conversationSummary?: string;
+  latestAssistantSuggestions?: GenUISuggestions;
 } {
-  const transientTurns = Array.isArray(request.context?.transientTurns)
-    ? request.context.transientTurns
+  const recentMessages = Array.isArray(request.context?.recentMessages)
+    ? request.context.recentMessages
     : [];
+  const scope = resolveHistoryScope(request);
+  const compressedRecentMessages = compressRecentMessages(recentMessages, scope);
 
-  const recentTurns = transientTurns.slice(-MAX_HISTORY_MESSAGES);
-  let latestAssistantTurnContext: GenUITurnContext | undefined;
-
-  const historyMessages = recentTurns
+  let latestAssistantSuggestions: GenUISuggestions | undefined;
+  const allHistoryMessages = compressedRecentMessages.recentMessages
     .map((turn) => {
       if (!isRecord(turn)) {
         return null;
@@ -1360,22 +1048,35 @@ function readTransientConversationTurnsFromRequest(request: GenUIRequest): {
       }
 
       if (role === 'assistant') {
-        const turnContext = readTurnContextFromStoredMessage({ turnContext: turn.turnContext });
-        if (turnContext) {
-          latestAssistantTurnContext = turnContext;
+        const suggestions = readSuggestionsFromStoredMessage({ suggestions: turn.suggestions });
+        if (suggestions) {
+          latestAssistantSuggestions = suggestions;
         }
       }
 
-      return {
+      const structuredAction = role === 'user' && typeof turn.action === 'string' && isStructuredActionType(turn.action)
+        ? {
+            action: turn.action,
+            payload: isRecord(turn.params) ? turn.params : {},
+            ...(typeof turn.source === 'string' ? { source: turn.source } : {}),
+            ...(typeof turn.displayText === 'string' ? { originalText: turn.displayText } : {}),
+          }
+        : undefined;
+
+      return buildHistoryMessageFromTextAndAction({
         role,
-        content: text,
-      };
+        text,
+        structuredAction,
+      });
     })
-    .filter((item): item is { role: GenUITransientTurn['role']; content: string } => Boolean(item));
+    .filter((item): item is ChatRequest['messages'][number] => Boolean(item));
 
   return {
-    historyMessages,
-    ...(latestAssistantTurnContext ? { latestAssistantTurnContext } : {}),
+    historyMessages: allHistoryMessages,
+    ...(compressedRecentMessages.conversationSummary
+      ? { conversationSummary: compressedRecentMessages.conversationSummary }
+      : {}),
+    ...(latestAssistantSuggestions ? { latestAssistantSuggestions } : {}),
   };
 }
 
@@ -1394,8 +1095,11 @@ async function resolveConversationContext(
     return {
       conversationId,
       historyMessages: transientConversation.historyMessages,
-      ...(transientConversation.latestAssistantTurnContext
-        ? { latestAssistantTurnContext: transientConversation.latestAssistantTurnContext }
+      ...(transientConversation.conversationSummary
+        ? { conversationSummary: transientConversation.conversationSummary }
+        : {}),
+      ...(transientConversation.latestAssistantSuggestions
+        ? { latestAssistantSuggestions: transientConversation.latestAssistantSuggestions }
         : {}),
       trace: {
         stage: 'conversation_resolved',
@@ -1406,7 +1110,7 @@ async function resolveConversationContext(
           messageCount: transientConversation.historyMessages.length,
           conversationMode,
           historySource,
-          turnContext: transientConversation.latestAssistantTurnContext?.kind || null,
+          suggestions: transientConversation.latestAssistantSuggestions?.kind || null,
         },
       },
     };
@@ -1424,13 +1128,19 @@ async function resolveConversationContext(
         throw new Error('无权限访问该会话');
       }
 
-      const latestAssistantTurnContext = readLatestAssistantTurnContextFromStoredMessages(conversation.messages);
+      const latestAssistantSuggestions = readLatestAssistantSuggestionsFromStoredMessages(conversation.messages);
+      const allHistoryMessages = toHistoryMessages(conversation.messages);
+      const { historyMessages, conversationSummary } = compressConversationHistory(
+        allHistoryMessages,
+        resolveHistoryScope(request),
+      );
 
       return {
         conversationId: requestedConversationId,
-        historyMessages: toHistoryMessages(conversation.messages),
-        ...(latestAssistantTurnContext
-          ? { latestAssistantTurnContext }
+        historyMessages,
+        ...(conversationSummary ? { conversationSummary } : {}),
+        ...(latestAssistantSuggestions
+          ? { latestAssistantSuggestions }
           : {}),
         trace: {
           stage: 'conversation_resolved',
@@ -1441,7 +1151,7 @@ async function resolveConversationContext(
             conversationId: requestedConversationId,
             conversationMode: 'authenticated_persistent',
             historySource: conversation.messages.length > 0 ? 'db' : 'empty',
-            turnContext: latestAssistantTurnContext?.kind || null,
+            suggestions: latestAssistantSuggestions?.kind || null,
           },
         },
       };
@@ -1462,7 +1172,7 @@ async function resolveConversationContext(
         conversationId: thread.id,
         conversationMode: 'authenticated_persistent',
         historySource: 'empty',
-        turnContext: null,
+        suggestions: null,
       },
     },
   };
@@ -1475,42 +1185,16 @@ async function resolveAiChatExecution(
 ): Promise<ResolvedAiChatExecution> {
   const conversation = await resolveConversationContext(request, viewer);
   const userText = normalizeActionDisplayText(request.input);
-  const turnContextResolution = request.input.type === 'text'
-    ? resolveContinuationFromTurnContext(request.input.text, conversation.latestAssistantTurnContext)
-    : undefined;
-  const requestActivityId =
-    typeof request.context?.activityId === 'string' && request.context.activityId.trim()
-      ? request.context.activityId.trim()
-      : undefined;
-  const taskFirstStructuredAction = request.input.type === 'text' && viewer
-    ? await inferStructuredActionFromOpenJoinTask({
-        userId: viewer.id,
-        conversationId: conversation.conversationId,
-        activityId: requestActivityId,
-        inputText: request.input.text,
-      })
-      || await inferStructuredActionFromOpenPartnerTask({
-        userId: viewer.id,
-        conversationId: conversation.conversationId,
-        inputText: request.input.text,
-      })
-      || await inferStructuredActionFromOpenCreateTask({
-        userId: viewer.id,
-        conversationId: conversation.conversationId,
-        activityId: requestActivityId,
-        inputText: request.input.text,
-      })
+  const suggestionResolution = request.input.type === 'text'
+    ? resolveContinuationFromSuggestions(request.input.text, conversation.latestAssistantSuggestions)
     : undefined;
   const resolvedStructuredAction = request.input.type === 'action'
     ? resolveStructuredActionFromInput(
         request.input,
-        conversation.historyMessages,
-        conversation.latestAssistantTurnContext,
+        conversation.latestAssistantSuggestions,
         typeof request.context?.entry === 'string' ? request.context.entry : undefined
       )
-    : turnContextResolution?.structuredAction
-      || taskFirstStructuredAction
-      || inferStructuredActionFromText(request.input.text, conversation.historyMessages);
+    : suggestionResolution?.structuredAction;
   const location = parseRequestLocation(request) || parseStructuredActionLocation(resolvedStructuredAction);
   const ai = parseRequestAiParams(request);
 
@@ -1518,37 +1202,29 @@ async function resolveAiChatExecution(
     throw new Error('输入内容不能为空');
   }
 
-  const source = request.context?.client === 'admin' ? 'admin' : 'miniprogram';
+  const source = request.context?.client === 'admin'
+    ? 'admin'
+    : request.context?.client === 'web'
+      ? 'web'
+      : 'miniprogram';
 
   return {
     conversation,
     userText,
     resolvedStructuredAction,
-    ...(turnContextResolution
+    ...(suggestionResolution
       ? {
           resolutionTrace: {
-            stage: 'turn_context_resolved',
+            stage: 'suggestions_resolved',
             detail: {
               inputText: userText,
-              contextKind: turnContextResolution.contextKind,
-              matchedBy: turnContextResolution.matchedBy,
-              matchedText: turnContextResolution.matchedText,
-              action: turnContextResolution.structuredAction.action,
+              contextKind: suggestionResolution.contextKind,
+              matchedBy: suggestionResolution.matchedBy,
+              matchedText: suggestionResolution.matchedText,
+              action: suggestionResolution.structuredAction.action,
             },
           },
         }
-      : taskFirstStructuredAction
-        ? {
-            resolutionTrace: {
-              stage: 'task_runtime_resolved',
-              detail: {
-                inputText: userText,
-                action: taskFirstStructuredAction.action,
-                source: taskFirstStructuredAction.source ?? 'task_runtime_inference',
-                conversationId: conversation.conversationId,
-              },
-            },
-          }
       : {}),
     defaultExecutionPath: resolvedStructuredAction ? 'structured_action' : 'llm_orchestrated',
     chatRequest: {
@@ -1566,9 +1242,12 @@ async function resolveAiChatExecution(
       structuredAction: resolvedStructuredAction,
       location,
       trace: true,
-      // v5.4: 传递最近一次 Assistant Turn 的上下文，用于无登录状态下感知已收集的偏好
-      ...(conversation.latestAssistantTurnContext
-        ? { latestAssistantTurnContext: conversation.latestAssistantTurnContext }
+      // v5.4: 传递最近一次 Assistant response 的上下文，用于无登录状态下感知已收集的偏好
+      ...(conversation.latestAssistantSuggestions
+        ? { latestAssistantSuggestions: conversation.latestAssistantSuggestions }
+        : {}),
+      ...(conversation.conversationSummary
+        ? { conversationSummary: conversation.conversationSummary }
         : {}),
       ...(ai ? { ai } : {}),
       ...(abortSignal ? { abortSignal } : {}),
@@ -1985,12 +1664,12 @@ function compactBlockForStream<TBlock extends GenUIBlock>(block: TBlock): TBlock
   } as TBlock;
 }
 
-function compactTurnEnvelopeForStream(envelope: GenUITurnEnvelope): GenUITurnEnvelope {
+function compactResponseEnvelopeForStream(envelope: GenUIResponseEnvelope): GenUIResponseEnvelope {
   return {
     ...envelope,
-    turn: {
-      ...envelope.turn,
-      blocks: envelope.turn.blocks.map((block) => compactBlockForStream(block)),
+    response: {
+      ...envelope.response,
+      blocks: envelope.response.blocks.map((block) => compactBlockForStream(block)),
     },
   };
 }
@@ -2924,208 +2603,50 @@ function inferResultOutcome(
   return null;
 }
 
-function buildProcessorStepTraceFromEventData(data: Record<string, unknown>): GenUITracePayload {
-  return {
-    stage: 'processor_step',
-    detail: {
-      id: toStringValue(data.id),
-      type: toStringValue(data.type),
-      name: toStringValue(data.name),
-      status: toStringValue(data.status),
-      ...(typeof data.startedAt === 'string' ? { startedAt: data.startedAt } : {}),
-      ...(typeof data.completedAt === 'string' ? { completedAt: data.completedAt } : {}),
-      ...(typeof data.duration === 'number' ? { duration: data.duration } : {}),
-      ...(isRecord(data.data) ? { data: data.data } : {}),
-      ...(typeof data.error === 'string' ? { error: data.error } : {}),
-    },
-  };
-}
-
-function buildWorkflowCompleteTraceFromEventData(
-  data: Record<string, unknown>,
-  executionPath: ExecutionPath
-): GenUITracePayload {
-  return {
-    stage: 'workflow_complete',
-    detail: {
-      status: toStringValue(data.status),
-      completedAt: toStringValue(data.completedAt),
-      totalDuration: data.totalDuration,
-      executionPath: toStringValue(data.executionPath, executionPath),
-    },
-  };
-}
-
-function buildBlocksFromDataStream(
-  events: DataStreamEvent[],
-  defaultExecutionPath: ExecutionPath,
+function buildBlocksFromExecutionResult(
+  result: ChatExecutionResult,
   request?: GenUIRequest
 ): {
   blocks: GenUIBlock[];
   traces: GenUITracePayload[];
   executionPath: ExecutionPath;
 } {
-  const traces: GenUITracePayload[] = [];
-  const toolStates = new Map<string, ToolInvocationState>();
-  const widgetDataEvents: Array<{ widgetType: string; payload: unknown }> = [];
-  const actionResultEvents: ActionResultEvent[] = [];
-
-  let assistantText = '';
-  let executionPath = defaultExecutionPath;
-  let cardPriorityLeadText: string | null = null;
-
-  for (const event of events) {
-    if (event.type === 'text-delta') {
-      assistantText += toStringValue(event.delta);
-      continue;
-    }
-
-    if (event.type === 'tool-input-start' || event.type === 'tool-input-available') {
-      const toolCallId = toStringValue(event.toolCallId);
-      if (!toolCallId) {
-        continue;
-      }
-
-      const existing = toolStates.get(toolCallId) || {
-        toolCallId,
-        toolName: toStringValue(event.toolName, 'unknown_tool'),
-      };
-
-      if (event.type === 'tool-input-start') {
-        existing.toolName = toStringValue(event.toolName, existing.toolName);
-      }
-
-      if (event.type === 'tool-input-available' && isRecord(event.input)) {
-        existing.toolName = toStringValue(event.toolName, existing.toolName);
-        existing.input = event.input;
-      }
-
-      toolStates.set(toolCallId, existing);
-      continue;
-    }
-
-    if (event.type === 'tool-output-available' || event.type === 'tool-output-error') {
-      const toolCallId = toStringValue(event.toolCallId);
-      if (!toolCallId) {
-        continue;
-      }
-
-      const existing = toolStates.get(toolCallId) || {
-        toolCallId,
-        toolName: toStringValue(event.toolName, 'unknown_tool'),
-      };
-
-      if (event.type === 'tool-output-available') {
-        existing.output = event.output;
-      } else {
-        existing.errorText = toStringValue(event.errorText, '工具执行失败');
-      }
-
-      toolStates.set(toolCallId, existing);
-      if (!cardPriorityLeadText) {
-        cardPriorityLeadText = request && isRecord(existing.output)
-          ? resolvePartnerFormLeadText(request, existing.output)
-          : null;
-      }
-      if (!cardPriorityLeadText) {
-        cardPriorityLeadText = resolveCardPriorityLeadTextFromTool(
-          existing.toolName,
-          existing.input,
-          existing.output
-        );
-      }
-      continue;
-    }
-
-    if (event.type === 'data-trace-start' && isRecord(event.data)) {
-      const intentMethod = toStringValue(event.data.intentMethod);
-      if (intentMethod === 'structured_action') {
-        executionPath = 'structured_action';
-      } else if (intentMethod) {
-        executionPath = 'llm_orchestrated';
-      }
-      continue;
-    }
-
-    if ((event.type === 'data-widget' || event.type === 'data') && isRecord(event.data)) {
-      const widgetType = toStringValue(event.data.type);
-      if (widgetType.startsWith('widget_')) {
-        widgetDataEvents.push({
-          widgetType,
-          payload: event.data.payload,
-        });
-        if (!cardPriorityLeadText) {
-          cardPriorityLeadText = request && isRecord(event.data.payload)
-            ? resolvePartnerFormLeadText(request, event.data.payload)
-            : null;
-        }
-        if (!cardPriorityLeadText) {
-          cardPriorityLeadText = resolveCardPriorityLeadTextFromWidget(
-            widgetType,
-            event.data.payload
-          );
-        }
-      } else if (widgetType === 'action_result') {
-        actionResultEvents.push({
-          success: event.data.success === true,
-          ...(typeof event.data.error === 'string' ? { error: event.data.error } : {}),
-          ...(isActionResultNextActions(event.data.nextActions) ? { nextActions: event.data.nextActions } : {}),
-        });
-      }
-      continue;
-    }
-
-    if (event.type === 'data-trace-step' && isRecord(event.data)) {
-      const stepType = toStringValue(event.data.type);
-      if (stepType === 'structured-action') {
-        executionPath = 'structured_action';
-      }
-
-      traces.push(buildProcessorStepTraceFromEventData(event.data));
-      continue;
-    }
-
-    if (event.type === 'data-trace-end' && isRecord(event.data)) {
-      traces.push(buildWorkflowCompleteTraceFromEventData(event.data, executionPath));
-    }
-  }
-
   const blocks: GenUIBlock[] = [];
-  const trimmedText = cardPriorityLeadText || assistantText.trim();
+  const trimmedText = result.assistantText.trim();
+
   if (trimmedText) {
     pushBlock(blocks, createTextBlock(trimmedText, 'assistant_text', 'assistant_text'));
   }
 
-  for (const widgetEvent of widgetDataEvents) {
+  for (const blockPayload of result.blockPayloads) {
     const block = mapWidgetDataToBlock({
       request,
-      widgetType: widgetEvent.widgetType,
-      payload: widgetEvent.payload,
+      widgetType: blockPayload.widgetType,
+      payload: blockPayload.payload,
       assistantText: trimmedText,
-      traceRef: widgetEvent.widgetType,
+      traceRef: blockPayload.widgetType,
     });
-
     if (block) {
       pushBlock(blocks, block);
     }
   }
 
-  for (const actionResult of actionResultEvents) {
-    const actionCta = mapActionResultToCtaBlock(actionResult, 'action_result');
-    if (actionCta) {
-      pushBlock(blocks, actionCta);
+  for (const actionResult of result.actionResults) {
+    const actionBlock = mapActionResultToCtaBlock(actionResult, 'action_result');
+    if (actionBlock) {
+      pushBlock(blocks, actionBlock);
     }
   }
 
-  for (const toolState of toolStates.values()) {
+  for (const toolCall of result.toolCallRecords) {
     const mappedBlocks = mapToolOutputToBlocks({
       request,
-      toolName: toolState.toolName,
-      toolInput: toolState.input,
-      toolOutput: toolState.output,
-      toolError: toolState.errorText,
+      toolName: toolCall.toolName,
+      toolInput: isRecord(toolCall.args) ? toolCall.args : undefined,
+      toolOutput: toolCall.result,
+      toolError: toolCall.errorText,
       assistantText: trimmedText,
-      traceRef: `tool_${toolState.toolName}`,
+      traceRef: `tool_${toolCall.toolName}`,
     });
 
     for (const block of mappedBlocks) {
@@ -3144,23 +2665,10 @@ function buildBlocksFromDataStream(
     );
   }
 
-  const finalBlocks = removeRedundantPreferenceBlocks(blocks);
-
-  ensureStrictTraceCoverage(traces, trimmedText, executionPath);
-
-  traces.push({
-    stage: 'genui_blocks_built',
-    detail: {
-      blockCount: finalBlocks.length,
-      blockTypes: finalBlocks.map((block) => block.type),
-      executionPath,
-    },
-  });
-
   return {
-    blocks: finalBlocks,
-    traces,
-    executionPath,
+    blocks: removeRedundantPreferenceBlocks(blocks),
+    traces: result.traces,
+    executionPath: result.executionPath,
   };
 }
 
@@ -3169,73 +2677,21 @@ function createStreamEvent(...args: StreamEventArgs): GenUIStreamEvent {
   const timestamp = new Date().toISOString();
 
   switch (args[0]) {
-    case 'turn-start':
+    case 'response-start':
       return { eventId, event: args[0], timestamp, data: args[1] };
     case 'block-append':
       return { eventId, event: args[0], timestamp, data: args[1] };
     case 'block-replace':
       return { eventId, event: args[0], timestamp, data: args[1] };
-    case 'turn-status':
+    case 'response-status':
       return { eventId, event: args[0], timestamp, data: args[1] };
-    case 'turn-complete':
+    case 'response-complete':
       return { eventId, event: args[0], timestamp, data: args[1] };
-    case 'turn-error':
+    case 'response-error':
       return { eventId, event: args[0], timestamp, data: args[1] };
     case 'trace':
       return { eventId, event: args[0], timestamp, data: args[1] };
   }
-}
-
-export function buildAiChatStreamEvents(
-  envelope: GenUITurnEnvelope,
-  traces: GenUITracePayload[],
-  streamOptions: ResolvedStreamOptions = {
-    includeTrace: true,
-    eventEnvelope: 'full',
-  }
-): GenUIStreamEvent[] {
-  const events: GenUIStreamEvent[] = [];
-
-  events.push(
-    createStreamEvent('turn-start', {
-      traceId: envelope.traceId,
-      conversationId: envelope.conversationId,
-      turnId: envelope.turn.turnId,
-    })
-  );
-
-  events.push(
-    createStreamEvent('turn-status', {
-      turnId: envelope.turn.turnId,
-      status: 'streaming',
-    })
-  );
-
-  for (const block of envelope.turn.blocks) {
-    events.push(
-      createStreamEvent('block-append', {
-        turnId: envelope.turn.turnId,
-        block,
-      })
-    );
-  }
-
-  events.push(
-    createStreamEvent('turn-status', {
-      turnId: envelope.turn.turnId,
-      status: 'completed',
-    })
-  );
-
-  events.push(createStreamEvent('turn-complete', envelope));
-
-  if (streamOptions.includeTrace) {
-    for (const trace of traces) {
-      events.push(createStreamEvent('trace', trace));
-    }
-  }
-
-  return events;
 }
 
 function readStreamEventPayload(
@@ -3250,11 +2706,11 @@ function readStreamEventPayload(
     case 'block-append':
     case 'block-replace':
       return {
-        turnId: event.data.turnId,
+        responseId: event.data.responseId,
         block: compactBlockForStream(event.data.block),
       };
-    case 'turn-complete':
-      return compactTurnEnvelopeForStream(event.data);
+    case 'response-complete':
+      return compactResponseEnvelopeForStream(event.data);
     default:
       return event.data;
   }
@@ -3264,734 +2720,66 @@ function serializeSSE(event: GenUIStreamEvent, streamOptions: ResolvedStreamOpti
   return `event: ${event.event}\ndata: ${JSON.stringify(readStreamEventPayload(event, streamOptions))}\n\n`;
 }
 
-export function createAiChatSSEStreamResponse(
-  events: GenUIStreamEvent[],
-  streamOptions: ResolvedStreamOptions = {
-    includeTrace: true,
-    eventEnvelope: 'full',
-  }
-): Response {
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream({
-    start(controller) {
-      for (const event of events) {
-        controller.enqueue(encoder.encode(serializeSSE(event, streamOptions)));
-      }
-
-      controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-      controller.close();
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream; charset=utf-8',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    },
-  });
-}
-
-function getTraceSignature(trace: GenUITracePayload): string {
-  return JSON.stringify({
-    stage: trace.stage,
-    detail: trace.detail,
-  });
-}
-
-function upsertBridgeBlock(
-  blocks: GenUIBlock[],
-  block: GenUIBlock
-): {
-  eventName: 'block-append' | 'block-replace';
-  block: GenUIBlock;
-  changed: boolean;
-} {
-  const targetIndex = block.dedupeKey
-    ? blocks.findIndex((item) => item.dedupeKey === block.dedupeKey)
-    : blocks.findIndex((item) => item.blockId === block.blockId);
-
-  if (targetIndex >= 0) {
-    const previousBlock = blocks[targetIndex];
-    const nextBlock = {
-      ...block,
-      blockId: previousBlock.blockId,
-    };
-    const changed = JSON.stringify(previousBlock) !== JSON.stringify(nextBlock);
-    if (!changed) {
-      return {
-        eventName: 'block-replace',
-        block: previousBlock,
-        changed: false,
-      };
-    }
-
-    blocks[targetIndex] = nextBlock;
-    return {
-      eventName: 'block-replace',
-      block: nextBlock,
-      changed: true,
-    };
-  }
-
-  blocks.push(block);
-  return {
-    eventName: 'block-append',
-    block,
-    changed: true,
-  };
-}
-
-function createStreamingTextBlock(content: string, blockId: string): GenUIBlock {
-  return {
-    blockId,
-    type: 'text',
-    content,
-    dedupeKey: 'assistant_text',
-    replacePolicy: 'replace',
-    meta: {
-      traceRef: 'assistant_text',
-    },
-  };
-}
-
-export async function createAiChatBridgeStreamResponse(
+export async function streamAiChatResponse(
   request: GenUIRequest,
-  options?: CreateAiChatBridgeStreamResponseOptions
+  options?: AiChatStreamOptions
 ): Promise<Response> {
-  const viewer = options?.viewer ?? null;
   const streamOptions = resolveStreamOptions(request);
-  const bridgeAbortController = new AbortController();
-  const requestAbortSignal = options?.requestAbortSignal;
-
-  if (requestAbortSignal) {
-    if (requestAbortSignal.aborted) {
-      bridgeAbortController.abort(requestAbortSignal.reason);
-    } else {
-      requestAbortSignal.addEventListener(
-        'abort',
-        () => {
-          bridgeAbortController.abort(requestAbortSignal.reason);
-        },
-        { once: true }
-      );
-    }
-  }
-
-  const execution = await resolveAiChatExecution(
-    request,
-    viewer,
-    bridgeAbortController.signal
-  );
-  const initialCardPriorityLeadText = inferInitialCardPriorityLeadText(request, execution);
-
-  const traceId = createId(ID_PREFIX.trace);
-  const turnId = createId(ID_PREFIX.turn);
-  const textBlockId = createId(ID_PREFIX.block);
-
   const encoder = new TextEncoder();
-  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
   const stream = new ReadableStream({
     async start(controller) {
-      const closeBridgeStream = () => {
-        try {
-          controller.close();
-        } catch {
-          // ignore double-close during abort races
-        }
-      };
-
-      const shouldStopBridge = () => bridgeAbortController.signal.aborted;
-
-      const stopBridgeIfAborted = () => {
-        if (!shouldStopBridge()) {
-          return false;
-        }
-
-        closeBridgeStream();
-        return true;
-      };
-
       const emit = (event: GenUIStreamEvent) => {
-        if (shouldStopBridge()) {
-          return;
-        }
         controller.enqueue(encoder.encode(serializeSSE(event, streamOptions)));
       };
 
-      const emitDone = () => {
-        if (shouldStopBridge()) {
-          return;
-        }
-        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-      };
-
-      const emitTrace = (
-        trace: GenUITracePayload,
-        traces: GenUITracePayload[],
-        emittedTraceSignatures: Set<string>
-      ) => {
-        traces.push(trace);
-        if (!streamOptions.includeTrace) {
-          return;
-        }
-
-        emittedTraceSignatures.add(getTraceSignature(trace));
-        emit(createStreamEvent('trace', trace));
-      };
-
-      const streamedBlocks: GenUIBlock[] = [];
-      const toolStates = new Map<string, ToolInvocationState>();
-      const internalEvents: DataStreamEvent[] = [];
-      const streamedTraces: GenUITracePayload[] = [];
-      const emittedTraceSignatures = new Set<string>();
-      let rawEventCount = 0;
-      let done = false;
-      let assistantText = '';
-      let executionPath = execution.defaultExecutionPath;
-      let cardPriorityLeadText: string | null = initialCardPriorityLeadText;
-
-      const emitCardPriorityLeadText = (nextText: string | null) => {
-        if (!nextText || shouldStopBridge()) {
-          return;
-        }
-
-        if (nextText === cardPriorityLeadText) {
-          return;
-        }
-
-        const currentScore = scoreCardPriorityLeadText(cardPriorityLeadText);
-        const nextScore = scoreCardPriorityLeadText(nextText);
-        if (cardPriorityLeadText && nextScore < currentScore) {
-          return;
-        }
-
-        cardPriorityLeadText = nextText;
-        const blockEvent = upsertBridgeBlock(
-          streamedBlocks,
-          createStreamingTextBlock(nextText, textBlockId)
-        );
-        if (!blockEvent.changed) {
-          return;
-        }
-        emit(createStreamEvent(blockEvent.eventName, {
-          turnId,
-          block: blockEvent.block,
-        }));
-      };
-
-      const hasStreamedAssistantTextBlock = () => (
-        streamedBlocks.some((block) => block.type === 'text' && block.dedupeKey === 'assistant_text')
-      );
-
-      const ensureAssistantTextBlockBeforeStructured = (preferredText?: string | null) => {
-        if (shouldStopBridge() || hasStreamedAssistantTextBlock()) {
-          return;
-        }
-
-        const nextText = toStringValue(
-          preferredText,
-          toStringValue(cardPriorityLeadText, assistantText.trim())
-        );
-        if (!nextText) {
-          return;
-        }
-
-        const blockEvent = upsertBridgeBlock(
-          streamedBlocks,
-          createStreamingTextBlock(nextText, textBlockId)
-        );
-        if (!blockEvent.changed) {
-          return;
-        }
-
-        emit(createStreamEvent(blockEvent.eventName, {
-          turnId,
-          block: blockEvent.block,
-        }));
-      };
-
       try {
-        if (stopBridgeIfAborted()) {
-          return;
-        }
+        const response = await buildAiChatResponse(request, {
+          viewer: options?.viewer ?? null,
+          abortSignal: options?.requestAbortSignal,
+        });
 
-        emit(createStreamEvent('turn-start', {
-          traceId,
-          conversationId: execution.conversation.conversationId,
-          turnId,
+        emit(createStreamEvent('response-start', {
+          traceId: response.envelope.traceId,
+          conversationId: response.envelope.conversationId,
+          responseId: response.envelope.response.responseId,
         }));
-        emit(createStreamEvent('turn-status', {
-          turnId,
+        emit(createStreamEvent('response-status', {
+          responseId: response.envelope.response.responseId,
           status: 'streaming',
         }));
-        if (initialCardPriorityLeadText) {
-          const blockEvent = upsertBridgeBlock(
-            streamedBlocks,
-            createStreamingTextBlock(initialCardPriorityLeadText, textBlockId)
-          );
-          if (blockEvent.changed) {
-            emit(createStreamEvent(blockEvent.eventName, {
-              turnId,
-              block: blockEvent.block,
-            }));
-          }
-        }
-        emitTrace(execution.conversation.trace, streamedTraces, emittedTraceSignatures);
 
-        const aiResponse = await handleChatStream(execution.chatRequest);
-        if (!aiResponse.body) {
-          throw new Error('AI 流式响应为空');
+        for (const block of response.envelope.response.blocks) {
+          emit(createStreamEvent('block-append', {
+            responseId: response.envelope.response.responseId,
+            block,
+          }));
         }
 
-        const decoder = new TextDecoder();
-        reader = aiResponse.body.getReader();
-        let buffer = '';
-
-        const processInternalEvent = (event: DataStreamEvent) => {
-          if (shouldStopBridge()) {
-            return;
-          }
-
-          internalEvents.push(event);
-
-          if (event.type === 'text-delta') {
-            assistantText += toStringValue(event.delta);
-            if (cardPriorityLeadText) {
-              return;
-            }
-            const blockEvent = upsertBridgeBlock(
-              streamedBlocks,
-              createStreamingTextBlock(assistantText, textBlockId)
-            );
-            if (!blockEvent.changed) {
-              return;
-            }
-            emit(createStreamEvent(blockEvent.eventName, {
-              turnId,
-              block: blockEvent.block,
-            }));
-            return;
-          }
-
-          if (event.type === 'tool-input-start' || event.type === 'tool-input-available') {
-            const toolCallId = toStringValue(event.toolCallId);
-            if (!toolCallId) {
-              return;
-            }
-
-            const existing = toolStates.get(toolCallId) || {
-              toolCallId,
-              toolName: toStringValue(event.toolName, 'unknown_tool'),
-            };
-
-            if (event.type === 'tool-input-start') {
-              existing.toolName = toStringValue(event.toolName, existing.toolName);
-            }
-
-            if (event.type === 'tool-input-available' && isRecord(event.input)) {
-              existing.toolName = toStringValue(event.toolName, existing.toolName);
-              existing.input = event.input;
-            }
-
-            toolStates.set(toolCallId, existing);
-            emitCardPriorityLeadText(
-              (isRecord(existing.output) && resolvePartnerFormLeadText(request, existing.output))
-                || resolveCardPriorityLeadTextFromTool(existing.toolName, existing.input, existing.output)
-            );
-            return;
-          }
-
-          if (event.type === 'tool-output-available' || event.type === 'tool-output-error') {
-            const toolCallId = toStringValue(event.toolCallId);
-            if (!toolCallId) {
-              return;
-            }
-
-            const existing = toolStates.get(toolCallId) || {
-              toolCallId,
-              toolName: toStringValue(event.toolName, 'unknown_tool'),
-            };
-
-            if (event.type === 'tool-output-available') {
-              existing.output = event.output;
-            } else {
-              existing.errorText = toStringValue(event.errorText, '工具执行失败');
-            }
-
-            toolStates.set(toolCallId, existing);
-            emitCardPriorityLeadText(
-              (isRecord(existing.output) && resolvePartnerFormLeadText(request, existing.output))
-                || resolveCardPriorityLeadTextFromTool(existing.toolName, existing.input, existing.output)
-            );
-
-            const mappedBlocks = mapToolOutputToBlocks({
-              request,
-              toolName: existing.toolName,
-              toolInput: existing.input,
-              toolOutput: existing.output,
-              toolError: existing.errorText,
-              assistantText: assistantText.trim(),
-              traceRef: `tool_${existing.toolName}`,
-            });
-
-            for (const block of mappedBlocks) {
-              if (block.type !== 'text') {
-                ensureAssistantTextBlockBeforeStructured();
-              }
-              const blockEvent = upsertBridgeBlock(streamedBlocks, block);
-              if (!blockEvent.changed) {
-                continue;
-              }
-              emit(createStreamEvent(blockEvent.eventName, {
-                turnId,
-                block: blockEvent.block,
-              }));
-            }
-            return;
-          }
-
-          if (event.type === 'data-trace-start' && isRecord(event.data)) {
-            const traceExecutionPath = toStringValue(event.data.executionPath);
-            const intentMethod = toStringValue(event.data.intentMethod);
-
-            if (traceExecutionPath === 'structured_action' || intentMethod === 'structured_action') {
-              executionPath = 'structured_action';
-            } else if (traceExecutionPath === 'llm' || traceExecutionPath === 'llm_orchestrated' || intentMethod) {
-              executionPath = 'llm_orchestrated';
-            }
-            return;
-          }
-
-          if ((event.type === 'data-widget' || event.type === 'data') && isRecord(event.data)) {
-            const widgetType = toStringValue(event.data.type);
-            if (widgetType.startsWith('widget_')) {
-              emitCardPriorityLeadText(
-                (isRecord(event.data.payload) && resolvePartnerFormLeadText(request, event.data.payload))
-                  || resolveCardPriorityLeadTextFromWidget(widgetType, event.data.payload)
-              );
-              const block = mapWidgetDataToBlock({
-                request,
-                widgetType,
-                payload: event.data.payload,
-                assistantText: assistantText.trim(),
-                traceRef: widgetType,
-              });
-
-              if (block) {
-                if (block.type !== 'text') {
-                  ensureAssistantTextBlockBeforeStructured();
-                }
-                const blockEvent = upsertBridgeBlock(streamedBlocks, block);
-                if (!blockEvent.changed) {
-                  return;
-                }
-                emit(createStreamEvent(blockEvent.eventName, {
-                  turnId,
-                  block: blockEvent.block,
-                }));
-              }
-              return;
-            }
-
-            if (widgetType === 'action_result') {
-              const block = mapActionResultToCtaBlock({
-                success: event.data.success === true,
-                ...(typeof event.data.error === 'string' ? { error: event.data.error } : {}),
-                ...(isActionResultNextActions(event.data.nextActions) ? { nextActions: event.data.nextActions } : {}),
-              }, 'action_result');
-
-              if (block) {
-                if (block.type !== 'text') {
-                  ensureAssistantTextBlockBeforeStructured();
-                }
-                const blockEvent = upsertBridgeBlock(streamedBlocks, block);
-                if (!blockEvent.changed) {
-                  return;
-                }
-                emit(createStreamEvent(blockEvent.eventName, {
-                  turnId,
-                  block: blockEvent.block,
-                }));
-              }
-            }
-            return;
-          }
-
-          if (event.type === 'data-trace-step' && isRecord(event.data)) {
-            const stepType = toStringValue(event.data.type);
-            if (stepType === 'structured-action') {
-              executionPath = 'structured_action';
-            }
-
-            emitTrace(
-              buildProcessorStepTraceFromEventData(event.data),
-              streamedTraces,
-              emittedTraceSignatures
-            );
-            return;
-          }
-
-          if (event.type === 'data-trace-end' && isRecord(event.data)) {
-            emitTrace(
-              buildWorkflowCompleteTraceFromEventData(event.data, executionPath),
-              streamedTraces,
-              emittedTraceSignatures
-            );
-          }
-        };
-
-        while (true) {
-          if (stopBridgeIfAborted()) {
-            return;
-          }
-
-          const chunk = await reader.read();
-          if (chunk.done) {
-            break;
-          }
-
-          buffer += decoder.decode(chunk.value, { stream: true });
-
-          let nextPacket = splitNextSSEPacket(buffer);
-          while (nextPacket) {
-            const packet = nextPacket.packet;
-            buffer = nextPacket.rest;
-            rawEventCount += 1;
-
-            const dataText = parseSSEPacket(packet).trim();
-            if (!dataText) {
-              nextPacket = splitNextSSEPacket(buffer);
-              continue;
-            }
-
-            if (dataText === '[DONE]') {
-              done = true;
-              nextPacket = splitNextSSEPacket(buffer);
-              continue;
-            }
-
-            const parsed = parseDataStreamEvent(dataText);
-            if (parsed) {
-              processInternalEvent(parsed);
-            }
-
-            nextPacket = splitNextSSEPacket(buffer);
-          }
-        }
-
-        const remaining = buffer.trim();
-        if (remaining) {
-          rawEventCount += 1;
-          const dataText = parseSSEPacket(remaining).trim();
-          if (dataText === '[DONE]') {
-            done = true;
-          } else if (dataText) {
-            const parsed = parseDataStreamEvent(dataText);
-            if (parsed) {
-              processInternalEvent(parsed);
-            }
-          }
-        }
-
-        if (stopBridgeIfAborted()) {
-          return;
-        }
-
-        const mapped = buildBlocksFromDataStream(
-          internalEvents,
-          execution.defaultExecutionPath,
-          request
-        );
-        executionPath = mapped.executionPath;
-        const turnContext = buildTurnContextFromBlocks(mapped.blocks);
-
-        const baseEnvelope: GenUITurnEnvelope = {
-          traceId,
-          conversationId: execution.conversation.conversationId,
-          turn: {
-            turnId,
-            role: 'assistant',
-            status: 'completed',
-            blocks: mapped.blocks,
-            ...(turnContext ? { turnContext } : {}),
-          },
-        };
-
-        const finalTraces: GenUITracePayload[] = [
-          execution.conversation.trace,
-          ...(execution.resolutionTrace ? [execution.resolutionTrace] : []),
-          {
-            stage: 'chat_stream_bridged',
-            detail: {
-              done,
-              rawEventCount,
-              parsedEventCount: internalEvents.length,
-              executionPath,
-              structuredAction: execution.resolvedStructuredAction?.action || null,
-            },
-          },
-          ...mapped.traces,
-          {
-            stage: 'turn_complete',
-            detail: {
-              traceId,
-              turnId,
-              conversationId: execution.conversation.conversationId,
-              blockCount: mapped.blocks.length,
-            },
-          },
-        ];
-
-        const outcome = inferResultOutcome(request, mapped.blocks);
-        if (outcome) {
-          finalTraces.push({
-            stage: 'result_outcome',
-            detail: {
-              outcome: outcome.outcome,
-              confidence: outcome.confidence,
-              evidence: outcome.evidence,
-            },
-          });
-        }
-
-        if (stopBridgeIfAborted()) {
-          return;
-        }
-
-        await persistActivityFollowUpResult({
-          request,
-          blocks: mapped.blocks,
-          viewer,
-          traces: finalTraces,
-        });
-
-        if (stopBridgeIfAborted()) {
-          return;
-        }
-
-        const normalized = applyAiChatTurnPolicies({
-          request,
-          viewer,
-          envelope: baseEnvelope,
-          traces: finalTraces,
-          resolvedStructuredAction: execution.resolvedStructuredAction,
-          executionPath,
-        });
-
-        const responseTraces = [
-          ...normalized.traces,
-          {
-            stage: 'controller_response_ready',
-            detail: {
-              executionPath,
-              structuredAction: execution.resolvedStructuredAction?.action || null,
-              stream: true,
-              authenticated: !!viewer,
-              blockCount: normalized.envelope.turn.blocks.length,
-            },
-          },
-        ];
-
-        if (stopBridgeIfAborted()) {
-          return;
-        }
-
-        if (viewer) {
-          await syncJoinTaskFromChatTurn({
-            userId: viewer.id,
-            conversationId: normalized.envelope.conversationId,
-            request,
-            blocks: normalized.envelope.turn.blocks,
-          });
-          await syncPartnerTaskFromChatTurn({
-            userId: viewer.id,
-            conversationId: normalized.envelope.conversationId,
-            request,
-            blocks: normalized.envelope.turn.blocks,
-          });
-          await syncCreateTaskFromChatTurn({
-            userId: viewer.id,
-            conversationId: normalized.envelope.conversationId,
-            request,
-            blocks: normalized.envelope.turn.blocks,
-          });
-          await syncConversationTurnSnapshot({
-            conversationId: normalized.envelope.conversationId,
-            userId: viewer.id,
-            userText: execution.userText,
-            blocks: normalized.envelope.turn.blocks,
-            turnId: normalized.envelope.turn.turnId,
-            traceId: normalized.envelope.traceId,
-            inputType: request.input.type,
-            resolvedStructuredAction: execution.resolvedStructuredAction,
-            activityId: typeof request.context?.activityId === 'string' ? request.context.activityId : undefined,
-          });
-        }
-
-        if (stopBridgeIfAborted()) {
-          return;
-        }
-
-        emit(createStreamEvent('turn-status', {
-          turnId,
+        emit(createStreamEvent('response-status', {
+          responseId: response.envelope.response.responseId,
           status: 'completed',
         }));
-        emit(createStreamEvent('turn-complete', normalized.envelope));
+        emit(createStreamEvent('response-complete', response.envelope));
 
         if (streamOptions.includeTrace) {
-          for (const trace of responseTraces) {
-            const signature = getTraceSignature(trace);
-            if (emittedTraceSignatures.has(signature)) {
-              continue;
-            }
-
-            emittedTraceSignatures.add(signature);
+          for (const trace of response.traces) {
             emit(createStreamEvent('trace', trace));
           }
         }
 
-        emitDone();
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
         controller.close();
       } catch (error) {
-        if (bridgeAbortController.signal.aborted) {
-          closeBridgeStream();
-          return;
-        }
-
         const message = normalizeAiProviderErrorMessage(
           error instanceof Error ? error.message : 'AI 服务暂时不可用'
         );
-        emit(createStreamEvent('turn-status', {
-          turnId,
-          status: 'error',
-        }));
-        emit(createStreamEvent('turn-error', {
-          turnId,
+        emit(createStreamEvent('response-error', {
+          responseId: createId(ID_PREFIX.response),
           message,
         }));
-        emitDone();
-        closeBridgeStream();
-      } finally {
-        if (reader) {
-          try {
-            await reader.cancel();
-          } catch {
-            // ignore reader cancel failures during shutdown
-          }
-        }
-      }
-    },
-    async cancel(reason) {
-      bridgeAbortController.abort(reason);
-      if (reader) {
-        try {
-          await reader.cancel(reason);
-        } catch {
-          // ignore reader cancel failures during abort
-        }
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+        controller.close();
       }
     },
   });
@@ -4006,56 +2794,41 @@ export async function createAiChatBridgeStreamResponse(
   });
 }
 
-export async function buildAiChatTurn(
+export async function buildAiChatResponse(
   request: GenUIRequest,
-  options?: BuildAiChatTurnOptions
-): Promise<BuildAiChatTurnResult> {
+  options?: AiChatResponseOptions
+): Promise<AiChatResponseResult> {
   const viewer = options?.viewer ?? null;
-  const execution = await resolveAiChatExecution(request, viewer);
-  const aiResponse = await handleChatStream(execution.chatRequest);
-  const parsed = await parseDataStreamResponse(aiResponse);
-  const mapped = buildBlocksFromDataStream(
-    parsed.events,
-    execution.defaultExecutionPath,
-    request
-  );
+  const execution = await resolveAiChatExecution(request, viewer, options?.abortSignal);
+  const executionResult = await executeChatTurn(execution.chatRequest);
+  const mapped = buildBlocksFromExecutionResult(executionResult, request);
   const executionPath = mapped.executionPath;
-  const turnContext = buildTurnContextFromBlocks(mapped.blocks);
+  const suggestions = buildSuggestionsFromBlocks(mapped.blocks);
 
   const traceId = createId(ID_PREFIX.trace);
-  const turnId = createId(ID_PREFIX.turn);
+  const responseId = createId(ID_PREFIX.response);
 
-  const envelope: GenUITurnEnvelope = {
+  const envelope: GenUIResponseEnvelope = {
     traceId,
     conversationId: execution.conversation.conversationId,
-    turn: {
-      turnId,
+    response: {
+      responseId,
       role: 'assistant',
       status: 'completed',
       blocks: mapped.blocks,
-      ...(turnContext ? { turnContext } : {}),
+      ...(suggestions ? { suggestions } : {}),
     },
   };
 
   const traces: GenUITracePayload[] = [
     execution.conversation.trace,
     ...(execution.resolutionTrace ? [execution.resolutionTrace] : []),
-    {
-      stage: 'chat_stream_parsed',
-      detail: {
-        done: parsed.done,
-        rawEventCount: parsed.rawEventCount,
-        parsedEventCount: parsed.events.length,
-        executionPath,
-        structuredAction: execution.resolvedStructuredAction?.action || null,
-      },
-    },
     ...mapped.traces,
     {
       stage: 'turn_complete',
       detail: {
         traceId,
-        turnId,
+        responseId,
         conversationId: execution.conversation.conversationId,
         blockCount: mapped.blocks.length,
       },
@@ -4074,7 +2847,7 @@ export async function buildAiChatTurn(
     });
   }
 
-  await persistActivityFollowUpResult({
+  await persistActivityReviewResult({
     request,
     blocks: mapped.blocks,
     viewer,

@@ -31,8 +31,6 @@ const matchTypeLabels: Record<string, string> = {
 const responseTypeLabels: Record<string, string> = {
   widget_explore: '探索活动',
   widget_draft: '创建草稿',
-  widget_launcher: '快速发起',
-  widget_action: '操作引导',
   widget_ask_preference: '偏好询问',
   text: '文本回复',
 }

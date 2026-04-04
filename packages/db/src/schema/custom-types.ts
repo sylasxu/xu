@@ -22,7 +22,7 @@ export const vector = customType<{
   config: { dimensions: number };
 }>({
   dataType(config) {
-    return `vector(${config?.dimensions ?? 1024})`;
+    return `vector(${config?.dimensions ?? 1536})`;
   },
   toDriver(value: number[]): string {
     return `[${value.join(',')}]`;

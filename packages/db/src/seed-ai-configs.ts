@@ -51,19 +51,19 @@ const welcomeUiConfig = {
 };
 
 const modelIntentMapConfig = {
-  chat: 'openai/gpt-5.4',
-  reasoning: 'openai/gpt-5.4',
-  agent: 'openai/gpt-5.4',
+  chat: 'moonshot/kimi-k2-32k',
+  reasoning: 'moonshot/kimi-k2-32k',
+  agent: 'moonshot/kimi-k2-32k',
   vision: 'qwen/qwen-vl-max',
 };
 
 const modelRouteMapConfig = {
-  chat: 'openai/gpt-5.4',
-  reasoning: 'openai/gpt-5.4',
-  agent: 'openai/gpt-5.4',
+  chat: 'moonshot/kimi-k2-32k',
+  reasoning: 'moonshot/kimi-k2-32k',
+  agent: 'moonshot/kimi-k2-32k',
   vision: 'qwen/qwen-vl-max',
-  content_generation: 'openai/gpt-5.4',
-  content_topic_suggestions: 'openai/gpt-5.4',
+  content_generation: 'moonshot/kimi-k2-32k',
+  content_topic_suggestions: 'moonshot/kimi-k2-32k',
   embedding: 'qwen/text-embedding-v4',
   rerank: 'qwen/qwen3-rerank',
 };

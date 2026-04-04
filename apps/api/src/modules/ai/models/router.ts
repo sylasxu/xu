@@ -4,13 +4,14 @@
  * 提供统一的模型访问接口，支持降级和意图路由
  * 
  * 策略 (v4.6):
- * - 主力 Chat: OpenAI 兼容网关（如 sub2api）/ Qwen / DeepSeek
+ * - 主力 Chat: Moonshot / Qwen / DeepSeek
  * - Embedding: Qwen text-embedding-v4
  * - Rerank: qwen3-rerank
  */
 
 import type { LanguageModel } from 'ai';
 import { deepseekProvider } from './adapters/deepseek';
+import { moonshotProvider } from './adapters/moonshot';
 import { openaiProvider } from './adapters/openai';
 import { qwenProvider } from './adapters/qwen';
 import type {
@@ -18,6 +19,7 @@ import type {
   ModelProviderName,
   FallbackConfig,
   RerankResponse,
+  EmbedTextType,
   ModelRouteConfigValue,
   ModelRouteKey,
   ModelRouteMap,
@@ -35,6 +37,7 @@ import { getConfigValue } from '../config/config.service';
  */
 const providers: Partial<Record<ModelProviderName, ModelProvider>> = {
   deepseek: deepseekProvider,
+  moonshot: moonshotProvider,
   openai: openaiProvider,
   qwen: qwenProvider,
 };
@@ -43,6 +46,10 @@ const providers: Partial<Record<ModelProviderName, ModelProvider>> = {
  * 当前降级配置
  */
 let fallbackConfig: FallbackConfig = { ...DEFAULT_FALLBACK_CONFIG };
+
+const EMBEDDING_CACHE_TTL_MS = 5 * 60 * 1000;
+
+const embeddingCache = new Map<string, { expiresAt: number; embedding: number[] }>();
 
 function inferProviderFromModelId(modelId?: string): ModelProviderName | undefined {
   if (!modelId) {
@@ -56,6 +63,14 @@ function inferProviderFromModelId(modelId?: string): ModelProviderName | undefin
 
   if (normalized.startsWith('qwen')) {
     return 'qwen';
+  }
+
+  if (normalized.startsWith('kimi')) {
+    return 'moonshot';
+  }
+
+  if (normalized.startsWith('moonshot')) {
+    return 'moonshot';
   }
 
   if (normalized.startsWith('deepseek')) {
@@ -79,7 +94,7 @@ function inferProviderFromModelId(modelId?: string): ModelProviderName | undefin
 }
 
 function isModelProviderName(value: string): value is ModelProviderName {
-  return value === 'openai' || value === 'qwen' || value === 'deepseek' || value === 'doubao';
+  return value === 'openai' || value === 'qwen' || value === 'deepseek' || value === 'doubao' || value === 'moonshot';
 }
 
 export function parseModelRouteIdentifier(identifier: string): ModelRouteSelection | null {
@@ -228,32 +243,127 @@ export function getChatModel(
   }
 }
 
+function getDefaultChatModelIdForProvider(
+  provider: ModelProviderName,
+  routeKey: Exclude<ModelRouteKey, 'embedding' | 'rerank'>,
+): string {
+  switch (provider) {
+    case 'qwen':
+      switch (routeKey) {
+        case 'reasoning':
+          return ACTIVE_MODELS.REASONING;
+        case 'agent':
+        case 'content_generation':
+        case 'content_topic_suggestions':
+          return ACTIVE_MODELS.AGENT;
+        default:
+          return ACTIVE_MODELS.CHAT_PRIMARY;
+      }
+    case 'moonshot':
+      return routeKey === 'vision'
+        ? DEFAULT_MODEL_ROUTE_MAP.vision.modelId
+        : ACTIVE_MODELS.CHAT_PRIMARY;
+    case 'deepseek':
+      return routeKey === 'reasoning' ? 'deepseek-reasoner' : 'deepseek-chat';
+    case 'openai':
+      return DEFAULT_MODEL_ROUTE_MAP.chat.modelId;
+    case 'doubao':
+      return DEFAULT_MODEL_ROUTE_MAP.chat.modelId;
+    default:
+      return DEFAULT_MODEL_ROUTE_MAP.chat.modelId;
+  }
+}
+
+function normalizeEmbeddingCacheKey(modelId: string, textType: EmbedTextType, text: string): string {
+  return `${modelId}::${textType}::${text.trim()}`;
+}
+
+function readCachedEmbedding(cacheKey: string): number[] | null {
+  const cached = embeddingCache.get(cacheKey);
+  if (!cached) {
+    return null;
+  }
+
+  if (cached.expiresAt <= Date.now()) {
+    embeddingCache.delete(cacheKey);
+    return null;
+  }
+
+  return cached.embedding;
+}
+
+function writeCachedEmbedding(cacheKey: string, embedding: number[]): void {
+  embeddingCache.set(cacheKey, {
+    expiresAt: Date.now() + EMBEDDING_CACHE_TTL_MS,
+    embedding,
+  });
+}
+
 /**
  * 获取 Embedding（使用 Qwen text-embedding-v4）
  * 
  * v4.6: 切换主力为 Qwen
  */
-export async function getEmbeddings(texts: string[]): Promise<number[][]> {
+export async function getEmbeddings(
+  texts: string[],
+  options?: { textType?: EmbedTextType }
+): Promise<number[][]> {
   const selection = await getModelRouteSelection('embedding');
   const provider = providers[selection.provider];
+  const textType = options?.textType ?? 'document';
 
   if (!provider?.embed) {
     throw new Error(`Provider ${selection.provider} does not support embedding`);
   }
 
-  const result = await provider.embed({
-    modelId: selection.modelId,
-    texts,
-  });
+  const resolved: number[][] = new Array(texts.length);
+  const uncachedTexts: string[] = [];
+  const uncachedIndexes: number[] = [];
 
-  return result.embeddings;
+  for (const [index, text] of texts.entries()) {
+    const cacheKey = normalizeEmbeddingCacheKey(selection.modelId, textType, text);
+    const cachedEmbedding = readCachedEmbedding(cacheKey);
+    if (cachedEmbedding) {
+      resolved[index] = cachedEmbedding;
+      continue;
+    }
+
+    uncachedTexts.push(text);
+    uncachedIndexes.push(index);
+  }
+
+  if (uncachedTexts.length > 0) {
+    const result = await provider.embed({
+      modelId: selection.modelId,
+      texts: uncachedTexts,
+      textType,
+    });
+
+    for (const [offset, embedding] of result.embeddings.entries()) {
+      const targetIndex = uncachedIndexes[offset];
+      if (targetIndex === undefined || !embedding) {
+        continue;
+      }
+
+      resolved[targetIndex] = embedding;
+      writeCachedEmbedding(
+        normalizeEmbeddingCacheKey(selection.modelId, textType, texts[targetIndex]),
+        embedding,
+      );
+    }
+  }
+
+  return resolved;
 }
 
 /**
  * 获取单个文本的 Embedding
  */
-export async function getEmbedding(text: string): Promise<number[]> {
-  const embeddings = await getEmbeddings([text]);
+export async function getEmbedding(
+  text: string,
+  options?: { textType?: EmbedTextType }
+): Promise<number[]> {
+  const embeddings = await getEmbeddings([text], options);
   return embeddings[0];
 }
 
@@ -263,9 +373,9 @@ export async function getEmbedding(text: string): Promise<number[]> {
  * 新主链路请优先使用 resolveChatModelSelection，从 AI 配置读取默认模型。
  */
 export function getDefaultChatModel(): LanguageModel {
-  if (process.env.OPENAI_API_KEY) {
+  if (process.env.MOONSHOT_API_KEY) {
     const selection = DEFAULT_MODEL_ROUTE_MAP.chat;
-    return getChatModel(selection.modelId, selection.provider, { allowFallback: false });
+    return getChatModel(selection.modelId, selection.provider, { allowFallback: true });
   }
 
   return qwenProvider.getChatModel(ACTIVE_MODELS.CHAT_PRIMARY);
@@ -314,7 +424,23 @@ export async function resolveChatModelSelection(params?: {
   return {
     provider: selection.provider,
     modelId: selection.modelId,
-    model: getChatModel(selection.modelId, params?.preferredProvider || selection.provider, { allowFallback: false }),
+    model: getChatModel(selection.modelId, params?.preferredProvider || selection.provider, { allowFallback: true }),
+  };
+}
+
+export async function resolveFallbackChatModelSelection(params?: {
+  routeKey?: Exclude<ModelRouteKey, 'embedding' | 'rerank'>;
+  intent?: IntentModelType;
+}): Promise<{ provider: ModelProviderName; modelId: string; model: LanguageModel }> {
+  const routeKey = params?.routeKey || params?.intent || 'chat';
+  const currentFallbackConfig = await getFallbackConfig();
+  const provider = currentFallbackConfig.fallback;
+  const modelId = getDefaultChatModelIdForProvider(provider, routeKey);
+
+  return {
+    provider,
+    modelId,
+    model: getChatModel(modelId, provider, { allowFallback: true }),
   };
 }
 
@@ -437,17 +563,17 @@ export async function checkProviderHealth(
 /**
  * 检查所有提供商健康状态
  * 
- * v4.6: 检查当前实际使用的 qwen + deepseek
+ * v5.4: 检查当前实际使用的 moonshot + qwen + deepseek
  */
 export async function checkAllProvidersHealth(): Promise<Partial<Record<ModelProviderName, boolean>>> {
   const results = await Promise.all([
-    checkProviderHealth('openai'),
+    checkProviderHealth('moonshot'),
     checkProviderHealth('qwen'),
     checkProviderHealth('deepseek'),
   ]);
 
   return {
-    openai: results[0],
+    moonshot: results[0],
     qwen: results[1],
     deepseek: results[2],
   };

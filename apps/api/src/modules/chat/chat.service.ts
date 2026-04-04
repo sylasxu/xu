@@ -217,6 +217,7 @@ export async function getMessages(
       id: activityMessages.id,
       activityId: activityMessages.activityId,
       senderId: activityMessages.senderId,
+      parentId: activityMessages.parentId,
       messageType: activityMessages.messageType,
       content: activityMessages.content,
       createdAt: activityMessages.createdAt,
@@ -233,6 +234,7 @@ export async function getMessages(
     id: m.id,
     activityId: m.activityId,
     senderId: m.senderId,
+    parentId: m.parentId,
     senderNickname: m.senderNickname,
     senderAvatarUrl: m.senderAvatarUrl,
     type: m.messageType,
@@ -286,6 +288,7 @@ export async function sendMessage(
     .values({
       activityId,
       senderId: userId,
+      parentId: data.parentId ?? null,
       messageType: 'text',
       content: data.content,
     })

@@ -257,7 +257,7 @@ bunx <package>       # 执行包命令
 **核心表** (v4.6 - 13 张):
 | 表 | 核心字段 |
 |---|---------|
-| users | id, wxOpenId, phoneNumber, nickname, avatarUrl, aiCreateQuotaToday, workingMemory |
+| users | id, wxOpenId, phoneNumber, nickname, avatarUrl, aiCreateQuotaToday |
 | activities | id, creatorId, title, location, locationHint, startAt, type, status, groupOpenId, dynamicMessageId |
 | participants | id, activityId, userId, status |
 | conversations | id, userId, title, messageCount, lastMessageAt (会话) |

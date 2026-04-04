@@ -24,6 +24,56 @@ const CACHE_KEY_PREFIX = 'hot_kw:';
 // 内存缓存（降级方案，如果 Redis 不可用）
 const memoryCache = new Map<string, { data: any; expiresAt: number }>();
 
+// ==========================================
+// 内置 Regex 热词规则（v5.0）
+// 这些规则作为系统默认，运营可以在数据库中添加相同热词来覆盖
+// ==========================================
+
+interface BuiltinRegexRule {
+  id: string;
+  keyword: string;
+  regex: RegExp;
+  matchType: 'regex';
+  responseType: GlobalKeywordResponse['responseType'];
+  responseContent: any;
+  priority: number;
+  description: string;
+}
+
+/** 内置 Regex 热词规则 - 从 Gateway 硬编码迁移而来 */
+const BUILTIN_REGEX_RULES: BuiltinRegexRule[] = [
+  {
+    id: 'builtin_explore_001',
+    keyword: '附近.*(局|活动|好玩的)|有什么(局|活动)|推荐|找个局|找局|看看.*局|约饭|吃饭|火锅|羽毛球|桌游|咖啡',
+    regex: /附近.*(局|活动|好玩的)|有什么(局|活动)|推荐|找个局|找局|看看.*局|约饭|吃饭|火锅|羽毛球|桌游|咖啡/i,
+    matchType: 'regex',
+    responseType: 'widget_explore',
+    responseContent: { intent: 'explore', hint: '用户想探索附近活动' },
+    priority: 100,
+    description: '探索附近活动意图',
+  },
+  {
+    id: 'builtin_create_001',
+    keyword: '(组|租|约).{0,8}局|想.*局|周五.*局',
+    regex: /(组|租|约).{0,8}局|想.*局|周五.*局/i,
+    matchType: 'regex',
+    responseType: 'widget_draft',
+    responseContent: { intent: 'create', hint: '用户想创建活动' },
+    priority: 100,
+    description: '创建活动意图',
+  },
+  {
+    id: 'builtin_partner_001',
+    keyword: '找搭子|求搭子|找.{0,12}搭子|约人',
+    regex: /找搭子|求搭子|找[^，。！？\s]{0,12}搭子|约人/i,
+    matchType: 'regex',
+    responseType: 'widget_ask_preference',
+    responseContent: { intent: 'partner', hint: '用户想找搭子' },
+    priority: 100,
+    description: '找搭子意图',
+  },
+];
+
 function toGlobalKeywordResponse(keyword: GlobalKeywordRow): GlobalKeywordResponse {
   return {
     id: keyword.id,

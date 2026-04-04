@@ -1,5 +1,6 @@
 // Auth Model - TypeBox schemas and types
 import { Elysia, t, type Static } from 'elysia';
+import { ErrorResponseSchema, type ErrorResponse } from "../../common/common.model";
 import { selectUserSchema } from '@juchang/db';
 
 const AuthPermission = t.Object({
@@ -81,11 +82,6 @@ const TestUsersBootstrapResponse = t.Object({
   msg: t.String(),
 });
 
-// 错误响应
-const ErrorResponse = t.Object({
-  code: t.Number(),
-  msg: t.String(),
-});
 
 // 注册到 Elysia Model Plugin
 export const authModel = new Elysia({ name: 'authModel' })
@@ -96,7 +92,7 @@ export const authModel = new Elysia({ name: 'authModel' })
     'auth.loginResponse': LoginResponse,
     'auth.testUsersBootstrap': TestUsersBootstrapRequest,
     'auth.testUsersBootstrapResponse': TestUsersBootstrapResponse,
-    'auth.error': ErrorResponse,
+    'common.error': ErrorResponseSchema,
   });
 
 // 导出 TS 类型
@@ -111,4 +107,6 @@ export type BindPhoneResponse = Static<typeof BindPhoneResponse>;
 export type LoginResponse = Static<typeof LoginResponse>;
 export type TestUsersBootstrapRequest = Static<typeof TestUsersBootstrapRequest>;
 export type TestUsersBootstrapResponse = Static<typeof TestUsersBootstrapResponse>;
-export type ErrorResponse = Static<typeof ErrorResponse>;
+
+// Re-export ErrorResponse from common
+export { ErrorResponseSchema, type ErrorResponse };

@@ -23,8 +23,6 @@ async function seed() {
         nickname: '张三',
         avatarUrl: 'https://example.com/avatar1.jpg',
         aiCreateQuotaToday: 3,
-        participationCount: 5,
-        activitiesCreatedCount: 2,
       },
       {
         wxOpenId: 'test_openid_002', 
@@ -32,16 +30,12 @@ async function seed() {
         avatarUrl: 'https://example.com/avatar2.jpg',
         phoneNumber: '13800138001',
         aiCreateQuotaToday: 3,
-        participationCount: 8,
-        activitiesCreatedCount: 3,
       },
       {
         wxOpenId: 'test_openid_003',
         nickname: '王五',
         avatarUrl: 'https://example.com/avatar3.jpg',
         aiCreateQuotaToday: 1,
-        participationCount: 2,
-        activitiesCreatedCount: 0,
       },
     ]).returning();
 

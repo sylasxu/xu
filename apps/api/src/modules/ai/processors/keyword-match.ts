@@ -1,17 +1,19 @@
 /**
  * Keyword Match Processor (v4.9)
  *
- * P0 层：全局关键词匹配，优先级最高。
+ * P0 层：全局关键词匹配，作为附加业务信号。
  * 命中时将匹配数据写入 context.metadata.keywordMatch，
- * 由 handleChatStream 判断是否直接返回 createDirectResponse。
+ * 主链路仍然继续走 recall + generate，只把它用于统计和后置策略。
  *
  * 设计决策：此处理器作为独立预检查步骤在 runProcessors 管线之前执行，
- * 不放入 runProcessors 管线。P0 命中后 handleChatStream 提前返回
- * createDirectResponse，属于流程控制而非 context 变换。
+ * 不放入 runProcessors 管线。它只补充 metadata，不再直接控制回复路径。
  */
 
 import type { ProcessorContext, ProcessorResult } from './types';
 import { matchKeyword } from '../../hot-keywords/hot-keywords.service';
+import { createLogger } from '../../../lib/logger';
+
+const logger = createLogger('keyword-match-processor');
 
 /**
  * Keyword Match Processor
@@ -30,6 +32,17 @@ export async function keywordMatchProcessor(
     const result = await matchKeyword(context.userInput);
 
     if (result) {
+      // v4.9: 观测性日志 - P0 热词命中
+      logger.info({
+        event: 'p0_keyword_matched',
+        userId: context.userId || 'anon',
+        keywordId: result.id,
+        keyword: result.keyword,
+        matchType: result.matchType,
+        responseType: result.responseType,
+        executionTime: Date.now() - startTime,
+      }, 'P0 keyword matched');
+
       return {
         success: true,
         context: {
@@ -57,6 +70,14 @@ export async function keywordMatchProcessor(
         },
       };
     }
+
+    // v4.9: 观测性日志 - P0 热词未命中
+    logger.info({
+      event: 'p0_keyword_missed',
+      userId: context.userId || 'anon',
+      inputLength: context.userInput.length,
+      executionTime: Date.now() - startTime,
+    }, 'P0 keyword missed');
 
     // 未命中
     return {

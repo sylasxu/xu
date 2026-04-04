@@ -175,7 +175,7 @@ export interface ToolStepData {
   /** 输出结果 */
   output?: Record<string, unknown>
   /** Widget 类型 (如果返回 Widget) */
-  widgetType?: 'widget_draft' | 'widget_explore' | 'widget_share' | 'widget_detail' | 'widget_ask_preference'
+  widgetType?: 'widget_draft' | 'widget_explore' | 'widget_share' | 'widget_ask_preference'
   /** v3.10: 评估结果 */
   evaluation?: EvaluationResult
 }

@@ -7,8 +7,8 @@
  * 2. JSON 格式（新版，支持置信度和时效性）
  */
 
-import { db, users, eq } from '@juchang/db';
-import type { ActivityOutcome, UserProfile } from './types';
+import { db, userMemories, eq, desc, sql } from '@juchang/db';
+import type { ActivityOutcome, InterestVector, UserProfile } from './types';
 import type { PreferenceExtraction, PreferenceCategory, PreferenceSentiment } from './extractor';
 import { calculatePreferenceScore } from './temporal-decay';
 
@@ -405,14 +405,14 @@ export function serializeUserProfile(profile: UserProfile): string {
  * @param memory - 用户工作记忆（Markdown 格式）
  * @returns 注入后的 Prompt
  */
-export function injectWorkingMemory(prompt: string, memory: string | null): string {
+export function injectMemoryContext(prompt: string, memory: string | null): string {
   if (!memory) return prompt;
 
   return `${prompt}
 
-<working_memory>
+<memory_context>
 ${memory}
-</working_memory>`;
+</memory_context>`;
 }
 
 /**
@@ -487,63 +487,199 @@ export function extractPreferencesFromHistory(
 
 // ============ 数据库操作 ============
 
-/**
- * 获取用户工作记忆
- */
-export async function getWorkingMemory(userId: string): Promise<string | null> {
-  const user = await db.query.users.findFirst({
-    where: eq(users.id, userId),
-    columns: { workingMemory: true },
-  });
-  return user?.workingMemory ?? null;
+type ActiveUserMemoryRow = {
+  id: string;
+  memoryType: typeof userMemories.$inferSelect.memoryType;
+  content: string;
+  embedding: number[] | null;
+  metadata: Record<string, unknown> | null;
+  importance: number;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+async function listActiveUserMemories(userId: string): Promise<ActiveUserMemoryRow[]> {
+  return db
+    .select({
+      id: userMemories.id,
+      memoryType: userMemories.memoryType,
+      content: userMemories.content,
+      embedding: userMemories.embedding,
+      metadata: userMemories.metadata,
+      importance: userMemories.importance,
+      createdAt: userMemories.createdAt,
+      updatedAt: userMemories.updatedAt,
+    })
+    .from(userMemories)
+    .where(
+      sql`${userMemories.userId} = ${userId}
+        AND (${userMemories.expiresAt} IS NULL OR ${userMemories.expiresAt} > NOW())`
+    )
+    .orderBy(desc(userMemories.updatedAt), desc(userMemories.createdAt));
 }
 
-/**
- * 更新用户工作记忆
- */
-export async function updateWorkingMemory(
-  userId: string,
-  content: string
-): Promise<void> {
-  await db.update(users)
-    .set({ 
-      workingMemory: content,
-      updatedAt: new Date(),
-    })
-    .where(eq(users.id, userId));
+function readMemoryMetadata(record: ActiveUserMemoryRow): Record<string, unknown> {
+  return isRecord(record.metadata) ? record.metadata : {};
+}
+
+function readMetadataText(metadata: Record<string, unknown>, key: string): string | null {
+  const value = metadata[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function readMetadataBoolean(metadata: Record<string, unknown>, key: string): boolean | null {
+  const value = metadata[key];
+  return typeof value === 'boolean' ? value : null;
+}
+
+function readMetadataDate(metadata: Record<string, unknown>, key: string): Date | null {
+  const text = readMetadataText(metadata, key);
+  if (!text) {
+    return null;
+  }
+
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function readMetadataNumber(metadata: Record<string, unknown>, key: string): number | null {
+  const value = metadata[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function inferPreferenceCategory(record: ActiveUserMemoryRow, metadata: Record<string, unknown>): PreferenceCategory {
+  const explicit = readPreferenceCategory(metadata.category);
+  if (explicit) {
+    return explicit;
+  }
+
+  const content = record.content.trim();
+  if (content.startsWith('常去地点：')) {
+    return 'location';
+  }
+
+  return 'activity_type';
+}
+
+function normalizeEnhancedPreference(record: ActiveUserMemoryRow): EnhancedPreference | null {
+  if (record.memoryType !== 'preference') {
+    return null;
+  }
+
+  const metadata = readMemoryMetadata(record);
+  const sentiment = readPreferenceSentiment(metadata.sentiment) ?? 'like';
+  const confidence = readMetadataNumber(metadata, 'confidence') ?? 0.5;
+  const mentionCount = readMetadataNumber(metadata, 'mentionCount') ?? 1;
+  const updatedAt = readMetadataDate(metadata, 'updatedAt') ?? record.updatedAt ?? record.createdAt;
+
+  return {
+    category: inferPreferenceCategory(record, metadata),
+    value: record.content.trim(),
+    sentiment,
+    confidence,
+    updatedAt,
+    mentionCount,
+  };
+}
+
+function normalizeActivityOutcome(record: ActiveUserMemoryRow): ActivityOutcome | null {
+  if (record.memoryType !== 'activity_outcome') {
+    return null;
+  }
+
+  const metadata = readMemoryMetadata(record);
+  const activityId = readMetadataText(metadata, 'activityId');
+  const activityTitle = readMetadataText(metadata, 'activityTitle');
+  const activityType = readMetadataText(metadata, 'activityType');
+  const locationName = readMetadataText(metadata, 'locationName');
+  const happenedAt = readMetadataDate(metadata, 'happenedAt');
+  const updatedAt = readMetadataDate(metadata, 'updatedAt') ?? record.updatedAt;
+
+  if (!activityId || !activityTitle || !activityType || !locationName || !happenedAt) {
+    return null;
+  }
+
+  return {
+    activityId,
+    activityTitle,
+    activityType,
+    locationName,
+    attended: readMetadataBoolean(metadata, 'attended'),
+    rebookTriggered: readMetadataBoolean(metadata, 'rebookTriggered') ?? false,
+    reviewSummary: readMetadataText(metadata, 'reviewSummary'),
+    happenedAt,
+    updatedAt,
+  };
+}
+
+function normalizeInterestVector(record: ActiveUserMemoryRow): InterestVector | null {
+  if (record.memoryType !== 'activity_outcome' || !Array.isArray(record.embedding) || record.embedding.length === 0) {
+    return null;
+  }
+
+  const metadata = readMemoryMetadata(record);
+  const activityId = readMetadataText(metadata, 'activityId');
+  const participatedAt = readMetadataDate(metadata, 'participatedAt')
+    ?? readMetadataDate(metadata, 'happenedAt')
+    ?? record.updatedAt;
+
+  if (!activityId) {
+    return null;
+  }
+
+  const feedback = readMetadataText(metadata, 'feedback');
+
+  return {
+    activityId,
+    embedding: record.embedding,
+    participatedAt,
+    ...(feedback === 'positive' || feedback === 'neutral' || feedback === 'negative'
+      ? { feedback }
+      : {}),
+  };
+}
+
+function deriveUserProfile(memories: ActiveUserMemoryRow[]): UserProfile {
+  const preferences = memories
+    .filter((record) => record.memoryType === 'preference')
+    .map((record) => record.content.trim())
+    .filter(Boolean)
+    .slice(0, 10);
+
+  const frequentLocations = memories
+    .filter((record) => record.memoryType === 'social_context' && record.content.startsWith('常去地点：'))
+    .map((record) => record.content.replace(/^常去地点：/, '').trim())
+    .filter(Boolean)
+    .slice(0, 5);
+
+  const identityFacts = memories
+    .filter((record) => record.memoryType === 'profile_fact')
+    .map((record) => record.content.trim())
+    .filter(Boolean)
+    .slice(0, 6);
+
+  const socialContextFacts = memories
+    .filter((record) => record.memoryType === 'social_context' && !record.content.startsWith('常去地点：'))
+    .map((record) => record.content.trim())
+    .filter(Boolean)
+    .slice(0, 6);
+
+  return {
+    preferences,
+    dislikes: [],
+    frequentLocations,
+    identityFacts,
+    socialContextFacts,
+    behaviorPatterns: [],
+  };
 }
 
 /**
  * 获取用户画像（解析后的结构）
  */
 export async function getUserProfile(userId: string): Promise<UserProfile> {
-  const memory = await getWorkingMemory(userId);
-  return parseUserProfile(memory);
-}
-
-/**
- * 更新用户画像
- */
-export async function updateUserProfile(
-  userId: string,
-  updates: Partial<UserProfile>
-): Promise<void> {
-  const existing = await getUserProfile(userId);
-  const merged = mergeUserProfile(existing, updates);
-  const markdown = serializeUserProfile(merged);
-  await updateWorkingMemory(userId, markdown);
-}
-
-/**
- * 清空用户工作记忆
- */
-export async function clearWorkingMemory(userId: string): Promise<void> {
-  await db.update(users)
-    .set({ 
-      workingMemory: null,
-      updatedAt: new Date(),
-    })
-    .where(eq(users.id, userId));
+  const memories = await listActiveUserMemories(userId);
+  return deriveUserProfile(memories);
 }
 
 
@@ -854,8 +990,42 @@ function getCategoryLabel(category: PreferenceCategory): string {
  * 获取增强版用户画像
  */
 export async function getEnhancedUserProfile(userId: string): Promise<EnhancedUserProfile> {
-  const memory = await getWorkingMemory(userId);
-  return parseEnhancedProfile(memory);
+  const memories = await listActiveUserMemories(userId);
+  const preferences = memories
+    .map((record) => normalizeEnhancedPreference(record))
+    .filter((item): item is EnhancedPreference => item !== null)
+    .slice(0, 30);
+  const frequentLocations = memories
+    .filter((record) => record.memoryType === 'social_context' && record.content.startsWith('常去地点：'))
+    .map((record) => record.content.replace(/^常去地点：/, '').trim())
+    .filter(Boolean)
+    .slice(0, 5);
+  const identityFacts = memories
+    .filter((record) => record.memoryType === 'profile_fact')
+    .map((record) => record.content.trim())
+    .filter(Boolean)
+    .slice(0, 6);
+  const socialContextFacts = memories
+    .filter((record) => record.memoryType === 'social_context' && !record.content.startsWith('常去地点：'))
+    .map((record) => record.content.trim())
+    .filter(Boolean)
+    .slice(0, 6);
+  const activityOutcomes = memories
+    .map((record) => normalizeActivityOutcome(record))
+    .filter((item): item is ActivityOutcome => item !== null);
+  const lastUpdated = memories.length > 0
+    ? memories.reduce((latest, record) => record.updatedAt > latest ? record.updatedAt : latest, memories[0].updatedAt)
+    : new Date();
+
+  return {
+    version: 2,
+    preferences,
+    frequentLocations,
+    identityFacts,
+    socialContextFacts,
+    lastUpdated,
+    activityOutcomes,
+  };
 }
 
 /**
@@ -868,8 +1038,51 @@ export async function saveEnhancedUserProfile(
   profile: EnhancedUserProfile
 ): Promise<void> {
   const cleaned = cleanupPreferences(profile);
-  const content = serializeEnhancedProfile(cleaned);
-  await updateWorkingMemory(userId, content);
+  const now = new Date();
+
+  await Promise.all(
+    cleaned.preferences.slice(0, 30).map(async (preference) => {
+      const [existing] = await db
+        .select({ id: userMemories.id, metadata: userMemories.metadata, importance: userMemories.importance })
+        .from(userMemories)
+        .where(
+          sql`${userMemories.userId} = ${userId}
+            AND ${userMemories.memoryType} = 'preference'
+            AND ${userMemories.content} = ${preference.value}`
+        )
+        .limit(1);
+
+      const metadata = {
+        ...(isRecord(existing?.metadata) ? existing.metadata : {}),
+        category: preference.category,
+        sentiment: preference.sentiment,
+        confidence: preference.confidence,
+        mentionCount: preference.mentionCount,
+        updatedAt: preference.updatedAt.toISOString(),
+      };
+
+      if (existing) {
+        await db
+          .update(userMemories)
+          .set({
+            metadata,
+            importance: Math.max(existing.importance ?? 0, 2),
+            updatedAt: now,
+          })
+          .where(eq(userMemories.id, existing.id));
+        return;
+      }
+
+      await db.insert(userMemories).values({
+        userId,
+        memoryType: 'preference',
+        content: preference.value,
+        metadata,
+        importance: 2,
+        updatedAt: now,
+      });
+    }),
+  );
 }
 
 /**
@@ -903,8 +1116,8 @@ export async function updateEnhancedUserProfile(
 ): Promise<void> {
   const existing = await getEnhancedUserProfile(userId);
   const newPrefs = extractionToEnhancedPreferences(extraction);
-  
-  const merged: EnhancedUserProfile = {
+
+  await saveEnhancedUserProfile(userId, {
     version: 2,
     preferences: mergeEnhancedPreferences(existing.preferences, newPrefs),
     frequentLocations: mergeArrayUnique(existing.frequentLocations, extraction.frequentLocations).slice(0, 5),
@@ -912,9 +1125,7 @@ export async function updateEnhancedUserProfile(
     socialContextFacts: mergeArrayUnique(existing.socialContextFacts, extraction.socialContextFacts).slice(0, 6),
     lastUpdated: new Date(),
     activityOutcomes: existing.activityOutcomes || [],
-  };
-  
-  await saveEnhancedUserProfile(userId, merged);
+  });
 }
 
 /**
@@ -932,7 +1143,7 @@ ${profilePrompt}`;
 
 // ============ v4.5 兴趣向量操作 (MaxSim) ============
 
-import type { InterestVector, EnhancedUserProfile as EnhancedUserProfileWithVectors } from './types';
+import type { EnhancedUserProfile as EnhancedUserProfileWithVectors } from './types';
 
 /**
  * 最大兴趣向量数量
@@ -952,25 +1163,47 @@ export async function addInterestVector(
   userId: string,
   vector: InterestVector
 ): Promise<void> {
-  const profile = await getEnhancedUserProfileWithVectors(userId);
-  
-  // 获取现有向量，如果不存在则初始化为空数组
-  const existingVectors = profile.interestVectors || [];
-  
-  // 检查是否已存在相同活动的向量
-  const filteredVectors = existingVectors.filter(v => v.activityId !== vector.activityId);
-  
-  // 添加新向量到开头
-  const newVectors = [vector, ...filteredVectors];
-  
-  // 限制最多 3 个向量（FIFO）
-  const limitedVectors = newVectors.slice(0, MAX_INTEREST_VECTORS);
-  
-  // 保存更新后的画像
-  await saveEnhancedUserProfileWithVectors(userId, {
-    ...profile,
-    interestVectors: limitedVectors,
-    lastUpdated: new Date(),
+  const [existing] = await db
+    .select({
+      id: userMemories.id,
+      content: userMemories.content,
+      metadata: userMemories.metadata,
+    })
+    .from(userMemories)
+    .where(
+      sql`${userMemories.userId} = ${userId}
+        AND ${userMemories.memoryType} = 'activity_outcome'
+        AND ${userMemories.metadata}->>'activityId' = ${vector.activityId}`
+    )
+    .limit(1);
+
+  const nextMetadata = {
+    ...(isRecord(existing?.metadata) ? existing.metadata : {}),
+    activityId: vector.activityId,
+    feedback: vector.feedback ?? null,
+    participatedAt: vector.participatedAt.toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (existing) {
+    await db
+      .update(userMemories)
+      .set({
+        embedding: vector.embedding,
+        metadata: nextMetadata,
+        updatedAt: new Date(),
+      })
+      .where(eq(userMemories.id, existing.id));
+    return;
+  }
+
+  await db.insert(userMemories).values({
+    userId,
+    memoryType: 'activity_outcome',
+    content: `活动结果：${vector.activityId}`,
+    embedding: vector.embedding,
+    metadata: nextMetadata,
+    importance: 2,
   });
 }
 
@@ -981,8 +1214,11 @@ export async function addInterestVector(
  * @returns 兴趣向量数组（最多 3 个）
  */
 export async function getInterestVectors(userId: string): Promise<InterestVector[]> {
-  const profile = await getEnhancedUserProfileWithVectors(userId);
-  return profile.interestVectors || [];
+  const memories = await listActiveUserMemories(userId);
+  return memories
+    .map((record) => normalizeInterestVector(record))
+    .filter((item): item is InterestVector => item !== null)
+    .slice(0, MAX_INTEREST_VECTORS);
 }
 
 /**
@@ -991,12 +1227,16 @@ export async function getInterestVectors(userId: string): Promise<InterestVector
  * @param userId - 用户 ID
  */
 export async function clearInterestVectors(userId: string): Promise<void> {
-  const profile = await getEnhancedUserProfileWithVectors(userId);
-  await saveEnhancedUserProfileWithVectors(userId, {
-    ...profile,
-    interestVectors: [],
-    lastUpdated: new Date(),
-  });
+  await db
+    .update(userMemories)
+    .set({
+      embedding: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      sql`${userMemories.userId} = ${userId}
+        AND ${userMemories.memoryType} = 'activity_outcome'`
+    );
 }
 
 export interface ActivityOutcomeMemoryInput {
@@ -1039,19 +1279,69 @@ export async function upsertActivityOutcomeMemory(
   userId: string,
   input: ActivityOutcomeMemoryInput,
 ): Promise<void> {
-  const profile = await getEnhancedUserProfileWithVectors(userId);
-  const existingOutcomes = profile.activityOutcomes || [];
-  const existing = existingOutcomes.find((item) => item.activityId === input.activityId);
-  const merged = mergeActivityOutcome(existing, input);
-  const nextOutcomes = sortActivityOutcomes([
-    merged,
-    ...existingOutcomes.filter((item) => item.activityId !== input.activityId),
-  ]);
+  const [existing] = await db
+    .select({
+      id: userMemories.id,
+      content: userMemories.content,
+      metadata: userMemories.metadata,
+      embedding: userMemories.embedding,
+    })
+    .from(userMemories)
+    .where(
+      sql`${userMemories.userId} = ${userId}
+        AND ${userMemories.memoryType} = 'activity_outcome'
+        AND ${userMemories.metadata}->>'activityId' = ${input.activityId}`
+    )
+    .limit(1);
 
-  await saveEnhancedUserProfileWithVectors(userId, {
-    ...profile,
-    activityOutcomes: nextOutcomes,
-    lastUpdated: new Date(),
+  const existingOutcome = existing
+    ? normalizeActivityOutcome({
+        id: existing.id,
+        memoryType: 'activity_outcome',
+        content: existing.content,
+        embedding: existing.embedding,
+        metadata: isRecord(existing.metadata) ? existing.metadata : {},
+        importance: 0,
+        createdAt: input.updatedAt ?? new Date(),
+        updatedAt: input.updatedAt ?? new Date(),
+      })
+    : undefined;
+  const merged = mergeActivityOutcome(existingOutcome ?? undefined, input);
+  const nextMetadata = {
+    ...(isRecord(existing?.metadata) ? existing.metadata : {}),
+    activityId: merged.activityId,
+    activityTitle: merged.activityTitle,
+    activityType: merged.activityType,
+    locationName: merged.locationName,
+    attended: merged.attended,
+    rebookTriggered: merged.rebookTriggered,
+    reviewSummary: merged.reviewSummary ?? null,
+    happenedAt: merged.happenedAt.toISOString(),
+    updatedAt: merged.updatedAt.toISOString(),
+  };
+  const nextContent = merged.reviewSummary?.trim()
+    ? merged.reviewSummary.trim()
+    : `活动结果：${merged.activityTitle}（${merged.locationName}）`;
+
+  if (existing) {
+    await db
+      .update(userMemories)
+      .set({
+        content: nextContent,
+        metadata: nextMetadata,
+        updatedAt: merged.updatedAt,
+      })
+      .where(eq(userMemories.id, existing.id));
+    return;
+  }
+
+  await db.insert(userMemories).values({
+    userId,
+    memoryType: 'activity_outcome',
+    content: nextContent,
+    metadata: nextMetadata,
+    importance: 3,
+    updatedAt: merged.updatedAt,
   });
 }
 
@@ -1261,8 +1551,27 @@ function createStoredDefaultPreference(
 export async function getEnhancedUserProfileWithVectors(
   userId: string
 ): Promise<EnhancedUserProfileWithVectors> {
-  const memory = await getWorkingMemory(userId);
-  return parseEnhancedProfileWithVectors(memory);
+  const profile = await getEnhancedUserProfile(userId);
+  const memories = await listActiveUserMemories(userId);
+  const interestVectors = memories
+    .map((record) => normalizeInterestVector(record))
+    .filter((item): item is InterestVector => item !== null)
+    .slice(0, MAX_INTEREST_VECTORS);
+
+  return {
+    preferences: profile.preferences.map((preference) => preference.value),
+    dislikes: profile.preferences
+      .filter((preference) => preference.sentiment === 'dislike')
+      .map((preference) => preference.value),
+    frequentLocations: profile.frequentLocations,
+    identityFacts: profile.identityFacts,
+    socialContextFacts: profile.socialContextFacts,
+    behaviorPatterns: [],
+    version: 2,
+    lastUpdated: profile.lastUpdated,
+    interestVectors,
+    activityOutcomes: profile.activityOutcomes || [],
+  };
 }
 
 /**
@@ -1272,8 +1581,23 @@ export async function saveEnhancedUserProfileWithVectors(
   userId: string,
   profile: EnhancedUserProfileWithVectors
 ): Promise<void> {
-  const content = serializeEnhancedProfileWithVectors(profile);
-  await updateWorkingMemory(userId, content);
+  await Promise.all(
+    (profile.interestVectors || []).slice(0, MAX_INTEREST_VECTORS).map((vector) => addInterestVector(userId, vector)),
+  );
+
+  await Promise.all(
+    (profile.activityOutcomes || []).slice(0, 10).map((outcome) => upsertActivityOutcomeMemory(userId, {
+      activityId: outcome.activityId,
+      activityTitle: outcome.activityTitle,
+      activityType: outcome.activityType,
+      locationName: outcome.locationName,
+      attended: outcome.attended,
+      rebookTriggered: outcome.rebookTriggered,
+      reviewSummary: outcome.reviewSummary ?? null,
+      happenedAt: outcome.happenedAt,
+      updatedAt: outcome.updatedAt,
+    })),
+  );
 }
 
 /**

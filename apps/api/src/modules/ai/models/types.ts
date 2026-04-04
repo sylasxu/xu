@@ -2,7 +2,7 @@
  * Models Module Types - 模型抽象层类型定义
  * 
  * 架构设计：
- * - Chat: OpenAI 兼容网关 / Qwen / DeepSeek
+ * - Chat: Moonshot / Qwen / DeepSeek
  * - Embedding: Qwen text-embedding-v4 (主力)
  * - 未来扩展: Doubao, OpenAI 等
  */
@@ -12,7 +12,7 @@ import type { LanguageModel } from 'ai';
 /**
  * 模型提供商名称
  */
-export type ModelProviderName = 'deepseek' | 'qwen' | 'doubao' | 'openai';
+export type ModelProviderName = 'deepseek' | 'qwen' | 'doubao' | 'openai' | 'moonshot';
 
 /**
  * 模型路由键
@@ -38,6 +38,8 @@ export type ModelPurpose = 'chat' | 'embedding' | 'rerank' | 'vision';
  * 模型类型
  */
 export type ModelType = 'chat' | 'embedding' | 'rerank';
+
+export type EmbedTextType = 'document' | 'query';
 
 /**
  * 模型配置
@@ -146,6 +148,8 @@ export interface EmbedParams {
   modelId?: string;
   /** 文本列表 */
   texts: string[];
+  /** 文本用途：入库文档或检索查询 */
+  textType?: EmbedTextType;
 }
 
 /**
@@ -227,11 +231,11 @@ export interface FallbackConfig {
 }
 
 /**
- * 默认降级配置 (v4.6: Qwen 主力 + DeepSeek 备选)
+ * 默认降级配置 (v5.4: Moonshot 主力 + Qwen 备选)
  */
 export const DEFAULT_FALLBACK_CONFIG: FallbackConfig = {
-  primary: 'qwen',
-  fallback: 'deepseek',
+  primary: 'moonshot',
+  fallback: 'qwen',
   maxRetries: 2,
   retryDelay: 1000,
   enableFallback: true,
@@ -248,6 +252,9 @@ export const MODEL_IDS = {
   // DeepSeek - 主力 Chat
   DEEPSEEK_CHAT: 'deepseek-chat',
   DEEPSEEK_REASONER: 'deepseek-reasoner',
+
+  // Moonshot / Kimi - 境内主力 Chat
+  MOONSHOT_KIMI_K2_32K: 'kimi-k2-32k',
 
   // OpenAI - 主力 Chat（可通过 OPENAI_BASE_URL 接 OpenAI 兼容网关，如 sub2api）
   OPENAI_GPT_54: 'gpt-5.4',
@@ -281,13 +288,13 @@ export const MODEL_IDS = {
  */
 export const ACTIVE_MODELS = {
   /** Chat 主力模型 (日常对话) */
-  CHAT_PRIMARY: MODEL_IDS.QWEN_FLASH,
+  CHAT_PRIMARY: MODEL_IDS.MOONSHOT_KIMI_K2_32K,
   /** Chat 备选模型 */
-  CHAT_FALLBACK: MODEL_IDS.DEEPSEEK_CHAT,
+  CHAT_FALLBACK: MODEL_IDS.QWEN_PLUS,
   /** 深度思考模型 (找搭子/复杂匹配) */
-  REASONING: MODEL_IDS.QWEN_PLUS,
+  REASONING: MODEL_IDS.MOONSHOT_KIMI_K2_32K,
   /** Agent 模型 (Tool Calling/Generative UI) */
-  AGENT: MODEL_IDS.QWEN_MAX,
+  AGENT: MODEL_IDS.MOONSHOT_KIMI_K2_32K,
   /** 视觉模型 (识图) */
   VISION: MODEL_IDS.QWEN_VL_MAX,
   /** Embedding 主力模型 */
@@ -300,34 +307,34 @@ export const ACTIVE_MODELS = {
  * 默认模型路由（代码级兜底）。
  *
  * 说明：
- * - Chat / Reasoning / Agent 默认走 OpenAI
- * - 内容生成与主题建议默认跟随 OpenAI 主链路
+ * - Chat / Reasoning / Agent 默认走 Moonshot（Kimi）
+ * - 内容生成与主题建议默认跟随 Moonshot 主链路
  * - Embedding / Rerank / Vision 继续走 Qwen
  */
 export const DEFAULT_MODEL_ROUTE_MAP: Record<ModelRouteKey, ModelRouteSelection> = {
   chat: {
-    provider: 'openai',
-    modelId: MODEL_IDS.OPENAI_GPT_54,
+    provider: 'moonshot',
+    modelId: MODEL_IDS.MOONSHOT_KIMI_K2_32K,
   },
   reasoning: {
-    provider: 'openai',
-    modelId: MODEL_IDS.OPENAI_GPT_54,
+    provider: 'moonshot',
+    modelId: MODEL_IDS.MOONSHOT_KIMI_K2_32K,
   },
   agent: {
-    provider: 'openai',
-    modelId: MODEL_IDS.OPENAI_GPT_54,
+    provider: 'moonshot',
+    modelId: MODEL_IDS.MOONSHOT_KIMI_K2_32K,
   },
   vision: {
     provider: 'qwen',
     modelId: MODEL_IDS.QWEN_VL_MAX,
   },
   content_generation: {
-    provider: 'openai',
-    modelId: MODEL_IDS.OPENAI_GPT_54,
+    provider: 'moonshot',
+    modelId: MODEL_IDS.MOONSHOT_KIMI_K2_32K,
   },
   content_topic_suggestions: {
-    provider: 'openai',
-    modelId: MODEL_IDS.OPENAI_GPT_54,
+    provider: 'moonshot',
+    modelId: MODEL_IDS.MOONSHOT_KIMI_K2_32K,
   },
   embedding: {
     provider: 'qwen',

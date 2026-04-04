@@ -98,14 +98,6 @@ export function UsersMutateDrawer() {
                   <span className='text-muted-foreground'>手机号：</span>
                   <span>{currentRow.phoneNumber || '未绑定'}</span>
                 </div>
-                <div className='text-sm'>
-                  <span className='text-muted-foreground'>创建活动：</span>
-                  <span>{currentRow.activitiesCreatedCount || 0} 次</span>
-                </div>
-                <div className='text-sm'>
-                  <span className='text-muted-foreground'>参与活动：</span>
-                  <span>{currentRow.participationCount || 0} 次</span>
-                </div>
               </div>
             )}
 

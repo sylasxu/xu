@@ -4,7 +4,7 @@
  * P1 + P2 层：意图分类处理器，实现三层漏斗级联逻辑。
  * - P1：Feature_Combination 规则引擎（多维特征组合）
  * - P2：LLM Few-shot 分类（当 P1 置信度不足时升级）
- * - P0 由 keyword-match-processor 独立处理，命中时不进入本处理器
+ * - P0 热词仅作为附加元数据，不再阻断意图分类
  *
  * 级联逻辑：
  * 1. 提取最近 3 轮对话（6 条消息）作为分类上下文
@@ -13,10 +13,6 @@
  * 4. P1 异常 → 直接失败，不再静默降级
  * 5. P2 返回 unknown → 保留 unknown，不再回退历史意图
  *
- * 条件执行配置（在管线中使用）：
- * ```
- * { processor: intentClassifyProcessor, condition: (ctx) => !ctx.metadata.keywordMatch?.matched }
- * ```
  */
 
 import type { ProcessorContext, ProcessorResult } from './types';

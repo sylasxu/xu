@@ -1,6 +1,7 @@
 import { Elysia } from 'elysia';
 import { basePlugins, verifyAuth } from '../../setup';
-import { partnerIntentModel, type ErrorResponse } from './partner-intent.model';
+import { partnerIntentModel } from './partner-intent.model';
+import { type ErrorResponse } from '../../common/common.model';
 import { getPartnerIntentList } from './partner-intent.service';
 
 export const partnerIntentController = new Elysia({ prefix: '/partner-intents' })

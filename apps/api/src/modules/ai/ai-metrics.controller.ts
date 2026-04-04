@@ -25,7 +25,7 @@ const createAiMetricsController = (prefix = '') => new Elysia({ prefix })
     } catch (error) {
       if (error instanceof AuthError) {
         set.status = error.status;
-        return { code: error.status, msg: error.message };
+        return { code: error.status, msg: error.message } satisfies ErrorResponse;
       }
     }
   })
@@ -65,8 +65,8 @@ const createAiMetricsController = (prefix = '') => new Elysia({ prefix })
       }),
       response: {
         200: 'ai.qualityMetricsResponse',
-        401: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -107,8 +107,8 @@ const createAiMetricsController = (prefix = '') => new Elysia({ prefix })
       }),
       response: {
         200: 'ai.conversionMetricsResponse',
-        401: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -133,8 +133,8 @@ const createAiMetricsController = (prefix = '') => new Elysia({ prefix })
       },
       response: {
         200: 'ai.playgroundStatsResponse',
-        401: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -165,8 +165,8 @@ const createAiMetricsController = (prefix = '') => new Elysia({ prefix })
       },
       response: {
         200: 'ai.aiHealthMetricsResponse',
-        401: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -199,8 +199,8 @@ const createAiMetricsController = (prefix = '') => new Elysia({ prefix })
       }),
       response: {
         200: 'ai.securitySensitiveWordsDBResponse',
-        401: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -234,9 +234,9 @@ const createAiMetricsController = (prefix = '') => new Elysia({ prefix })
       }),
       response: {
         200: 'ai.securityAddSensitiveWordResponse',
-        400: 'ai.error',
-        401: 'ai.error',
-        500: 'ai.error',
+        400: 'common.error',
+        401: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -268,9 +268,9 @@ const createAiMetricsController = (prefix = '') => new Elysia({ prefix })
       }),
       response: {
         200: 'ai.securityDeleteSensitiveWordResponse',
-        401: 'ai.error',
-        404: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        404: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -311,8 +311,8 @@ const createAiMetricsController = (prefix = '') => new Elysia({ prefix })
       }),
       response: {
         200: 'ai.securityEventsResponse',
-        401: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -348,8 +348,8 @@ const createAiMetricsController = (prefix = '') => new Elysia({ prefix })
       }),
       response: {
         200: 'ai.securityStatsDBResponse',
-        401: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        500: 'common.error',
       },
     }
   );

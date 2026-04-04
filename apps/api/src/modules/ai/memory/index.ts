@@ -29,20 +29,15 @@ export {
   getMessagesByActivityId,
 } from './store';
 
-// Working Memory - 用户工作记忆（旧版）
+// Working Memory - 旧版画像工具（仅保留纯函数）
 export {
   EMPTY_PROFILE,
   parseUserProfile,
   serializeUserProfile,
-  injectWorkingMemory,
+  injectMemoryContext,
   mergeUserProfile,
   extractPreferencesFromHistory,
-  // Database operations
-  getWorkingMemory,
-  updateWorkingMemory,
   getUserProfile,
-  updateUserProfile,
-  clearWorkingMemory,
 } from './working';
 
 // Working Memory - 增强版用户画像
@@ -95,3 +90,7 @@ export {
 export {
   semanticRecall
 } from './semantic';
+
+export {
+  persistExtractedUserMemories,
+} from './user-memories';

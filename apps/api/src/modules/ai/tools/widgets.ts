@@ -18,12 +18,8 @@ export const WidgetType = {
   TEXT: 'text',
   DRAFT: 'widget_draft',
   EXPLORE: 'widget_explore',
-  DETAIL: 'widget_detail',
   SHARE: 'widget_share',
-  ACTION: 'widget_action',
   ASK_PREFERENCE: 'widget_ask_preference',
-  DASHBOARD: 'widget_dashboard',
-  LAUNCHER: 'widget_launcher',
   ERROR: 'widget_error',
 } as const;
 
@@ -173,16 +169,6 @@ export const WIDGET_CATALOG: WidgetCatalogEntry[] = [
     ],
   },
   {
-    widgetType: WidgetType.DETAIL,
-    description: '活动详情卡片，展示单个活动的完整信息',
-    payloadSchema: undefined,
-    toolNames: ['getActivityDetail'],
-    interactions: [
-      { action: 'join', label: '报名' },
-      { action: 'share', label: '分享' },
-    ],
-  },
-  {
     widgetType: WidgetType.SHARE,
     description: '分享活动卡片，展示已发布活动的分享信息和链接',
     payloadSchema: WidgetSharePayloadSchema,
@@ -190,12 +176,6 @@ export const WIDGET_CATALOG: WidgetCatalogEntry[] = [
     interactions: [
       { action: 'share', label: '分享给朋友' },
     ],
-  },
-  {
-    widgetType: WidgetType.ACTION,
-    description: '快捷操作卡片，展示可执行的快捷操作按钮',
-    payloadSchema: undefined,
-    toolNames: [],
   },
   {
     widgetType: WidgetType.ASK_PREFERENCE,
@@ -207,18 +187,6 @@ export const WIDGET_CATALOG: WidgetCatalogEntry[] = [
       { action: 'select', label: '选择选项' },
       { action: 'skip', label: '跳过' },
     ],
-  },
-  {
-    widgetType: WidgetType.DASHBOARD,
-    description: '进场欢迎面板，展示个性化问候、快捷入口和社交信息',
-    payloadSchema: undefined,
-    toolNames: [],
-  },
-  {
-    widgetType: WidgetType.LAUNCHER,
-    description: '组局发射台，展示用户的活动列表和管理入口',
-    payloadSchema: undefined,
-    toolNames: [],
   },
   {
     widgetType: WidgetType.ERROR,

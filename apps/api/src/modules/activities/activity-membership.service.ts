@@ -146,14 +146,6 @@ export async function joinActivity(activityId: string, userId: string): Promise<
         throw new Error('活动人数已满');
       }
 
-      await tx
-        .update(users)
-        .set({
-          participationCount: sql`${users.participationCount} + 1`,
-          updatedAt: now,
-        })
-        .where(eq(users.id, userId));
-
       creatorId = activity.creatorId;
       activityTitle = activity.title;
       joinerName = joiningUser.nickname || '新成员';

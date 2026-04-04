@@ -173,15 +173,6 @@ export async function createActivity(
         userId: creatorId,
         status: 'joined',
       });
-
-    await tx
-      .update(users)
-      .set({
-        activitiesCreatedCount: sql`${users.activitiesCreatedCount} + 1`,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, creatorId));
-
     newActivityId = newActivity.id;
   });
 
@@ -281,14 +272,6 @@ export async function publishDraftActivity(
       .update(activities)
       .set(updateData)
       .where(eq(activities.id, activityId));
-
-    await tx
-      .update(users)
-      .set({
-        activitiesCreatedCount: sql`${users.activitiesCreatedCount} + 1`,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, creatorId));
   });
 
   const activityForIndex = await getActivityRowForRag(activityId);

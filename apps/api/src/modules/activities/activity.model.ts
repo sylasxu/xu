@@ -1,5 +1,6 @@
 // Activity Model - TypeBox schemas (MVP 简化版 + v3.2 附近搜索)
 import { Elysia, t, type Static } from 'elysia';
+import { ErrorResponseSchema, type ErrorResponse } from "../../common/common.model";
 
 /**
  * Activity Model Plugin (MVP 简化版 + v3.2 附近搜索)
@@ -268,11 +269,6 @@ const IdParams = t.Object({
   id: t.String({ format: 'uuid', description: '活动ID' }),
 });
 
-// 错误响应
-const ErrorResponse = t.Object({
-  code: t.Number(),
-  msg: t.String(),
-});
 
 // 成功响应
 const SuccessResponse = t.Object({
@@ -338,7 +334,7 @@ export const activityModel = new Elysia({ name: 'activityModel' })
     'activity.updateStatusRequest': UpdateStatusRequest,
     'activity.createResponse': CreateActivityResponse,
     'activity.idParams': IdParams,
-    'activity.error': ErrorResponse,
+    'common.error': ErrorResponseSchema,
     'activity.success': SuccessResponse,
     // 活动统计
     'activity.statsQuery': ActivityStatsQuerySchema,
@@ -363,7 +359,6 @@ export type CreateActivityRequest = Static<typeof CreateActivityRequest>;
 export type PublishDraftRequest = Static<typeof PublishDraftRequest>;
 export type UpdateStatusRequest = Static<typeof UpdateStatusRequest>;
 export type IdParams = Static<typeof IdParams>;
-export type ErrorResponse = Static<typeof ErrorResponse>;
 export type SuccessResponse = Static<typeof SuccessResponse>;
 export type CreateActivityResponse = Static<typeof CreateActivityResponse>;
 // 活动统计类型

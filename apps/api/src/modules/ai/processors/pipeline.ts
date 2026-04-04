@@ -7,7 +7,7 @@
  * - clearRegistry：清空注册表（用于测试/重置）
  *
  * 内置处理器按设计文档顺序注册：
- *   intent-classify → [user-profile ∥ semantic-recall] → token-limit
+ *   semantic-recall → intent-classify → user-profile → token-limit
  *
  * 注意：keyword-match-processor 和 input-guard-processor 不在管线中，
  * 它们分别作为独立预检查步骤在管线之前执行。
@@ -49,9 +49,9 @@ const DEFAULT_PIPELINE_CONFIG: PipelineConfig = {
  * 构建 Pre-LLM 管线配置
  *
  * 返回有序的 ProcessorConfig 数组，供 runProcessors 编排执行：
- *   1. intent-classify（条件：P0 未命中时才执行）
- *   2. user-profile（并行组 'inject'）
- *   3. semantic-recall（并行组 'inject'）
+ *   1. semantic-recall（并行组 'inject'）
+ *   2. intent-classify
+ *   3. user-profile（并行组 'inject'）
  *   4. [自定义处理器...]
  *   5. token-limit（始终最后执行）
  *
@@ -62,9 +62,9 @@ export async function buildPreLLMPipeline(): Promise<ProcessorConfig[]> {
   const disabled = new Set(pipelineConfig.disabledProcessors ?? []);
 
   const builtIn: Array<ProcessorConfig & { name: string }> = [
-    { name: 'intent-classify-processor', processor: intentClassifyProcessor, condition: (ctx: ProcessorContext) => !ctx.metadata.keywordMatch?.matched },
-    { name: 'user-profile-processor', processor: userProfileProcessor, parallelGroup: 'inject' },
     { name: 'semantic-recall-processor', processor: semanticRecallProcessor, parallelGroup: 'inject' },
+    { name: 'intent-classify-processor', processor: intentClassifyProcessor },
+    { name: 'user-profile-processor', processor: userProfileProcessor, parallelGroup: 'inject' },
     { name: 'token-limit-processor', processor: tokenLimitProcessor },
   ];
 

@@ -92,7 +92,7 @@ export async function evaluateQualityProcessor(context: ProcessorContext): Promi
       activityCreated: conversionInfo.activityCreated,
       activityJoined: conversionInfo.activityJoined,
       activityId: conversionInfo.activityId,
-      source: qualityData.source as 'miniprogram' | 'admin' | undefined,
+      source: qualityData.source as 'web' | 'miniprogram' | 'admin' | undefined,
     });
 
     return {

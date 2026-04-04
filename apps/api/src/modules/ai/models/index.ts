@@ -1,7 +1,7 @@
 /**
  * Models Module - 模型抽象层
  * 
- * 支持 OpenAI 兼容网关 / Qwen / DeepSeek 的统一模型访问
+ * 支持 Moonshot / Qwen / DeepSeek 的统一模型访问
  * 
  * 使用示例：
  * ```typescript
@@ -66,5 +66,6 @@ export {
 
 // Adapters
 export { deepseekProvider, getDeepSeekChat, getDeepSeekReasoner } from './adapters/deepseek';
+export { moonshotProvider, getMoonshotChat } from './adapters/moonshot';
 export { openaiProvider, getOpenAIChat } from './adapters/openai';
 export { runText, runObject, runStream } from './runtime';

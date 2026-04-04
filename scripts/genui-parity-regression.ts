@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
 
-interface TurnInputText {
+interface ResponseInputText {
   type: "text";
   text: string;
 }
 
-interface TurnInputAction {
+interface ResponseInputAction {
   type: "action";
   action: string;
   actionId: string;
@@ -13,19 +13,19 @@ interface TurnInputAction {
   params?: Record<string, unknown>;
 }
 
-type TurnInput = TurnInputText | TurnInputAction;
+type ResponseInput = ResponseInputText | ResponseInputAction;
 
 interface Scenario {
   id: string;
   description: string;
-  steps: TurnInput[];
+  steps: ResponseInput[];
 }
 
-interface TurnEnvelope {
+interface ResponseEnvelope {
   traceId: string;
   conversationId: string;
-  turn: {
-    turnId: string;
+  response: {
+    responseId: string;
     role: "assistant";
     status: "streaming" | "completed" | "error";
     blocks: Array<Record<string, unknown>>;
@@ -57,7 +57,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-async function postTurn(conversationId: string | null, input: TurnInput): Promise<TurnEnvelope> {
+async function postResponse(conversationId: string | null, input: ResponseInput): Promise<ResponseEnvelope> {
   const payload = {
     ...(conversationId ? { conversationId } : {}),
     input,
@@ -80,11 +80,11 @@ async function postTurn(conversationId: string | null, input: TurnInput): Promis
     body: JSON.stringify(payload),
   });
 
-  assert(response.ok, `turn request failed: ${response.status}`);
-  return (await response.json()) as TurnEnvelope;
+  assert(response.ok, `response request failed: ${response.status}`);
+  return (await response.json()) as ResponseEnvelope;
 }
 
-function summarizeForWeb(turn: TurnEnvelope): SemanticSummary {
+function summarizeForWeb(turn: ResponseEnvelope): SemanticSummary {
   const summary: SemanticSummary = {
     textCount: 0,
     interactiveCount: 0,
@@ -94,7 +94,7 @@ function summarizeForWeb(turn: TurnEnvelope): SemanticSummary {
     blockingAlertCount: 0,
   };
 
-  for (const block of turn.turn.blocks) {
+  for (const block of turn.response.blocks) {
     const type = String(block.type || "");
 
     if (type === "text") {
@@ -135,7 +135,7 @@ function summarizeForWeb(turn: TurnEnvelope): SemanticSummary {
   return summary;
 }
 
-function summarizeForMini(turn: TurnEnvelope): SemanticSummary {
+function summarizeForMini(turn: ResponseEnvelope): SemanticSummary {
   const summary: SemanticSummary = {
     textCount: 0,
     interactiveCount: 0,
@@ -145,7 +145,7 @@ function summarizeForMini(turn: TurnEnvelope): SemanticSummary {
     blockingAlertCount: 0,
   };
 
-  for (const block of turn.turn.blocks) {
+  for (const block of turn.response.blocks) {
     const type = String(block.type || "");
 
     if (type === "text") {
@@ -236,12 +236,12 @@ async function runScenario(scenario: Scenario): Promise<string[]> {
 
   for (let index = 0; index < scenario.steps.length; index += 1) {
     const step = scenario.steps[index];
-    const turn = await postTurn(conversationId, step);
-    const label = `${scenario.id}#turn${index + 1}`;
+    const turn = await postResponse(conversationId, step);
+    const label = `${scenario.id}#response${index + 1}`;
 
-    assert(turn.turn.role === "assistant", `${label}: role must be assistant`);
-    assert(turn.turn.status === "completed", `${label}: status must be completed`);
-    assert(Array.isArray(turn.turn.blocks) && turn.turn.blocks.length > 0, `${label}: blocks empty`);
+    assert(turn.response.role === "assistant", `${label}: role must be assistant`);
+    assert(turn.response.status === "completed", `${label}: status must be completed`);
+    assert(Array.isArray(turn.response.blocks) && turn.response.blocks.length > 0, `${label}: blocks empty`);
 
     if (conversationId) {
       assert(
@@ -255,7 +255,7 @@ async function runScenario(scenario: Scenario): Promise<string[]> {
     const miniSummary = summarizeForMini(turn);
     assertParity(webSummary, miniSummary, label);
 
-    const blockTypes = turn.turn.blocks.map((block) => String(block.type || "unknown")).join(",");
+    const blockTypes = turn.response.blocks.map((block) => String(block.type || "unknown")).join(",");
     lines.push(
       `${label} input=${JSON.stringify(step)} blocks=[${blockTypes}] parityOK interactiveOptions=${webSummary.interactiveOptions}`
     );

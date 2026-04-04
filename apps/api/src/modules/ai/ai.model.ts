@@ -1,5 +1,6 @@
 // AI Model - v4.6 Chat-First: AI 解析 + 对话历史管理 + Admin 运营 Schema
 import { Elysia, t, type Static } from 'elysia';
+import { ErrorResponseSchema, type ErrorResponse } from "../../common/common.model";
 import { selectConversationSchema, selectMessageSchema } from '@juchang/db';
 
 /**
@@ -29,7 +30,7 @@ const ChatInputActionSchema = t.Object({
   displayText: t.Optional(t.String({ description: '用户侧展示文本' })),
 }, { additionalProperties: true });
 
-const ChatFollowUpModeSchema = t.Union([
+const ChatActivityModeSchema = t.Union([
   t.Literal('review'),
   t.Literal('rebook'),
   t.Literal('kickoff'),
@@ -45,51 +46,58 @@ const GenUIBlockTypeSchema = t.Union([
   t.Literal('alert'),
 ]);
 
-const TurnContextChoiceOptionSchema = t.Object({
+const SuggestionsChoiceOptionSchema = t.Object({
   label: t.String({ minLength: 1 }),
   action: t.String({ minLength: 1 }),
   params: t.Optional(GenericObjectSchema),
   value: t.Optional(t.String()),
 }, { additionalProperties: false });
 
-const TurnContextListItemSchema = t.Object({
+const SuggestionsListItemSchema = t.Object({
   title: t.String({ minLength: 1 }),
   action: t.String({ minLength: 1 }),
   params: t.Optional(GenericObjectSchema),
   aliases: t.Optional(t.Array(t.String({ minLength: 1 }), { maxItems: 8 })),
 }, { additionalProperties: false });
 
-const TurnContextCtaItemSchema = t.Object({
+const SuggestionsCtaItemSchema = t.Object({
   label: t.String({ minLength: 1 }),
   action: t.String({ minLength: 1 }),
   params: t.Optional(GenericObjectSchema),
 }, { additionalProperties: false });
 
-const TurnContextSchema = t.Union([
+const SuggestionsSchema = t.Union([
   t.Object({
     kind: t.Literal('choice'),
     question: t.Optional(t.String()),
-    options: t.Array(TurnContextChoiceOptionSchema, { minItems: 1, maxItems: 12 }),
+    options: t.Array(SuggestionsChoiceOptionSchema, { minItems: 1, maxItems: 12 }),
   }, { additionalProperties: false }),
   t.Object({
     kind: t.Literal('list'),
     title: t.Optional(t.String()),
-    items: t.Array(TurnContextListItemSchema, { minItems: 1, maxItems: 12 }),
+    items: t.Array(SuggestionsListItemSchema, { minItems: 1, maxItems: 12 }),
   }, { additionalProperties: false }),
   t.Object({
     kind: t.Literal('cta-group'),
-    items: t.Array(TurnContextCtaItemSchema, { minItems: 1, maxItems: 12 }),
+    items: t.Array(SuggestionsCtaItemSchema, { minItems: 1, maxItems: 12 }),
   }, { additionalProperties: false }),
 ]);
 
-const ChatTransientTurnSchema = t.Object({
+const RecentMessageSchema = t.Object({
+  messageId: t.Optional(t.String({ minLength: 1 })),
+  parentId: t.Optional(t.String({ minLength: 1 })),
   role: t.Union([
     t.Literal('user'),
     t.Literal('assistant'),
   ]),
   text: t.String({ minLength: 1 }),
   primaryBlockType: t.Optional(t.Union([GenUIBlockTypeSchema, t.Null()])),
-  turnContext: t.Optional(TurnContextSchema),
+  suggestions: t.Optional(SuggestionsSchema),
+  action: t.Optional(t.String({ minLength: 1, description: '匿名态下用户点击的结构化动作名称' })),
+  actionId: t.Optional(t.String({ minLength: 1, description: '匿名态结构化动作唯一 ID' })),
+  params: t.Optional(GenericObjectSchema),
+  source: t.Optional(t.String({ description: '匿名态结构化动作来源' })),
+  displayText: t.Optional(t.String({ description: '匿名态结构化动作展示文案' })),
 }, { additionalProperties: false });
 
 const ChatContextSchema = t.Object({
@@ -104,9 +112,9 @@ const ChatContextSchema = t.Object({
   lat: t.Optional(t.Number()),
   lng: t.Optional(t.Number()),
   activityId: t.Optional(t.String({ minLength: 1, description: '关联活动 ID，用于活动后 follow-up 等承接场景' })),
-  followUpMode: t.Optional(ChatFollowUpModeSchema),
+  activityMode: t.Optional(ChatActivityModeSchema),
   entry: t.Optional(t.String({ description: '触发入口标识，如 message_center_post_activity' })),
-  transientTurns: t.Optional(t.Array(ChatTransientTurnSchema, {
+  recentMessages: t.Optional(t.Array(RecentMessageSchema, {
     maxItems: 12,
     description: '匿名用户当前页临时上下文，不会服务端持久化',
   })),
@@ -125,8 +133,8 @@ const ChatRequestSchema = t.Object({
   ai: t.Optional(ChatAiSchema),
   trace: t.Optional(t.Boolean({ description: 'stream=true 时是否返回 trace 调试事件；H5/小程序默认 false，Admin 可动态开启' })),
   stream: t.Optional(t.Boolean({ description: 'true 时返回 GenUI SSE 事件流' })),
-  // v5.4: 传递最近一次 Assistant Turn 的上下文，用于无登录状态下感知已收集的偏好
-  latestAssistantTurnContext: t.Optional(TurnContextSchema),
+  // v5.4: 传递最近一次 Assistant response 的上下文，用于无登录状态下感知已收集的偏好
+  latestAssistantSuggestions: t.Optional(SuggestionsSchema),
 });
 
 const DiscussionEnteredRequestSchema = t.Object({
@@ -192,7 +200,7 @@ const GenUIReplacePolicySchema = t.Union([
   t.Literal('ignore-if-exists'),
 ]);
 
-const GenUITurnStatusSchema = t.Union([
+const GenUIResponseStatusSchema = t.Union([
   t.Literal('streaming'),
   t.Literal('completed'),
   t.Literal('error'),
@@ -304,15 +312,15 @@ const GenUIBlockSchema = t.Union([
   GenUIAlertBlockSchema,
 ]);
 
-const ChatTurnEnvelopeSchema = t.Object({
+const ChatResponseEnvelopeSchema = t.Object({
   traceId: t.String({ minLength: 1 }),
   conversationId: t.String({ minLength: 1 }),
-  turn: t.Object({
-    turnId: t.String({ minLength: 1 }),
+  response: t.Object({
+    responseId: t.String({ minLength: 1 }),
     role: t.Literal('assistant'),
-    status: GenUITurnStatusSchema,
+    status: GenUIResponseStatusSchema,
     blocks: t.Array(GenUIBlockSchema),
-    turnContext: t.Optional(TurnContextSchema),
+    suggestions: t.Optional(SuggestionsSchema),
   }),
 });
 
@@ -431,11 +439,6 @@ const ClearConversationsResponse = t.Object({
   deletedCount: t.Number({ description: '删除的消息数量' }),
 });
 
-// 错误响应
-const ErrorResponse = t.Object({
-  code: t.Number(),
-  msg: t.String(),
-});
 
 // ==========================================
 // Welcome Card 相关 Schema (v3.10 重构 - 分组结构)
@@ -467,8 +470,8 @@ const WelcomeSection = t.Object({
 
 // Welcome Card 响应 (v4.4 重构 - 增加社交档案)
 const SocialProfile = t.Object({
-  participationCount: t.Number({ description: '参与活动数' }),
-  activitiesCreatedCount: t.Number({ description: '发起活动数' }),
+  joinedActivities: t.Number({ description: '参与活动数' }),
+  hostedActivities: t.Number({ description: '发起活动数' }),
   preferenceCompleteness: t.Number({ description: '偏好完善度 0-100' }),
 });
 
@@ -703,6 +706,14 @@ const MemoryInterestVectorItem = t.Object({
   feedback: t.Union([t.String(), t.Null()]),
 });
 
+const LongTermMemoryItem = t.Object({
+  id: t.String(),
+  memoryType: t.String(),
+  content: t.String(),
+  importance: t.Number(),
+  createdAt: t.String(),
+});
+
 // 用户画像响应
 const MemoryProfileResponse = t.Object({
   userId: t.String(),
@@ -710,6 +721,7 @@ const MemoryProfileResponse = t.Object({
   preferences: t.Array(MemoryPreferenceItem),
   frequentLocations: t.Array(t.String()),
   interestVectors: t.Array(MemoryInterestVectorItem),
+  longTermMemories: t.Array(LongTermMemoryItem),
   lastUpdated: t.Union([t.String(), t.Null()]),
 });
 
@@ -999,12 +1011,15 @@ const SecurityStatsDBResponse = t.Object({
   })),
 });
 
+// Re-export ErrorResponse for controller usage
+export { ErrorResponseSchema, type ErrorResponse };
+
 // 注册到 Elysia
 export const aiModel = new Elysia({ name: 'aiModel' })
   .model({
     // AI Chat 协议
     'ai.chatRequest': ChatRequestSchema,
-    'ai.chatTurnEnvelope': ChatTurnEnvelopeSchema,
+    'ai.chatResponseEnvelope': ChatResponseEnvelopeSchema,
     'ai.discussionEnteredRequest': DiscussionEnteredRequestSchema,
     'ai.discussionEnteredResponse': DiscussionEnteredResponseSchema,
     'ai.currentTasksResponse': CurrentTasksResponseSchema,
@@ -1029,7 +1044,7 @@ export const aiModel = new Elysia({ name: 'aiModel' })
     // Prompt (v3.4 新增)
     'ai.promptInfoResponse': PromptInfoResponse,
     // 通用
-    'ai.error': ErrorResponse,
+    'common.error': ErrorResponseSchema,
     // ==========================================
     // Sessions (v4.6 - Admin 对话审计)
     // ==========================================
@@ -1089,7 +1104,7 @@ export type CurrentTaskAction = Static<typeof CurrentTaskActionSchema>;
 export type CurrentTaskSnapshot = Static<typeof CurrentTaskSnapshotSchema>;
 export type CurrentTasksResponse = Static<typeof CurrentTasksResponseSchema>;
 export type GenUIBlock = Static<typeof GenUIBlockSchema>;
-export type ChatTurnEnvelope = Static<typeof ChatTurnEnvelopeSchema>;
+export type ChatResponseEnvelope = Static<typeof ChatResponseEnvelopeSchema>;
 export type ConversationRole = Static<typeof ConversationRole>;
 export type ConversationMessageType = Static<typeof ConversationMessageType>;
 export type ConversationsQuery = Static<typeof ConversationsQuery>;
@@ -1103,7 +1118,6 @@ export type ActivityConversationMessagesResponse = Static<typeof ActivityConvers
 export type AddMessageRequest = Static<typeof AddMessageRequest>;
 export type AddMessageResponse = Static<typeof AddMessageResponse>;
 export type ClearConversationsResponse = Static<typeof ClearConversationsResponse>;
-export type ErrorResponse = Static<typeof ErrorResponse>;
 
 // Welcome Card 类型导出 (v3.4 新增)
 export type WelcomeResponse = Static<typeof WelcomeResponse>;

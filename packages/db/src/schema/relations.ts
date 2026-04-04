@@ -5,6 +5,7 @@ import { participants } from "./participants";
 import { notifications } from "./notifications";
 import { activityMessages } from "./activity_messages";
 import { conversations, conversationMessages } from "./conversations";
+import { userMemories } from "./user-memories";
 import { agentTasks } from "./agent-tasks";
 import { agentTaskEvents } from "./agent-task-events";
 import { reports } from "./reports";
@@ -22,6 +23,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   activityMessages: many(activityMessages),
   conversations: many(conversations),
   conversationMessages: many(conversationMessages),
+  userMemories: many(userMemories),
   agentTasks: many(agentTasks),
   agentTaskEvents: many(agentTaskEvents),
   reportsSubmitted: many(reports, { relationName: "reporter" }),
@@ -144,7 +146,7 @@ export const agentTaskEventsRelations = relations(agentTaskEvents, ({ one }) => 
 // ==========================================
 // Activity Message Relations
 // ==========================================
-export const activityMessagesRelations = relations(activityMessages, ({ one }) => ({
+export const activityMessagesRelations = relations(activityMessages, ({ one, many }) => ({
   activity: one(activities, {
     fields: [activityMessages.activityId],
     references: [activities.id],
@@ -152,6 +154,14 @@ export const activityMessagesRelations = relations(activityMessages, ({ one }) =
   sender: one(users, {
     fields: [activityMessages.senderId],
     references: [users.id],
+  }),
+  parent: one(activityMessages, {
+    fields: [activityMessages.parentId],
+    references: [activityMessages.id],
+    relationName: "activity_message_parent",
+  }),
+  replies: many(activityMessages, {
+    relationName: "activity_message_parent",
   }),
 }));
 
@@ -191,6 +201,17 @@ export const conversationMessagesRelations = relations(conversationMessages, ({ 
   task: one(agentTasks, {
     fields: [conversationMessages.taskId],
     references: [agentTasks.id],
+  }),
+}));
+
+export const userMemoriesRelations = relations(userMemories, ({ one }) => ({
+  user: one(users, {
+    fields: [userMemories.userId],
+    references: [users.id],
+  }),
+  sourceMessage: one(conversationMessages, {
+    fields: [userMemories.sourceMessageId],
+    references: [conversationMessages.id],
   }),
 }));
 

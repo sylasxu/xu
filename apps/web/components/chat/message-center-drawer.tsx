@@ -148,7 +148,7 @@ type DrawerNotice = {
 
 type PromptContextOverrides = {
   activityId?: string;
-  followUpMode?: "review" | "rebook" | "kickoff";
+  activityMode?: "review" | "rebook" | "kickoff";
   entry?: string;
 };
 
@@ -235,7 +235,7 @@ function buildKickoffPrompt(activityId?: string, activityTitle?: string): string
   return `围绕${activityHint}${activityRef}，帮我生成一段讨论区开场白，再给我 3 条接下来的协同提醒。`;
 }
 
-function buildFollowUpEntry(notificationId: string, mode: NonNullable<PromptContextOverrides["followUpMode"]>): string {
+function buildFollowUpEntry(notificationId: string, mode: NonNullable<PromptContextOverrides["activityMode"]>): string {
   if (mode === "kickoff") {
     return notificationId.startsWith("chat:") ? "message_center_chat_summary" : "message_center_notification";
   }
@@ -635,7 +635,7 @@ export function MessageCenterDrawer({
           promptOverride?.label || (mode === "review" ? "去复盘" : mode === "rebook" ? "去再约" : "让 AI 帮我写开场白");
         const contextOverrides: PromptContextOverrides = {
           ...(notification.activityId ? { activityId: notification.activityId } : {}),
-          followUpMode: mode,
+          activityMode: mode,
           entry: buildFollowUpEntry(notification.id, mode),
         };
 

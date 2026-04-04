@@ -14,8 +14,6 @@ const hotKeywordsSearchSchema = Type.Object({
   responseType: Type.Optional(Type.Union([
     Type.Literal('widget_explore'),
     Type.Literal('widget_draft'),
-    Type.Literal('widget_launcher'),
-    Type.Literal('widget_action'),
     Type.Literal('widget_ask_preference'),
     Type.Literal('text'),
   ])),

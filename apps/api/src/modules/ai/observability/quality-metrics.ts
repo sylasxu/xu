@@ -49,7 +49,7 @@ export interface ConversationMetricsData {
   activityId?: string;
   
   // 元数据
-  source?: 'miniprogram' | 'admin';
+  source?: 'web' | 'miniprogram' | 'admin';
 }
 
 /**

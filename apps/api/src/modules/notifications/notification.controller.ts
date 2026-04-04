@@ -1,13 +1,13 @@
 // Notification Controller - 通知与消息中心接口
 import { Elysia } from 'elysia';
-import { basePlugins, verifyAuth } from '../../setup';
-import { notificationModel, type ErrorResponse } from './notification.model';
-import { 
+import { basePlugins, verifyAuth, verifySelfOrAdmin, type ErrorResponse } from '../../setup';
+import { notificationModel } from './notification.model';
+import {
   getMessageCenterData,
-  getNotifications, 
+  getNotifications,
   getPendingMatches,
   getPendingMatchDetail,
-  markAsRead, 
+  markAsRead,
   getUnreadCount,
   confirmPendingMatch,
   cancelPendingMatch,
@@ -27,19 +27,14 @@ export const notificationController = new Elysia({ prefix: '/notifications' })
         return { code: 401, msg: '未授权' } satisfies ErrorResponse;
       }
 
-      const { userId } = query;
-      if (!userId) {
-        set.status = 400;
-        return { code: 400, msg: '缺少 userId 参数' } satisfies ErrorResponse;
+      if (query.userId) {
+        if (user.role !== 'admin' && user.id !== query.userId) {
+          set.status = 403;
+          return { code: 403, msg: '无权限访问该用户通知' } satisfies ErrorResponse;
+        }
       }
 
-      if (user.role !== 'admin' && user.id !== userId) {
-        set.status = 403;
-        return { code: 403, msg: '无权限访问该用户通知' } satisfies ErrorResponse;
-      }
-
-      const result = await getNotifications(userId, query);
-      return result;
+      return await getNotifications(query.userId || user.id, query);
     },
     {
       detail: {
@@ -50,9 +45,9 @@ export const notificationController = new Elysia({ prefix: '/notifications' })
       query: 'notification.listQuery',
       response: {
         200: 'notification.listResponse',
-        400: 'notification.error',
-        403: 'notification.error',
-        401: 'notification.error',
+        400: 'common.error',
+        403: 'common.error',
+        401: 'common.error',
       },
     }
   )
@@ -67,19 +62,14 @@ export const notificationController = new Elysia({ prefix: '/notifications' })
         return { code: 401, msg: '未授权' } satisfies ErrorResponse;
       }
 
-      const { userId } = query;
-      if (!userId) {
-        set.status = 400;
-        return { code: 400, msg: '缺少 userId 参数' } satisfies ErrorResponse;
+      if (query.userId) {
+        if (user.role !== 'admin' && user.id !== query.userId) {
+          set.status = 403;
+          return { code: 403, msg: '无权限访问该用户消息中心' } satisfies ErrorResponse;
+        }
       }
 
-      if (user.role !== 'admin' && user.id !== userId) {
-        set.status = 403;
-        return { code: 403, msg: '无权限访问该用户消息中心' } satisfies ErrorResponse;
-      }
-
-      const result = await getMessageCenterData(userId, query);
-      return result;
+      return await getMessageCenterData(query.userId || user.id, query);
     },
     {
       detail: {
@@ -90,9 +80,9 @@ export const notificationController = new Elysia({ prefix: '/notifications' })
       query: 'notification.messageCenterQuery',
       response: {
         200: 'notification.messageCenterResponse',
-        400: 'notification.error',
-        403: 'notification.error',
-        401: 'notification.error',
+        400: 'common.error',
+        403: 'common.error',
+        401: 'common.error',
       },
     }
   )
@@ -107,19 +97,14 @@ export const notificationController = new Elysia({ prefix: '/notifications' })
         return { code: 401, msg: '未授权' } satisfies ErrorResponse;
       }
 
-      const { userId } = query;
-      if (!userId) {
-        set.status = 400;
-        return { code: 400, msg: '缺少 userId 参数' } satisfies ErrorResponse;
+      if (query.userId) {
+        if (user.role !== 'admin' && user.id !== query.userId) {
+          set.status = 403;
+          return { code: 403, msg: '无权限访问该用户匹配' } satisfies ErrorResponse;
+        }
       }
 
-      if (user.role !== 'admin' && user.id !== userId) {
-        set.status = 403;
-        return { code: 403, msg: '无权限访问该用户匹配信息' } satisfies ErrorResponse;
-      }
-
-      const result = await getPendingMatches(userId);
-      return result;
+      return await getPendingMatches(query.userId || user.id);
     },
     {
       detail: {
@@ -130,9 +115,9 @@ export const notificationController = new Elysia({ prefix: '/notifications' })
       query: 'notification.matchPendingQuery',
       response: {
         200: 'notification.matchPendingResponse',
-        400: 'notification.error',
-        403: 'notification.error',
-        401: 'notification.error',
+        400: 'common.error',
+        403: 'common.error',
+        401: 'common.error',
       },
     }
   )
@@ -147,19 +132,15 @@ export const notificationController = new Elysia({ prefix: '/notifications' })
         return { code: 401, msg: '未授权' } satisfies ErrorResponse;
       }
 
-      const { userId } = query;
-      if (!userId) {
-        set.status = 400;
-        return { code: 400, msg: '缺少 userId 参数' } satisfies ErrorResponse;
-      }
-
-      if (user.role !== 'admin' && user.id !== userId) {
-        set.status = 403;
-        return { code: 403, msg: '无权限访问该用户匹配详情' } satisfies ErrorResponse;
+      if (query.userId) {
+        if (user.role !== 'admin' && user.id !== query.userId) {
+          set.status = 403;
+          return { code: 403, msg: '无权限访问该用户匹配详情' } satisfies ErrorResponse;
+        }
       }
 
       try {
-        return await getPendingMatchDetail(userId, params.id);
+        return await getPendingMatchDetail(query.userId || user.id, params.id);
       } catch (error) {
         const message = error instanceof Error ? error.message : '获取详情失败';
         if (/找不到/.test(message)) {
@@ -185,11 +166,11 @@ export const notificationController = new Elysia({ prefix: '/notifications' })
       query: 'notification.matchPendingDetailQuery',
       response: {
         200: 'notification.matchPendingDetailResponse',
-        400: 'notification.error',
-        401: 'notification.error',
-        403: 'notification.error',
-        404: 'notification.error',
-        500: 'notification.error',
+        400: 'common.error',
+        401: 'common.error',
+        403: 'common.error',
+        404: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -227,10 +208,10 @@ export const notificationController = new Elysia({ prefix: '/notifications' })
       params: 'notification.idParams',
       response: {
         200: 'notification.matchActionResponse',
-        400: 'notification.error',
-        401: 'notification.error',
-        403: 'notification.error',
-        404: 'notification.error',
+        400: 'common.error',
+        401: 'common.error',
+        403: 'common.error',
+        404: 'common.error',
       },
     }
   )
@@ -268,10 +249,10 @@ export const notificationController = new Elysia({ prefix: '/notifications' })
       params: 'notification.idParams',
       response: {
         200: 'notification.matchActionResponse',
-        400: 'notification.error',
-        401: 'notification.error',
-        403: 'notification.error',
-        404: 'notification.error',
+        400: 'common.error',
+        401: 'common.error',
+        403: 'common.error',
+        404: 'common.error',
       },
     }
   )
@@ -286,8 +267,7 @@ export const notificationController = new Elysia({ prefix: '/notifications' })
         return { code: 401, msg: '未授权' } satisfies ErrorResponse;
       }
 
-      const result = await getUnreadCount(user.id);
-      return result;
+      return await getUnreadCount(user.id);
     },
     {
       detail: {
@@ -296,7 +276,7 @@ export const notificationController = new Elysia({ prefix: '/notifications' })
       },
       response: {
         200: 'notification.unreadCount',
-        401: 'notification.error',
+        401: 'common.error',
       },
     }
   )
@@ -327,8 +307,8 @@ export const notificationController = new Elysia({ prefix: '/notifications' })
       params: 'notification.idParams',
       response: {
         200: 'notification.success',
-        401: 'notification.error',
-        404: 'notification.error',
+        401: 'common.error',
+        404: 'common.error',
       },
     }
   );

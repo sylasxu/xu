@@ -1,6 +1,7 @@
 import { Elysia } from 'elysia';
 import { basePlugins, verifyAuth } from '../../setup';
-import { intentMatchModel, type ErrorResponse } from './intent-match.model';
+import { intentMatchModel } from './intent-match.model';
+import { type ErrorResponse } from '../../common/common.model';
 import { getIntentMatchList } from './intent-match.service';
 
 export const intentMatchController = new Elysia({ prefix: '/intent-matches' })

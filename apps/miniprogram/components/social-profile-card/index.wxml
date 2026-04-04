@@ -27,14 +27,14 @@
       <view class="stat-item">
         <text class="stat-icon">🎯</text>
         <text class="stat-label">参与</text>
-        <text class="stat-value">{{displayProfile.participationCount}}</text>
+        <text class="stat-value">{{displayProfile.joinedActivities}}</text>
         <text class="stat-unit">场</text>
       </view>
       <view class="stat-divider"></view>
       <view class="stat-item">
         <text class="stat-icon">📍</text>
         <text class="stat-label">发起</text>
-        <text class="stat-value">{{displayProfile.activitiesCreatedCount}}</text>
+        <text class="stat-value">{{displayProfile.hostedActivities}}</text>
         <text class="stat-unit">场</text>
       </view>
       <view class="stat-divider"></view>

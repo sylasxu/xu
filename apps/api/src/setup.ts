@@ -70,14 +70,14 @@ export const basePlugins = new Elysia({ name: 'basePlugins' })
  */
 export async function verifyAuth(jwt: any, headers: Record<string, string | undefined>): Promise<{ id: string; role: string } | null> {
   const authHeader = headers['authorization'] || headers['Authorization'];
-  
+
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return null;
   }
 
   const token = authHeader.slice(7);
   const profile = await jwt.verify(token);
-  
+
   return profile as { id: string; role: string } | null;
 }
 
@@ -125,3 +125,48 @@ export async function verifySelfOrAdmin(
 
   return user;
 }
+
+/**
+ * Elysia guard beforeHandle hooks
+ * These attach user to context on success
+ */
+export async function requireAuth({ jwt, headers, set }: { jwt: any; headers: Record<string, string | undefined>; set: any }): Promise<{ user: { id: string; role: string } } | void> {
+  const user = await verifyAuth(jwt, headers);
+  if (!user) {
+    set.status = 401;
+    return { user: { id: '', role: '' } };
+  }
+  return { user };
+}
+
+export function requireUserOrAdmin(paramName: string) {
+  return async function({ jwt, headers, params, set }: { jwt: any; headers: Record<string, string | undefined>; params: Record<string, string>; set: any }): Promise<{ user: { id: string; role: string } } | void> {
+    const user = await verifyAuth(jwt, headers);
+    if (!user) {
+      set.status = 401;
+      return { user: { id: '', role: '' } };
+    }
+    const targetUserId = params[paramName];
+    if (user.role !== 'admin' && user.id !== targetUserId) {
+      set.status = 403;
+      return { user: { id: '', role: '' } };
+    }
+    return { user };
+  };
+}
+
+export async function requireAdmin({ jwt, headers, set }: { jwt: any; headers: Record<string, string | undefined>; set: any }): Promise<{ user: { id: string; role: string } } | void> {
+  const user = await verifyAuth(jwt, headers);
+  if (!user) {
+    set.status = 401;
+    return { user: { id: '', role: '' } };
+  }
+  if (user.role !== 'admin') {
+    set.status = 403;
+    return { user: { id: '', role: '' } };
+  }
+  return { user };
+}
+
+// Re-export ErrorResponse from common for convenience
+export type { ErrorResponse } from './common';

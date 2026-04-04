@@ -1,7 +1,7 @@
 /**
  * MemoryInspector Component
  *
- * 展示当前用户的 Working Memory 内容
+ * 展示当前用户的记忆画像内容
  * 包括每个偏好的类别、情感、置信度、mentionCount 和最后更新时间
  */
 
@@ -16,27 +16,27 @@ interface Preference {
   updatedAt?: string
 }
 
-interface WorkingMemory {
+interface MemoryProfile {
   preferences?: Preference[]
   frequentLocations?: Array<{ name: string; count: number }>
   interestVector?: Record<string, number>
 }
 
 interface MemoryInspectorProps {
-  workingMemory: WorkingMemory | null
+  memoryProfile: MemoryProfile | null
 }
 
-export function MemoryInspector({ workingMemory }: MemoryInspectorProps) {
-  if (!workingMemory) {
+export function MemoryInspector({ memoryProfile }: MemoryInspectorProps) {
+  if (!memoryProfile) {
     return (
       <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
-        暂无 Working Memory 数据
+        暂无记忆画像数据
       </div>
     )
   }
 
-  const preferences = workingMemory.preferences ?? []
-  const locations = workingMemory.frequentLocations ?? []
+  const preferences = memoryProfile.preferences ?? []
+  const locations = memoryProfile.frequentLocations ?? []
 
   return (
     <div className="space-y-4 p-4">
@@ -83,11 +83,11 @@ export function MemoryInspector({ workingMemory }: MemoryInspectorProps) {
       )}
 
       {/* 兴趣向量 */}
-      {workingMemory.interestVector && Object.keys(workingMemory.interestVector).length > 0 && (
+      {memoryProfile.interestVector && Object.keys(memoryProfile.interestVector).length > 0 && (
         <div className="space-y-1.5">
           <span className="text-xs font-medium text-muted-foreground">兴趣向量</span>
           <div className="space-y-1">
-            {Object.entries(workingMemory.interestVector)
+            {Object.entries(memoryProfile.interestVector)
               .sort(([, a], [, b]) => b - a)
               .map(([key, val]) => (
                 <div key={key} className="flex items-center gap-2">

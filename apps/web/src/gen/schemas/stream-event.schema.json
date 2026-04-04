@@ -9,12 +9,12 @@
     "event": {
       "type": "string",
       "enum": [
-        "turn-start",
+        "response-start",
         "block-append",
         "block-replace",
-        "turn-status",
-        "turn-complete",
-        "turn-error",
+        "response-status",
+        "response-complete",
+        "response-error",
         "trace"
       ]
     },

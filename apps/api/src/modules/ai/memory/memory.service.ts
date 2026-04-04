@@ -2,7 +2,7 @@
  * Memory Service - 记忆运营领域服务
  */
 
-import { db, users, activities, eq, sql, inArray } from '@juchang/db';
+import { db, users, activities, userMemories, eq, sql, inArray, desc } from '@juchang/db';
 import {
   getEnhancedUserProfileWithVectors,
   getInterestVectors,
@@ -26,6 +26,13 @@ export interface UserMemoryProfile {
     participatedAt: string;
     feedback: string | null;
   }>;
+  longTermMemories: Array<{
+    id: string;
+    memoryType: string;
+    content: string;
+    importance: number;
+    createdAt: string;
+  }>;
   lastUpdated: string | null;
 }
 
@@ -34,7 +41,6 @@ export async function getUserMemoryProfile(userId: string): Promise<UserMemoryPr
     .select({
       id: users.id,
       nickname: users.nickname,
-      workingMemory: users.workingMemory,
     })
     .from(users)
     .where(eq(users.id, userId))
@@ -57,6 +63,19 @@ export async function getUserMemoryProfile(userId: string): Promise<UserMemoryPr
     activityTitles = new Map(activityList.map(a => [a.id, a.title]));
   }
 
+  const memoryList = await db
+    .select({
+      id: userMemories.id,
+      memoryType: userMemories.memoryType,
+      content: userMemories.content,
+      importance: userMemories.importance,
+      createdAt: userMemories.createdAt,
+    })
+    .from(userMemories)
+    .where(eq(userMemories.userId, userId))
+    .orderBy(desc(userMemories.importance), desc(userMemories.createdAt))
+    .limit(20);
+
   return {
     userId: user.id,
     nickname: user.nickname,
@@ -72,6 +91,13 @@ export async function getUserMemoryProfile(userId: string): Promise<UserMemoryPr
       activityTitle: activityTitles.get(v.activityId) || '未知活动',
       participatedAt: v.participatedAt.toISOString(),
       feedback: v.feedback || null,
+    })),
+    longTermMemories: memoryList.map((memory) => ({
+      id: memory.id,
+      memoryType: memory.memoryType,
+      content: memory.content,
+      importance: memory.importance,
+      createdAt: memory.createdAt.toISOString(),
     })),
     lastUpdated: profile.lastUpdated?.toISOString() || null,
   };
@@ -117,7 +143,7 @@ export interface MaxSimTestResult {
 export async function testMaxSim(params: MaxSimTestParams): Promise<MaxSimTestResult> {
   const { userId, query } = params;
 
-  const queryVector = await generateEmbedding(query);
+  const queryVector = await generateEmbedding(query, { textType: 'query' });
   const interestVectors = await getInterestVectors(userId);
 
   if (interestVectors.length === 0 || !queryVector) {

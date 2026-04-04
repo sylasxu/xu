@@ -1,7 +1,7 @@
 import type {
   GenUIRequest,
   GenUITracePayload,
-  GenUITurnEnvelope,
+  GenUIResponseEnvelope,
 } from '@juchang/genui-contract';
 import {
   createAlertBlock,
@@ -15,10 +15,10 @@ interface ViewerContext {
 
 type ExecutionPath = 'llm_orchestrated' | 'structured_action';
 
-interface ApplyAiChatTurnPolicyParams {
+interface ApplyAiChatResponsePolicyParams {
   request: GenUIRequest;
   viewer: ViewerContext | null;
-  envelope: GenUITurnEnvelope;
+  envelope: GenUIResponseEnvelope;
   traces: GenUITracePayload[];
   resolvedStructuredAction?: StructuredAction;
   executionPath?: ExecutionPath;
@@ -75,10 +75,10 @@ function getAuthRequiredMessage(action: string): string {
   return '这个操作需要先登录，登录后我会接着帮你处理。';
 }
 
-export function applyAiChatTurnPolicies(
-  params: ApplyAiChatTurnPolicyParams
-): { envelope: GenUITurnEnvelope; traces: GenUITracePayload[] } {
-  const nextBlocks = [...params.envelope.turn.blocks];
+export function applyAiChatResponsePolicies(
+  params: ApplyAiChatResponsePolicyParams
+): { envelope: GenUIResponseEnvelope; traces: GenUITracePayload[] } {
+  const nextBlocks = [...params.envelope.response.blocks];
   const nextTraces = [...params.traces];
   const directInputActionName =
     params.request.input.type === 'action' ? params.request.input.action : '';
@@ -142,8 +142,8 @@ export function applyAiChatTurnPolicies(
   return {
     envelope: {
       ...params.envelope,
-      turn: {
-        ...params.envelope.turn,
+      response: {
+        ...params.envelope.response,
         blocks: nextBlocks,
       },
     },

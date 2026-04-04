@@ -15,8 +15,6 @@ interface User {
   nickname?: string;
   avatarUrl?: string;
   phoneNumber?: string;
-  participationCount?: number;
-  organizationCount?: number;
 }
 
 interface Participant {
@@ -89,7 +87,6 @@ function normalizeCurrentUser(value: ReturnType<typeof useUserStore.getState>['u
     nickname: value.nickname || undefined,
     avatarUrl: value.avatarUrl || undefined,
     phoneNumber: value.phoneNumber || undefined,
-    participationCount: value.participationCount,
   };
 }
 
@@ -262,7 +259,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     const creator = activity.creator;
     wx.showModal({
       title: creator.nickname || '匿名用户',
-      content: `组织场次: ${creator.organizationCount || 0}\n参与场次: ${creator.participationCount || 0}`,
+      content: '这是活动发起人。',
       showCancel: false,
       confirmText: '知道了',
     });

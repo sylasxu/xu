@@ -20,7 +20,7 @@ export const aiSessionsController = new Elysia({ prefix: '/sessions' })
     } catch (error) {
       if (error instanceof AuthError) {
         set.status = error.status;
-        return { code: error.status, msg: error.message };
+        return { code: error.status, msg: error.message } satisfies ErrorResponse;
       }
     }
   })
@@ -71,8 +71,8 @@ v4.6 新增筛选：
       }),
       response: {
         200: 'ai.sessionListResponse',
-        401: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -107,9 +107,9 @@ v4.6 新增筛选：
       }),
       response: {
         200: 'ai.sessionDetailResponse',
-        401: 'ai.error',
-        404: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        404: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -162,9 +162,9 @@ Bad Case 标签可选值：
       }),
       response: {
         200: 'ai.sessionEvaluateResponse',
-        401: 'ai.error',
-        404: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        404: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -199,9 +199,9 @@ Bad Case 标签可选值：
           success: t.Literal(true),
           msg: t.String(),
         }),
-        401: 'ai.error',
-        404: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        404: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -233,8 +233,8 @@ Bad Case 标签可选值：
           msg: t.String(),
           count: t.Number(),
         }),
-        401: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        500: 'common.error',
       },
     }
   );

@@ -55,7 +55,7 @@ import type {
   GenUIListBlock,
   GenUIRequestContext,
   GenUITextBlock,
-  GenUITurnEnvelope,
+  GenUIResponseEnvelope,
 } from "@/src/gen/genui-contract";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:1996";
@@ -87,9 +87,23 @@ const PENDING_AGENT_ACTION_STORAGE_KEY = "juchang:web:pending-agent-action";
 const TEXT_STREAM_CHUNK_DELAY_MS = 60;  // v5.5: 调慢打字机速度，提升可读性
 
 type ComposerStatus = "ready" | "submitted";
-type TurnContextOverrides = Pick<GenUIRequestContext, "activityId" | "followUpMode" | "entry">;
-type GenUITransientTurn = NonNullable<GenUIRequestContext["transientTurns"]>[number];
-const MAX_TRANSIENT_TURNS = 8;
+type ActivityContextOverrides = Pick<GenUIRequestContext, "activityId" | "activityMode" | "entry">;
+type GenUIRecentMessage = NonNullable<GenUIRequestContext["recentMessages"]>[number];
+type LocalStructuredAction = {
+  action: string;
+  actionId: string;
+  params?: Record<string, unknown>;
+  source?: string;
+  displayText?: string;
+};
+type LocalGenUIRecentMessage = GenUIRecentMessage & {
+  action?: string;
+  actionId?: string;
+  params?: Record<string, unknown>;
+  source?: string;
+  displayText?: string;
+};
+const MAX_TRANSIENT_TURNS = 10;
 type PendingActionAuthMode = "login" | "bind_phone";
 
 type StructuredPendingAction = {
@@ -148,12 +162,13 @@ type ChatRecord =
       id: string;
       role: "user";
       text: string;
+      structuredAction?: LocalStructuredAction;
     }
   | {
       id: string;
       role: "assistant";
       pending?: boolean;
-      turn?: GenUITurnEnvelope;
+      response?: GenUIResponseEnvelope;
       error?: string;
     };
 
@@ -162,9 +177,9 @@ type ActionOption = Pick<GenUIChoiceOption, "label" | "action" | "params"> | Gen
 type ChatStreamMessageMetadata = {
   traceId?: string;
   conversationId?: string;
-  turnId?: string;
-  status?: GenUITurnEnvelope["turn"]["status"];
-  turnContext?: GenUITurnEnvelope["turn"]["turnContext"];
+  responseId?: string;
+  status?: GenUIResponseEnvelope["response"]["status"];
+  suggestions?: GenUIResponseEnvelope["response"]["suggestions"];
   assistantTextOverride?: string;
 };
 type ChatStreamDataTypes = {
@@ -176,8 +191,8 @@ type ChatStreamDataTypes = {
 type ChatStreamMessage = AISDKUIMessage<ChatStreamMessageMetadata, ChatStreamDataTypes>;
 type ChatStreamChunk = UIMessageChunk<ChatStreamMessageMetadata, ChatStreamDataTypes>;
 type WelcomeSocialProfile = {
-  participationCount: number;
-  activitiesCreatedCount: number;
+  joinedActivities: number;
+  hostedActivities: number;
   preferenceCompleteness: number;
 };
 type WelcomePendingActivity = {
@@ -617,13 +632,13 @@ function normalizeChatErrorMessage(message: string): string {
 function createEmptyEnvelope(params: {
   traceId: string;
   conversationId: string;
-  turnId: string;
-}): GenUITurnEnvelope {
+  responseId: string;
+}): GenUIResponseEnvelope {
   return {
     traceId: params.traceId,
     conversationId: params.conversationId,
-    turn: {
-      turnId: params.turnId,
+    response: {
+      responseId: params.responseId,
       role: "assistant",
       status: "streaming",
       blocks: [],
@@ -631,7 +646,7 @@ function createEmptyEnvelope(params: {
   };
 }
 
-function resolvePrimaryBlockType(blocks: GenUIBlock[]): GenUITransientTurn["primaryBlockType"] {
+function resolvePrimaryBlockType(blocks: GenUIBlock[]): GenUIRecentMessage["primaryBlockType"] {
   const primaryBlock = blocks.find((block) => block.type !== "text") ?? blocks[0];
   return primaryBlock?.type ?? null;
 }
@@ -699,7 +714,7 @@ async function enqueueSimulatedTextDeltaChunks(
   }
 }
 
-function buildEnvelopeFromStreamMessage(message: ChatStreamMessage): GenUITurnEnvelope {
+function buildEnvelopeFromStreamMessage(message: ChatStreamMessage): GenUIResponseEnvelope {
   const metadata = message.metadata;
   const blocks = message.parts.reduce<GenUIBlock[]>((result, part, index) => {
     if (isTextUIPart(part)) {
@@ -746,12 +761,12 @@ function buildEnvelopeFromStreamMessage(message: ChatStreamMessage): GenUITurnEn
   return {
     traceId: metadata?.traceId ?? `trace_${message.id}`,
     conversationId: metadata?.conversationId ?? `conv_${message.id}`,
-    turn: {
-      turnId: metadata?.turnId ?? message.id,
+    response: {
+      responseId: metadata?.responseId ?? message.id,
       role: "assistant",
       status: metadata?.status ?? "streaming",
       blocks,
-      ...(metadata?.turnContext ? { turnContext: metadata.turnContext } : {}),
+      ...(metadata?.suggestions ? { suggestions: metadata.suggestions } : {}),
     },
   };
 }
@@ -831,8 +846,8 @@ function extractRecordText(record: ChatRecord): string {
     return record.text.trim();
   }
 
-  if (record.turn) {
-    return summarizeAssistantBlocks(record.turn.turn.blocks);
+  if (record.response) {
+    return summarizeAssistantBlocks(record.response.response.blocks);
   }
 
   if (typeof record.error === "string" && record.error.trim()) {
@@ -842,10 +857,10 @@ function extractRecordText(record: ChatRecord): string {
   return "";
 }
 
-function buildTransientTurns(records: ChatRecord[]): GenUITransientTurn[] {
+function buildRecentMessages(records: ChatRecord[]): LocalGenUIRecentMessage[] {
   return records
     .slice(-MAX_TRANSIENT_TURNS)
-    .map((record) => {
+    .map((record): LocalGenUIRecentMessage | null => {
       const text = extractRecordText(record);
       if (!text) {
         return null;
@@ -853,30 +868,41 @@ function buildTransientTurns(records: ChatRecord[]): GenUITransientTurn[] {
 
       if (record.role === "user") {
         return {
+          messageId: record.id,
           role: "user",
           text,
+          ...(record.structuredAction
+            ? {
+                action: record.structuredAction.action,
+                actionId: record.structuredAction.actionId,
+                ...(record.structuredAction.params ? { params: record.structuredAction.params } : {}),
+                ...(record.structuredAction.source ? { source: record.structuredAction.source } : {}),
+                ...(record.structuredAction.displayText ? { displayText: record.structuredAction.displayText } : {}),
+              }
+            : {}),
         };
       }
 
-      const primaryBlockType = record.turn
-        ? resolvePrimaryBlockType(record.turn.turn.blocks)
+      const primaryBlockType = record.response
+        ? resolvePrimaryBlockType(record.response.response.blocks)
         : null;
 
       return {
+        messageId: record.id,
         role: "assistant",
         text,
         ...(primaryBlockType !== undefined ? { primaryBlockType } : {}),
-        ...(record.turn?.turn.turnContext ? { turnContext: record.turn.turn.turnContext } : {}),
+        ...(record.response?.response.suggestions ? { suggestions: record.response.response.suggestions } : {}),
       };
     })
-    .filter((turn): turn is GenUITransientTurn => Boolean(turn));
+    .filter((turn): turn is LocalGenUIRecentMessage => Boolean(turn));
 }
 
 function isGenUIAlertLevel(value: unknown): value is GenUIAlertBlock["level"] {
   return value === "info" || value === "warning" || value === "error" || value === "success";
 }
 
-function isGenUITurnStatus(value: unknown): value is GenUITurnEnvelope["turn"]["status"] {
+function isGenUIResponseStatus(value: unknown): value is GenUIResponseEnvelope["response"]["status"] {
   return value === "streaming" || value === "completed" || value === "error";
 }
 
@@ -952,21 +978,21 @@ function isGenUITextBlock(block: GenUIBlock): block is GenUITextBlock {
   return block.type === "text";
 }
 
-function isGenUITurnEnvelope(value: unknown): value is GenUITurnEnvelope {
+function isGenUIResponseEnvelope(value: unknown): value is GenUIResponseEnvelope {
   if (!isRecord(value) || typeof value.traceId !== "string" || typeof value.conversationId !== "string") {
     return false;
   }
 
-  if (!isRecord(value.turn)) {
+  if (!isRecord(value.response)) {
     return false;
   }
 
   return (
-    typeof value.turn.turnId === "string" &&
-    value.turn.role === "assistant" &&
-    isGenUITurnStatus(value.turn.status) &&
-    Array.isArray(value.turn.blocks) &&
-    value.turn.blocks.every(isGenUIBlock)
+    typeof value.response.responseId === "string" &&
+    value.response.role === "assistant" &&
+    isGenUIResponseStatus(value.response.status) &&
+    Array.isArray(value.response.blocks) &&
+    value.response.blocks.every(isGenUIBlock)
   );
 }
 
@@ -1000,21 +1026,21 @@ function extractWelcomeSocialProfile(payload: unknown): WelcomeSocialProfile | n
     return null;
   }
 
-  const participationCount = Number(payload.socialProfile.participationCount);
-  const activitiesCreatedCount = Number(payload.socialProfile.activitiesCreatedCount);
+  const joinedActivities = Number(payload.socialProfile.joinedActivities);
+  const hostedActivities = Number(payload.socialProfile.hostedActivities);
   const preferenceCompleteness = Number(payload.socialProfile.preferenceCompleteness);
 
   if (
-    !Number.isFinite(participationCount) ||
-    !Number.isFinite(activitiesCreatedCount) ||
+    !Number.isFinite(joinedActivities) ||
+    !Number.isFinite(hostedActivities) ||
     !Number.isFinite(preferenceCompleteness)
   ) {
     return null;
   }
 
   return {
-    participationCount,
-    activitiesCreatedCount,
+    joinedActivities,
+    hostedActivities,
     preferenceCompleteness,
   };
 }
@@ -1444,7 +1470,7 @@ export default function ChatPage() {
     async (
       nextInput: GenUIInput,
       userDisplayText: string,
-      contextOverrides?: TurnContextOverrides
+      contextOverrides?: ActivityContextOverrides
     ) => {
       if (isSending) {
         return;
@@ -1459,6 +1485,21 @@ export default function ChatPage() {
           id: userMessageId,
           role: "user",
           text: userDisplayText,
+          ...(nextInput.type === "action"
+            ? {
+                structuredAction: {
+                  action: nextInput.action,
+                  actionId: nextInput.actionId,
+                  ...(isRecord(nextInput.params) ? { params: nextInput.params } : {}),
+                  ...(typeof contextOverrides?.entry === "string"
+                    ? { source: contextOverrides.entry }
+                    : isRecord(nextInput.params) && typeof nextInput.params.source === "string"
+                      ? { source: nextInput.params.source }
+                      : {}),
+                  ...(typeof nextInput.displayText === "string" ? { displayText: nextInput.displayText } : {}),
+                },
+              }
+            : {}),
         },
         {
           id: assistantMessageId,
@@ -1475,7 +1516,7 @@ export default function ChatPage() {
       let errorUiChunkStream = (_reason: unknown) => {};
 
       try {
-        const streamState: { envelope: GenUITurnEnvelope | null } = {
+        const streamState: { envelope: GenUIResponseEnvelope | null } = {
           envelope: null,
         };
 
@@ -1492,7 +1533,7 @@ export default function ChatPage() {
           );
         };
 
-        const applyEnvelope = (nextEnvelope: GenUITurnEnvelope, pending = true) => {
+        const applyEnvelope = (nextEnvelope: GenUIResponseEnvelope, pending = true) => {
           streamState.envelope = nextEnvelope;
           patchAssistantMessage(() => ({
             id: assistantMessageId,
@@ -1502,7 +1543,7 @@ export default function ChatPage() {
           }));
         };
 
-        const transientTurns = !authToken ? buildTransientTurns(messages) : undefined;
+        const recentMessages = !authToken ? buildRecentMessages(messages) : undefined;
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
         };
@@ -1528,9 +1569,9 @@ export default function ChatPage() {
                     lng: clientLocation.lng,
                   }
                 : {}),
-              ...(transientTurns && transientTurns.length > 0
+              ...(recentMessages && recentMessages.length > 0
                 ? {
-                    transientTurns,
+                    recentMessages,
                   }
                 : {}),
               ...(contextOverrides || {}),
@@ -1553,7 +1594,7 @@ export default function ChatPage() {
           metadata: {
             traceId: randomId("trace"),
             conversationId: conversationId ?? randomId("conv"),
-            turnId: randomId("turn"),
+            responseId: randomId("turn"),
             status: "streaming",
           },
           started: false,
@@ -1673,10 +1714,10 @@ export default function ChatPage() {
             const nextEnvelope = buildEnvelopeFromStreamMessage(streamMessage);
             setConversationId(nextEnvelope.conversationId);
             // v5.5: 一旦有内容（特别是文字），立即隐藏 loading，打字机效果和 loading 互斥
-            const hasTextContent = nextEnvelope.turn.blocks.some(
+            const hasTextContent = nextEnvelope.response.blocks.some(
               (b) => b.type === "text" && typeof b.content === "string" && b.content.trim().length > 0
             );
-            applyEnvelope(nextEnvelope, !hasTextContent && nextEnvelope.turn.status !== "completed");
+            applyEnvelope(nextEnvelope, !hasTextContent && nextEnvelope.response.status !== "completed");
           }
         })();
 
@@ -1722,7 +1763,7 @@ export default function ChatPage() {
                 : parsed.eventName;
             const eventData = readStreamEventData(payload);
 
-            if (eventName === "turn-start" && isRecord(eventData)) {
+            if (eventName === "response-start" && isRecord(eventData)) {
               const traceId =
                 typeof eventData.traceId === "string"
                   ? eventData.traceId
@@ -1731,16 +1772,16 @@ export default function ChatPage() {
                 typeof eventData.conversationId === "string"
                   ? eventData.conversationId
                   : conversationId ?? randomId("conv");
-              const turnId =
-                typeof eventData.turnId === "string"
-                  ? eventData.turnId
+              const responseId =
+                typeof eventData.responseId === "string"
+                  ? eventData.responseId
                   : randomId("turn");
 
               setConversationId(streamConversationId);
               updateAssistantUiMetadata({
                 traceId,
                 conversationId: streamConversationId,
-                turnId,
+                responseId,
                 status: "streaming",
                 assistantTextOverride: undefined,
               });
@@ -1760,7 +1801,7 @@ export default function ChatPage() {
               }
             }
 
-            if (eventName === "turn-status" && isRecord(eventData)) {
+            if (eventName === "response-status" && isRecord(eventData)) {
               const statusText =
                 eventData.status === "streaming" ||
                 eventData.status === "completed" ||
@@ -1774,19 +1815,19 @@ export default function ChatPage() {
               }
             }
 
-            if (eventName === "turn-complete" && isGenUITurnEnvelope(eventData)) {
+            if (eventName === "response-complete" && isGenUIResponseEnvelope(eventData)) {
               const completeEnvelope = eventData;
               sawTurnComplete = true;
               setConversationId(completeEnvelope.conversationId);
               updateAssistantUiMetadata({
                 traceId: completeEnvelope.traceId,
                 conversationId: completeEnvelope.conversationId,
-                turnId: completeEnvelope.turn.turnId,
-                status: completeEnvelope.turn.status,
-                turnContext: completeEnvelope.turn.turnContext,
+                responseId: completeEnvelope.response.responseId,
+                status: completeEnvelope.response.status,
+                suggestions: completeEnvelope.response.suggestions,
               });
 
-              const finalAssistantText = completeEnvelope.turn.blocks
+              const finalAssistantText = completeEnvelope.response.blocks
                 .filter((block): block is GenUITextBlock => block.type === "text")
                 .map((block) => block.content)
                 .filter(Boolean)
@@ -1810,7 +1851,7 @@ export default function ChatPage() {
               }
             }
 
-            if (eventName === "turn-error" && isRecord(eventData)) {
+            if (eventName === "response-error" && isRecord(eventData)) {
               const message =
                 typeof eventData.message === "string"
                   ? normalizeChatErrorMessage(eventData.message)
@@ -1846,7 +1887,7 @@ export default function ChatPage() {
         const completedEnvelope = streamState.envelope;
         if (completedEnvelope) {
           applyEnvelope(completedEnvelope, false);
-          applyCompletionEffectsFromBlocks(completedEnvelope.turn.blocks);
+          applyCompletionEffectsFromBlocks(completedEnvelope.response.blocks);
         }
       } catch (error) {
         errorUiChunkStream(error);
@@ -2181,7 +2222,7 @@ export default function ChatPage() {
                           {isWelcomeLoading ? (
                             <div className="mx-auto mt-2 h-6 w-12 animate-pulse rounded-full bg-white/75" />
                           ) : (
-                            <p className="text-[16px] font-semibold">{welcomeProfile?.participationCount ?? 0}<span className="ml-0.5 text-[11px] font-normal">场</span></p>
+                            <p className="text-[16px] font-semibold">{welcomeProfile?.joinedActivities ?? 0}<span className="ml-0.5 text-[11px] font-normal">场</span></p>
                           )}
                         </div>
                         <div className="rounded-xl bg-white/76 px-2 py-2 text-center text-[#2f3870]">
@@ -2189,7 +2230,7 @@ export default function ChatPage() {
                           {isWelcomeLoading ? (
                             <div className="mx-auto mt-2 h-6 w-12 animate-pulse rounded-full bg-white/75" />
                           ) : (
-                            <p className="text-[16px] font-semibold">{welcomeProfile?.activitiesCreatedCount ?? 0}<span className="ml-0.5 text-[11px] font-normal">场</span></p>
+                            <p className="text-[16px] font-semibold">{welcomeProfile?.hostedActivities ?? 0}<span className="ml-0.5 text-[11px] font-normal">场</span></p>
                           )}
                         </div>
                         <div className="rounded-xl bg-white/76 px-2 py-2 text-center text-[#2f3870]">
@@ -2408,7 +2449,7 @@ function AssistantMessage({
   disabled: boolean;
   onActionSelect: (option: ActionOption) => Promise<void>;
 }) {
-  const renderableBlocks = message.turn ? getRenderableBlocks(message.turn.turn.blocks) : [];
+  const renderableBlocks = message.response ? getRenderableBlocks(message.response.response.blocks) : [];
   const hasRenderableBlocks = renderableBlocks.length > 0;
   // 非最后一条消息或正在发送中时，禁用交互
   const isDisabled = disabled || !isLast;

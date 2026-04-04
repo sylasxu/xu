@@ -114,7 +114,7 @@ export async function testRagSearch(params: RagSearchTestParams): Promise<RagSea
   const { query, lat, lng, radiusKm = 5, userId, limit = 20 } = params;
 
   const embeddingStart = Date.now();
-  const queryVector = await generateEmbedding(query);
+  const queryVector = await generateEmbedding(query, { textType: 'query' });
   const embeddingTimeMs = Date.now() - embeddingStart;
 
   const searchStart = Date.now();

@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, index, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, index, pgEnum, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { activities } from "./activities";
 import { users } from "./users";
 import { createInsertSchema, createSelectSchema } from "drizzle-typebox";
@@ -31,6 +31,7 @@ export const activityMessages = pgTable("activity_messages", {
   
   activityId: uuid("activity_id").notNull().references(() => activities.id),
   senderId: uuid("sender_id").references(() => users.id), // 可为空：系统消息无 sender
+  parentId: uuid("parent_id").references((): AnyPgColumn => activityMessages.id, { onDelete: "set null" }),
   
   // 消息类型 (使用本地定义的枚举)
   messageType: activityMessageTypeEnum("message_type").default("text").notNull(),
@@ -39,6 +40,7 @@ export const activityMessages = pgTable("activity_messages", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [
   index("activity_messages_activity_idx").on(t.activityId),
+  index("activity_messages_parent_idx").on(t.parentId),
   index("activity_messages_created_idx").on(t.createdAt),
 ]);
 

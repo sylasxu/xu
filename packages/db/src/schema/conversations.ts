@@ -41,6 +41,13 @@ export const conversationMessageTypeEnum = pgEnum("conversation_message_type", [
   "widget_ask_preference"    // 多轮对话偏好询问卡片
 ]);
 
+export const conversationMessageKindEnum = pgEnum("conversation_message_kind", [
+  "text",
+  "action",
+  "response",
+  "error",
+]);
+
 // v4.6: 会话评估状态枚举 (Admin Command Center)
 export const evaluationStatusEnum = pgEnum("evaluation_status", [
   "unreviewed",  // 未评估（默认）
@@ -111,6 +118,15 @@ export const conversationMessages = pgTable("conversation_messages", {
   // 消息类型：决定前端渲染哪种 Widget
   messageType: conversationMessageTypeEnum("message_type").notNull(),
 
+  // 消息职责：原始文本 / 结构化动作 / 助手响应 / 错误
+  kind: conversationMessageKindEnum("kind"),
+
+  // 归一化后的纯文本，便于检索和摘要
+  text: text("text"),
+
+  // 轻量结构化负载，避免所有逻辑都去读 content JSON
+  payload: jsonb("payload"),
+
   // 内容：JSONB 存储灵活的卡片数据
   content: jsonb("content").notNull(),
 
@@ -120,12 +136,15 @@ export const conversationMessages = pgTable("conversation_messages", {
 
   // v4.7 语义搜索：向量字段 (Qwen text-embedding-v4, 1536 维)
   embedding: vector('embedding', { dimensions: 1536 }),
+  expiresAt: timestamp("expires_at"),
 
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [
   index("conversation_messages_conversation_idx").on(t.conversationId),
   index("conversation_messages_user_idx").on(t.userId),
   index("conversation_messages_created_idx").on(t.createdAt),
+  index("conversation_messages_expires_idx").on(t.expiresAt),
+  index("conversation_messages_kind_idx").on(t.kind),
   index("conversation_messages_activity_idx").on(t.activityId),
   index("conversation_messages_task_idx").on(t.taskId),
 ]);

@@ -62,7 +62,7 @@ export interface JoinTaskContext {
   budget?: string;
   semanticQuery?: string;
   selectedActivityId?: string;
-  followUpMode?: 'review' | 'rebook' | 'kickoff';
+  activityMode?: 'review' | 'rebook' | 'kickoff';
   activityId?: string;
   entry?: string;
   source?: string;
@@ -354,11 +354,11 @@ function buildSlotSummaryFromRequest(request: GenUIRequest): Record<string, unkn
     slotSummary.activityId = request.context.activityId.trim();
   }
   if (
-    (request.context?.followUpMode === 'review'
-      || request.context?.followUpMode === 'rebook'
-      || request.context?.followUpMode === 'kickoff')
+    (request.context?.activityMode === 'review'
+      || request.context?.activityMode === 'rebook'
+      || request.context?.activityMode === 'kickoff')
   ) {
-    slotSummary.followUpMode = request.context.followUpMode;
+    slotSummary.activityMode = request.context.activityMode;
   }
   if (request.input.type === 'action' && isRecord(request.input.params)) {
     if (typeof request.input.params.activityId === 'string') {
@@ -394,11 +394,11 @@ function buildJoinTaskContextFromRequest(request: GenUIRequest): JoinTaskContext
     context.entry = request.context.entry.trim();
   }
   if (
-    request.context?.followUpMode === 'review'
-    || request.context?.followUpMode === 'rebook'
-    || request.context?.followUpMode === 'kickoff'
+    request.context?.activityMode === 'review'
+    || request.context?.activityMode === 'rebook'
+    || request.context?.activityMode === 'kickoff'
   ) {
-    context.followUpMode = request.context.followUpMode;
+    context.activityMode = request.context.activityMode;
   }
   if (typeof request.context?.activityId === 'string' && request.context.activityId.trim()) {
     context.activityId = request.context.activityId.trim();
@@ -657,10 +657,10 @@ export function readJoinTaskContext(task: Pick<AgentTask, 'slotSummary' | 'activ
     ...(readTextValue(slotSummary.entry) ? { entry: readTextValue(slotSummary.entry) ?? undefined } : {}),
     ...(readTextValue(slotSummary.source) ? { source: readTextValue(slotSummary.source) ?? undefined } : {}),
     ...(readStringArray(slotSummary.vibe) ? { vibe: readStringArray(slotSummary.vibe) } : {}),
-    ...(slotSummary.followUpMode === 'review'
-      || slotSummary.followUpMode === 'rebook'
-      || slotSummary.followUpMode === 'kickoff'
-      ? { followUpMode: slotSummary.followUpMode }
+    ...(slotSummary.activityMode === 'review'
+      || slotSummary.activityMode === 'rebook'
+      || slotSummary.activityMode === 'kickoff'
+      ? { activityMode: slotSummary.activityMode }
       : {}),
   };
 
@@ -1045,30 +1045,30 @@ function buildJoinTaskPrimaryAction(task: AgentTask, activityTitle?: string): Cu
   return undefined;
 }
 
-function readTaskFollowUpMode(task: AgentTask): 'review' | 'rebook' | 'kickoff' | null {
+function readTaskActivityMode(task: AgentTask): 'review' | 'rebook' | 'kickoff' | null {
   if (!isRecord(task.slotSummary)) {
     return null;
   }
 
-  const followUpMode = task.slotSummary.followUpMode;
-  return followUpMode === 'review' || followUpMode === 'rebook' || followUpMode === 'kickoff'
-    ? followUpMode
+  const activityMode = task.slotSummary.activityMode;
+  return activityMode === 'review' || activityMode === 'rebook' || activityMode === 'kickoff'
+    ? activityMode
     : null;
 }
 
 function buildPostActivityPrompt(params: {
   activityTitle?: string;
   activityId?: string;
-  followUpMode: 'review' | 'rebook' | 'kickoff';
+  activityMode: 'review' | 'rebook' | 'kickoff';
 }): string {
   const activityHint = params.activityTitle ? `「${params.activityTitle}」` : '这场活动';
   const activityRef = params.activityId ? `（activityId: ${params.activityId}）` : '';
 
-  if (params.followUpMode === 'rebook') {
+  if (params.activityMode === 'rebook') {
     return `基于我刚结束的${activityHint}${activityRef}，帮我快速再约一场：延续合适的人、给个新时间建议，并直接生成一段可发送的招呼文案。`;
   }
 
-  if (params.followUpMode === 'kickoff') {
+  if (params.activityMode === 'kickoff') {
     return `围绕我刚结束的${activityHint}${activityRef}，帮我把下一次局的开场方案想好：先定主题、再给个破冰话术和发起文案。`;
   }
 
@@ -1079,7 +1079,7 @@ function buildPostActivityChatAction(params: {
   label: string;
   activityTitle?: string;
   activityId?: string;
-  followUpMode: 'review' | 'rebook' | 'kickoff';
+  activityMode: 'review' | 'rebook' | 'kickoff';
 }): CurrentAgentTaskAction | undefined {
   if (!params.activityId) {
     return undefined;
@@ -1093,10 +1093,10 @@ function buildPostActivityChatAction(params: {
       prompt: buildPostActivityPrompt({
         activityTitle: params.activityTitle,
         activityId: params.activityId,
-        followUpMode: params.followUpMode,
+        activityMode: params.activityMode,
       }),
       activityId: params.activityId,
-      followUpMode: params.followUpMode,
+      activityMode: params.activityMode,
       entry: 'task_runtime_post_activity',
     },
     source: 'task_runtime_panel',
@@ -1105,15 +1105,15 @@ function buildPostActivityChatAction(params: {
 }
 
 function buildPostActivityTaskSummary(task: AgentTask, activityTitle?: string): string {
-  const followUpMode = readTaskFollowUpMode(task);
+  const activityMode = readTaskActivityMode(task);
 
-  if (followUpMode === 'rebook') {
+  if (activityMode === 'rebook') {
     return activityTitle
       ? `活动已经结束，正在围绕「${activityTitle}」继续承接再约和下一次发起。`
       : '活动已经结束，这条任务正在继续承接再约和下一次发起。';
   }
 
-  if (followUpMode === 'review') {
+  if (activityMode === 'review') {
     return activityTitle
       ? `活动已经结束，正在围绕「${activityTitle}」继续承接复盘和真实结果沉淀。`
       : '活动已经结束，这条任务正在继续承接复盘和真实结果沉淀。';
@@ -1123,26 +1123,26 @@ function buildPostActivityTaskSummary(task: AgentTask, activityTitle?: string): 
 }
 
 function buildPostActivityPrimaryAction(task: AgentTask, activityTitle?: string): CurrentAgentTaskAction | undefined {
-  const followUpMode = readTaskFollowUpMode(task);
-  const primaryMode = followUpMode === 'rebook' ? 'rebook' : followUpMode === 'kickoff' ? 'kickoff' : 'review';
+  const activityMode = readTaskActivityMode(task);
+  const primaryMode = activityMode === 'rebook' ? 'rebook' : activityMode === 'kickoff' ? 'kickoff' : 'review';
 
   return buildPostActivityChatAction({
     label: primaryMode === 'rebook' ? '继续再约' : primaryMode === 'kickoff' ? '继续筹备下次' : '继续复盘',
     activityTitle,
     activityId: task.activityId ?? undefined,
-    followUpMode: primaryMode,
+    activityMode: primaryMode,
   });
 }
 
 function buildPostActivitySecondaryAction(task: AgentTask, activityTitle?: string): CurrentAgentTaskAction | undefined {
-  const followUpMode = readTaskFollowUpMode(task);
-  const secondaryMode = followUpMode === 'rebook' ? 'review' : 'rebook';
+  const activityMode = readTaskActivityMode(task);
+  const secondaryMode = activityMode === 'rebook' ? 'review' : 'rebook';
 
   return buildPostActivityChatAction({
     label: secondaryMode === 'review' ? '先做复盘' : '去再约',
     activityTitle,
     activityId: task.activityId ?? undefined,
-    followUpMode: secondaryMode,
+    activityMode: secondaryMode,
   });
 }
 
@@ -1681,17 +1681,17 @@ export async function syncJoinTaskFromChatTurn(params: {
   const authRequirement = extractJoinAuthRequirement(params.blocks);
   const explored = params.outcome === 'explored' || extractExploreSignal(params.blocks);
   const isJoinAction = params.request.input.type === 'action' && params.request.input.action === 'join_activity';
-  const followUpMode = params.request.context?.followUpMode;
-  const followUpActivityId = readTextValue(params.request.context?.activityId);
+  const activityMode = params.request.context?.activityMode;
+  const contextActivityId = readTextValue(params.request.context?.activityId);
 
-  if (followUpMode && followUpActivityId) {
+  if (activityMode && contextActivityId) {
     const existingOpenTask = await findOpenJoinTask({
       userId: params.userId,
-      activityId: followUpActivityId,
+      activityId: contextActivityId,
     });
     const existingTask = existingOpenTask ?? await findLatestJoinTaskByActivity({
       userId: params.userId,
-      activityId: followUpActivityId,
+      activityId: contextActivityId,
     });
 
     if (existingTask && isTerminalTaskStatus(existingTask.status)) {
@@ -1702,7 +1702,7 @@ export async function syncJoinTaskFromChatTurn(params: {
       userId: params.userId,
       taskType: 'join_activity',
       conversationId: params.conversationId,
-      activityId: followUpActivityId,
+      activityId: contextActivityId,
       goalText: goalText || '活动后跟进',
       defaultStage: 'post_activity',
       source: entry ?? 'activity_follow_up',
@@ -1715,7 +1715,7 @@ export async function syncJoinTaskFromChatTurn(params: {
       stage: 'post_activity',
       status: 'active',
       conversationId: params.conversationId,
-      activityId: followUpActivityId,
+      activityId: contextActivityId,
       source: entry ?? 'activity_follow_up',
       entry,
       goalText,
@@ -1727,7 +1727,7 @@ export async function syncJoinTaskFromChatTurn(params: {
             eventType: 'stage_changed' as const,
           }),
       eventPayload: {
-        followUpMode,
+        activityMode,
         entry: entry ?? null,
       },
     });

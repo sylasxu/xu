@@ -131,8 +131,6 @@ export async function loginWithWechatCode(params: WechatCodeLoginRequest) {
           avatarUrl: null, // 延迟完善
           phoneNumber: null, // 延迟绑定
           aiCreateQuotaToday: 3,
-          activitiesCreatedCount: 0,
-          participationCount: 0,
         })
         .returning();
 
@@ -172,8 +170,6 @@ export async function loginWithPhoneCode(params: PhoneOtpLoginRequest): Promise<
         nickname: '管理员',
         avatarUrl: null,
         aiCreateQuotaToday: 999, // 受保护登录账号使用高额度，便于运维联调
-        activitiesCreatedCount: 0,
-        participationCount: 0,
       })
       .returning();
 
@@ -234,8 +230,6 @@ export async function bootstrapTestUsers(params: TestUsersBootstrapRequest) {
         avatarUrl: null,
         aiCreateQuotaToday: 999,
         aiQuotaResetAt: now,
-        activitiesCreatedCount: 0,
-        participationCount: 0,
       })
       .returning();
 

@@ -1,6 +1,9 @@
 // Analytics Model - 数据分析领域 Schema
 
+import { ErrorResponseSchema, type ErrorResponse } from "../../common/common.model";
 import { Elysia, t, type Static } from 'elysia'
+
+export { ErrorResponseSchema, type ErrorResponse };
 
 const TrendsQuerySchema = t.Object({
   period: t.Optional(t.Union([
@@ -98,17 +101,13 @@ const PlatformOverviewResponseSchema = t.Object({
   alerts: PlatformOverviewAlertsSchema,
 })
 
-const ErrorResponseSchema = t.Object({
-  code: t.Number(),
-  msg: t.String(),
-})
-
 export const analyticsModel = new Elysia({ name: 'analyticsModel' }).model({
   'analytics.trendsQuery': TrendsQuerySchema,
   'analytics.trendsResponse': TrendsResponseSchema,
   'analytics.metricsResponse': BusinessMetricsResponseSchema,
   'analytics.platformOverviewResponse': PlatformOverviewResponseSchema,
   'analytics.error': ErrorResponseSchema,
+  'common.error': ErrorResponseSchema,
 })
 
 export type TrendsQuery = Static<typeof TrendsQuerySchema>
@@ -125,5 +124,3 @@ export type PlatformOverviewRealtime = Static<typeof PlatformOverviewRealtimeSch
 export type PlatformOverviewAIHealth = Static<typeof PlatformOverviewAIHealthSchema>
 export type PlatformOverviewAlerts = Static<typeof PlatformOverviewAlertsSchema>
 export type PlatformOverviewResponse = Static<typeof PlatformOverviewResponseSchema>
-
-export type ErrorResponse = Static<typeof ErrorResponseSchema>

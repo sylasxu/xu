@@ -2,7 +2,7 @@
  * Anomaly Controller - 异常检测接口
  */
 import { Elysia, t } from 'elysia';
-import { basePlugins, verifyAdmin, AuthError } from '../../../setup';
+import { basePlugins, verifyAdmin, AuthError, type ErrorResponse } from '../../../setup';
 import { detectAllAnomalies, getAnomalyStats } from './detector';
 
 const AnomalyUserSchema = t.Object({
@@ -43,7 +43,7 @@ export const anomalyController = new Elysia({ prefix: '/ai/anomaly' })
     } catch (error) {
       if (error instanceof AuthError) {
         set.status = error.status;
-        return { code: error.status, msg: error.message };
+        return { code: error.status, msg: error.message } satisfies ErrorResponse;
       }
     }
   })

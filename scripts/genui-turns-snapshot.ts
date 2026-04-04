@@ -5,7 +5,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-type TurnInput =
+type ResponseInput =
   | {
       type: "text";
       text: string;
@@ -19,7 +19,7 @@ type TurnInput =
     };
 
 interface SnapshotStep {
-  input: TurnInput;
+  input: ResponseInput;
   expected: {
     blocks: NormalizedBlock[];
   };
@@ -31,9 +31,9 @@ interface SnapshotFixture {
   steps: SnapshotStep[];
 }
 
-interface TurnEnvelope {
+interface ResponseEnvelope {
   conversationId: string;
-  turn: {
+  response: {
     role: "assistant";
     status: "streaming" | "completed" | "error";
     blocks: Array<Record<string, unknown>>;
@@ -49,7 +49,7 @@ const BASE_URL =
 const DEFAULT_TEST_MODEL = process.env.GENUI_TEST_MODEL?.trim() || "deepseek-chat";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, "..");
-const FIXTURE_DIR = join(REPO_ROOT, "packages", "genui-contract", "fixtures", "turn-snapshots");
+const FIXTURE_DIR = join(REPO_ROOT, "packages", "genui-contract", "fixtures", "response-snapshots");
 const AUTH_TOKEN = process.env.GENUI_AUTH_TOKEN?.trim() || "";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -165,7 +165,7 @@ function normalizeBlock(block: Record<string, unknown>): NormalizedBlock {
   return normalizeUnknown({ ...normalized, ...block }) as NormalizedBlock;
 }
 
-async function postTurn(conversationId: string | null, input: TurnInput): Promise<TurnEnvelope> {
+async function postResponse(conversationId: string | null, input: ResponseInput): Promise<ResponseEnvelope> {
   const payload = {
     ...(conversationId ? { conversationId } : {}),
     input,
@@ -206,7 +206,7 @@ async function postTurn(conversationId: string | null, input: TurnInput): Promis
     throw new Error(`curl exited with code ${result.status}: ${result.stderr || "unknown error"}`);
   }
 
-  return JSON.parse(result.stdout) as TurnEnvelope;
+  return JSON.parse(result.stdout) as ResponseEnvelope;
 }
 
 function loadFixtures(): SnapshotFixture[] {
@@ -240,19 +240,19 @@ async function runFixture(fixture: SnapshotFixture): Promise<string[]> {
 
   for (let index = 0; index < fixture.steps.length; index += 1) {
     const step = fixture.steps[index];
-    const turn = await postTurn(conversationId, step.input);
-    const label = `${fixture.name}#turn${index + 1}`;
+    const turn = await postResponse(conversationId, step.input);
+    const label = `${fixture.name}#response${index + 1}`;
 
-    assert(turn.turn.role === "assistant", `${label}: role must be assistant`);
-    assert(turn.turn.status === "completed", `${label}: status must be completed`);
-    assert(Array.isArray(turn.turn.blocks), `${label}: blocks must be array`);
+    assert(turn.response.role === "assistant", `${label}: role must be assistant`);
+    assert(turn.response.status === "completed", `${label}: status must be completed`);
+    assert(Array.isArray(turn.response.blocks), `${label}: blocks must be array`);
 
     if (conversationId) {
       assert(turn.conversationId === conversationId, `${label}: conversation id drift`);
     }
     conversationId = turn.conversationId;
 
-    const actualBlocks = normalizeBlocks(turn.turn.blocks);
+    const actualBlocks = normalizeBlocks(turn.response.blocks);
     const actualTypes = actualBlocks.map((block) => String(block.type || "unknown"));
     const expectedTypes = step.expected.blocks.map((block) => String(block.type || "unknown"));
 

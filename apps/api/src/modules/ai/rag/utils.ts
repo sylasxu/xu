@@ -10,7 +10,7 @@
 
 import type { Activity } from '@juchang/db';
 import type { ActivityVibe, TimeOfDay, DayOfWeek } from './types';
-import { getQwenEmbedding, getQwenEmbeddings } from '../models/adapters/qwen';
+import { getEmbedding, getEmbeddings } from '../models/router';
 import { EMBEDDING_DIMENSIONS } from '../models/types';
 import { createLogger } from '../observability/logger';
 
@@ -221,8 +221,11 @@ export function enrichActivityText(activity: Activity): string {
  * 生成单个文本的向量
  * 使用 Qwen text-embedding-v4 模型 (1536 维)
  */
-export async function generateEmbedding(text: string): Promise<number[]> {
-  return getQwenEmbedding(text);
+export async function generateEmbedding(
+  text: string,
+  options?: { textType?: 'document' | 'query' }
+): Promise<number[]> {
+  return getEmbedding(text, options);
 }
 
 /**
@@ -234,13 +237,16 @@ export async function generateEmbedding(text: string): Promise<number[]> {
  * @param text - 要生成向量的文本
  * @returns 向量数组，或 null（如果所有重试都失败）
  */
-export async function generateEmbeddingWithRetry(text: string): Promise<number[] | null> {
+export async function generateEmbeddingWithRetry(
+  text: string,
+  options?: { textType?: 'document' | 'query' }
+): Promise<number[] | null> {
   let lastError: Error | null = null;
   let delay = RETRY_CONFIG.initialDelayMs;
   
   for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
     try {
-      return await getQwenEmbedding(text);
+      return await getEmbedding(text, options);
     } catch (error) {
       lastError = error instanceof Error ? error : new Error('Embedding generation failed');
       logger.warn('Embedding generation failed', { 
@@ -266,14 +272,14 @@ export async function generateEmbeddingWithRetry(text: string): Promise<number[]
  */
 export async function generateEmbeddings(
   texts: string[],
-  options?: { batchSize?: number; delayMs?: number }
+  options?: { batchSize?: number; delayMs?: number; textType?: 'document' | 'query' }
 ): Promise<number[][]> {
-  const { batchSize = 100, delayMs = 100 } = options || {};
+  const { batchSize = 100, delayMs = 100, textType = 'document' } = options || {};
   const results: number[][] = [];
 
   for (let i = 0; i < texts.length; i += batchSize) {
     const batch = texts.slice(i, i + batchSize);
-    const embeddings = await getQwenEmbeddings(batch);
+    const embeddings = await getEmbeddings(batch, { textType });
     results.push(...embeddings);
 
     // 速率限制延迟
@@ -298,5 +304,5 @@ export function getEmbeddingDimension(): number {
  */
 export async function generateActivityEmbedding(activity: Activity): Promise<number[]> {
   const enrichedText = enrichActivityText(activity);
-  return generateEmbedding(enrichedText);
+  return generateEmbedding(enrichedText, { textType: 'document' });
 }

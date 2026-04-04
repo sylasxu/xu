@@ -1,13 +1,13 @@
 // Activity Controller - 活动相关接口 (MVP 简化版 + v3.2 附近搜索)
 import { Elysia, t } from 'elysia';
-import { basePlugins, verifyAuth } from '../../setup';
-import { activityModel, type ErrorResponse, ActivityOverviewStatsSchema, ActivityTypeDistributionSchema } from './activity.model';
-import { 
+import { basePlugins, verifyAuth, type ErrorResponse } from '../../setup';
+import { activityModel, ActivityOverviewStatsSchema, ActivityTypeDistributionSchema } from './activity.model';
+import {
   getActivitiesList,
   getMyActivities,
   getActivityById,
   getPublicActivityById,
-  createActivity, 
+  createActivity,
   updateActivityStatus,
   deleteActivity,
   joinActivity,
@@ -22,8 +22,9 @@ export const activityController = new Elysia({ prefix: '/activities' })
   .use(activityModel)
 
   // ==========================================
-  // 活动列表（分页 + 筛选）
+  // 公开接口（无需认证）
   // ==========================================
+  // 活动列表（分页 + 筛选）
   .get(
     '/',
     async ({ query, set }) => {
@@ -47,14 +48,12 @@ export const activityController = new Elysia({ prefix: '/activities' })
       query: 'activity.listQuery',
       response: {
         200: 'activity.listResponse',
-        500: 'activity.error',
+        500: 'common.error',
       },
     }
   )
 
-  // ==========================================
   // 活动统计
-  // ==========================================
   .get(
     '/stats',
     async ({ query, set }) => {
@@ -78,14 +77,12 @@ export const activityController = new Elysia({ prefix: '/activities' })
       query: 'activity.statsQuery',
       response: {
         200: t.Union([ActivityOverviewStatsSchema, ActivityTypeDistributionSchema]),
-        500: 'activity.error',
+        500: 'common.error',
       },
     }
   )
 
-  // ==========================================
   // 附近活动搜索 (v3.2 新增) - 放在 /:id 之前避免路由冲突
-  // ==========================================
   .get(
     '/nearby',
     async ({ query, set }) => {
@@ -109,11 +106,72 @@ export const activityController = new Elysia({ prefix: '/activities' })
       query: 'activity.nearbyQuery',
       response: {
         200: 'activity.nearbyResponse',
-        500: 'activity.error',
+        500: 'common.error',
       },
     }
   )
 
+  // v5.0: 公开活动详情（无需认证，含讨论区预览）
+  .get(
+    '/:id/public',
+    async ({ params, set }) => {
+      const activity = await getPublicActivityById(params.id);
+      if (!activity) {
+        set.status = 404;
+        return {
+          code: 404,
+          msg: '活动不存在',
+        } satisfies ErrorResponse;
+      }
+      return activity;
+    },
+    {
+      detail: {
+        tags: ['Activities'],
+        summary: '获取活动公开详情（无需认证）',
+        description: '获取活动公开信息，含参与者列表和讨论区预览。不包含敏感信息。',
+      },
+      params: 'activity.idParams',
+      response: {
+        200: 'activity.publicResponse',
+        404: 'common.error',
+      },
+    }
+  )
+
+  // 获取活动详情
+  .get(
+    '/:id',
+    async ({ params, set }) => {
+      const activity = await getActivityById(params.id);
+
+      if (!activity) {
+        set.status = 404;
+        return {
+          code: 404,
+          msg: '活动不存在',
+        } satisfies ErrorResponse;
+      }
+
+      return activity;
+    },
+    {
+      detail: {
+        tags: ['Activities'],
+        summary: '获取活动详情',
+        description: '根据活动ID获取活动详情，包含 isArchived 计算字段',
+      },
+      params: 'activity.idParams',
+      response: {
+        200: 'activity.detailResponse',
+        404: 'common.error',
+      },
+    }
+  )
+
+  // ==========================================
+  // 需要本人或管理员权限（userId 参数）
+  // ==========================================
   // 按用户 ID 获取相关活动（发布的 + 参与的）
   .get(
     '/user/:userId',
@@ -158,73 +216,16 @@ export const activityController = new Elysia({ prefix: '/activities' })
       query: 'activity.myActivitiesQuery',
       response: {
         200: 'activity.myActivitiesResponse',
-        401: 'activity.error',
-        403: 'activity.error',
-        500: 'activity.error',
+        401: 'common.error',
+        403: 'common.error',
+        500: 'common.error',
       },
     }
   )
 
   // ==========================================
-  // v5.0: 公开活动详情（无需认证，含讨论区预览）
+  // 只需要登录（从 JWT 取 user.id）
   // ==========================================
-  .get(
-    '/:id/public',
-    async ({ params, set }) => {
-      const activity = await getPublicActivityById(params.id);
-      if (!activity) {
-        set.status = 404;
-        return {
-          code: 404,
-          msg: '活动不存在',
-        } satisfies ErrorResponse;
-      }
-      return activity;
-    },
-    {
-      detail: {
-        tags: ['Activities'],
-        summary: '获取活动公开详情（无需认证）',
-        description: '获取活动公开信息，含参与者列表和讨论区预览。不包含敏感信息。',
-      },
-      params: 'activity.idParams',
-      response: {
-        200: 'activity.publicResponse',
-        404: 'activity.error',
-      },
-    }
-  )
-
-  // 获取活动详情
-  .get(
-    '/:id',
-    async ({ params, set }) => {
-      const activity = await getActivityById(params.id);
-
-      if (!activity) {
-        set.status = 404;
-        return {
-          code: 404,
-          msg: '活动不存在',
-        } satisfies ErrorResponse;
-      }
-
-      return activity;
-    },
-    {
-      detail: {
-        tags: ['Activities'],
-        summary: '获取活动详情',
-        description: '根据活动ID获取活动详情，包含 isArchived 计算字段',
-      },
-      params: 'activity.idParams',
-      response: {
-        200: 'activity.detailResponse',
-        404: 'activity.error',
-      },
-    }
-  )
-
   // 创建活动
   .post(
     '/',
@@ -261,9 +262,9 @@ export const activityController = new Elysia({ prefix: '/activities' })
       body: 'activity.createRequest',
       response: {
         200: 'activity.createResponse',
-        400: 'activity.error',
-        401: 'activity.error',
-        403: 'activity.error',
+        400: 'common.error',
+        401: 'common.error',
+        403: 'common.error',
       },
     }
   )
@@ -305,8 +306,8 @@ export const activityController = new Elysia({ prefix: '/activities' })
       body: 'activity.publishDraftRequest',
       response: {
         200: 'activity.createResponse',
-        400: 'activity.error',
-        401: 'activity.error',
+        400: 'common.error',
+        401: 'common.error',
       },
     }
   )
@@ -348,8 +349,8 @@ export const activityController = new Elysia({ prefix: '/activities' })
       body: 'activity.updateStatusRequest',
       response: {
         200: 'activity.success',
-        400: 'activity.error',
-        401: 'activity.error',
+        400: 'common.error',
+        401: 'common.error',
       },
     }
   )
@@ -390,8 +391,8 @@ export const activityController = new Elysia({ prefix: '/activities' })
       params: 'activity.idParams',
       response: {
         200: 'activity.success',
-        400: 'activity.error',
-        401: 'activity.error',
+        400: 'common.error',
+        401: 'common.error',
       },
     }
   )
@@ -437,9 +438,9 @@ export const activityController = new Elysia({ prefix: '/activities' })
           msg: t.String(),
           participantId: t.String(),
         }),
-        400: 'activity.error',
-        401: 'activity.error',
-        403: 'activity.error',
+        400: 'common.error',
+        401: 'common.error',
+        403: 'common.error',
       },
     }
   )
@@ -480,8 +481,8 @@ export const activityController = new Elysia({ prefix: '/activities' })
       params: 'activity.idParams',
       response: {
         200: 'activity.success',
-        400: 'activity.error',
-        401: 'activity.error',
+        400: 'common.error',
+        401: 'common.error',
       },
     }
   );

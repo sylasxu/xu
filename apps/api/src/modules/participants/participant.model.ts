@@ -1,5 +1,6 @@
 // Participant Model - TypeBox schemas (MVP 简化版)
 // 主要逻辑已移到 activities 模块，此模块仅保留辅助功能
+import { ErrorResponseSchema, type ErrorResponse } from "../../common/common.model";
 import { Elysia, t, type Static } from 'elysia';
 
 /**
@@ -66,11 +67,6 @@ const IdParams = t.Object({
   id: t.String({ format: 'uuid', description: '活动ID' }),
 });
 
-// 错误响应
-const ErrorResponse = t.Object({
-  code: t.Number(),
-  msg: t.String(),
-});
 
 // 注册到 Elysia
 export const participantModel = new Elysia({ name: 'participantModel' })
@@ -82,7 +78,7 @@ export const participantModel = new Elysia({ name: 'participantModel' })
     'participant.rebookFollowUpRequest': RebookFollowUpRequest,
     'participant.actionResponse': ActionResponse,
     'participant.idParams': IdParams,
-    'participant.error': ErrorResponse,
+    'common.error': ErrorResponseSchema,
   });
 
 // 导出 TS 类型
@@ -93,4 +89,3 @@ export type ConfirmFulfillmentResponse = Static<typeof ConfirmFulfillmentRespons
 export type RebookFollowUpRequest = Static<typeof RebookFollowUpRequest>;
 export type ActionResponse = Static<typeof ActionResponse>;
 export type IdParams = Static<typeof IdParams>;
-export type ErrorResponse = Static<typeof ErrorResponse>;

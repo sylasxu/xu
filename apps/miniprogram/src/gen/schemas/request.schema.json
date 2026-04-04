@@ -47,12 +47,12 @@
         "lat": { "type": "number" },
         "lng": { "type": "number" },
         "activityId": { "type": "string", "minLength": 1 },
-        "followUpMode": {
+        "activityMode": {
           "type": "string",
           "enum": ["review", "rebook", "kickoff"]
         },
         "entry": { "type": "string" },
-        "transientTurns": {
+        "recentMessages": {
           "type": "array",
           "maxItems": 12,
           "items": {
@@ -71,9 +71,14 @@
                 "type": ["string", "null"],
                 "enum": ["text", "choice", "entity-card", "list", "form", "cta-group", "alert", null]
               },
-              "turnContext": {
-                "$ref": "#/definitions/turnContext"
-              }
+              "suggestions": {
+                "$ref": "#/definitions/suggestions"
+              },
+              "action": { "type": "string", "minLength": 1 },
+              "actionId": { "type": "string", "minLength": 1 },
+              "params": { "type": "object" },
+              "source": { "type": "string" },
+              "displayText": { "type": "string" }
             },
             "additionalProperties": false
           }
@@ -99,10 +104,13 @@
         }
       },
       "additionalProperties": false
+    },
+    "latestAssistantSuggestions": {
+      "$ref": "#/definitions/suggestions"
     }
   },
   "definitions": {
-    "turnContextChoiceOption": {
+    "suggestionsChoiceOption": {
       "type": "object",
       "required": ["label", "action"],
       "properties": {
@@ -113,7 +121,7 @@
       },
       "additionalProperties": false
     },
-    "turnContextListItem": {
+    "suggestionsListItem": {
       "type": "object",
       "required": ["title", "action"],
       "properties": {
@@ -128,7 +136,7 @@
       },
       "additionalProperties": false
     },
-    "turnContextCtaItem": {
+    "suggestionsCtaItem": {
       "type": "object",
       "required": ["label", "action"],
       "properties": {
@@ -138,7 +146,7 @@
       },
       "additionalProperties": false
     },
-    "turnContext": {
+    "suggestions": {
       "oneOf": [
         {
           "type": "object",
@@ -150,7 +158,7 @@
               "type": "array",
               "minItems": 1,
               "maxItems": 12,
-              "items": { "$ref": "#/definitions/turnContextChoiceOption" }
+              "items": { "$ref": "#/definitions/suggestionsChoiceOption" }
             }
           },
           "additionalProperties": false
@@ -165,7 +173,7 @@
               "type": "array",
               "minItems": 1,
               "maxItems": 12,
-              "items": { "$ref": "#/definitions/turnContextListItem" }
+              "items": { "$ref": "#/definitions/suggestionsListItem" }
             }
           },
           "additionalProperties": false
@@ -179,7 +187,7 @@
               "type": "array",
               "minItems": 1,
               "maxItems": 12,
-              "items": { "$ref": "#/definitions/turnContextCtaItem" }
+              "items": { "$ref": "#/definitions/suggestionsCtaItem" }
             }
           },
           "additionalProperties": false

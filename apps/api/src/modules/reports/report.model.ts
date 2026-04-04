@@ -1,5 +1,6 @@
 // Report Model - TypeBox schemas for 内容审核
 import { Elysia, t, type Static } from 'elysia';
+import { ErrorResponseSchema, type ErrorResponse } from "../../common/common.model";
 
 /**
  * Report Model Plugin
@@ -120,12 +121,6 @@ export const ReportListResponseSchema = t.Object({
   limit: t.Number({ description: '每页数量' }),
 });
 
-// 错误响应
-const ErrorResponseSchema = t.Object({
-  code: t.Number(),
-  msg: t.String(),
-});
-
 // 成功响应
 const SuccessResponseSchema = t.Object({
   code: t.Number(),
@@ -150,6 +145,7 @@ export const reportModel = new Elysia({ name: 'reportModel' })
     'report.response': ReportResponseSchema,
     'report.listResponse': ReportListResponseSchema,
     'report.error': ErrorResponseSchema,
+    'common.error': ErrorResponseSchema,
     'report.success': SuccessResponseSchema,
     'report.createSuccess': CreateReportSuccessSchema,
   });
@@ -162,5 +158,4 @@ export type UpdateReportRequest = Static<typeof UpdateReportRequestSchema>;
 export type ReportIdParams = Static<typeof ReportIdParamsSchema>;
 export type ReportResponse = Static<typeof ReportResponseSchema>;
 export type ReportListResponse = Static<typeof ReportListResponseSchema>;
-export type ErrorResponse = Static<typeof ErrorResponseSchema>;
 export type SuccessResponse = Static<typeof SuccessResponseSchema>;

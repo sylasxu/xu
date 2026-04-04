@@ -94,6 +94,7 @@ async function getHistoryMessages(activityId: string, limit = 50) {
       id: activityMessages.id,
       activityId: activityMessages.activityId,
       senderId: activityMessages.senderId,
+      parentId: activityMessages.parentId,
       messageType: activityMessages.messageType,
       content: activityMessages.content,
       createdAt: activityMessages.createdAt,
@@ -111,6 +112,7 @@ async function getHistoryMessages(activityId: string, limit = 50) {
     id: m.id,
     content: m.content,
     senderId: m.senderId,
+    parentId: m.parentId,
     senderNickname: m.senderNickname,
     senderAvatarUrl: m.senderAvatarUrl,
     type: m.messageType,
@@ -245,6 +247,9 @@ export async function handleWsMessage(
 
   // 处理消息发送
   if (data.type === 'message' && data.content) {
+    const parentIdValue = (data as { parentId?: unknown }).parentId;
+    const parentId = typeof parentIdValue === 'string' ? parentIdValue : null;
+
     // 检查归档状态
     const isArchived = await checkIsArchived(activityId);
     if (isArchived) {
@@ -277,6 +282,7 @@ export async function handleWsMessage(
       .values({
         activityId,
         senderId: userId,
+        parentId,
         messageType: 'text',
         content: data.content,
       })
@@ -292,6 +298,7 @@ export async function handleWsMessage(
         id: message.id,
         content: data.content,
         senderId: userId,
+        parentId,
         senderNickname: userInfo?.nickname || '匿名用户',
         senderAvatarUrl: userInfo?.avatarUrl || null,
         type: 'text',

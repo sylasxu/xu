@@ -177,7 +177,6 @@ export const useUserStore = create<UserState>()(
           if ((state.user.aiCreateQuotaToday ?? 0) < UNLIMITED_AI_CREATE_QUOTA) {
             state.user.aiCreateQuotaToday = Math.max(0, (state.user.aiCreateQuotaToday ?? 0) - 1)
           }
-          state.user.activitiesCreatedCount = (state.user.activitiesCreatedCount ?? 0) + 1
           state.user.updatedAt = new Date().toISOString()
         })
 

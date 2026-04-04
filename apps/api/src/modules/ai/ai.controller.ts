@@ -11,7 +11,7 @@ import {
   getActivityConversationMessages,
   addMessageToConversation,
   getOrCreateCurrentConversation,
-  syncConversationTurnSnapshot,
+  syncConversationResponseSnapshot,
 } from './ai.service';
 import { getSystemPrompt, getPromptTemplateConfig, getPromptTemplateMetadata } from './prompts';
 import {
@@ -29,10 +29,10 @@ import {
 import type { GenUIRequest } from '@juchang/genui-contract';
 import { db, users, activities, eq } from '@juchang/db';
 import {
-  buildAiChatTurn,
-  createAiChatBridgeStreamResponse,
+  buildAiChatResponse,
+  streamAiChatResponse,
 } from './ai-chat-gateway.service';
-import { applyAiChatTurnPolicies } from './ai-chat-policy.service';
+import { applyAiChatResponsePolicies } from './ai-chat-policy.service';
 import { normalizeAiProviderErrorMessage } from './models/provider-error';
 
 // 子领域 controller
@@ -139,14 +139,14 @@ export const aiController = new Elysia({ prefix: '/ai' })
         const request = body as GenUIRequest & { stream?: boolean };
 
         if (request.stream) {
-          return createAiChatBridgeStreamResponse(request, {
+          return streamAiChatResponse(request, {
             viewer,
             requestAbortSignal: rawRequest.signal,
           });
         }
 
-        const result = await buildAiChatTurn(request, { viewer });
-        const normalized = applyAiChatTurnPolicies({
+        const result = await buildAiChatResponse(request, { viewer });
+        const normalized = applyAiChatResponsePolicies({
           request,
           viewer,
           envelope: result.envelope,
@@ -163,40 +163,49 @@ export const aiController = new Elysia({ prefix: '/ai' })
               structuredAction: result.resolvedStructuredAction?.action || null,
               stream: false,
               authenticated: !!viewer,
-              blockCount: normalized.envelope.turn.blocks.length,
+              blockCount: normalized.envelope.response.blocks.length,
             },
           },
         ];
 
         if (viewer) {
-          await syncJoinTaskFromChatTurn({
-            userId: viewer.id,
-            conversationId: normalized.envelope.conversationId,
-            request,
-            blocks: normalized.envelope.turn.blocks,
-          });
-          await syncPartnerTaskFromChatTurn({
-            userId: viewer.id,
-            conversationId: normalized.envelope.conversationId,
-            request,
-            blocks: normalized.envelope.turn.blocks,
-          });
-          await syncCreateTaskFromChatTurn({
-            userId: viewer.id,
-            conversationId: normalized.envelope.conversationId,
-            request,
-            blocks: normalized.envelope.turn.blocks,
-          });
-          await syncConversationTurnSnapshot({
-            conversationId: normalized.envelope.conversationId,
-            userId: viewer.id,
-            userText: resolveConversationUserText(request.input),
-            blocks: normalized.envelope.turn.blocks,
-            turnId: normalized.envelope.turn.turnId,
-            traceId: normalized.envelope.traceId,
-            inputType: request.input.type,
-            resolvedStructuredAction: result.resolvedStructuredAction,
-            activityId: typeof request.context?.activityId === 'string' ? request.context.activityId : undefined,
+          void Promise.allSettled([
+            syncJoinTaskFromChatTurn({
+              userId: viewer.id,
+              conversationId: normalized.envelope.conversationId,
+              request,
+              blocks: normalized.envelope.response.blocks,
+            }),
+            syncPartnerTaskFromChatTurn({
+              userId: viewer.id,
+              conversationId: normalized.envelope.conversationId,
+              request,
+              blocks: normalized.envelope.response.blocks,
+            }),
+            syncCreateTaskFromChatTurn({
+              userId: viewer.id,
+              conversationId: normalized.envelope.conversationId,
+              request,
+              blocks: normalized.envelope.response.blocks,
+            }),
+            syncConversationResponseSnapshot({
+              conversationId: normalized.envelope.conversationId,
+              userId: viewer.id,
+              userText: resolveConversationUserText(request.input),
+              blocks: normalized.envelope.response.blocks,
+              responseId: normalized.envelope.response.responseId,
+              traceId: normalized.envelope.traceId,
+              inputType: request.input.type,
+              resolvedStructuredAction: result.resolvedStructuredAction,
+              activityId: typeof request.context?.activityId === 'string' ? request.context.activityId : undefined,
+            }),
+          ]).then((results) => {
+            results.forEach((settled, index) => {
+              if (settled.status === 'rejected') {
+                const labels = ['syncJoinTaskFromChatTurn', 'syncPartnerTaskFromChatTurn', 'syncCreateTaskFromChatTurn', 'syncConversationResponseSnapshot'] as const;
+                console.error(`[AI Chat Async] ${labels[index]} failed:`, settled.reason);
+              }
+            });
           });
         }
 
@@ -218,7 +227,7 @@ export const aiController = new Elysia({ prefix: '/ai' })
       detail: {
         tags: ['AI'],
         summary: 'AI 对话（Chat Gateway）',
-        description: `统一的 GenUI Chat 网关：\n\n- 请求体固定为 conversationId + input + context\n- 全部请求统一走 AI Workflow（Processor/Intent/RAG/Tools）\n- stream=false 返回 GenUI turn envelope\n- stream=true 返回 GenUI SSE 事件序列`,
+        description: `统一的 GenUI Chat 网关：\n\n- 请求体固定为 conversationId + input + context\n- 全部请求统一走 AI Workflow（Processor/Intent/RAG/Tools）\n- stream=false 返回 GenUI response envelope\n- stream=true 返回 GenUI SSE 事件序列`,
       },
       body: 'ai.chatRequest',
     }
@@ -254,7 +263,7 @@ export const aiController = new Elysia({ prefix: '/ai' })
       body: 'ai.discussionEnteredRequest',
       response: {
         200: 'ai.discussionEnteredResponse',
-        401: 'ai.error',
+        401: 'common.error',
       },
     }
   )
@@ -281,7 +290,7 @@ export const aiController = new Elysia({ prefix: '/ai' })
       },
       response: {
         200: 'ai.currentTasksResponse',
-        401: 'ai.error',
+        401: 'common.error',
       },
     }
   )
@@ -333,9 +342,9 @@ export const aiController = new Elysia({ prefix: '/ai' })
       query: 'ai.conversationsQuery',
       response: {
         200: 'ai.conversationsResponse',
-        401: 'ai.error',
-        403: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        403: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -404,10 +413,10 @@ export const aiController = new Elysia({ prefix: '/ai' })
       query: 'ai.conversationMessagesQuery',
       response: {
         200: 'ai.conversationMessagesResponse',
-        401: 'ai.error',
-        403: 'ai.error',
-        404: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        403: 'common.error',
+        404: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -466,10 +475,10 @@ export const aiController = new Elysia({ prefix: '/ai' })
       params: 'ai.activityConversationMessageParams',
       response: {
         200: 'ai.activityConversationMessagesResponse',
-        401: 'ai.error',
-        403: 'ai.error',
-        404: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        403: 'common.error',
+        404: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -522,8 +531,8 @@ export const aiController = new Elysia({ prefix: '/ai' })
       body: 'ai.addMessageRequest',
       response: {
         200: 'ai.addMessageResponse',
-        400: 'ai.error',
-        401: 'ai.error',
+        400: 'common.error',
+        401: 'common.error',
       },
     }
   )
@@ -564,8 +573,8 @@ export const aiController = new Elysia({ prefix: '/ai' })
       },
       response: {
         200: 'ai.clearConversationsResponse',
-        401: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -606,8 +615,8 @@ export const aiController = new Elysia({ prefix: '/ai' })
       body: 'ai.contentGenerationRequest',
       response: {
         200: 'ai.contentGenerationResponse',
-        401: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -623,7 +632,7 @@ export const aiController = new Elysia({ prefix: '/ai' })
         } catch (error) {
           if (error instanceof AuthError) {
             set.status = error.status;
-            return { code: error.status, msg: error.message };
+            return { code: error.status, msg: error.message } satisfies ErrorResponse;
           }
         }
       },
@@ -637,7 +646,7 @@ export const aiController = new Elysia({ prefix: '/ai' })
 
           if (!apiKey) {
             set.status = 500;
-            return { code: 500, msg: 'DeepSeek API Key 未配置' };
+            return { code: 500, msg: 'DeepSeek API Key 未配置' } satisfies ErrorResponse;
           }
 
           try {
@@ -651,14 +660,14 @@ export const aiController = new Elysia({ prefix: '/ai' })
 
             if (!response.ok) {
               set.status = response.status;
-              return { code: response.status, msg: '余额查询失败' };
+              return { code: response.status, msg: '余额查询失败' } satisfies ErrorResponse;
             }
 
             const data = await response.json();
             return data;
           } catch (error: any) {
             set.status = 500;
-            return { code: 500, msg: error.message || '余额查询失败' };
+            return { code: 500, msg: error.message || '余额查询失败' } satisfies ErrorResponse;
           }
         },
         {
@@ -677,7 +686,7 @@ export const aiController = new Elysia({ prefix: '/ai' })
                 topped_up_balance: t.String(),
               })),
             }),
-            500: 'ai.error',
+            500: 'common.error',
           },
         }
       )

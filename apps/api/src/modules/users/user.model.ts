@@ -1,5 +1,6 @@
 // User Model - TypeBox schemas (纯 RESTful)
 import { Elysia, t, type Static } from 'elysia';
+import { ErrorResponseSchema, type ErrorResponse } from "../../common/common.model";
 import { selectUserSchema } from '@juchang/db';
 
 /**
@@ -9,14 +10,9 @@ import { selectUserSchema } from '@juchang/db';
 
 // ============ 响应 Schema ============
 
-// 用户响应 (排除敏感字段 wxOpenId)
+// 用户响应 (排除敏感字段)
 export const UserResponseSchema = t.Omit(selectUserSchema, ['wxOpenId']);
 
-// 错误响应
-const ErrorResponse = t.Object({
-  code: t.Number(),
-  msg: t.String(),
-});
 
 // 成功响应
 const SuccessResponse = t.Object({
@@ -51,10 +47,6 @@ export const UserListResponseSchema = t.Object({
 export const UpdateUserRequestSchema = t.Object({
   nickname: t.Optional(t.String({ maxLength: 50, description: '昵称' })),
   avatarUrl: t.Optional(t.String({ maxLength: 500, description: '头像URL' })),
-  workingMemory: t.Optional(t.Union([
-    t.String({ description: '用户画像工作记忆（JSON 字符串）' }),
-    t.Null(),
-  ])),
 });
 
 // ============ 统计 Schema ============
@@ -92,7 +84,7 @@ export const UserGrowthResponseSchema = t.Array(UserGrowthItemSchema);
 export const userModel = new Elysia({ name: 'userModel' })
   .model({
     'user.response': UserResponseSchema,
-    'user.error': ErrorResponse,
+    'common.error': ErrorResponseSchema,
     'user.success': SuccessResponse,
     'user.quotaResponse': QuotaResponse,
     'user.listQuery': UserListQuerySchema,
@@ -106,7 +98,6 @@ export const userModel = new Elysia({ name: 'userModel' })
 // ============ 导出 TS 类型 ============
 
 export type UserResponse = Static<typeof UserResponseSchema>;
-export type ErrorResponse = Static<typeof ErrorResponse>;
 export type SuccessResponse = Static<typeof SuccessResponse>;
 export type QuotaResponse = Static<typeof QuotaResponse>;
 export type UserListQuery = Static<typeof UserListQuerySchema>;

@@ -8,11 +8,11 @@
 
 const CHAT_URL = process.env.GENUI_CHAT_API_URL || 'http://127.0.0.1:1996/ai/chat';
 
-interface TurnEnvelope {
+interface ResponseEnvelope {
   traceId: string;
   conversationId: string;
-  turn: {
-    turnId: string;
+  response: {
+    responseId: string;
     role: 'assistant';
     status: string;
     blocks: Array<{
@@ -23,7 +23,7 @@ interface TurnEnvelope {
   };
 }
 
-async function postChat(input: { type: 'text'; text: string }): Promise<TurnEnvelope> {
+async function postChat(input: { type: 'text'; text: string }): Promise<ResponseEnvelope> {
   const response = await fetch(CHAT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -38,11 +38,11 @@ async function postChat(input: { type: 'text'; text: string }): Promise<TurnEnve
     throw new Error(`HTTP ${response.status}: ${await response.text()}`);
   }
 
-  return response.json() as Promise<TurnEnvelope>;
+  return response.json() as Promise<ResponseEnvelope>;
 }
 
-function getTextContent(envelope: TurnEnvelope): string {
-  const block = envelope.turn.blocks.find((b) => b.type === 'text');
+function getTextContent(envelope: ResponseEnvelope): string {
+  const block = envelope.response.blocks.find((b) => b.type === 'text');
   return block?.content?.trim() ?? '';
 }
 

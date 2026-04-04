@@ -76,7 +76,7 @@ export function buildTemplateVariables(
   contextXml?: string,
   widgetCatalog?: string,
 ): Record<string, string> {
-  const { currentTime, userLocation, userNickname, draftContext, workingMemory } = ctx;
+  const { currentTime, userLocation, userNickname, draftContext, memoryContext } = ctx;
 
   const timeStr = formatDateTime(currentTime);
   const tomorrowStr = getTomorrowStr(currentTime);
@@ -105,7 +105,7 @@ export function buildTemplateVariables(
     tomorrowStr,
     enrichmentXml: contextXml || '',
     widgetCatalog: widgetCatalog || '',
-    workingMemory: workingMemory || '',
+    memoryContext: memoryContext || '',
   };
 }
 
@@ -132,7 +132,7 @@ export function getTemplatePreview(template: string): string {
     userLocation: { lat: 29.5630, lng: 106.5516, name: '观音桥' },
     userNickname: '测试用户',
     draftContext: undefined,
-    workingMemory: '喜欢火锅，不喝酒，周末有空',
+    memoryContext: '喜欢火锅，不喝酒，周末有空',
   };
 
   const catalog = generateWidgetCatalog();

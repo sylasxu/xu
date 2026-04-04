@@ -15,11 +15,8 @@ export interface User {
   phoneNumber: string | null
   nickname: string | null
   avatarUrl: string | null
-  workingMemory?: string | null
   aiCreateQuotaToday: number
   aiQuotaResetAt: string | null
-  participationCount: number
-  activitiesCreatedCount: number
   createdAt: string
   updatedAt: string
 }
@@ -57,7 +54,6 @@ export interface LoginResponse {
 export interface UpdateUserParams {
   nickname?: string
   avatarUrl?: string
-  workingMemory?: string | null
 }
 
 export {}

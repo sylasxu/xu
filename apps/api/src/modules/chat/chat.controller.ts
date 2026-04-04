@@ -1,7 +1,7 @@
 // Chat Controller - 群聊消息接口 (MVP 简化版)
 import { Elysia, t } from 'elysia';
-import { basePlugins, verifyAuth } from '../../setup';
-import { chatModel, ChatMessageResponseSchema, type ErrorResponse } from './chat.model';
+import { basePlugins, verifyAuth, type ErrorResponse } from '../../setup';
+import { chatModel, ChatMessageResponseSchema } from './chat.model';
 import { getChatActivities, getMessages, sendMessage } from './chat.service';
 import { handleWsUpgrade, handleWsMessage, handleWsClose, startHeartbeatChecker } from './chat.ws';
 import { createReport } from '../reports/report.service';
@@ -42,31 +42,10 @@ export const chatController = new Elysia({ prefix: '/chat' })
       const user = await verifyAuth(jwt, headers);
       if (!user) {
         set.status = 401;
-        return {
-          code: 401,
-          msg: '未授权',
-        } satisfies ErrorResponse;
+        return { code: 401, msg: '未授权' } satisfies ErrorResponse;
       }
 
-      const { userId } = query;
-      if (!userId) {
-        set.status = 400;
-        return {
-          code: 400,
-          msg: '缺少 userId 参数',
-        } satisfies ErrorResponse;
-      }
-
-      if (user.role !== 'admin' && user.id !== userId) {
-        set.status = 403;
-        return {
-          code: 403,
-          msg: '无权限访问该用户群聊',
-        } satisfies ErrorResponse;
-      }
-
-      const result = await getChatActivities(userId, query);
-      return result;
+      return await getChatActivities(query.userId, query);
     },
     {
       detail: {
@@ -77,9 +56,9 @@ export const chatController = new Elysia({ prefix: '/chat' })
       query: 'chat.activitiesQuery',
       response: {
         200: 'chat.activitiesResponse',
-        400: 'chat.error',
-        401: 'chat.error',
-        403: 'chat.error',
+        400: 'common.error',
+        401: 'common.error',
+        403: 'common.error',
       },
     }
   )
@@ -91,10 +70,7 @@ export const chatController = new Elysia({ prefix: '/chat' })
       const user = await verifyAuth(jwt, headers);
       if (!user) {
         set.status = 401;
-        return {
-          code: 401,
-          msg: '未授权',
-        } satisfies ErrorResponse;
+        return { code: 401, msg: '未授权' } satisfies ErrorResponse;
       }
 
       try {
@@ -121,8 +97,8 @@ export const chatController = new Elysia({ prefix: '/chat' })
           messages: t.Array(ChatMessageResponseSchema),
           isArchived: t.Boolean({ description: '群聊是否已归档' }),
         }),
-        400: 'chat.error',
-        401: 'chat.error',
+        400: 'common.error',
+        401: 'common.error',
       },
     }
   )
@@ -134,10 +110,7 @@ export const chatController = new Elysia({ prefix: '/chat' })
       const user = await verifyAuth(jwt, headers);
       if (!user) {
         set.status = 401;
-        return {
-          code: 401,
-          msg: '未授权',
-        } satisfies ErrorResponse;
+        return { code: 401, msg: '未授权' } satisfies ErrorResponse;
       }
 
       try {
@@ -164,8 +137,8 @@ export const chatController = new Elysia({ prefix: '/chat' })
       body: 'chat.sendMessageRequest',
       response: {
         200: 'chat.sendMessageResponse',
-        400: 'chat.error',
-        401: 'chat.error',
+        400: 'common.error',
+        401: 'common.error',
       },
     }
   )
@@ -177,10 +150,7 @@ export const chatController = new Elysia({ prefix: '/chat' })
       const user = await verifyAuth(jwt, headers);
       if (!user) {
         set.status = 401;
-        return {
-          code: 401,
-          msg: '未授权',
-        } satisfies ErrorResponse;
+        return { code: 401, msg: '未授权' } satisfies ErrorResponse;
       }
 
       try {
@@ -216,19 +186,21 @@ export const chatController = new Elysia({ prefix: '/chat' })
       body: 'chat.reportMessageRequest',
       response: {
         200: t.Object({ msg: t.String() }),
-        400: 'chat.error',
-        401: 'chat.error',
+        400: 'common.error',
+        401: 'common.error',
       },
     }
   )
 
-  // WebSocket 实时通讯
+  // ==========================================
+  // WebSocket 实时通讯（独立认证）
+  // ==========================================
   .ws('/:activityId/ws', {
     body: t.String(),
     query: t.Object({
       token: t.String({ description: 'JWT Token' }),
     }),
-    
+
     async open(ws) {
       const payload = readSocketOpenPayload(ws.data);
 

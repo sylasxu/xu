@@ -25,7 +25,7 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
     } catch (error) {
       if (error instanceof AuthError) {
         set.status = error.status;
-        return { code: error.status, msg: error.message };
+        return { code: error.status, msg: error.message } satisfies ErrorResponse;
       }
     }
   })
@@ -52,8 +52,8 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
       },
       response: {
         200: 'ai.securityOverviewResponse',
-        401: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -77,7 +77,7 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
       },
       response: {
         200: 'ai.sensitiveWordsResponse',
-        401: 'ai.error',
+        401: 'common.error',
       },
     }
   )
@@ -104,8 +104,8 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
       }),
       response: {
         200: 'ai.sensitiveWordOpResponse',
-        400: 'ai.error',
-        401: 'ai.error',
+        400: 'common.error',
+        401: 'common.error',
       },
     }
   )
@@ -132,8 +132,8 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
       }),
       response: {
         200: 'ai.sensitiveWordOpResponse',
-        401: 'ai.error',
-        404: 'ai.error',
+        401: 'common.error',
+        404: 'common.error',
       },
     }
   )
@@ -156,7 +156,7 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
       }),
       response: {
         200: 'ai.sensitiveWordsImportResponse',
-        401: 'ai.error',
+        401: 'common.error',
       },
     }
   )
@@ -189,8 +189,8 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
       }),
       response: {
         200: 'ai.moderationQueueResponse',
-        401: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -218,8 +218,8 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
       }),
       response: {
         200: 'ai.moderationOpResponse',
-        401: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -247,8 +247,8 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
       }),
       response: {
         200: 'ai.moderationOpResponse',
-        401: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -276,8 +276,8 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
       }),
       response: {
         200: 'ai.moderationOpResponse',
-        401: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -304,8 +304,8 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
       },
       response: {
         200: 'ai.violationStatsResponse',
-        401: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        500: 'common.error',
       },
     }
   );

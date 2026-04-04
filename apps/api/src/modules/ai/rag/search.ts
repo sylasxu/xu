@@ -219,7 +219,7 @@ export async function search(params: HybridSearchParams): Promise<ScoredActivity
   });
 
   // 1. 生成查询向量（带重试）
-  const queryVector = await generateEmbeddingWithRetry(semanticQuery);
+  const queryVector = await generateEmbeddingWithRetry(semanticQuery, { textType: 'query' });
 
   // 2. 如果向量生成失败，降级到 location-only 搜索
   if (!queryVector) {

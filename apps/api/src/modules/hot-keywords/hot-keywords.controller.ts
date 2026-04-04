@@ -1,7 +1,8 @@
 // Hot Keywords Controller - 热词相关接口 (v4.8 Digital Ascension)
 import { Elysia } from 'elysia';
 import { basePlugins, verifyAdmin, AuthError } from '../../setup';
-import { hotKeywordsModel, type ErrorResponse } from './hot-keywords.model';
+import { hotKeywordsModel } from './hot-keywords.model';
+import { type ErrorResponse } from '../../common/common.model';
 import {
   getActiveHotKeywords,
   createKeyword,
@@ -55,9 +56,9 @@ export const hotKeywordsController = new Elysia({ prefix: '/hot-keywords' })
       query: 'hotKeywords.query',
       response: {
         200: 'hotKeywords.listResponse',
-        401: 'hotKeywords.error',
-        403: 'hotKeywords.error',
-        500: 'hotKeywords.error',
+        401: 'common.error',
+        403: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -70,7 +71,7 @@ export const hotKeywordsController = new Elysia({ prefix: '/hot-keywords' })
         } catch (error) {
           if (error instanceof AuthError) {
             set.status = error.status;
-            return { code: error.status, msg: error.message };
+            return { code: error.status, msg: error.message } satisfies ErrorResponse;
           }
         }
       },
@@ -101,9 +102,9 @@ export const hotKeywordsController = new Elysia({ prefix: '/hot-keywords' })
             body: 'hotKeywords.createRequest',
             response: {
               200: 'hotKeywords.createResponse',
-              400: 'hotKeywords.error',
-              401: 'hotKeywords.error',
-              403: 'hotKeywords.error',
+              400: 'common.error',
+              401: 'common.error',
+              403: 'common.error',
             },
           }
         )
@@ -132,9 +133,9 @@ export const hotKeywordsController = new Elysia({ prefix: '/hot-keywords' })
             body: 'hotKeywords.updateRequest',
             response: {
               200: 'hotKeywords.updateResponse',
-              400: 'hotKeywords.error',
-              401: 'hotKeywords.error',
-              403: 'hotKeywords.error',
+              400: 'common.error',
+              401: 'common.error',
+              403: 'common.error',
             },
           }
         )
@@ -162,9 +163,9 @@ export const hotKeywordsController = new Elysia({ prefix: '/hot-keywords' })
             params: 'hotKeywords.idParams',
             response: {
               200: 'hotKeywords.deleteResponse',
-              400: 'hotKeywords.error',
-              401: 'hotKeywords.error',
-              403: 'hotKeywords.error',
+              400: 'common.error',
+              401: 'common.error',
+              403: 'common.error',
             },
           }
         )
@@ -192,9 +193,9 @@ export const hotKeywordsController = new Elysia({ prefix: '/hot-keywords' })
             query: 'hotKeywords.analyticsQuery',
             response: {
               200: 'hotKeywords.analyticsResponse',
-              401: 'hotKeywords.error',
-              403: 'hotKeywords.error',
-              500: 'hotKeywords.error',
+              401: 'common.error',
+              403: 'common.error',
+              500: 'common.error',
             },
           }
         )

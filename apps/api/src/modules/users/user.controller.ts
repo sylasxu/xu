@@ -1,14 +1,14 @@
 // User Controller - 用户管理接口 (纯 RESTful)
 import { Elysia, t } from 'elysia';
 import { basePlugins, verifyAdmin, verifySelfOrAdmin, AuthError } from '../../setup';
-import { 
-  userModel, 
+import {
+  userModel,
   UserResponseSchema,
   UserListResponseSchema,
   UserOverviewStatsSchema,
   UserGrowthResponseSchema,
-  type ErrorResponse 
 } from './user.model';
+import { type ErrorResponse } from '../../common/common.model';
 import { 
   getUserById, 
   getUserList, 
@@ -34,10 +34,10 @@ export const userController = new Elysia({ prefix: '/users' })
       } catch (error) {
         if (error instanceof AuthError) {
           set.status = error.status;
-          return { code: error.status, msg: error.message };
+          return { code: error.status, msg: error.message } satisfies ErrorResponse;
         }
         set.status = 500;
-        return { code: 500, msg: '鉴权失败' };
+        return { code: 500, msg: '鉴权失败' } satisfies ErrorResponse;
       }
       return await getUserStats(query);
     },
@@ -50,9 +50,9 @@ export const userController = new Elysia({ prefix: '/users' })
       query: 'user.statsQuery',
       response: {
         200: t.Union([UserOverviewStatsSchema, UserGrowthResponseSchema]),
-        401: 'user.error',
-        403: 'user.error',
-        500: 'user.error',
+        401: 'common.error',
+        403: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -66,10 +66,10 @@ export const userController = new Elysia({ prefix: '/users' })
       } catch (error) {
         if (error instanceof AuthError) {
           set.status = error.status;
-          return { code: error.status, msg: error.message };
+          return { code: error.status, msg: error.message } satisfies ErrorResponse;
         }
         set.status = 500;
-        return { code: 500, msg: '鉴权失败' };
+        return { code: 500, msg: '鉴权失败' } satisfies ErrorResponse;
       }
       return await getUserList(query);
     },
@@ -82,9 +82,9 @@ export const userController = new Elysia({ prefix: '/users' })
       query: 'user.listQuery',
       response: {
         200: UserListResponseSchema,
-        401: 'user.error',
-        403: 'user.error',
-        500: 'user.error',
+        401: 'common.error',
+        403: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -119,10 +119,10 @@ export const userController = new Elysia({ prefix: '/users' })
       },
       response: {
         200: UserResponseSchema,
-        401: 'user.error',
-        403: 'user.error',
-        404: 'user.error',
-        500: 'user.error',
+        401: 'common.error',
+        403: 'common.error',
+        404: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -158,9 +158,9 @@ export const userController = new Elysia({ prefix: '/users' })
       body: 'user.updateRequest',
       response: {
         200: UserResponseSchema,
-        401: 'user.error',
-        403: 'user.error',
-        404: 'user.error',
+        401: 'common.error',
+        403: 'common.error',
+        404: 'common.error',
       },
     }
   )
@@ -195,10 +195,10 @@ export const userController = new Elysia({ prefix: '/users' })
       },
       response: {
         200: 'user.success',
-        401: 'user.error',
-        403: 'user.error',
-        404: 'user.error',
-        500: 'user.error',
+        401: 'common.error',
+        403: 'common.error',
+        404: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -233,10 +233,10 @@ export const userController = new Elysia({ prefix: '/users' })
       },
       response: {
         200: 'user.quotaResponse',
-        401: 'user.error',
-        403: 'user.error',
-        404: 'user.error',
-        500: 'user.error',
+        401: 'common.error',
+        403: 'common.error',
+        404: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -278,10 +278,10 @@ export const userController = new Elysia({ prefix: '/users' })
           msg: t.String(),
           quota: t.Number(),
         }),
-        401: 'user.error',
-        403: 'user.error',
-        404: 'user.error',
-        500: 'user.error',
+        401: 'common.error',
+        403: 'common.error',
+        404: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -320,9 +320,9 @@ export const userController = new Elysia({ prefix: '/users' })
           msg: t.String(),
           count: t.Number(),
         }),
-        401: 'user.error',
-        403: 'user.error',
-        500: 'user.error',
+        401: 'common.error',
+        403: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -395,7 +395,7 @@ export const userController = new Elysia({ prefix: '/users' })
           })),
           lastAnalyzedAt: t.String(),
         }),
-        404: 'user.error',
+        404: 'common.error',
       },
     }
   );

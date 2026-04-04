@@ -1,7 +1,7 @@
 /**
  * Extract Preferences Processor
  *
- * 负责从最近几轮用户对话里提取可复用的画像线索，并写回 workingMemory：
+ * 负责从最近几轮用户对话里提取可复用的画像线索，并写入长期记忆：
  * - 偏好
  * - 常去地点
  * - 身份线索
@@ -12,7 +12,7 @@
 
 import type { ProcessorContext, ProcessorResult } from './types';
 import { extractPreferencesFromConversation } from '../memory/extractor';
-import { updateEnhancedUserProfile } from '../memory/working';
+import { persistExtractedUserMemories } from '../memory/user-memories';
 import { hasPreferenceSignal } from '../memory/preference-signal';
 
 function normalizeConversationMessages(messages: ProcessorContext['messages']): Array<{ role: string; content: string }> {
@@ -70,7 +70,7 @@ export async function extractPreferencesProcessor(context: ProcessorContext): Pr
       };
     }
 
-    await updateEnhancedUserProfile(userId, extraction);
+    await persistExtractedUserMemories(userId, extraction);
 
     return {
       success: true,

@@ -132,7 +132,7 @@ function buildFollowUpRequest(activityId: string): GenUIRequest {
     context: {
       client: 'miniprogram',
       activityId,
-      followUpMode: 'review',
+      activityMode: 'review',
       entry: 'message_center_post_activity',
     },
   };
@@ -554,7 +554,7 @@ describe('Agent Task Runtime Integration', () => {
     expect(tasks[0]?.currentStage).toBe('post_activity');
     expect(tasks[0]?.slotSummary).toMatchObject({
       activityId,
-      followUpMode: 'review',
+      activityMode: 'review',
       entry: 'message_center_post_activity',
     });
     expect(events.filter((event) => event.eventType === 'stage_changed')).toHaveLength(1);
@@ -604,7 +604,7 @@ describe('Agent Task Runtime Integration', () => {
       latestConversationId: conversationId,
       slotSummary: {
         activityId,
-        followUpMode: 'review',
+        activityMode: 'review',
         entry: 'message_center_post_activity',
       },
     });

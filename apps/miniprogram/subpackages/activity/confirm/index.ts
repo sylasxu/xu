@@ -329,7 +329,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     const prompt = this.buildRebookPrompt(attendedCount, noShowCount);
     useChatStore.getState().sendMessage(prompt, {
       ...(activityId ? { activityId } : {}),
-      followUpMode: 'rebook',
+      activityMode: 'rebook',
       entry: 'confirm_fulfillment',
     });
     wx.switchTab({ url: '/pages/home/index' });

@@ -1,13 +1,13 @@
 import type {
   GenUIBlock,
   GenUIChoiceOption,
-  GenUITurnChoiceContext,
-  GenUITurnChoiceContextOption,
-  GenUITurnContext,
-  GenUITurnCtaContext,
-  GenUITurnCtaContextItem,
-  GenUITurnListContext,
-  GenUITurnListContextItem,
+  GenUIChoiceSuggestions,
+  GenUISuggestionChoiceOption,
+  GenUISuggestions,
+  GenUICtaSuggestions,
+  GenUISuggestionCtaItem,
+  GenUIListSuggestions,
+  GenUISuggestionListItem,
 } from '@juchang/genui-contract';
 import { isStructuredActionType, type StructuredAction } from './user-action';
 
@@ -15,8 +15,8 @@ type ChoiceBlock = Extract<GenUIBlock, { type: 'choice' }>;
 type ListBlock = Extract<GenUIBlock, { type: 'list' }>;
 type CtaGroupBlock = Extract<GenUIBlock, { type: 'cta-group' }>;
 
-export interface TurnContextResolution {
-  contextKind: GenUITurnContext['kind'];
+export interface SuggestionResolution {
+  contextKind: GenUISuggestions['kind'];
   matchedBy: 'label' | 'value' | 'ordinal' | 'title' | 'alias' | 'default';
   matchedText: string;
   structuredAction: StructuredAction;
@@ -100,7 +100,7 @@ function readChoiceOptionValue(option: GenUIChoiceOption): string {
   );
 }
 
-function normalizeChoiceContextOptions(options: unknown[]): GenUITurnChoiceContextOption[] {
+function normalizeChoiceContextOptions(options: unknown[]): GenUISuggestionChoiceOption[] {
   return options
     .map((option) => {
       if (!isRecord(option)) {
@@ -123,11 +123,11 @@ function normalizeChoiceContextOptions(options: unknown[]): GenUITurnChoiceConte
         ...(value ? { value } : {}),
       };
     })
-    .filter((item): item is GenUITurnChoiceContextOption => Boolean(item))
+    .filter((item): item is GenUISuggestionChoiceOption => Boolean(item))
     .slice(0, 12);
 }
 
-function normalizeListContextItems(items: unknown[]): GenUITurnListContextItem[] {
+function normalizeListContextItems(items: unknown[]): GenUISuggestionListItem[] {
   return items
     .map((item) => {
       if (!isRecord(item)) {
@@ -152,11 +152,11 @@ function normalizeListContextItems(items: unknown[]): GenUITurnListContextItem[]
         ...(aliases.length > 0 ? { aliases } : {}),
       };
     })
-    .filter((item): item is GenUITurnListContextItem => Boolean(item))
+    .filter((item): item is GenUISuggestionListItem => Boolean(item))
     .slice(0, 12);
 }
 
-function normalizeCtaContextItems(items: unknown[]): GenUITurnCtaContextItem[] {
+function normalizeCtaContextItems(items: unknown[]): GenUISuggestionCtaItem[] {
   return items
     .map((item) => {
       if (!isRecord(item)) {
@@ -177,11 +177,11 @@ function normalizeCtaContextItems(items: unknown[]): GenUITurnCtaContextItem[] {
         ...(params ? { params } : {}),
       };
     })
-    .filter((item): item is GenUITurnCtaContextItem => Boolean(item))
+    .filter((item): item is GenUISuggestionCtaItem => Boolean(item))
     .slice(0, 12);
 }
 
-function parseTurnContext(value: unknown): GenUITurnContext | undefined {
+function parseSuggestions(value: unknown): GenUISuggestions | undefined {
   if (!isRecord(value) || typeof value.kind !== 'string') {
     return undefined;
   }
@@ -306,7 +306,7 @@ function buildListItemAliases(item: Record<string, unknown>, title: string): str
   ]).slice(0, 8);
 }
 
-function buildChoiceTurnContext(block: ChoiceBlock): GenUITurnChoiceContext | undefined {
+function buildChoiceSuggestions(block: ChoiceBlock): GenUIChoiceSuggestions | undefined {
   const options = block.options
     .map((option) => {
       const label = toStringValue(option.label);
@@ -325,7 +325,7 @@ function buildChoiceTurnContext(block: ChoiceBlock): GenUITurnChoiceContext | un
         ...(value ? { value } : {}),
       };
     })
-    .filter((item): item is GenUITurnChoiceContextOption => Boolean(item))
+    .filter((item): item is GenUISuggestionChoiceOption => Boolean(item))
     .slice(0, 12);
 
   if (options.length === 0) {
@@ -339,8 +339,8 @@ function buildChoiceTurnContext(block: ChoiceBlock): GenUITurnChoiceContext | un
   };
 }
 
-function buildListTurnContext(block: ListBlock): GenUITurnListContext | undefined {
-  const items: GenUITurnListContextItem[] = [];
+function buildListSuggestions(block: ListBlock): GenUIListSuggestions | undefined {
+  const items: GenUISuggestionListItem[] = [];
 
   for (const item of block.items) {
     if (!isRecord(item)) {
@@ -391,7 +391,7 @@ function buildListTurnContext(block: ListBlock): GenUITurnListContext | undefine
   };
 }
 
-function buildCtaGroupTurnContext(block: CtaGroupBlock): GenUITurnCtaContext | undefined {
+function buildCtaGroupSuggestions(block: CtaGroupBlock): GenUICtaSuggestions | undefined {
   const items = block.items
     .map((item) => {
       const label = toStringValue(item.label);
@@ -408,7 +408,7 @@ function buildCtaGroupTurnContext(block: CtaGroupBlock): GenUITurnCtaContext | u
         ...(params ? { params } : {}),
       };
     })
-    .filter((item): item is GenUITurnCtaContextItem => Boolean(item))
+    .filter((item): item is GenUISuggestionCtaItem => Boolean(item))
     .slice(0, 12);
 
   if (items.length === 0) {
@@ -421,7 +421,7 @@ function buildCtaGroupTurnContext(block: CtaGroupBlock): GenUITurnCtaContext | u
   };
 }
 
-function createStructuredActionFromTurnContext(params: {
+function createStructuredActionFromSuggestions(params: {
   action: string;
   rawParams?: Record<string, unknown>;
   inputText: string;
@@ -513,12 +513,12 @@ function resolveOrdinalIndex(inputText: string, count: number): number | null {
 
 function resolveChoiceContinuation(
   inputText: string,
-  context: GenUITurnChoiceContext
-): TurnContextResolution | undefined {
+  context: GenUIChoiceSuggestions
+): SuggestionResolution | undefined {
   const ordinalIndex = resolveOrdinalIndex(inputText, context.options.length);
   if (ordinalIndex !== null) {
     const matched = context.options[ordinalIndex];
-    const structuredAction = createStructuredActionFromTurnContext({
+    const structuredAction = createStructuredActionFromSuggestions({
       action: matched.action,
       rawParams: matched.params,
       inputText,
@@ -536,7 +536,7 @@ function resolveChoiceContinuation(
 
   for (const option of context.options) {
     if (isSameOrIncludedMatch(inputText, option.label)) {
-      const structuredAction = createStructuredActionFromTurnContext({
+      const structuredAction = createStructuredActionFromSuggestions({
         action: option.action,
         rawParams: option.params,
         inputText,
@@ -553,7 +553,7 @@ function resolveChoiceContinuation(
     }
 
     if (option.value && isSameOrIncludedMatch(inputText, option.value)) {
-      const structuredAction = createStructuredActionFromTurnContext({
+      const structuredAction = createStructuredActionFromSuggestions({
         action: option.action,
         rawParams: option.params,
         inputText,
@@ -575,12 +575,12 @@ function resolveChoiceContinuation(
 
 function resolveListContinuation(
   inputText: string,
-  context: GenUITurnListContext
-): TurnContextResolution | undefined {
+  context: GenUIListSuggestions
+): SuggestionResolution | undefined {
   const ordinalIndex = resolveOrdinalIndex(inputText, context.items.length);
   if (ordinalIndex !== null) {
     const matched = context.items[ordinalIndex];
-    const structuredAction = createStructuredActionFromTurnContext({
+    const structuredAction = createStructuredActionFromSuggestions({
       action: matched.action,
       rawParams: matched.params,
       inputText,
@@ -598,7 +598,7 @@ function resolveListContinuation(
 
   for (const item of context.items) {
     if (isSameOrIncludedMatch(inputText, item.title)) {
-      const structuredAction = createStructuredActionFromTurnContext({
+      const structuredAction = createStructuredActionFromSuggestions({
         action: item.action,
         rawParams: item.params,
         inputText,
@@ -619,7 +619,7 @@ function resolveListContinuation(
         continue;
       }
 
-      const structuredAction = createStructuredActionFromTurnContext({
+      const structuredAction = createStructuredActionFromSuggestions({
         action: item.action,
         rawParams: item.params,
         inputText,
@@ -638,7 +638,7 @@ function resolveListContinuation(
 
   if (context.items.length > 0 && LIST_DEFAULT_PATTERN.test(inputText.trim())) {
     const firstItem = context.items[0];
-    const structuredAction = createStructuredActionFromTurnContext({
+    const structuredAction = createStructuredActionFromSuggestions({
       action: firstItem.action,
       rawParams: firstItem.params,
       inputText,
@@ -659,12 +659,12 @@ function resolveListContinuation(
 
 function resolveCtaContinuation(
   inputText: string,
-  context: GenUITurnCtaContext
-): TurnContextResolution | undefined {
+  context: GenUICtaSuggestions
+): SuggestionResolution | undefined {
   const ordinalIndex = resolveOrdinalIndex(inputText, context.items.length);
   if (ordinalIndex !== null) {
     const matched = context.items[ordinalIndex];
-    const structuredAction = createStructuredActionFromTurnContext({
+    const structuredAction = createStructuredActionFromSuggestions({
       action: matched.action,
       rawParams: matched.params,
       inputText,
@@ -685,7 +685,7 @@ function resolveCtaContinuation(
       continue;
     }
 
-    const structuredAction = createStructuredActionFromTurnContext({
+    const structuredAction = createStructuredActionFromSuggestions({
       action: item.action,
       rawParams: item.params,
       inputText,
@@ -703,7 +703,7 @@ function resolveCtaContinuation(
 
   if (context.items.length > 0 && CTA_DEFAULT_PATTERN.test(inputText.trim())) {
     const firstItem = context.items[0];
-    const structuredAction = createStructuredActionFromTurnContext({
+    const structuredAction = createStructuredActionFromSuggestions({
       action: firstItem.action,
       rawParams: firstItem.params,
       inputText,
@@ -722,10 +722,10 @@ function resolveCtaContinuation(
   return undefined;
 }
 
-export function buildTurnContextFromBlocks(blocks: GenUIBlock[]): GenUITurnContext | undefined {
+export function buildSuggestionsFromBlocks(blocks: GenUIBlock[]): GenUISuggestions | undefined {
   for (const block of blocks) {
     if (block.type === 'choice') {
-      const context = buildChoiceTurnContext(block);
+      const context = buildChoiceSuggestions(block);
       if (context) {
         return context;
       }
@@ -733,7 +733,7 @@ export function buildTurnContextFromBlocks(blocks: GenUIBlock[]): GenUITurnConte
     }
 
     if (block.type === 'list') {
-      const context = buildListTurnContext(block);
+      const context = buildListSuggestions(block);
       if (context) {
         return context;
       }
@@ -741,7 +741,7 @@ export function buildTurnContextFromBlocks(blocks: GenUIBlock[]): GenUITurnConte
     }
 
     if (block.type === 'cta-group') {
-      const context = buildCtaGroupTurnContext(block);
+      const context = buildCtaGroupSuggestions(block);
       if (context) {
         return context;
       }
@@ -751,26 +751,26 @@ export function buildTurnContextFromBlocks(blocks: GenUIBlock[]): GenUITurnConte
   return undefined;
 }
 
-export function readTurnContextFromStoredMessage(content: unknown): GenUITurnContext | undefined {
+export function readSuggestionsFromStoredMessage(content: unknown): GenUISuggestions | undefined {
   if (!isRecord(content)) {
     return undefined;
   }
 
-  const turnRecord = isRecord(content.turn) ? content.turn : null;
-  if (turnRecord) {
-    const nestedTurnContext = parseTurnContext(turnRecord.turnContext);
-    if (nestedTurnContext) {
-      return nestedTurnContext;
+  const responseRecord = isRecord(content.response) ? content.response : null;
+  if (responseRecord) {
+    const nestedSuggestions = parseSuggestions(responseRecord.suggestions);
+    if (nestedSuggestions) {
+      return nestedSuggestions;
     }
   }
 
-  const storedTurnContext = parseTurnContext(content.turnContext);
-  if (storedTurnContext) {
-    return storedTurnContext;
+  const storedSuggestions = parseSuggestions(content.suggestions);
+  if (storedSuggestions) {
+    return storedSuggestions;
   }
 
-  const rawBlocks = Array.isArray(turnRecord?.blocks)
-    ? turnRecord.blocks
+  const rawBlocks = Array.isArray(responseRecord?.blocks)
+    ? responseRecord.blocks
     : Array.isArray(content.blocks)
       ? content.blocks
       : [];
@@ -785,25 +785,25 @@ export function readTurnContextFromStoredMessage(content: unknown): GenUITurnCon
     }
   }
 
-  return buildTurnContextFromBlocks(parsedBlocks);
+  return buildSuggestionsFromBlocks(parsedBlocks);
 }
 
-export function resolveContinuationFromTurnContext(
+export function resolveContinuationFromSuggestions(
   inputText: string,
-  turnContext: GenUITurnContext | null | undefined
-): TurnContextResolution | undefined {
+  suggestions: GenUISuggestions | null | undefined
+): SuggestionResolution | undefined {
   const normalizedText = inputText.trim();
-  if (!normalizedText || !turnContext) {
+  if (!normalizedText || !suggestions) {
     return undefined;
   }
 
-  if (turnContext.kind === 'choice') {
-    return resolveChoiceContinuation(normalizedText, turnContext);
+  if (suggestions.kind === 'choice') {
+    return resolveChoiceContinuation(normalizedText, suggestions);
   }
 
-  if (turnContext.kind === 'list') {
-    return resolveListContinuation(normalizedText, turnContext);
+  if (suggestions.kind === 'list') {
+    return resolveListContinuation(normalizedText, suggestions);
   }
 
-  return resolveCtaContinuation(normalizedText, turnContext);
+  return resolveCtaContinuation(normalizedText, suggestions);
 }

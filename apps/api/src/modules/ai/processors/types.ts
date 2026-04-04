@@ -72,7 +72,7 @@ export interface ProcessorMetadata {
     resultsCount: number;
     avgSimilarity: number;
     rerankApplied: boolean;
-    sources: ('conversations' | 'activities')[];
+    sources: ('conversations' | 'activities' | 'user_memories')[];
   };
 
   /** 对话历史摘要 */

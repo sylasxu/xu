@@ -10,28 +10,42 @@
  * - models/ - 模型路由
  */
 
-import { db, users, conversations, conversationMessages, activities, participants, eq, desc, sql, inArray, and, or, gt, lt } from '@juchang/db';
 import {
-  createUIMessageStream,
-  createUIMessageStreamResponse,
+  db,
+  users,
+  conversations,
+  conversationMessages,
+  activities,
+  participants,
+  eq,
+  desc,
+  sql,
+  inArray,
+  and,
+  or,
+  gt,
+  lt,
+} from '@juchang/db';
+import {
   convertToModelMessages,
   stepCountIs,
   hasToolCall,
   type LanguageModelUsage,
   type UIMessage,
-  type UIMessageStreamWriter,
 } from 'ai';
 import { randomUUID } from 'crypto';
 import type { ProcessorLogEntry } from '@juchang/db';
-import type { GenUIBlock, GenUITurnContext } from '@juchang/genui-contract';
+import type { GenUIBlock, GenUITracePayload, GenUISuggestions } from '@juchang/genui-contract';
 
 // 新架构模块
 import { type ClassifyResult } from './intent';
 import { getOrCreateThread, saveMessage, clearUserThreads, deleteThread } from './memory';
-import { resolveToolsForIntent, getToolWidgetType, getToolDisplayName } from './tools';
+import { getConversationMessageExpiresAt, refreshMessageEmbedding } from './memory/store';
+import { resolveToolsForIntent } from './tools';
 import { getSystemPrompt, type PromptContext, type ActivityDraftForPrompt } from './prompts';
-import { resolveChatModelSelection } from './models/router';
-import { runObject, runStream } from './models/runtime';
+import { getFallbackConfig, resolveChatModelSelection, resolveFallbackChatModelSelection } from './models/router';
+import { runObject, runText } from './models/runtime';
+import { generateText } from 'ai';
 // Guardrails
 import { checkRateLimit } from './guardrails/rate-limiter';
 // 辅助函数（从独立模块导入）
@@ -78,7 +92,7 @@ import {
 } from './workflow/partner-matching';
 // Structured Action：结构化动作可直接映射为 UI 响应
 import { handleStructuredAction, type StructuredAction } from './user-action';
-import { buildTurnContextFromBlocks } from './turn-context';
+import { buildSuggestionsFromBlocks } from './suggestions';
 import { getConfigValue } from './config/config.service';
 import { buildNextBestActions, type NextBestActionItem } from './next-best-action.service';
 import { resolveConversationTaskId } from './task-runtime/agent-task.service';
@@ -175,15 +189,17 @@ export interface ChatRequest {
   rateLimitUserId?: string | null;
   conversationId?: string;
   location?: [number, number];
-  source: 'miniprogram' | 'admin';
+  source: 'web' | 'miniprogram' | 'admin';
   draftContext?: { activityId: string; currentDraft: ActivityDraftForPrompt };
   trace?: boolean;
   ai?: { model?: string; temperature?: number; maxTokens?: number };
   abortSignal?: AbortSignal;
   /** 结构化动作：跳过 LLM 意图识别直接执行 */
   structuredAction?: StructuredAction;
-  /** v5.4: 最近一次 Assistant Turn 的上下文，用于无登录状态下感知已收集的偏好 */
-  latestAssistantTurnContext?: GenUITurnContext;
+  /** v5.4: 最近一次 Assistant 回复携带的 follow-up，用于无登录状态下继续承接上下文 */
+  latestAssistantSuggestions?: GenUISuggestions;
+  /** 更早历史的压缩摘要，避免直接发送全量消息 */
+  conversationSummary?: string;
 }
 
 export interface TraceStep {
@@ -191,11 +207,37 @@ export interface TraceStep {
   toolCallId: string;
   args: unknown;
   result?: unknown;
+  errorText?: string;
+}
+
+export type ChatExecutionPath = 'llm_orchestrated' | 'structured_action';
+
+export interface ChatBlockPayload {
+  widgetType: string;
+  payload: unknown;
+}
+
+export interface ChatActionResult {
+  success: boolean;
+  error?: string;
+  nextActions?: Array<{
+    label: string;
+    action: string;
+    params?: Record<string, unknown>;
+  }>;
+}
+
+export interface ChatExecutionResult {
+  assistantText: string;
+  executionPath: ChatExecutionPath;
+  toolCallRecords: TraceStep[];
+  blockPayloads: ChatBlockPayload[];
+  actionResults: ChatActionResult[];
+  traces: GenUITracePayload[];
 }
 
 type ChatMessage = ChatRequest['messages'][number];
 type ChatMessagePart = NonNullable<ChatMessage['parts']>[number];
-type AIStreamWriter = UIMessageStreamWriter<UIMessage>;
 const CONVERSATION_MESSAGE_TYPES = new Set<string>([
   'text',
   'user_action',
@@ -252,14 +294,6 @@ function toTextUIMessageParts(message: ChatMessage): UIMessage['parts'] {
   return text ? [{ type: 'text', text }] : [];
 }
 
-function getToolStepPhase(step: { stepNumber: number; toolResults: unknown[] }): 'initial' | 'continue' | 'tool-result' {
-  if (step.stepNumber === 0) {
-    return 'initial';
-  }
-
-  return step.toolResults.length > 0 ? 'tool-result' : 'continue';
-}
-
 function getActivityIdFromValue(value: unknown): string | undefined {
   const record = asRecord(value);
   return typeof record?.activityId === 'string' ? record.activityId : undefined;
@@ -298,13 +332,6 @@ function getTokenLimitSnapshot(data: unknown): {
     originalLength,
     finalLength,
   };
-}
-
-function writeWidgetEvent(writer: AIStreamWriter, data: Record<string, unknown>): void {
-  writer.write({
-    type: 'data-widget',
-    data,
-  });
 }
 
 function shouldEmitExploreWidgetPayload(payload: unknown): boolean {
@@ -526,67 +553,6 @@ function buildStructuredActionReplyText(params: {
   return trimmedDefaultMessage;
 }
 
-function splitTextForStream(text: string): string[] {
-  const normalized = text.trim();
-  if (!normalized) {
-    return [];
-  }
-
-  const punctuationChunks = normalized
-    .split(/(?<=[，。！？；])/u)
-    .map((chunk) => chunk.trim())
-    .filter(Boolean);
-
-  if (punctuationChunks.length > 1) {
-    return punctuationChunks;
-  }
-
-  const chunks: string[] = [];
-  for (let index = 0; index < normalized.length; index += 8) {
-    chunks.push(normalized.slice(index, index + 8));
-  }
-  return chunks;
-}
-
-async function streamTextDelta(writer: AIStreamWriter, text: string): Promise<void> {
-  const chunks = splitTextForStream(text);
-  for (let index = 0; index < chunks.length; index += 1) {
-    writer.write({
-      type: 'text-delta',
-      delta: chunks[index],
-      id: randomUUID(),
-    });
-
-    if (index < chunks.length - 1) {
-      await new Promise((resolve) => setTimeout(resolve, 16));
-    }
-  }
-}
-
-function writeTraceStartEvent(writer: AIStreamWriter, data: Record<string, unknown>): void {
-  writer.write({
-    type: 'data-trace-start',
-    data,
-    transient: true,
-  });
-}
-
-function writeTraceStepEvent(writer: AIStreamWriter, data: Record<string, unknown>): void {
-  writer.write({
-    type: 'data-trace-step',
-    data,
-    transient: true,
-  });
-}
-
-function writeTraceEndEvent(writer: AIStreamWriter, data: Record<string, unknown>): void {
-  writer.write({
-    type: 'data-trace-end',
-    data,
-    transient: true,
-  });
-}
-
 function getCacheHitTokens(usage: LanguageModelUsage): number | undefined {
   return usage.inputTokenDetails.cacheReadTokens ?? usage.cachedInputTokens;
 }
@@ -646,573 +612,428 @@ function inferIntentFromStructuredAction(actionType: StructuredAction['action'] 
   return 'unknown';
 }
 
-function extractToolSchema(tool: unknown): unknown {
-  const toolRecord = asRecord(tool);
-  if (!toolRecord) {
-    return {};
-  }
-
-  const inputSchema = toolRecord.inputSchema;
-  if (isRecord(inputSchema) && 'jsonSchema' in inputSchema) {
-    return inputSchema.jsonSchema;
-  }
-
-  return inputSchema ?? toolRecord.parameters ?? {};
-}
-
 // ==========================================
 // AI Chat 核心
 // ==========================================
 
-/**
- * 从 TurnContext 中提取已收集的偏好信息
- * v5.4: 用于无登录状态下感知当前对话的上下文
- */
-function buildTransientContextMemory(turnContext?: GenUITurnContext): string | null {
-  if (!turnContext || turnContext.kind !== 'choice') {
-    return null;
-  }
-
-  const choice = turnContext as { kind: 'choice'; question?: string; options: Array<{ label: string; value?: string; action: string; params?: Record<string, unknown> }> };
-  const collectedInfo: string[] = [];
-
-  // 从 question 推断询问类型
-  const question = choice.question || '';
-  const isLocationQuestion = question.includes('哪片') || question.includes('地方') || question.includes('区域');
-  const isTypeQuestion = question.includes('哪类') || question.includes('类型') || question.includes('运动');
-
-  // 从 options 的 params 中提取已收集信息
-  for (const option of choice.options) {
-    const params = option.params;
-    if (!params) continue;
-
-    // 提取位置信息
-    if (typeof params.location === 'string' || typeof params.locationName === 'string') {
-      const location = typeof params.location === 'string' ? params.location : params.locationName;
-      collectedInfo.push(`用户已选择位置：${location}`);
-    }
-
-    // 提取类型信息
-    if (typeof params.activityType === 'string' || typeof params.type === 'string') {
-      const type = typeof params.activityType === 'string' ? params.activityType : params.type;
-      collectedInfo.push(`用户已选择类型：${type}`);
-    }
-
-    // 如果已经有信息了，不需要遍历所有选项
-    if (collectedInfo.length > 0) break;
-  }
-
-  return collectedInfo.length > 0 ? collectedInfo.join('；') : null;
-}
-
-export async function handleChatStream(request: ChatRequest): Promise<Response> {
+export async function executeChatTurn(request: ChatRequest): Promise<ChatExecutionResult> {
   return runWithTrace(async () => {
-  const { messages, userId, rateLimitUserId, conversationId, location, source, draftContext, trace, ai, abortSignal, structuredAction, latestAssistantTurnContext } = request;
-  let effectiveMessages = messages;
-  const startTime = Date.now();
-  const latestMessage = messages[messages.length - 1];
-  const currentInputText = typeof latestMessage?.content === 'string'
-    ? latestMessage.content
-    : latestMessage?.parts?.find((part): part is { type: 'text'; text: string } => part.type === 'text')?.text
-      || structuredAction?.originalText
-      || '';
-
-  // 0. 提前执行限流与输入护栏，避免文本推断出的结构化动作绕过基础保护
-  const rateLimitSubject = userId || rateLimitUserId || null;
-  const rateLimitResult = await checkRateLimit(rateLimitSubject, { maxRequests: 30, windowSeconds: 60 });
-  if (!rateLimitResult.allowed) {
-    logger.warn('Rate limit exceeded', { userId, retryAfter: rateLimitResult.retryAfter });
-    return createDirectResponse('请求太频繁了，休息一下再来吧～', trace);
-  }
-
-  const processorLogs: ProcessorLogEntry[] = [];
-  const createGuardContext = (inputText: string): ProcessorContext => ({
-    userId,
-    messages: [],
-    rawUserInput: inputText,
-    userInput: inputText.trim().slice(0, 2000),
-    systemPrompt: '',
-    metadata: {},
-  });
-
-  const initialGuardResult = await inputGuardProcessor(createGuardContext(currentInputText));
-  processorLogs.push({
-    processorName: inputGuardProcessor.processorName,
-    executionTime: initialGuardResult.executionTime,
-    success: initialGuardResult.success,
-    data: initialGuardResult.data,
-    error: initialGuardResult.error,
-    timestamp: new Date().toISOString(),
-  });
-
-  if (!initialGuardResult.success) {
-    logger.warn('Input blocked', { userId, error: initialGuardResult.error });
-    return createDirectResponse('这个话题我帮不了你 😅', trace);
-  }
-
-  let sanitizedInput = initialGuardResult.context.userInput;
-
-  if (userId && structuredAction?.source === 'text_action_inference') {
-    const partnerThreadId = conversationId || (await getOrCreateThread(userId)).id;
-    const partnerMatchingState = await recoverPartnerMatchingState(partnerThreadId);
-    if (partnerMatchingState) {
-      const currentQuestion = getNextQuestion(partnerMatchingState);
-      if (looksLikePartnerAnswer(sanitizedInput, currentQuestion)) {
-        return handlePartnerMatchingFlow(
-          request,
-          partnerMatchingState,
-          partnerThreadId,
-          sanitizedInput,
-          { intent: 'partner', confidence: 1, method: 'p1' }
-        );
-      }
-    }
-  }
-
-  // 1. 先尝试执行结构化动作
-  if (structuredAction) {
-    logger.info('Processing structured action', {
-      action: structuredAction.action,
-      source: structuredAction.source,
-      userId: userId || 'anon',
-    });
-    
-    const actionResult = await handleStructuredAction(
-      structuredAction,
+    const {
+      messages,
       userId,
-      location ? { lat: location[1], lng: location[0] } : undefined
-    );
-    
-    // 如果动作处理成功且不需要回退到 LLM
-    if (actionResult.success && !actionResult.fallbackToLLM) {
-      return createStructuredActionResponse(actionResult, trace, structuredAction);
+      rateLimitUserId,
+      conversationId,
+      location,
+      source,
+      draftContext,
+      ai,
+      abortSignal,
+      structuredAction,
+      conversationSummary,
+    } = request;
+
+    let effectiveMessages = messages;
+    const startTime = Date.now();
+    const latestMessage = messages[messages.length - 1];
+    const currentInputText = typeof latestMessage?.content === 'string'
+      ? latestMessage.content
+      : latestMessage?.parts?.find((part): part is { type: 'text'; text: string } => part.type === 'text')?.text
+        || structuredAction?.originalText
+        || '';
+
+    const rateLimitSubject = userId || rateLimitUserId || null;
+    const rateLimitResult = await checkRateLimit(rateLimitSubject, { maxRequests: 30, windowSeconds: 60 });
+    if (!rateLimitResult.allowed) {
+      logger.warn('Rate limit exceeded', { userId, retryAfter: rateLimitResult.retryAfter });
+      return buildDirectResponseResult({ type: 'rate_limit', retryAfter: rateLimitResult.retryAfter });
     }
-    
-    // 如果需要回退到 LLM，使用 fallbackText 作为用户消息
-    if (actionResult.fallbackToLLM && actionResult.fallbackText) {
-      const modifiedMessages = [...effectiveMessages];
-      if (modifiedMessages.length > 0) {
-        const lastMsg = modifiedMessages[modifiedMessages.length - 1];
-        if (lastMsg.role === 'user') {
-          modifiedMessages[modifiedMessages.length - 1] = replaceMessageTextContent(lastMsg, actionResult.fallbackText);
-        }
-      }
-      effectiveMessages = modifiedMessages;
 
-      if (actionResult.fallbackText !== currentInputText) {
-        const fallbackGuardResult = await inputGuardProcessor(createGuardContext(actionResult.fallbackText));
-        processorLogs.push({
-          processorName: inputGuardProcessor.processorName,
-          executionTime: fallbackGuardResult.executionTime,
-          success: fallbackGuardResult.success,
-          data: fallbackGuardResult.data,
-          error: fallbackGuardResult.error,
-          timestamp: new Date().toISOString(),
-        });
-
-        if (!fallbackGuardResult.success) {
-          logger.warn('Fallback input blocked', { userId, error: fallbackGuardResult.error });
-          return createDirectResponse('这个话题我帮不了你 😅', trace);
-        }
-
-        sanitizedInput = fallbackGuardResult.context.userInput;
-      }
-    }
-    
-    // 如果动作失败且不回退，直接返回错误
-    if (!actionResult.success && !actionResult.fallbackToLLM) {
-      return createDirectResponse(actionResult.error || '操作失败', trace);
-    }
-  }
-
-  // 2. 提取最后一条用户消息（用于后续 LLM 管线）
-  const conversationHistory: Array<{
-    role: ChatRequest['messages'][number]['role'];
-    content: string;
-  }> = effectiveMessages.map((m) => ({
-    role: m.role,
-    content: getMessageTextContent(m),
-  }));
-  const rawUserInput = conversationHistory.filter((message) => message.role === 'user').pop()?.content || currentInputText;
-
-  // ── Pre-LLM 管线阶段 ──
-  // 2.5 构建上下文（promptContext 需要在 ProcessorContext 之前准备好）
-  const locationName = location ? await reverseGeocode(location[1], location[0]) : undefined;
-  const userNickname = userId ? await getUserNickname(userId) : undefined;
-  const userProfile = userId ? await getEnhancedUserProfile(userId) : null;
-
-  // v5.4: 从无登录 transientTurns 中提取当前对话已收集的偏好
-  const transientMemory = buildTransientContextMemory(latestAssistantTurnContext);
-  const baseMemory = userProfile ? buildProfilePrompt(userProfile) : null;
-  // 合并记忆：用户档案 + 当前对话上下文
-  const workingMemory = transientMemory
-    ? baseMemory
-      ? `${baseMemory}\n\n当前对话已收集：${transientMemory}`
-      : `当前对话已收集：${transientMemory}`
-    : baseMemory;
-
-  const promptContext: PromptContext = {
-    currentTime: new Date(),
-    userLocation: location ? { lat: location[1], lng: location[0], name: locationName } : undefined,
-    userNickname,
-    draftContext,
-    workingMemory,
-  };
-
-  // 构建初始 ProcessorContext（所有处理器间数据通过 context.metadata 传递）
-  const initialContext: ProcessorContext = {
-    userId,
-    messages: conversationHistory,
-    rawUserInput,
-    userInput: sanitizedInput,
-    systemPrompt: await getSystemPrompt(promptContext),
-    metadata: {
-      ...(ai ? { requestAi: ai } : {}),
-    },
-  };
-
-  // 2.6 P0 层：keyword-match-processor（独立预检查，命中后直接返回）
-  const keywordResult = await keywordMatchProcessor(initialContext);
-  processorLogs.push({
-    processorName: keywordMatchProcessor.processorName,
-    executionTime: keywordResult.executionTime,
-    success: keywordResult.success,
-    data: keywordResult.data,
-    error: keywordResult.error,
-    timestamp: new Date().toISOString(),
-  });
-
-  const keywordMeta = keywordResult.context.metadata.keywordMatch;
-  const matchedKeywordId = keywordMeta?.matched ? (keywordMeta.keywordId ?? null) : null;
-
-  if (keywordMeta?.matched) {
-    logger.info('P0 keyword matched', {
-      keywordId: keywordMeta.keywordId,
-      keyword: keywordMeta.keyword,
-      matchType: keywordMeta.matchType,
-      userId: userId || 'anon',
+    const processorLogs: ProcessorLogEntry[] = [];
+    const createGuardContext = (inputText: string): ProcessorContext => ({
+      userId,
+      messages: [],
+      rawUserInput: inputText,
+      userInput: inputText.trim().slice(0, 2000),
+      systemPrompt: '',
+      metadata: {},
     });
 
-    // 增加命中次数（异步，不阻塞）
-    const { incrementHitCount } = await import('../hot-keywords/hot-keywords.service');
-    if (keywordMeta.keywordId) {
-      incrementHitCount(keywordMeta.keywordId).catch(err => {
-        logger.error('Failed to increment hit count', { error: err });
-      });
-    }
-
-    // 返回预设响应（需要完整的 keyword 对象，从 hot-keywords 服务重新获取）
-    const { matchKeyword } = await import('../hot-keywords/hot-keywords.service');
-    const matchedKeyword = await matchKeyword(sanitizedInput);
-    if (matchedKeyword) {
-      return createKeywordResponse(matchedKeyword, trace);
-    }
-    // 降级：metadata 标记命中但无法获取完整 keyword 对象，继续后续流程
-  }
-
-  // 3. 运行 Pre-LLM 管线：intent-classify → [user-profile ∥ semantic-recall] → token-limit
-  const preLLMConfigs = await buildPreLLMPipeline();
-  const { context: preLLMContext, logs: pipelineLogs, success: pipelineSuccess } = await runProcessors(preLLMConfigs, keywordResult.context);
-  processorLogs.push(...pipelineLogs);
-
-  if (!pipelineSuccess) {
-    logger.warn('Pre-LLM pipeline failed', { logs: pipelineLogs.filter(l => !l.success) });
-    const failedLogs = pipelineLogs.filter((log) => !log.success);
-    const failureMessage = failedLogs[0]?.error || 'Pre-LLM pipeline failed';
-    throw new Error(failureMessage);
-  }
-
-  // 4. 从 context.metadata 提取意图分类结果
-  const intentClassifyMeta = preLLMContext.metadata.intentClassify;
-  const intentResult: ClassifyResult = intentClassifyMeta ? {
-    intent: intentClassifyMeta.intent,
-    confidence: intentClassifyMeta.confidence,
-    method: intentClassifyMeta.method,
-    matchedPattern: intentClassifyMeta.matchedPattern,
-    p1Features: intentClassifyMeta.p1Features,
-  } : { intent: 'unknown' as const, confidence: 0, method: 'p1' as const };
-
-  logger.info('Intent classified', { intent: intentResult.intent, method: intentResult.method });
-
-  // 5. Partner Matching 检查（找搭子追问流程）
-  if (userId) {
-    const partnerThreadId = conversationId || (await getOrCreateThread(userId)).id;
-    const partnerMatchingState = await recoverPartnerMatchingState(partnerThreadId);
-
-    if (partnerMatchingState) {
-      const currentQuestion = getNextQuestion(partnerMatchingState);
-      if (looksLikePartnerAnswer(sanitizedInput, currentQuestion)) {
-        return handlePartnerMatchingFlow(request, partnerMatchingState, partnerThreadId, sanitizedInput, intentResult);
-      }
-    }
-
-    if (intentResult.intent === 'partner' && shouldStartPartnerMatching('partner', partnerMatchingState)) {
-      return handlePartnerMatchingFlow(request, partnerMatchingState, partnerThreadId, sanitizedInput, intentResult);
-    }
-  }
-
-  // 6. 特殊意图：身份记忆问题需要确保 workingMemory 已注入 systemPrompt，然后继续走 LLM
-  // 闲聊（chitchat）不再短路，统一走轻量 LLM 以支持上下文感知回复
-  if (intentResult.intent === 'chitchat' && isIdentityMemoryQuestion(rawUserInput)) {
-    logger.info('Identity question detected, routing through LLM with workingMemory', {
-      userId: userId || 'anon',
+    const initialGuardResult = await inputGuardProcessor(createGuardContext(currentInputText));
+    processorLogs.push({
+      processorName: inputGuardProcessor.processorName,
+      executionTime: initialGuardResult.executionTime,
+      success: initialGuardResult.success,
+      data: initialGuardResult.data,
+      error: initialGuardResult.error,
+      timestamp: new Date().toISOString(),
     });
-  }
 
-  // 7. 获取工具集
-  const userLocation = location ? { lat: location[1], lng: location[0] } : null;
-  const tools = await resolveToolsForIntent(userId, intentResult.intent, {
-    hasDraftContext: !!draftContext,
-    location: userLocation,
-  });
-  logger.debug('Tools selected', { tools: Object.keys(tools) });
-
-  // 8. 统一组装 systemPrompt：基础 prompt + 各 processor 注入的段落
-  const injectedPrompts: string[] = [];
-  if (preLLMContext.metadata.userProfilePrompt) {
-    injectedPrompts.push(preLLMContext.metadata.userProfilePrompt as string);
-  }
-  if (preLLMContext.metadata.semanticRecallPrompt) {
-    injectedPrompts.push(preLLMContext.metadata.semanticRecallPrompt as string);
-  }
-  const systemPrompt = injectedPrompts.length > 0
-    ? `${preLLMContext.systemPrompt}\n\n${injectedPrompts.join('\n\n')}`
-    : preLLMContext.systemPrompt;
-
-  const uiMessages: UIMessage[] = effectiveMessages.map((m, i) => ({
-    id: `msg-${i}`,
-    role: m.role,
-    parts: toTextUIMessageParts(m),
-  }));
-  const aiMessages = await convertToModelMessages(uiMessages);
-
-  // 9. 执行 LLM 推理
-  const toolCallRecords: TraceStep[] = [];
-  let totalUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
-  let aiResponseText = '';
-  
-  // 根据意图选择模型
-  const intentToModelType = (intent: string): 'chat' | 'reasoning' | 'agent' => {
-    switch (intent) {
-      case 'partner': return 'reasoning';
-      case 'create': return 'agent';
-      default: return 'chat';
+    if (!initialGuardResult.success) {
+      logger.warn('Input blocked', { userId, error: initialGuardResult.error });
+      return buildDirectResponseResult({ type: 'blocked' });
     }
-  };
-  const modelType = intentToModelType(intentResult.intent);
-  const {
-    model: selectedModel,
-    modelId,
-  } = await resolveChatModelSelection({
-    intent: modelType,
-    modelId: ai?.model,
-  });
 
-  const result = runStream({
-    model: selectedModel,
-    system: systemPrompt,
-    messages: aiMessages,
-    tools,
-    temperature: ai?.temperature ?? 0,
-    maxOutputTokens: ai?.maxTokens,
-    abortSignal,
-    stopWhen: [stepCountIs(5), hasToolCall('askPreference')],
-    onStepFinish: (step) => {
-      // 记录每一步的详细信息
-      const stepNumber = toolCallRecords.length + 1;
-      const stepType = getToolStepPhase(step);
+    let sanitizedInput = initialGuardResult.context.userInput;
 
-      logger.debug('AI step finished', {
-        stepNumber,
-        stepType,
-        toolCallsCount: step.toolCalls?.length || 0,
-        toolResultsCount: step.toolResults?.length || 0,
-        hasText: !!step.text,
-        finishReason: step.finishReason,
+    if (structuredAction) {
+      logger.info('Processing structured action', {
+        action: structuredAction.action,
+        source: structuredAction.source,
+        userId: userId || 'anon',
       });
 
-      // 收集 Tool Calls
-      for (const tc of step.toolCalls || []) {
-        if (!toolCallRecords.find(s => s.toolCallId === tc.toolCallId)) {
-          toolCallRecords.push({
-            toolName: tc.toolName,
-            toolCallId: tc.toolCallId,
-            args: tc.input,
+      const actionResult = await handleStructuredAction(
+        structuredAction,
+        userId,
+        location ? { lat: location[1], lng: location[0] } : undefined
+      );
+
+      if (actionResult.success && !actionResult.fallbackToLLM) {
+        return buildStructuredActionResult(actionResult, structuredAction);
+      }
+
+      if (actionResult.fallbackToLLM && actionResult.fallbackText) {
+        const modifiedMessages = [...effectiveMessages];
+        if (modifiedMessages.length > 0) {
+          const lastMsg = modifiedMessages[modifiedMessages.length - 1];
+          if (lastMsg.role === 'user') {
+            modifiedMessages[modifiedMessages.length - 1] = replaceMessageTextContent(lastMsg, actionResult.fallbackText);
+          }
+        }
+        effectiveMessages = modifiedMessages;
+
+        if (actionResult.fallbackText !== currentInputText) {
+          const fallbackGuardResult = await inputGuardProcessor(createGuardContext(actionResult.fallbackText));
+          processorLogs.push({
+            processorName: inputGuardProcessor.processorName,
+            executionTime: fallbackGuardResult.executionTime,
+            success: fallbackGuardResult.success,
+            data: fallbackGuardResult.data,
+            error: fallbackGuardResult.error,
+            timestamp: new Date().toISOString(),
           });
 
-          // 记录 Tool 调用日志
-          logger.info('Tool called', {
-            stepNumber,
-            toolName: tc.toolName,
-            toolCallId: tc.toolCallId,
-          });
+          if (!fallbackGuardResult.success) {
+            logger.warn('Fallback input blocked', { userId, error: fallbackGuardResult.error });
+            return buildDirectResponseResult({ type: 'blocked' });
+          }
+
+          sanitizedInput = fallbackGuardResult.context.userInput;
         }
       }
 
-      // 收集 Tool Results
-      for (const tr of step.toolResults || []) {
-        const existing = toolCallRecords.find(s => s.toolCallId === tr.toolCallId);
-        if (existing) {
-          existing.result = tr.output;
-
-          // 记录 Tool 结果日志
-          logger.info('Tool result received', {
-            stepNumber,
-            toolName: existing.toolName,
-            toolCallId: tr.toolCallId,
-            hasResult: tr.output !== undefined,
-          });
-        }
+      if (!actionResult.success && !actionResult.fallbackToLLM) {
+        return buildDirectResponseResult({ type: 'error', error: actionResult.error || '操作失败' });
       }
+    }
 
-      // 如果达到最大步数，记录警告
-      if (stepNumber >= 5) {
-        logger.warn('Max steps reached', {
-          stepNumber,
-          toolCalls: toolCallRecords.map(s => s.toolName),
+    const conversationHistory: Array<{
+      role: ChatRequest['messages'][number]['role'];
+      content: string;
+    }> = effectiveMessages.map((m) => ({
+      role: m.role,
+      content: getMessageTextContent(m),
+    }));
+    const rawUserInput = conversationHistory.filter((message) => message.role === 'user').pop()?.content || currentInputText;
+
+    const locationName = location ? await reverseGeocode(location[1], location[0]) : undefined;
+    const userNickname = userId ? await getUserNickname(userId) : undefined;
+    const userProfile = userId ? await getEnhancedUserProfile(userId) : null;
+
+    const baseMemory = userProfile ? buildProfilePrompt(userProfile) : null;
+    const memoryContext = [baseMemory]
+      .filter((section): section is string => Boolean(section))
+      .join('\n\n') || null;
+
+    const promptContext: PromptContext = {
+      currentTime: new Date(),
+      userLocation: location ? { lat: location[1], lng: location[0], name: locationName } : undefined,
+      userNickname,
+      draftContext,
+      memoryContext,
+    };
+
+    const baseSystemPrompt = await getSystemPrompt(promptContext);
+    const initialContext: ProcessorContext = {
+      userId,
+      messages: conversationHistory,
+      rawUserInput,
+      userInput: sanitizedInput,
+      systemPrompt: conversationSummary
+        ? `${baseSystemPrompt}\n\n## 更早对话摘要\n${conversationSummary}`
+        : baseSystemPrompt,
+      metadata: {
+        ...(ai ? { requestAi: ai } : {}),
+      },
+    };
+
+    const keywordResult = await keywordMatchProcessor(initialContext);
+    processorLogs.push({
+      processorName: keywordMatchProcessor.processorName,
+      executionTime: keywordResult.executionTime,
+      success: keywordResult.success,
+      data: keywordResult.data,
+      error: keywordResult.error,
+      timestamp: new Date().toISOString(),
+    });
+
+    const keywordMeta = keywordResult.context.metadata.keywordMatch;
+    const matchedKeywordId = keywordMeta?.matched ? (keywordMeta.keywordId ?? null) : null;
+
+    const preLLMConfigs = await buildPreLLMPipeline();
+    const { context: preLLMContext, logs: pipelineLogs, success: pipelineSuccess } = await runProcessors(preLLMConfigs, keywordResult.context);
+    processorLogs.push(...pipelineLogs);
+
+    if (!pipelineSuccess) {
+      logger.warn('Pre-LLM pipeline failed', { logs: pipelineLogs.filter(l => !l.success) });
+      return buildDirectResponseResult({ type: 'fallback', context: 'Pre-LLM pipeline failed' });
+    }
+
+    const intentClassifyMeta = preLLMContext.metadata.intentClassify;
+    const intentResult: ClassifyResult = intentClassifyMeta ? {
+      intent: intentClassifyMeta.intent,
+      confidence: intentClassifyMeta.confidence,
+      method: intentClassifyMeta.method,
+      matchedPattern: intentClassifyMeta.matchedPattern,
+      p1Features: intentClassifyMeta.p1Features,
+    } : { intent: 'unknown' as const, confidence: 0, method: 'p1' as const };
+
+    if (keywordMeta?.matched) {
+      logger.info('P0 keyword matched', {
+        keywordId: keywordMeta.keywordId,
+        keyword: keywordMeta.keyword,
+        matchType: keywordMeta.matchType,
+        userId: userId || 'anon',
+      });
+
+      const { incrementHitCount } = await import('../hot-keywords/hot-keywords.service');
+      if (keywordMeta.keywordId) {
+        incrementHitCount(keywordMeta.keywordId).catch(err => {
+          logger.error('Failed to increment hit count', { error: err });
         });
       }
-    },
-    onFinish: async ({ usage, text }) => {
-      aiResponseText = text || '';
-      // 必须 mutate 而非 reassign，因为 createTracedStreamResponse 持有同一对象引用
-      totalUsage.promptTokens = usage.inputTokens ?? 0;
-      totalUsage.completionTokens = usage.outputTokens ?? 0;
-      totalUsage.totalTokens = usage.totalTokens ?? 0;
+    }
 
-      const duration = Date.now() - startTime;
-      logger.info('AI request completed', {
-        source, userId: userId || 'anon',
-        tokens: totalUsage.totalTokens,
-        duration,
-        intent: intentResult.intent,
+    if (userId) {
+      const partnerThreadId = conversationId || (await getOrCreateThread(userId)).id;
+      const partnerMatchingState = await recoverPartnerMatchingState(partnerThreadId);
+
+      if (partnerMatchingState) {
+        const currentQuestion = getNextQuestion(partnerMatchingState);
+        if (looksLikePartnerAnswer(sanitizedInput, currentQuestion)) {
+          return handlePartnerMatchingFlowResult(request, partnerMatchingState, partnerThreadId, sanitizedInput);
+        }
+      }
+
+      if (intentResult.intent === 'partner' && shouldStartPartnerMatching('partner', partnerMatchingState)) {
+        return handlePartnerMatchingFlowResult(request, partnerMatchingState, partnerThreadId, sanitizedInput);
+      }
+    }
+
+    const userLocation = location ? { lat: location[1], lng: location[0] } : null;
+    const tools = await resolveToolsForIntent(userId, intentResult.intent, {
+      hasDraftContext: !!draftContext,
+      location: userLocation,
+    });
+
+    const injectedPrompts: string[] = [];
+    if (preLLMContext.metadata.userProfilePrompt) {
+      injectedPrompts.push(preLLMContext.metadata.userProfilePrompt as string);
+    }
+    if (preLLMContext.metadata.semanticRecallPrompt) {
+      injectedPrompts.push(preLLMContext.metadata.semanticRecallPrompt as string);
+    }
+    const systemPrompt = injectedPrompts.length > 0
+      ? `${preLLMContext.systemPrompt}\n\n${injectedPrompts.join('\n\n')}`
+      : preLLMContext.systemPrompt;
+
+    const uiMessages: UIMessage[] = effectiveMessages.map((m, i) => ({
+      id: `msg-${i}`,
+      role: m.role,
+      parts: toTextUIMessageParts(m),
+    }));
+    const aiMessages = await convertToModelMessages(uiMessages);
+
+    const toolCallRecords: TraceStep[] = [];
+    const modelType = ((intent: string): 'chat' | 'reasoning' | 'agent' => {
+      switch (intent) {
+        case 'partner': return 'reasoning';
+        case 'create': return 'agent';
+        default: return 'chat';
+      }
+    })(intentResult.intent);
+    const {
+      model: selectedModel,
+      modelId: selectedModelId,
+      provider: selectedProvider,
+    } = await resolveChatModelSelection({
+      intent: modelType,
+      modelId: ai?.model,
+    });
+
+    const runTextRequest = {
+      system: systemPrompt,
+      messages: aiMessages,
+      tools,
+      temperature: ai?.temperature ?? 0,
+      maxOutputTokens: ai?.maxTokens,
+      abortSignal,
+      stopWhen: [stepCountIs(5), hasToolCall('askPreference')],
+      onStepFinish: (step: any) => {
+        for (const tc of step.toolCalls || []) {
+          if (!toolCallRecords.find((item) => item.toolCallId === tc.toolCallId)) {
+            toolCallRecords.push({
+              toolName: tc.toolName,
+              toolCallId: tc.toolCallId,
+              args: tc.input,
+            });
+          }
+        }
+
+        for (const tr of step.toolResults || []) {
+          const existing = toolCallRecords.find((item) => item.toolCallId === tr.toolCallId);
+          if (existing) {
+            existing.result = tr.output;
+          }
+        }
+      },
+    };
+
+    let textResult;
+    let modelId = selectedModelId;
+
+    try {
+      textResult = await runText({
+        model: selectedModel,
+        ...runTextRequest,
+      });
+    } catch (primaryError) {
+      const fallbackConfig = await getFallbackConfig();
+      const fallbackSelection = await resolveFallbackChatModelSelection({ intent: modelType });
+
+      logger.warn('Primary chat model failed, retrying with fallback provider', {
+        primaryProvider: selectedProvider,
+        primaryModelId: selectedModelId,
+        fallbackProvider: fallbackSelection.provider,
+        fallbackModelId: fallbackSelection.modelId,
+        configuredFallback: fallbackConfig.fallback,
+        error: primaryError instanceof Error ? primaryError.message : String(primaryError),
       });
 
-      // ── Post-LLM 阶段：通过管线编排 ──
-      // 构建 Post-LLM context，包含 AI 响应数据和各 Processor 所需的 metadata
-      const postLLMContext: ProcessorContext = {
-        ...preLLMContext,
-        messages: [
-          ...preLLMContext.messages,
-          { role: 'assistant' as const, content: text || '' },
-        ],
-        metadata: {
-          ...preLLMContext.metadata,
-          chatProtocol: 'genui_chat',
-          conversationId: conversationId ?? undefined,
-          activityId: getActivityIdFromTraceSteps(toolCallRecords),
-          // record-metrics-processor 数据
-          metricsData: {
-            modelId,
-            duration,
-            inputTokens: totalUsage.promptTokens,
-            outputTokens: totalUsage.completionTokens,
-            totalTokens: totalUsage.totalTokens,
-            cacheHitTokens: getCacheHitTokens(usage),
-            cacheMissTokens: getCacheMissTokens(usage),
-            toolCalls: toolCallRecords.map(s => ({ toolName: s.toolName })),
-            source,
-            intent: intentResult.intent,
-            userId,
-          },
-          // persist-request-processor 数据
-          persistData: {
-            userId: userId || null,
-            modelId,
-            inputTokens: totalUsage.promptTokens,
-            outputTokens: totalUsage.completionTokens,
-            latencyMs: duration,
-            processorLog: processorLogs,
-            p0MatchKeyword: matchedKeywordId,
-            input: rawUserInput,
-            output: text || '',
-          },
-          // evaluate-quality-processor 数据
-          qualityData: {
-            rawUserInput,
-            aiResponseText: text || '',
-            intent: intentResult.intent,
-            intentConfidence: intentResult.confidence,
-            toolCallRecords: toolCallRecords.map(s => ({ toolName: s.toolName, result: s.result })),
-            userId,
-            inputTokens: totalUsage.promptTokens,
-            outputTokens: totalUsage.completionTokens,
-            totalTokens: totalUsage.totalTokens,
-            latencyMs: duration,
-            source,
-          },
+      textResult = await runText({
+        model: fallbackSelection.model,
+        ...runTextRequest,
+      });
+      modelId = fallbackSelection.modelId;
+    }
+
+    const aiResponseText = textResult.text || '';
+    const usage = textResult.usage;
+    const totalUsage = {
+      promptTokens: usage?.inputTokens ?? 0,
+      completionTokens: usage?.outputTokens ?? 0,
+      totalTokens: usage?.totalTokens ?? 0,
+    };
+    const duration = Date.now() - startTime;
+
+    const postLLMContext: ProcessorContext = {
+      ...preLLMContext,
+      messages: [
+        ...preLLMContext.messages,
+        { role: 'assistant' as const, content: aiResponseText },
+      ],
+      metadata: {
+        ...preLLMContext.metadata,
+        chatProtocol: 'genui_chat',
+        conversationId: conversationId ?? undefined,
+        activityId: getActivityIdFromTraceSteps(toolCallRecords),
+        metricsData: {
+          modelId,
+          duration,
+          inputTokens: totalUsage.promptTokens,
+          outputTokens: totalUsage.completionTokens,
+          totalTokens: totalUsage.totalTokens,
+          cacheHitTokens: usage ? getCacheHitTokens(usage) : undefined,
+          cacheMissTokens: usage ? getCacheMissTokens(usage) : undefined,
+          toolCalls: toolCallRecords.map((step) => ({ toolName: step.toolName })),
+          source,
+          intent: intentResult.intent,
+          userId,
         },
-      };
+        persistData: {
+          userId: userId || null,
+          modelId,
+          inputTokens: totalUsage.promptTokens,
+          outputTokens: totalUsage.completionTokens,
+          latencyMs: duration,
+          processorLog: processorLogs,
+          p0MatchKeyword: matchedKeywordId,
+          input: rawUserInput,
+          output: aiResponseText,
+        },
+        qualityData: {
+          rawUserInput,
+          aiResponseText,
+          intent: intentResult.intent,
+          intentConfidence: intentResult.confidence,
+          toolCallRecords: toolCallRecords.map((step) => ({ toolName: step.toolName, result: step.result })),
+          userId,
+          inputTokens: totalUsage.promptTokens,
+          outputTokens: totalUsage.completionTokens,
+          totalTokens: totalUsage.totalTokens,
+          latencyMs: duration,
+          source,
+        },
+      },
+    };
 
-      if (userId) {
-        // Post-LLM: output-guard（对话持久化统一在 controller 末端处理）
-        const { logs: postLLMLogs } = await runPostLLMProcessors(
-          [{ processor: outputGuardProcessor }],
-          postLLMContext
-        );
-        processorLogs.push(...postLLMLogs);
-
-        // Async: extract-preferences（火并忘，不阻塞响应）
-        runAsyncProcessors(
-          [{ processor: extractPreferencesProcessor }],
-          postLLMContext
-        ).then(({ logs: asyncLogs }) => {
-          processorLogs.push(...asyncLogs);
-        }).catch((err: Error) => {
-          logger.warn('Async processors failed', { error: err.message });
-        });
-      }
-
-      // Post-LLM: record-metrics → persist-request → evaluate-quality
-      // 使用 runPostLLMProcessors 确保单个 Processor 失败不影响其他 Processor
-      const { logs: postFinishLogs } = await runPostLLMProcessors(
-        [
-          { processor: recordMetricsProcessor },
-          { processor: persistRequestProcessor },
-          { processor: evaluateQualityProcessor },
-        ],
+    if (userId) {
+      const { logs: postLLMLogs } = await runPostLLMProcessors(
+        [{ processor: outputGuardProcessor }],
         postLLMContext
       );
-      processorLogs.push(...postFinishLogs);
-    },
-  });
+      processorLogs.push(...postLLMLogs);
 
-  // 10. 返回响应
-  if (!trace) {
-    return result.toUIMessageStreamResponse();
-  }
+      runAsyncProcessors(
+        [{ processor: extractPreferencesProcessor }],
+        postLLMContext
+      ).then(({ logs: asyncLogs }) => {
+        processorLogs.push(...asyncLogs);
+      }).catch((err: Error) => {
+        logger.warn('Async processors failed', { error: err.message });
+      });
+    }
 
-  return createTracedStreamResponse(result, {
-    requestId: randomUUID(),
-    startedAt: new Date().toISOString(),
-    intent: intentResult,
-    systemPrompt,
-    tools,
-    toolCallRecords,
-    totalUsage,
-    aiResponseText,
-    rawUserInput,
-    source,
-    userId: userId || null,
-    modelId,
-    // Processor 数据（从 ProcessorContext.metadata 读取）
-    preLLMContext,
-    inputGuard: {
-      duration: initialGuardResult.executionTime,
-      blocked: false,
-      sanitized: sanitizedInput,
-      triggeredRules: [],
-    },
-    keywordMatch: {
-      matched: keywordMeta?.matched ?? false,
-      keyword: keywordMeta?.keyword,
-      matchType: keywordMeta?.matchType,
-      priority: keywordMeta?.priority,
-      responseType: keywordMeta?.responseType,
-      duration: keywordResult.executionTime,
-    },
-    processorLogs,
-  });
+    runAsyncProcessors(
+      [
+        { processor: recordMetricsProcessor },
+        { processor: persistRequestProcessor },
+        { processor: evaluateQualityProcessor },
+      ],
+      postLLMContext
+    ).then(({ logs: asyncLogs }) => {
+      processorLogs.push(...asyncLogs);
+    }).catch((err: Error) => {
+      logger.warn('Post-finish async processors failed', { error: err.message });
+    });
+
+    return {
+      assistantText: aiResponseText,
+      executionPath: 'llm_orchestrated',
+      toolCallRecords,
+      blockPayloads: [],
+      actionResults: [],
+      traces: [
+        createExecutionTrace('chat_execution_completed', {
+          intent: intentResult.intent,
+          confidence: intentResult.confidence,
+          toolCallCount: toolCallRecords.length,
+          modelId,
+          totalTokens: totalUsage.totalTokens,
+          durationMs: duration,
+        }),
+      ],
+    };
   });
 }
 
@@ -1220,89 +1041,202 @@ export async function handleChatStream(request: ChatRequest): Promise<Response> 
 // 辅助函数
 // ==========================================
 
-function createDirectResponse(text: string, trace?: boolean): Response {
-  const stream = createUIMessageStream({
-    execute: ({ writer }) => {
-      writer.write({ type: 'text-delta', delta: text, id: randomUUID() });
-      if (trace) {
-        const now = new Date().toISOString();
-        writeTraceStartEvent(writer, {
-          requestId: randomUUID(),
-          startedAt: now,
-          intent: 'blocked',
-          intentMethod: 'guardrail',
-        });
-        writeTraceEndEvent(writer, {
-          completedAt: now,
-          status: 'blocked',
-          output: { text, toolCalls: [] },
-        });
-      }
-    },
-  });
-  return createUIMessageStreamResponse({ stream });
+/**
+ * 小聚人设 System Prompt
+ * 用于轻量 LLM 生成有温度的回复
+ */
+const XIAOJU_PERSONA = `你是"小聚"，一个热情、接地气、有活力的组局达人。你是用户的社交助理，像朋友一样帮忙组局、找搭子、探索活动。
+
+说话风格：
+- 像朋友一样自然，不要太正式
+- 用表情符号增加温度 😊🎉🔥
+- 不要说"已为您构建"，要说"帮你把局组好了！"
+- 不要说"正在解析"，要说"收到，小聚正在帮你整理..."
+- 用户是喜欢组局、参加活动的人，你要表现出对社交活动的热情
+- 称呼用户为"朋友"或直接对话，不要叫"用户"
+
+记住：你是"组局助手"小聚，有血有肉有灵魂，不是冷冰冰的系统。`;
+
+/**
+ * 轻量 LLM 生成有灵魂的回复
+ * 使用 qwen-flash 快速生成，成本低且快
+ */
+async function generateSoulfulResponse(
+  userInput: string,
+  context: {
+    keyword: string;
+    intent: string;
+    responseHint: string;
+  }
+): Promise<string> {
+  const startTime = Date.now();
+  try {
+    const { model, modelId } = await resolveChatModelSelection({ routeKey: 'chat' });
+
+    const prompt = `用户说："${userInput}"
+
+触发了热词"${context.keyword}"，意图是${context.intent}。
+参考信息：${context.responseHint}
+
+请用一句话热情回应用户，体现小聚的组局达人性格。要求：
+1. 自然、有温度、像朋友一样
+2. 可以带表情符号
+3. 不要机械复述参考信息，要转化成自己的话
+4. 如果是活动相关，表现出热情
+5. 直接输出回应文字，不要解释
+
+回应：`;
+
+    const result = await generateText({
+      model,
+      system: XIAOJU_PERSONA,
+      prompt,
+      temperature: 0.8,
+      maxOutputTokens: 150,
+    });
+
+    const latency = Date.now() - startTime;
+    logger.info('p0_soulful_response_generated', {
+      keyword: context.keyword,
+      intent: context.intent,
+      model: modelId,
+      latencyMs: latency,
+      responseLength: result.text.trim().length,
+    });
+    return result.text.trim() || context.responseHint;
+  } catch (error) {
+    // 降级到默认提示
+    logger.error('p0_soulful_response_failed', { error: String(error), keyword: context.keyword });
+    return context.responseHint;
+  }
+}
+
+// ==========================================
+// 辅助函数
+// ==========================================
+
+type DirectResponseScenario =
+  | { type: 'rate_limit'; retryAfter?: number }
+  | { type: 'blocked'; reason?: string }
+  | { type: 'error'; error?: string }
+  | { type: 'fallback'; context?: string };
+
+/** 限流场景预设文案 - 随机选择增加多样性 */
+const RATE_LIMIT_RESPONSES = [
+  '哎呀，小聚有点忙不过来了，你稍等 1 分钟再来呗 😅',
+  '哇，你今天好活跃！让我喘口气，等会儿继续帮你组局～',
+  '小聚正在处理其他朋友的请求，1 分钟后回来找你！',
+  '等等我等等我！小聚马上就好，你稍等片刻 ⏳',
+];
+
+/** 拦截场景预设文案 */
+const BLOCKED_RESPONSES = [
+  '这个话题我帮不了你 😅 我们聊点别的？比如最近有什么好玩的活动～',
+  '哎呀，这个我不太方便聊，换个话题呗？你最近想组什么局？',
+  '小聚是个组局助手，这方面不太懂 😅 聊聊活动怎么样？',
+];
+
+/**
+ * 小聚快速回复生成器
+ * 为各种边缘场景生成有灵魂的兜底回复
+ */
+async function xiaoJuQuickReply(scenario: DirectResponseScenario): Promise<string> {
+  // 限流和拦截场景：直接返回预设文案，不调用 LLM（减少延迟和成本）
+  if (scenario.type === 'rate_limit') {
+    const index = Math.floor(Math.random() * RATE_LIMIT_RESPONSES.length);
+    logger.info('edge_response_preset', { scenario: 'rate_limit', source: 'preset' });
+    return RATE_LIMIT_RESPONSES[index];
+  }
+
+  if (scenario.type === 'blocked') {
+    const index = Math.floor(Math.random() * BLOCKED_RESPONSES.length);
+    logger.info('edge_response_preset', { scenario: 'blocked', source: 'preset' });
+    return BLOCKED_RESPONSES[index];
+  }
+
+  // error 和 fallback 场景：走 LLM 生成更个性化的回复
+  const startTime = Date.now();
+  try {
+    const { model, modelId } = await resolveChatModelSelection({ routeKey: 'chat' });
+
+    let prompt = '';
+    switch (scenario.type) {
+      case 'error':
+        prompt = `系统出错了${scenario.error ? `：${scenario.error}` : ''}。
+用轻松、幽默的方式道歉，告诉用户再试试，不要显得太技术化。`;
+        break;
+      case 'fallback':
+        prompt = `没理解用户的意思${scenario.context ? `（上下文：${scenario.context}）` : ''}。
+用友好、轻松的方式请用户换个说法，表现出愿意继续帮忙的态度。`;
+        break;
+    }
+
+    const result = await generateText({
+      model,
+      system: XIAOJU_PERSONA,
+      prompt,
+      temperature: 0.7,
+      maxOutputTokens: 100,
+    });
+
+    const latency = Date.now() - startTime;
+    logger.info('edge_response_generated', {
+      scenario: scenario.type,
+      model: modelId,
+      latencyMs: latency,
+      responseLength: result.text.trim().length,
+    });
+    return result.text.trim() || getFallbackText(scenario);
+  } catch (error) {
+    logger.error('edge_response_failed', { scenario: scenario.type, error: String(error) });
+    return getFallbackText(scenario);
+  }
 }
 
 /**
- * 创建关键词匹配响应 (P0 层)
- * 直接返回预设响应，无需 LLM 处理
+ * 获取兜底文本（LLM 失败时使用）
  */
-async function createKeywordResponse(
-  keyword: import('../hot-keywords/hot-keywords.model').GlobalKeywordResponse, 
-  trace: boolean | undefined
-): Promise<Response> {
-  const keywordContext = {
-    keywordId: keyword.id,
-    matchedAt: new Date().toISOString(),
+function getFallbackText(scenario: DirectResponseScenario): string {
+  switch (scenario.type) {
+    case 'rate_limit':
+      return '哎呀，小聚有点忙不过来了，你稍等 1 分钟再来呗 😅';
+    case 'blocked':
+      return '这个话题我帮不了你 😅';
+    case 'error':
+      return '我这会儿有点卡住了，你换个说法再试试，我继续帮你接。';
+    case 'fallback':
+      return '我没太明白，换个说法呗？';
+    default:
+      return '小聚还在学习中，再试一次？';
+  }
+}
+
+function createExecutionTrace(stage: string, detail: Record<string, unknown>): GenUITracePayload {
+  return { stage, detail };
+}
+
+async function buildDirectResponseResult(
+  scenario: DirectResponseScenario
+): Promise<ChatExecutionResult> {
+  const text = await xiaoJuQuickReply(scenario);
+  return {
+    assistantText: text,
+    executionPath: 'llm_orchestrated',
+    toolCallRecords: [],
+    blockPayloads: [],
+    actionResults: [],
+    traces: [
+      createExecutionTrace('direct_response', {
+        scenario: scenario.type,
+      }),
+    ],
   };
-  
-  const stream = createUIMessageStream({
-    execute: ({ writer }) => {
-      // 返回 widget 数据
-      writeWidgetEvent(writer, {
-        type: keyword.responseType,
-        payload: keyword.responseContent,
-        keywordContext,
-      });
-      
-      // 如果是文本类型，返回文本内容
-      if (keyword.responseType === 'text' && typeof keyword.responseContent === 'string') {
-        writer.write({ type: 'text-delta', delta: keyword.responseContent, id: randomUUID() });
-      }
-      
-      if (trace) {
-        const now = new Date().toISOString();
-        writeTraceStartEvent(writer, {
-          requestId: randomUUID(),
-          startedAt: now,
-          intent: 'keyword_match',
-          intentMethod: 'p0_layer',
-          keyword: keyword.keyword,
-          matchType: keyword.matchType,
-        });
-        writeTraceEndEvent(writer, {
-          completedAt: now,
-          status: 'completed',
-          output: {
-            keywordId: keyword.id,
-            responseType: keyword.responseType,
-          },
-        });
-      }
-    },
-  });
-  return createUIMessageStreamResponse({ stream });
 }
 
-/**
- * 创建 Structured Action 响应
- * 直接返回动作执行结果，不经过 LLM
- */
-function createStructuredActionResponse(
+function buildStructuredActionResult(
   result: import('./user-action').StructuredActionResult,
-  trace?: boolean,
   structuredAction?: StructuredAction
-): Response {
+): ChatExecutionResult {
   const data = asRecord(result.data);
   const pendingAction = asRecord(data?.pendingAction);
   const explorePayload = (() => {
@@ -1328,6 +1262,7 @@ function createStructuredActionResponse(
       ...(preview ? { preview } : {}),
     };
   })();
+
   const actionType = structuredAction?.action;
   const actionMessage = (
     typeof data?.message === 'string' && data.message.trim()
@@ -1373,192 +1308,72 @@ function createStructuredActionResponse(
     nextActions,
     originalText: structuredAction?.originalText,
   });
-  const actionDurationMs = typeof result.durationMs === 'number' && Number.isFinite(result.durationMs)
-    ? Math.max(0, result.durationMs)
-    : 0;
-  const traceCompletedAtMs = Date.now();
-  const traceStartedAtMs = traceCompletedAtMs - actionDurationMs;
-  const traceStartedAt = new Date(traceStartedAtMs).toISOString();
-  const traceCompletedAt = new Date(traceCompletedAtMs).toISOString();
-  const requestId = randomUUID();
   const structuredIntent = inferIntentFromStructuredAction(actionType);
   const activityId = typeof data?.activityId === 'string' ? data.activityId : null;
 
-  const stream = createUIMessageStream({
-    execute: async ({ writer }) => {
-      if (trace) {
-        writeTraceStartEvent(writer, {
-          requestId,
-          startedAt: traceStartedAt,
-          intent: structuredIntent,
-          intentMethod: 'structured_action',
-          executionPath: 'structured_action',
-        });
+  const blockPayloads: ChatBlockPayload[] = [];
+  if (explorePayload && shouldEmitExploreWidgetPayload(explorePayload)) {
+    blockPayloads.push({ widgetType: 'widget_explore', payload: explorePayload });
+  }
+  if (data?.askPreference && typeof data.askPreference === 'object') {
+    blockPayloads.push({ widgetType: 'widget_ask_preference', payload: data.askPreference });
+  }
+  if (data?.partnerIntentForm && typeof data.partnerIntentForm === 'object') {
+    blockPayloads.push({ widgetType: 'widget_partner_intent_form', payload: data.partnerIntentForm });
+  }
+  if (data?.partnerSearchResults && typeof data.partnerSearchResults === 'object') {
+    blockPayloads.push({ widgetType: 'widget_partner_search_results', payload: data.partnerSearchResults });
+  }
+  if (data?.draftSettingsForm && typeof data.draftSettingsForm === 'object') {
+    blockPayloads.push({ widgetType: 'widget_draft_settings_form', payload: data.draftSettingsForm });
+  }
+  if (data?.draft && typeof data.draft === 'object') {
+    blockPayloads.push({
+      widgetType: 'widget_draft',
+      payload: {
+        ...(typeof data.activityId === 'string' ? { activityId: data.activityId } : {}),
+        ...data.draft,
+      },
+    });
+  }
+  if (data?.publishedActivity && typeof data.publishedActivity === 'object') {
+    blockPayloads.push({ widgetType: 'widget_share', payload: data.publishedActivity });
+  }
+  if (authRequiredPayload) {
+    blockPayloads.push({ widgetType: 'widget_auth_required', payload: authRequiredPayload });
+  }
+  if (successWidgetPayload) {
+    blockPayloads.push({ widgetType: 'widget_success', payload: successWidgetPayload });
+  }
 
-        writeTraceStepEvent(writer, {
-          id: `${requestId}-structured_action_resolved`,
-          type: 'structured-action',
-          name: '结构化动作判定',
-          startedAt: traceStartedAt,
-          completedAt: traceStartedAt,
-          status: 'success',
-          duration: 0,
-          data: {
-            phase: 'resolved',
-            action: actionType,
-            source: structuredAction?.source || 'structured_action',
-            executionPath: 'structured_action',
-          },
-        });
-
-        writeTraceStepEvent(writer, {
-          id: `${requestId}-structured_action_executed`,
-          type: 'structured-action',
-          name: '结构化动作执行',
-          startedAt: traceStartedAt,
-          completedAt: traceCompletedAt,
-          status: result.success ? 'success' : 'error',
-          duration: actionDurationMs,
-          data: {
-            phase: 'executed',
-            action: actionType,
-            success: result.success,
-            fallbackToLLM: result.fallbackToLLM === true,
-            ...(activityId ? { activityId } : {}),
-          },
-          ...(result.error ? { error: result.error } : {}),
-        });
-      }
-
-      if (shouldWritePrimaryText && assistantReplyText) {
-        await streamTextDelta(writer, assistantReplyText);
-      }
-
-      if (explorePayload && shouldEmitExploreWidgetPayload(explorePayload)) {
-        writeWidgetEvent(writer, {
-          type: 'widget_explore',
-          payload: explorePayload,
-        });
-      }
-
-      if (data?.askPreference && typeof data.askPreference === 'object') {
-        writeWidgetEvent(writer, {
-          type: 'widget_ask_preference',
-          payload: data.askPreference,
-        });
-      }
-
-      if (data?.partnerIntentForm && typeof data.partnerIntentForm === 'object') {
-        writeWidgetEvent(writer, {
-          type: 'widget_partner_intent_form',
-          payload: data.partnerIntentForm,
-        });
-      }
-
-      if (data?.partnerSearchResults && typeof data.partnerSearchResults === 'object') {
-        writeWidgetEvent(writer, {
-          type: 'widget_partner_search_results',
-          payload: data.partnerSearchResults,
-        });
-      }
-
-      if (data?.draftSettingsForm && typeof data.draftSettingsForm === 'object') {
-        writeWidgetEvent(writer, {
-          type: 'widget_draft_settings_form',
-          payload: data.draftSettingsForm,
-        });
-      }
-
-      if (data?.draft && typeof data.draft === 'object') {
-        writeWidgetEvent(writer, {
-          type: 'widget_draft',
-          payload: {
-            ...(typeof data.activityId === 'string' ? { activityId: data.activityId } : {}),
-            ...data.draft,
-          },
-        });
-      }
-
-      if (data?.publishedActivity && typeof data.publishedActivity === 'object') {
-        writeWidgetEvent(writer, {
-          type: 'widget_share',
-          payload: data.publishedActivity,
-        });
-      }
-
-      if (authRequiredPayload) {
-        writeWidgetEvent(writer, {
-          type: 'widget_auth_required',
-          payload: authRequiredPayload,
-        });
-      }
-
-      if (successWidgetPayload) {
-        writeWidgetEvent(writer, {
-          type: 'widget_success',
-          payload: successWidgetPayload,
-        });
-      }
-
-      // 返回 action 结果作为 data，CTA 应该跟在说明文本之后出现。
-      writeWidgetEvent(writer, {
-        type: 'action_result',
+  return {
+    assistantText: shouldWritePrimaryText ? assistantReplyText : '',
+    executionPath: 'structured_action',
+    toolCallRecords: [],
+    blockPayloads,
+    actionResults: [{
+      success: result.success,
+      ...(typeof result.error === 'string' ? { error: result.error } : {}),
+      ...(nextActions.length > 0 ? { nextActions } : {}),
+    }],
+    traces: [
+      createExecutionTrace('structured_action', {
+        action: actionType,
+        intent: structuredIntent,
         success: result.success,
-        data: result.data,
-        error: result.error,
-        nextActions,
-      });
-      
-      if (trace) {
-        writeTraceStepEvent(writer, {
-          id: `${requestId}-output`,
-          type: 'output',
-          name: '输出',
-          startedAt: traceCompletedAt,
-          completedAt: traceCompletedAt,
-          status: result.success ? 'success' : 'error',
-          duration: 0,
-          data: {
-            text: assistantReplyText,
-            executionPath: 'structured_action',
-            structuredAction: actionType,
-          },
-        });
-
-        writeTraceEndEvent(writer, {
-          requestId,
-          completedAt: traceCompletedAt,
-          totalDuration: actionDurationMs,
-          status: result.success ? 'completed' : 'failed',
-          executionPath: 'structured_action',
-          output: {
-            text: assistantReplyText,
-            structuredAction: actionType,
-            success: result.success,
-            ...(activityId ? { activityId } : {}),
-          },
-        });
-      }
-    },
-  });
-  return createUIMessageStreamResponse({ stream });
+        ...(activityId ? { activityId } : {}),
+      }),
+    ],
+  };
 }
 
-
-// 已删除 handleChitchat 短路逻辑。所有闲聊/身份问题统一走 LLM 主链路，
-// 由 systemPrompt 中的 workingMemory 决定回复质量。
-
-/**
- * 处理 Partner Matching 流程（找搭子追问）
- */
-async function handlePartnerMatchingFlow(
+async function handlePartnerMatchingFlowResult(
   request: ChatRequest,
   existingState: PartnerMatchingState | null,
   threadId: string,
-  userMessage: string,
-  _intentResult: ClassifyResult
-): Promise<Response> {
-  const { userId, trace } = request;
+  userMessage: string
+): Promise<ChatExecutionResult> {
+  const { userId } = request;
 
   let state = existingState || createPartnerMatchingState(userMessage);
 
@@ -1583,7 +1398,6 @@ async function handlePartnerMatchingFlow(
           },
         };
       }
-      logger.debug('Partner matching state updated', { field: answer.field, value: answer.value });
     }
   }
 
@@ -1600,24 +1414,22 @@ async function handlePartnerMatchingFlow(
       await persistPartnerMatchingState(threadId, userId, completedState);
     }
 
-    return createStructuredActionResponse(
-      await handleStructuredAction(
-        {
-          action: 'search_partners',
-          payload: buildPartnerSearchPayloadFromState(completedState),
-          source: 'partner_matching_workflow',
-          originalText: completedState.rawInput,
-        },
-        userId,
-      ),
-      trace,
+    const payload = buildPartnerSearchPayloadFromState(completedState);
+    const actionResult = await handleStructuredAction(
       {
         action: 'search_partners',
-        payload: buildPartnerSearchPayloadFromState(completedState),
+        payload,
         source: 'partner_matching_workflow',
         originalText: completedState.rawInput,
       },
+      userId,
     );
+    return buildStructuredActionResult(actionResult, {
+      action: 'search_partners',
+      payload,
+      source: 'partner_matching_workflow',
+      originalText: completedState.rawInput,
+    });
   }
 
   if (userId) {
@@ -1626,362 +1438,22 @@ async function handlePartnerMatchingFlow(
 
   const introText = buildPartnerWorkflowIntroText(state);
   const askPreferencePayload = buildPartnerAskPreferencePayload(state);
-  const stream = createUIMessageStream({
-    execute: ({ writer }) => {
-      writer.write({ type: 'text-delta', delta: introText, id: randomUUID() });
-      if (askPreferencePayload) {
-        writeWidgetEvent(writer, {
-          type: 'widget_ask_preference',
-          payload: askPreferencePayload,
-        });
-      }
-      if (trace) {
-        const now = new Date().toISOString();
-        writeTraceStartEvent(writer, {
-          requestId: randomUUID(),
-          startedAt: now,
-          intent: 'partner',
-          intentMethod: 'partner_matching',
-        });
-        writeTraceEndEvent(writer, {
-          completedAt: now,
-          status: 'collecting',
-          output: { text: introText, toolCalls: [] },
-        });
-      }
-    },
-  });
-  return createUIMessageStreamResponse({ stream });
-}
 
-// @ts-ignore - 保留以备将来使用
-async function _persistConversation(
-  userId: string,
-  userMessage: string,
-  assistantResponse: string,
-  toolCalls: TraceStep[]
-) {
-  try {
-    const { id: threadId } = await getOrCreateThread(userId);
-
-    if (userMessage) {
-      await saveMessage({ conversationId: threadId, userId, role: 'user', messageType: 'text', content: { text: userMessage } });
-    }
-
-    const activityId = getActivityIdFromTraceSteps(toolCalls);
-    let messageType: typeof conversationMessages.$inferSelect.messageType = 'text';
-    if (toolCalls.length > 0) {
-      const widgetType = getToolWidgetType(toolCalls[toolCalls.length - 1].toolName);
-      if (widgetType && isConversationMessageType(widgetType)) {
-        messageType = widgetType;
-      }
-    }
-
-    await saveMessage({
-      conversationId: threadId,
-      userId,
-      role: 'assistant',
-      messageType,
-      content: { text: assistantResponse, toolCalls: toolCalls.map(tc => ({ toolName: tc.toolName, args: tc.args, result: tc.result })) },
-      ...(activityId ? { activityId } : {}),
-    });
-  } catch (error) {
-    console.error('[AI] Failed to save conversation:', error);
-  }
-}
-
-function createTracedStreamResponse(result: ReturnType<typeof runStream>, ctx: {
-  requestId: string;
-  startedAt: string;
-  intent: ClassifyResult;
-  systemPrompt: string;
-  tools: Record<string, unknown>;
-  toolCallRecords: TraceStep[];
-  totalUsage: { promptTokens: number; completionTokens: number; totalTokens: number };
-  aiResponseText: string;
-  rawUserInput: string;
-  source: string;
-  userId: string | null;
-  modelId: string;
-  // Pre-LLM 管线上下文（从 metadata 读取各处理器数据）
-  preLLMContext: ProcessorContext;
-  // 独立于管线的 Processor 数据（管线外执行，无法从 metadata 获取）
-  inputGuard?: {
-    duration: number;
-    blocked: boolean;
-    sanitized: string;
-    triggeredRules?: string[];
+  return {
+    assistantText: introText,
+    executionPath: 'structured_action',
+    toolCallRecords: [],
+    blockPayloads: askPreferencePayload
+      ? [{ widgetType: 'widget_ask_preference', payload: askPreferencePayload }]
+      : [],
+    actionResults: [],
+    traces: [
+      createExecutionTrace('partner_matching', {
+        status: 'collecting',
+        hasNextQuestion: Boolean(nextQuestion),
+      }),
+    ],
   };
-  keywordMatch?: {
-    matched: boolean;
-    keyword?: string;
-    matchType?: string;
-    priority?: number;
-    responseType?: string;
-    duration: number;
-  };
-  // processorLogs 仅用于获取执行时间（metadata 不存储 duration）
-  processorLogs: import('./processors/types').ProcessorLogEntry[];
-}): Response {
-  const llmStartedAt = new Date().toISOString();
-  const llmStepId = `step-llm`;
-
-  // 从 ProcessorContext.metadata 读取各处理器数据
-  const { metadata } = ctx.preLLMContext;
-  const intentClassifyMeta = metadata.intentClassify;
-  const userProfileMeta = metadata.userProfile;
-  const semanticRecallMeta = metadata.semanticRecall;
-
-  // 辅助函数：从 processorLogs 获取执行时间
-  const getLogDuration = (name: string) => ctx.processorLogs.find(l => l.processorName === name)?.executionTime ?? 0;
-  const getLogData = (name: string) => ctx.processorLogs.find(l => l.processorName === name)?.data;
-
-  const toolsInfo = Object.entries(ctx.tools).map(([name, tool]) => {
-    const toolRecord = asRecord(tool);
-    return {
-      name,
-      description: typeof toolRecord?.description === 'string' ? toolRecord.description : '',
-      schema: extractToolSchema(tool),
-    };
-  });
-
-  const stream = createUIMessageStream({
-    execute: ({ writer }) => {
-      writer.write({
-        type: 'data-trace-start',
-        data: { requestId: ctx.requestId, startedAt: ctx.startedAt, systemPrompt: ctx.systemPrompt, tools: toolsInfo, intent: ctx.intent.intent, intentMethod: ctx.intent.method },
-        transient: true,
-      });
-
-      writer.write({
-        type: 'data-trace-step',
-        data: { id: `${ctx.requestId}-input`, type: 'input', name: '用户输入', startedAt: ctx.startedAt, completedAt: ctx.startedAt, status: 'success', duration: 0, data: { text: ctx.rawUserInput, source: ctx.source, userId: ctx.userId } },
-        transient: true,
-      });
-
-      // Input Guard Processor trace
-      if (ctx.inputGuard) {
-        const guardCompletedAt = new Date(new Date(ctx.startedAt).getTime() + ctx.inputGuard.duration).toISOString();
-        writer.write({
-          type: 'data-trace-step',
-          data: {
-            id: `${ctx.requestId}-input-guard`,
-            type: 'processor',
-            name: 'Input Guard',
-            startedAt: ctx.startedAt,
-            completedAt: guardCompletedAt,
-            status: 'success',
-            duration: ctx.inputGuard.duration,
-            data: {
-              processorType: 'input-guard',
-              output: {
-                blocked: ctx.inputGuard.blocked,
-                sanitized: ctx.inputGuard.sanitized,
-                triggeredRules: ctx.inputGuard.triggeredRules || [],
-              },
-              config: { maxLength: 500, enabled: true },
-            },
-          },
-          transient: true,
-        });
-      }
-
-      // P0 关键词匹配 (Keyword Match) trace
-      if (ctx.keywordMatch) {
-        const keywordMatchCompletedAt = new Date(new Date(ctx.startedAt).getTime() + (ctx.inputGuard?.duration || 0) + ctx.keywordMatch.duration).toISOString();
-        writer.write({
-          type: 'data-trace-step',
-          data: {
-            id: `${ctx.requestId}-keyword-match`,
-            type: 'keyword-match',
-            name: 'P0: 关键词匹配',
-            startedAt: new Date(new Date(ctx.startedAt).getTime() + (ctx.inputGuard?.duration || 0)).toISOString(),
-            completedAt: keywordMatchCompletedAt,
-            status: 'success',
-            duration: ctx.keywordMatch.duration,
-            data: {
-              matched: ctx.keywordMatch.matched,
-              keyword: ctx.keywordMatch.keyword,
-              matchType: ctx.keywordMatch.matchType,
-              priority: ctx.keywordMatch.priority,
-              responseType: ctx.keywordMatch.responseType,
-            },
-          },
-          transient: true,
-        });
-      }
-
-      // 意图分类 (Intent Classify) trace - 从 metadata 读取
-      if (intentClassifyMeta) {
-        const intentDuration = getLogDuration('intent-classify-processor');
-        const intentClassifyStartTime = new Date(ctx.startedAt).getTime() + (ctx.inputGuard?.duration || 0) + (ctx.keywordMatch?.duration || 0);
-        const intentClassifyCompletedAt = new Date(intentClassifyStartTime + intentDuration).toISOString();
-        writer.write({
-          type: 'data-trace-step',
-          data: {
-            id: `${ctx.requestId}-intent-classify`,
-            type: 'intent-classify',
-            name: 'P1: 意图识别',
-            startedAt: new Date(intentClassifyStartTime).toISOString(),
-            completedAt: intentClassifyCompletedAt,
-            status: 'success',
-            duration: intentDuration,
-            data: {
-              intent: intentClassifyMeta.intent,
-              method: intentClassifyMeta.method,
-              confidence: intentClassifyMeta.confidence,
-            },
-          },
-          transient: true,
-        });
-      }
-
-      // User Profile Processor trace - 从 metadata 读取
-      if (userProfileMeta) {
-        const profileDuration = getLogDuration('user-profile-processor');
-        const intentDuration = getLogDuration('intent-classify-processor');
-        const profileStartTime = new Date(ctx.startedAt).getTime() + (ctx.inputGuard?.duration || 0) + (ctx.keywordMatch?.duration || 0) + intentDuration;
-        const profileCompletedAt = new Date(profileStartTime + profileDuration).toISOString();
-        writer.write({
-          type: 'data-trace-step',
-          data: {
-            id: `${ctx.requestId}-user-profile`,
-            type: 'processor',
-            name: 'User Profile',
-            startedAt: new Date(profileStartTime).toISOString(),
-            completedAt: profileCompletedAt,
-            status: 'success',
-            duration: profileDuration,
-            data: {
-              processorType: 'user-profile',
-              output: userProfileMeta.hasProfile ? {
-                preferencesCount: userProfileMeta.preferencesCount || 0,
-                topPreferences: userProfileMeta.topPreferences || [],
-              } : {},
-              config: { enabled: true },
-            },
-          },
-          transient: true,
-        });
-      }
-
-      // Semantic Recall Processor trace - 从 metadata 读取
-      if (semanticRecallMeta) {
-        const recallDuration = getLogDuration('semantic-recall-processor');
-        const intentDuration = getLogDuration('intent-classify-processor');
-        const profileDuration = getLogDuration('user-profile-processor');
-        const recallStartTime = new Date(ctx.startedAt).getTime() + (ctx.inputGuard?.duration || 0) + (ctx.keywordMatch?.duration || 0) + intentDuration + profileDuration;
-        const recallCompletedAt = new Date(recallStartTime + recallDuration).toISOString();
-        writer.write({
-          type: 'data-trace-step',
-          data: {
-            id: `${ctx.requestId}-semantic-recall`,
-            type: 'processor',
-            name: 'Semantic Recall',
-            startedAt: new Date(recallStartTime).toISOString(),
-            completedAt: recallCompletedAt,
-            status: 'success',
-            duration: recallDuration,
-            data: {
-              processorType: 'semantic-recall',
-              output: {
-                query: ctx.preLLMContext.userInput || '',
-                resultCount: semanticRecallMeta.resultsCount || 0,
-                topScore: semanticRecallMeta.avgSimilarity || 0,
-              },
-              config: { enabled: true },
-            },
-          },
-          transient: true,
-        });
-      }
-
-      // Token Limit Processor trace - 从 processorLogs.data 读取（token-limit 不写 metadata）
-      const tokenLimitData = getLogData('token-limit-processor');
-      if (tokenLimitData) {
-        const tokenDuration = getLogDuration('token-limit-processor');
-        const intentDuration = getLogDuration('intent-classify-processor');
-        const profileDuration = getLogDuration('user-profile-processor');
-        const recallDuration = getLogDuration('semantic-recall-processor');
-        const tokenStartTime = new Date(ctx.startedAt).getTime() + (ctx.inputGuard?.duration || 0) + (ctx.keywordMatch?.duration || 0) + intentDuration + profileDuration + recallDuration;
-        const tokenCompletedAt = new Date(tokenStartTime + tokenDuration).toISOString();
-        const tokenSnapshot = getTokenLimitSnapshot(tokenLimitData);
-        writer.write({
-          type: 'data-trace-step',
-          data: {
-            id: `${ctx.requestId}-token-limit`,
-            type: 'processor',
-            name: 'Token Limit',
-            startedAt: new Date(tokenStartTime).toISOString(),
-            completedAt: tokenCompletedAt,
-            status: 'success',
-            duration: tokenDuration,
-            data: {
-              processorType: 'token-limit',
-              output: {
-                truncated: tokenSnapshot.truncated,
-                originalLength: tokenSnapshot.originalLength,
-                finalLength: tokenSnapshot.finalLength,
-              },
-              config: { maxTokens: 12000, enabled: true },
-            },
-          },
-          transient: true,
-        });
-      }
-
-      writer.write({
-        type: 'data-trace-step',
-        data: { id: llmStepId, type: 'llm', name: 'LLM 推理', startedAt: llmStartedAt, status: 'running', data: { model: ctx.modelId, inputTokens: 0, outputTokens: 0, totalTokens: 0 } },
-        transient: true,
-      });
-
-      writer.merge(result.toUIMessageStream({
-        onFinish: async () => {
-          const llmCompletedAt = new Date().toISOString();
-          const llmDuration = new Date(llmCompletedAt).getTime() - new Date(llmStartedAt).getTime();
-
-          // 直接从 streamText result 获取 usage，避免依赖 onFinish 回调的执行顺序
-          const usage = await result.usage;
-          const inputTokens = usage?.inputTokens ?? ctx.totalUsage.promptTokens;
-          const outputTokens = usage?.outputTokens ?? ctx.totalUsage.completionTokens;
-          const totalTokens = (inputTokens + outputTokens) || ctx.totalUsage.totalTokens;
-
-          writer.write({
-            type: 'data-trace-step-update',
-            data: { stepId: llmStepId, completedAt: llmCompletedAt, status: 'success', duration: llmDuration, data: { model: ctx.modelId, inputTokens, outputTokens, totalTokens } },
-            transient: true,
-          });
-
-          for (const step of ctx.toolCallRecords) {
-            writer.write({
-              type: 'data-trace-step',
-              data: { id: `${ctx.requestId}-tool-${step.toolCallId}`, type: 'tool', name: getToolDisplayName(step.toolName), startedAt: llmCompletedAt, completedAt: llmCompletedAt, status: 'success', duration: 0, data: { toolName: step.toolName, toolDisplayName: getToolDisplayName(step.toolName), input: step.args, output: step.result, widgetType: getToolWidgetType(step.toolName) } },
-              transient: true,
-            });
-          }
-
-          const completedAt = new Date().toISOString();
-          const totalDuration = new Date(completedAt).getTime() - new Date(ctx.startedAt).getTime();
-
-          // Output step
-          writer.write({
-            type: 'data-trace-step',
-            data: { id: `${ctx.requestId}-output`, type: 'output', name: '输出', startedAt: llmCompletedAt, completedAt, status: 'success', duration: totalDuration, data: { text: ctx.aiResponseText || '', toolCallCount: ctx.toolCallRecords.length, totalDuration, totalTokens } },
-            transient: true,
-          });
-
-          writer.write({
-            type: 'data-trace-end',
-            data: { requestId: ctx.requestId, completedAt, totalDuration, status: 'completed', output: { text: ctx.aiResponseText || null, toolCalls: ctx.toolCallRecords.map(s => ({ name: s.toolName, input: s.args, output: s.result })) } },
-            transient: true,
-          });
-        },
-      }));
-    },
-  });
-
-  return createUIMessageStreamResponse({ stream });
 }
 
 // ==========================================
@@ -2312,7 +1784,10 @@ export async function getConversationMessages(conversationId: string) {
   const msgs = await db
     .select()
     .from(conversationMessages)
-    .where(eq(conversationMessages.conversationId, conversationId))
+    .where(
+      sql`${conversationMessages.conversationId} = ${conversationId}
+        AND (${conversationMessages.expiresAt} IS NULL OR ${conversationMessages.expiresAt} > NOW())`
+    )
     .orderBy(conversationMessages.createdAt);
 
   return {
@@ -2458,7 +1933,7 @@ function resolvePrimaryBlockType(blocks: GenUIBlock[]): GenUIBlock['type'] | nul
 
 function buildAssistantConversationSnapshot(
   blocks: GenUIBlock[],
-  params?: { turnId?: string; traceId?: string }
+  params?: { responseId?: string; traceId?: string }
 ): {
   messageType: ConversationMessageRecord['messageType'];
   content: Record<string, unknown>;
@@ -2468,21 +1943,21 @@ function buildAssistantConversationSnapshot(
   }
 
   const text = summarizeAssistantBlocks(blocks);
-  const turnContext = buildTurnContextFromBlocks(blocks);
+  const suggestions = buildSuggestionsFromBlocks(blocks);
 
   return {
     messageType: resolveAssistantMessageTypeFromBlocks(blocks),
     content: {
       ...(text ? { text } : {}),
       primaryBlockType: resolvePrimaryBlockType(blocks),
-      ...(turnContext ? { turnContext } : {}),
+      ...(suggestions ? { suggestions } : {}),
       blocks,
-      turn: {
-        ...(params?.turnId ? { turnId: params.turnId } : {}),
+      response: {
+        ...(params?.responseId ? { responseId: params.responseId } : {}),
         ...(params?.traceId ? { traceId: params.traceId } : {}),
         status: 'completed',
         primaryBlockType: resolvePrimaryBlockType(blocks),
-        ...(turnContext ? { turnContext } : {}),
+        ...(suggestions ? { suggestions } : {}),
         blocks,
       },
     },
@@ -2509,19 +1984,19 @@ function extractStoredConversationText(content: unknown): string {
   return '';
 }
 
-export async function syncConversationTurnSnapshot(params: {
+export async function syncConversationResponseSnapshot(params: {
   conversationId: string;
   userId: string;
   userText?: string;
   blocks: GenUIBlock[];
-  turnId?: string;
+  responseId?: string;
   traceId?: string;
   inputType?: 'text' | 'action';
   resolvedStructuredAction?: StructuredAction;
   activityId?: string;
 }) {
   const assistantRecord = buildAssistantConversationSnapshot(params.blocks, {
-    turnId: params.turnId,
+    responseId: params.responseId,
     traceId: params.traceId,
   });
   if (!assistantRecord) {
@@ -2533,6 +2008,15 @@ export async function syncConversationTurnSnapshot(params: {
   const userRecord = normalizedUserText
     ? {
         messageType: shouldPersistStructuredActionInput ? 'user_action' as const : 'text' as const,
+        kind: shouldPersistStructuredActionInput ? 'action' as const : 'text' as const,
+        text: normalizedUserText,
+        payload: shouldPersistStructuredActionInput
+          ? {
+              action: params.resolvedStructuredAction?.action,
+              payload: params.resolvedStructuredAction?.payload,
+              source: params.resolvedStructuredAction?.source || 'structured_action',
+            }
+          : undefined,
         content: shouldPersistStructuredActionInput
           ? {
               text: normalizedUserText,
@@ -2558,32 +2042,50 @@ export async function syncConversationTurnSnapshot(params: {
       content: conversationMessages.content,
     })
     .from(conversationMessages)
-    .where(eq(conversationMessages.conversationId, params.conversationId))
+    .where(
+      sql`${conversationMessages.conversationId} = ${params.conversationId}
+        AND (${conversationMessages.expiresAt} IS NULL OR ${conversationMessages.expiresAt} > NOW())`
+    )
     .orderBy(desc(conversationMessages.createdAt))
     .limit(4);
 
-  const existingAssistantForTurn = params.turnId
+  const existingAssistantForTurn = params.responseId
     ? recentMessages.find((message) => {
       if (message.role !== 'assistant' || !isRecord(message.content)) {
         return false;
       }
 
-      const turn = isRecord(message.content.turn) ? message.content.turn : null;
-      return turn?.turnId === params.turnId;
+      const turn = isRecord(message.content.response) ? message.content.response : null;
+      return turn?.responseId === params.responseId;
     })
     : undefined;
 
   if (existingAssistantForTurn) {
+    const previousAssistantText = extractStoredConversationText(existingAssistantForTurn.content);
+    const nextAssistantText = extractStoredConversationText(assistantRecord.content);
+    const shouldRefreshEmbedding = nextAssistantText.length > 0 && nextAssistantText !== previousAssistantText;
+
     await db
       .update(conversationMessages)
       .set({
         messageType: assistantRecord.messageType,
+        kind: hasError ? 'error' : 'response',
+        text: nextAssistantText || null,
+        payload: {
+          ...(isRecord(assistantRecord.content.response) ? { response: assistantRecord.content.response } : {}),
+          ...(assistantRecord.content.primaryBlockType ? { primaryBlockType: assistantRecord.content.primaryBlockType } : {}),
+          ...(assistantRecord.content.suggestions ? { suggestions: assistantRecord.content.suggestions } : {}),
+        },
         content: assistantRecord.content,
         activityId: resolvedActivityId ?? null,
         taskId: resolvedTaskId ?? null,
-        embedding: null,
+        expiresAt: getConversationMessageExpiresAt(),
       })
       .where(eq(conversationMessages.id, existingAssistantForTurn.id));
+
+    if (shouldRefreshEmbedding) {
+      refreshMessageEmbedding(existingAssistantForTurn.id, nextAssistantText);
+    }
 
     if (hasError) {
       await db
@@ -2609,16 +2111,26 @@ export async function syncConversationTurnSnapshot(params: {
       userId: params.userId,
       role: 'user',
       messageType: userRecord.messageType,
+      kind: userRecord.kind,
+      text: userRecord.text,
+      ...(userRecord.payload ? { payload: userRecord.payload } : {}),
       content: userRecord.content,
       ...(resolvedTaskId ? { taskId: resolvedTaskId } : {}),
     });
   }
 
-  await saveMessage({
+  const assistantMessage = await saveMessage({
     conversationId: params.conversationId,
     userId: params.userId,
     role: 'assistant',
     messageType: assistantRecord.messageType,
+    kind: hasError ? 'error' : 'response',
+    text: extractStoredConversationText(assistantRecord.content),
+    payload: {
+      ...(isRecord(assistantRecord.content.response) ? { response: assistantRecord.content.response } : {}),
+      ...(assistantRecord.content.primaryBlockType ? { primaryBlockType: assistantRecord.content.primaryBlockType } : {}),
+      ...(assistantRecord.content.suggestions ? { suggestions: assistantRecord.content.suggestions } : {}),
+    },
     content: assistantRecord.content,
     ...(resolvedActivityId ? { activityId: resolvedActivityId } : {}),
     ...(resolvedTaskId ? { taskId: resolvedTaskId } : {}),
@@ -2655,7 +2167,6 @@ export async function evaluateConversation(params: {
     .returning();
 
   if (!updated) return null;
-
   // 获取用户昵称
   const [user] = await db
     .select({ nickname: users.nickname })
@@ -2758,8 +2269,8 @@ export interface WelcomeSection {
 
 // 社交档案 (v4.4 新增)
 export interface SocialProfile {
-  participationCount: number;
-  activitiesCreatedCount: number;
+  joinedActivities: number;
+  hostedActivities: number;
   preferenceCompleteness: number;
 }
 
@@ -2797,6 +2308,27 @@ export interface WelcomeResponse {
       medium: string;
       high: string;
     };
+  };
+}
+
+async function getUserActivityStats(userId: string): Promise<{
+  joinedActivities: number;
+  hostedActivities: number;
+}> {
+  const [createdResult, joinedResult] = await Promise.all([
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(activities)
+      .where(eq(activities.creatorId, userId)),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(participants)
+      .where(and(eq(participants.userId, userId), eq(participants.status, 'joined'))),
+  ]);
+
+  return {
+    joinedActivities: joinedResult[0]?.count ?? 0,
+    hostedActivities: createdResult[0]?.count ?? 0,
   };
 }
 
@@ -3039,29 +2571,6 @@ function renderWelcomeTemplate(template: string, nickname: string): string {
   });
 }
 
-function parseWorkingMemorySummary(rawMemory: string | null): {
-  preferencesCount: number;
-  locationsCount: number;
-} {
-  if (!rawMemory) {
-    return { preferencesCount: 0, locationsCount: 0 };
-  }
-
-  try {
-    const parsed: unknown = JSON.parse(rawMemory);
-    if (!isRecord(parsed)) {
-      return { preferencesCount: 0, locationsCount: 0 };
-    }
-
-    return {
-      preferencesCount: Array.isArray(parsed.preferences) ? parsed.preferences.length : 0,
-      locationsCount: Array.isArray(parsed.frequentLocations) ? parsed.frequentLocations.length : 0,
-    };
-  } catch {
-    return { preferencesCount: 0, locationsCount: 0 };
-  }
-}
-
 function clampWelcomeTitle(title: string, maxLength = 12): string {
   const normalized = title.trim();
   if (normalized.length <= maxLength) {
@@ -3095,31 +2604,25 @@ export async function getWelcomeCard(
   const now = new Date();
 
   // 社交档案（已登录用户）
-  let socialProfile: { participationCount: number; activitiesCreatedCount: number; preferenceCompleteness: number } | undefined;
+  let socialProfile: { joinedActivities: number; hostedActivities: number; preferenceCompleteness: number } | undefined;
   let pendingActivities: WelcomePendingActivity[] = [];
   let hasDraftActivity = false;
 
   if (userId) {
-    const [user] = await db
-      .select({
-        participationCount: users.participationCount,
-        activitiesCreatedCount: users.activitiesCreatedCount,
-        workingMemory: users.workingMemory,
-      })
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
+    const [activityStats, profile] = await Promise.all([
+      getUserActivityStats(userId),
+      getEnhancedUserProfile(userId),
+    ]);
 
-    if (user) {
-      const { preferencesCount, locationsCount } = parseWorkingMemorySummary(user.workingMemory);
-      const preferenceCompleteness = Math.min(100, preferencesCount * 15 + locationsCount * 10);
+    const preferencesCount = profile.preferences.length;
+    const locationsCount = profile.frequentLocations.length;
+    const preferenceCompleteness = Math.min(100, preferencesCount * 15 + locationsCount * 10);
 
-      socialProfile = {
-        participationCount: user.participationCount,
-        activitiesCreatedCount: user.activitiesCreatedCount,
-        preferenceCompleteness,
-      };
-    }
+    socialProfile = {
+      joinedActivities: activityStats.joinedActivities,
+      hostedActivities: activityStats.hostedActivities,
+      preferenceCompleteness,
+    };
 
     const [draftRows, activeRows] = await Promise.all([
       db

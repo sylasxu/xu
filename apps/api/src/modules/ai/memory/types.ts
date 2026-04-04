@@ -113,6 +113,9 @@ export interface SaveMessageParams {
   userId: Message['userId'];
   role: Message['role'];
   messageType: Message['messageType'];
+  kind?: Message['kind'];
+  text?: string | null;
+  payload?: Message['payload'];
   content: Message['content'];
   activityId?: Message['activityId'];
   taskId?: Message['taskId'];

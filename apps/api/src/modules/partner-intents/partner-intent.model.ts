@@ -1,5 +1,6 @@
 import { Elysia, t, type Static } from 'elysia';
 import { selectPartnerIntentSchema } from '@juchang/db';
+import { ErrorResponseSchema, type ErrorResponse } from "../../common/common.model";
 
 const ActivityTypeSchema = t.Union([
   t.Literal('food'),
@@ -45,19 +46,14 @@ const PartnerIntentListResponseSchema = t.Object({
   limit: t.Number(),
 });
 
-const ErrorResponseSchema = t.Object({
-  code: t.Number(),
-  msg: t.String(),
-});
-
 export const partnerIntentModel = new Elysia({ name: 'partnerIntentModel' }).model({
   'partnerIntent.listQuery': PartnerIntentListQuerySchema,
   'partnerIntent.listItem': PartnerIntentListItemSchema,
   'partnerIntent.listResponse': PartnerIntentListResponseSchema,
   'partnerIntent.error': ErrorResponseSchema,
+  'common.error': ErrorResponseSchema,
 });
 
 export type PartnerIntentListQuery = Static<typeof PartnerIntentListQuerySchema>;
 export type PartnerIntentListItem = Static<typeof PartnerIntentListItemSchema>;
 export type PartnerIntentListResponse = Static<typeof PartnerIntentListResponseSchema>;
-export type ErrorResponse = Static<typeof ErrorResponseSchema>;

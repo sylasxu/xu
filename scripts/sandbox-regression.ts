@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { agentTasks, and, db, eq, inArray, partnerIntents, users } from '@juchang/db';
+import { agentTasks, and, db, desc, eq, inArray, partnerIntents, userMemories } from '@juchang/db';
 import { app } from '../apps/api/src/index';
 
 interface ApiError {
@@ -111,7 +111,7 @@ interface WelcomeResponse {
   sections?: unknown[];
 }
 
-type FollowUpMode = 'review' | 'rebook' | 'kickoff';
+type ActivityMode = 'review' | 'rebook' | 'kickoff';
 
 interface AiChatRequestContext {
   client?: 'web' | 'miniprogram' | 'admin';
@@ -121,7 +121,7 @@ interface AiChatRequestContext {
   lat?: number;
   lng?: number;
   activityId?: string;
-  followUpMode?: FollowUpMode;
+  activityMode?: ActivityMode;
   entry?: string;
 }
 
@@ -147,8 +147,8 @@ interface AiChatBlock {
 interface AiChatEnvelope {
   traceId: string;
   conversationId: string;
-  turn: {
-    turnId: string;
+  response: {
+    responseId: string;
     role: 'assistant';
     status: 'completed' | 'streaming' | 'error';
     blocks: AiChatBlock[];
@@ -238,7 +238,7 @@ function hasLeakedToolCallText(value: string): boolean {
   return /^call[a-zA-Z]+\(/.test(normalized);
 }
 
-function assertNoLeakedToolText(blocks: AiChatEnvelope['turn']['blocks'], label: string): void {
+function assertNoLeakedToolText(blocks: AiChatEnvelope['response']['blocks'], label: string): void {
   for (const block of blocks) {
     if (block.type !== 'text' || typeof block.content !== 'string') {
       continue;
@@ -250,15 +250,15 @@ function assertNoLeakedToolText(blocks: AiChatEnvelope['turn']['blocks'], label:
   }
 }
 
-function findBlock(blocks: AiChatEnvelope['turn']['blocks'], type: string): AiChatBlock | undefined {
+function findBlock(blocks: AiChatEnvelope['response']['blocks'], type: string): AiChatBlock | undefined {
   return blocks.find((block) => block.type === type);
 }
 
-function hasTextContent(blocks: AiChatEnvelope['turn']['blocks']): boolean {
+function hasTextContent(blocks: AiChatEnvelope['response']['blocks']): boolean {
   return blocks.some((block) => block.type === 'text' && typeof block.content === 'string' && block.content.trim().length > 0);
 }
 
-function hasVisibleFeedback(blocks: AiChatEnvelope['turn']['blocks']): boolean {
+function hasVisibleFeedback(blocks: AiChatEnvelope['response']['blocks']): boolean {
   return blocks.some((block) => {
     if (block.type === 'text' && typeof block.content === 'string' && block.content.trim().length > 0) {
       return true;
@@ -278,7 +278,7 @@ function readAlertMeta(block: AiChatBlock): Record<string, unknown> | null {
     : null;
 }
 
-function findAlertBlock(blocks: AiChatEnvelope['turn']['blocks']): AiChatBlock | undefined {
+function findAlertBlock(blocks: AiChatEnvelope['response']['blocks']): AiChatBlock | undefined {
   return blocks.find((block) => block.type === 'alert');
 }
 
@@ -704,68 +704,67 @@ async function markRebookFollowUp(activityId: string, user: BootstrappedUser) {
   });
 }
 
-function readActivityOutcomesFromWorkingMemory(workingMemory: string | null): StoredActivityOutcome[] {
-  if (!workingMemory) {
-    return [];
-  }
-
-  try {
-    const parsed = JSON.parse(workingMemory) as {
-      version?: unknown;
-      activityOutcomes?: unknown;
-    };
-
-    if (parsed.version !== 2 || !Array.isArray(parsed.activityOutcomes)) {
-      return [];
-    }
-
-    return parsed.activityOutcomes.flatMap((item): StoredActivityOutcome[] => {
-      if (typeof item !== 'object' || item === null) {
-        return [];
-      }
-
-      const outcome = item as Partial<StoredActivityOutcome>;
-      if (
-        typeof outcome.activityId !== 'string'
-        || typeof outcome.activityTitle !== 'string'
-        || typeof outcome.activityType !== 'string'
-        || typeof outcome.locationName !== 'string'
-        || !(outcome.attended === null || typeof outcome.attended === 'boolean')
-        || typeof outcome.rebookTriggered !== 'boolean'
-        || typeof outcome.happenedAt !== 'string'
-        || typeof outcome.updatedAt !== 'string'
-      ) {
-        return [];
-      }
-
-      if (
-        outcome.reviewSummary !== undefined
-        && outcome.reviewSummary !== null
-        && typeof outcome.reviewSummary !== 'string'
-      ) {
-        return [];
-      }
-
-      return [outcome];
-    });
-  } catch {
-    return [];
-  }
-}
-
 async function getUserActivityOutcome(userId: string, activityId: string): Promise<StoredActivityOutcome | null> {
-  const [record] = await db
-    .select({ workingMemory: users.workingMemory })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
+  const records = await db
+    .select({
+      metadata: userMemories.metadata,
+    })
+    .from(userMemories)
+    .where(and(
+      eq(userMemories.userId, userId),
+      eq(userMemories.memoryType, 'activity_outcome'),
+    ))
+    .orderBy(desc(userMemories.updatedAt))
+    .limit(20);
 
-  if (!record) {
+  const record = records.find((item) => {
+    const metadata = item.metadata as Record<string, unknown>;
+    return metadata.activityId === activityId;
+  });
+  if (!record) return null;
+
+  const metadata = record.metadata as Record<string, unknown>;
+  if (metadata.activityId !== activityId) {
     return null;
   }
 
-  return readActivityOutcomesFromWorkingMemory(record.workingMemory)
-    .find((item) => item.activityId === activityId) ?? null;
+  const attended = metadata.attended;
+  const rebookTriggered = metadata.rebookTriggered;
+  const reviewSummary = metadata.reviewSummary;
+  const activityTitle = metadata.activityTitle;
+  const activityType = metadata.activityType;
+  const locationName = metadata.locationName;
+  const happenedAt = metadata.happenedAt;
+  const updatedAt = metadata.updatedAt;
+
+  if (
+    typeof activityTitle !== 'string'
+    || typeof activityType !== 'string'
+    || typeof locationName !== 'string'
+    || typeof happenedAt !== 'string'
+    || typeof updatedAt !== 'string'
+    || !(attended === null || typeof attended === 'boolean')
+    || typeof rebookTriggered !== 'boolean'
+    || !(
+      reviewSummary === undefined
+      || reviewSummary === null
+      || typeof reviewSummary === 'string'
+    )
+  ) {
+    return null;
+  }
+
+  return {
+    activityId,
+    activityTitle,
+    activityType,
+    locationName,
+    attended,
+    rebookTriggered,
+    reviewSummary: typeof reviewSummary === 'string' ? reviewSummary : null,
+    happenedAt,
+    updatedAt,
+  };
 }
 
 async function withActivity<T>(creator: BootstrappedUser, run: (activityId: string) => Promise<T>, overrides?: Parameters<typeof buildCreatePayload>[0]) {
@@ -1044,7 +1043,7 @@ async function scenarioPostActivityFollowUpFlow(context: ScenarioContext): Promi
     async () => getUserActivityOutcome(joiner.user.id, activityId),
     { retries: 8, delayMs: 300 },
   );
-  assert(initialOutcome, '履约确认后参与者 workingMemory 未写入 activityOutcome');
+  assert(initialOutcome, '履约确认后参与者长期记忆未写入 activityOutcome');
   assert(initialOutcome.attended === true, `参与者 attended 写回异常: ${initialOutcome.attended}`);
   assert(initialOutcome.rebookTriggered === false, '履约确认后不应提前写入 rebookTriggered');
   assert(
@@ -1057,14 +1056,14 @@ async function scenarioPostActivityFollowUpFlow(context: ScenarioContext): Promi
     text: `我刚结束「${activityTitle}」（activityId: ${activityId}），帮我先做一份复盘：亮点、槽点、下次优化和一句可直接发群里的总结。`,
     context: {
       activityId,
-      followUpMode: 'review',
+      activityMode: 'review',
       entry: 'message_center_post_activity',
     },
   });
-  assertNoLeakedToolText(reviewTurn.turn.blocks, '活动后 review 复盘');
+  assertNoLeakedToolText(reviewTurn.response.blocks, '活动后 review 复盘');
   assert(
-    hasTextContent(reviewTurn.turn.blocks),
-    `活动后 review 复盘没有返回文本块: ${JSON.stringify(reviewTurn.turn.blocks)}`,
+    hasTextContent(reviewTurn.response.blocks),
+    `活动后 review 复盘没有返回文本块: ${JSON.stringify(reviewTurn.response.blocks)}`,
   );
 
   const reviewedOutcome = await waitFor(async () => {
@@ -1110,10 +1109,10 @@ async function scenarioAiExploreWithoutLocationFlow(context: ScenarioContext): P
 
   const firstTurn = await postAiChat({ user, text: '周末附近有什么活动' });
   assert(typeof firstTurn.conversationId === 'string' && firstTurn.conversationId.length > 0, 'AI 探索首轮未返回 conversationId');
-  assertNoLeakedToolText(firstTurn.turn.blocks, 'AI 无位置探索首轮');
+  assertNoLeakedToolText(firstTurn.response.blocks, 'AI 无位置探索首轮');
   assert(
-    firstTurn.turn.blocks.some((block) => block.type === 'choice'),
-    `AI 无位置探索首轮未返回位置选择卡: ${JSON.stringify(firstTurn.turn.blocks)}`,
+    firstTurn.response.blocks.some((block) => block.type === 'choice'),
+    `AI 无位置探索首轮未返回位置选择卡: ${JSON.stringify(firstTurn.response.blocks)}`,
   );
 
   const secondTurn = await postAiChat({
@@ -1121,10 +1120,10 @@ async function scenarioAiExploreWithoutLocationFlow(context: ScenarioContext): P
     conversationId: firstTurn.conversationId,
     text: '解放碑',
   });
-  assertNoLeakedToolText(secondTurn.turn.blocks, 'AI 位置追答');
+  assertNoLeakedToolText(secondTurn.response.blocks, 'AI 位置追答');
   assert(
-    secondTurn.turn.blocks.some((block) => block.type === 'choice'),
-    `AI 位置追答后未返回类型选择卡: ${JSON.stringify(secondTurn.turn.blocks)}`,
+    secondTurn.response.blocks.some((block) => block.type === 'choice'),
+    `AI 位置追答后未返回类型选择卡: ${JSON.stringify(secondTurn.response.blocks)}`,
   );
 
   const thirdTurn = await postAiChat({
@@ -1132,10 +1131,10 @@ async function scenarioAiExploreWithoutLocationFlow(context: ScenarioContext): P
     conversationId: firstTurn.conversationId,
     text: '火锅',
   });
-  assertNoLeakedToolText(thirdTurn.turn.blocks, 'AI 类型追答');
+  assertNoLeakedToolText(thirdTurn.response.blocks, 'AI 类型追答');
   assert(
-    thirdTurn.turn.blocks.some((block) => block.type === 'list' || block.type === 'cta-group'),
-    `AI 类型追答后未进入 explore 链路: ${JSON.stringify(thirdTurn.turn.blocks)}`,
+    thirdTurn.response.blocks.some((block) => block.type === 'list' || block.type === 'cta-group'),
+    `AI 类型追答后未进入 explore 链路: ${JSON.stringify(thirdTurn.response.blocks)}`,
   );
 
   details.push(`会话 ${firstTurn.conversationId} 对“周末附近有什么活动”先返回位置卡`);
@@ -1152,10 +1151,10 @@ async function scenarioAiLocationFollowupFlow(context: ScenarioContext): Promise
 
   const firstTurn = await postAiChat({ user, text: '想组个周五晚的局' });
   assert(typeof firstTurn.conversationId === 'string' && firstTurn.conversationId.length > 0, 'AI 追问链路未返回 conversationId');
-  assertNoLeakedToolText(firstTurn.turn.blocks, 'AI 首轮追问');
+  assertNoLeakedToolText(firstTurn.response.blocks, 'AI 首轮追问');
   assert(
-    hasVisibleFeedback(firstTurn.turn.blocks),
-    `AI 首轮未返回用户可见追问: ${JSON.stringify(firstTurn.turn.blocks)}`,
+    hasVisibleFeedback(firstTurn.response.blocks),
+    `AI 首轮未返回用户可见追问: ${JSON.stringify(firstTurn.response.blocks)}`,
   );
 
   const secondTurn = await postAiChat({
@@ -1163,10 +1162,10 @@ async function scenarioAiLocationFollowupFlow(context: ScenarioContext): Promise
     conversationId: firstTurn.conversationId,
     text: '解放碑',
   });
-  assertNoLeakedToolText(secondTurn.turn.blocks, 'AI 地点追答');
+  assertNoLeakedToolText(secondTurn.response.blocks, 'AI 地点追答');
   assert(
-    secondTurn.turn.blocks.some((block) => block.type === 'choice' || block.type === 'form' || block.type === 'cta-group'),
-    `AI 地点追答后未返回下一步交互组件: ${JSON.stringify(secondTurn.turn.blocks)}`,
+    secondTurn.response.blocks.some((block) => block.type === 'choice' || block.type === 'form' || block.type === 'cta-group'),
+    `AI 地点追答后未返回下一步交互组件: ${JSON.stringify(secondTurn.response.blocks)}`,
   );
 
   const thirdTurn = await postAiChat({
@@ -1174,15 +1173,15 @@ async function scenarioAiLocationFollowupFlow(context: ScenarioContext): Promise
     conversationId: firstTurn.conversationId,
     text: '桌游',
   });
-  assertNoLeakedToolText(thirdTurn.turn.blocks, 'AI 类型追答');
+  assertNoLeakedToolText(thirdTurn.response.blocks, 'AI 类型追答');
   assert(
-    thirdTurn.turn.blocks.some((block) =>
+    thirdTurn.response.blocks.some((block) =>
       block.type === 'list'
       || block.type === 'cta-group'
       || block.type === 'entity-card'
       || block.type === 'form'
     ),
-    `AI 类型追答后未进入后续承接链路: ${JSON.stringify(thirdTurn.turn.blocks)}`,
+    `AI 类型追答后未进入后续承接链路: ${JSON.stringify(thirdTurn.response.blocks)}`,
   );
 
   details.push(`会话 ${firstTurn.conversationId} 首轮已返回可继续追答的建局提示`);
@@ -1212,15 +1211,15 @@ async function scenarioAiPartnerSearchBootstrapFlow(context: ScenarioContext): P
   });
 
   assert(typeof firstTurn.conversationId === 'string' && firstTurn.conversationId.length > 0, '找搭子首轮未返回 conversationId');
-  assertNoLeakedToolText(firstTurn.turn.blocks, '找搭子首轮');
-  assert(hasTextContent(firstTurn.turn.blocks), `找搭子首轮缺少说明文本: ${JSON.stringify(firstTurn.turn.blocks)}`);
+  assertNoLeakedToolText(firstTurn.response.blocks, '找搭子首轮');
+  assert(hasTextContent(firstTurn.response.blocks), `找搭子首轮缺少说明文本: ${JSON.stringify(firstTurn.response.blocks)}`);
   assert(
-    !firstTurn.turn.blocks.some((block) => block.type === 'form' && block.dedupeKey === 'partner_intent_form'),
-    `找搭子首轮不应再返回完整 form: ${JSON.stringify(firstTurn.turn.blocks)}`
+    !firstTurn.response.blocks.some((block) => block.type === 'form' && block.dedupeKey === 'partner_intent_form'),
+    `找搭子首轮不应再返回完整 form: ${JSON.stringify(firstTurn.response.blocks)}`
   );
   assert(
-    firstTurn.turn.blocks.some((block) => block.type === 'text' || block.type === 'choice' || block.type === 'list'),
-    `找搭子首轮未返回轻问或搜索结果: ${JSON.stringify(firstTurn.turn.blocks)}`
+    firstTurn.response.blocks.some((block) => block.type === 'text' || block.type === 'choice' || block.type === 'list'),
+    `找搭子首轮未返回轻问或搜索结果: ${JSON.stringify(firstTurn.response.blocks)}`
   );
 
   details.push(`会话 ${firstTurn.conversationId} 首轮已走 search-first 链路，没有再直接弹完整搭子表单`);
@@ -1251,9 +1250,9 @@ async function scenarioAiDraftSettingsFormFlow(context: ScenarioContext): Promis
   });
 
   assert(typeof createTurn.conversationId === 'string' && createTurn.conversationId.length > 0, '创建草稿未返回 conversationId');
-  assertNoLeakedToolText(createTurn.turn.blocks, '创建草稿');
-  const draftBlock = findBlock(createTurn.turn.blocks, 'entity-card');
-  assert(draftBlock?.fields, `创建草稿后缺少 draft card: ${JSON.stringify(createTurn.turn.blocks)}`);
+  assertNoLeakedToolText(createTurn.response.blocks, '创建草稿');
+  const draftBlock = findBlock(createTurn.response.blocks, 'entity-card');
+  assert(draftBlock?.fields, `创建草稿后缺少 draft card: ${JSON.stringify(createTurn.response.blocks)}`);
 
   const activityId = typeof draftBlock.fields.activityId === 'string' ? draftBlock.fields.activityId : '';
   assert(activityId, `创建草稿后缺少 activityId: ${JSON.stringify(draftBlock.fields)}`);
@@ -1278,9 +1277,9 @@ async function scenarioAiDraftSettingsFormFlow(context: ScenarioContext): Promis
       },
     });
 
-    assertNoLeakedToolText(editTurn.turn.blocks, '编辑草稿');
-    const formBlock = findBlock(editTurn.turn.blocks, 'form');
-    assert(formBlock?.schema, `编辑草稿后缺少 form block: ${JSON.stringify(editTurn.turn.blocks)}`);
+    assertNoLeakedToolText(editTurn.response.blocks, '编辑草稿');
+    const formBlock = findBlock(editTurn.response.blocks, 'form');
+    assert(formBlock?.schema, `编辑草稿后缺少 form block: ${JSON.stringify(editTurn.response.blocks)}`);
     const formSchema = formBlock.schema as Record<string, unknown>;
     assert(formSchema.formType === 'draft_settings', `草稿设置 formType 异常: ${JSON.stringify(formSchema)}`);
     assert(formSchema.submitAction === 'save_draft_settings', `草稿设置 submitAction 异常: ${JSON.stringify(formSchema)}`);
@@ -1300,10 +1299,10 @@ async function scenarioAiDraftSettingsFormFlow(context: ScenarioContext): Promis
       },
     });
 
-    assertNoLeakedToolText(saveTurn.turn.blocks, '保存草稿设置');
-    assert(hasVisibleFeedback(saveTurn.turn.blocks), `保存草稿设置后缺少可见反馈: ${JSON.stringify(saveTurn.turn.blocks)}`);
-    assert(findBlock(saveTurn.turn.blocks, 'entity-card'), `保存草稿设置后缺少更新后的 draft card: ${JSON.stringify(saveTurn.turn.blocks)}`);
-    assert(findBlock(saveTurn.turn.blocks, 'cta-group'), `保存草稿设置后缺少下一步 CTA: ${JSON.stringify(saveTurn.turn.blocks)}`);
+    assertNoLeakedToolText(saveTurn.response.blocks, '保存草稿设置');
+    assert(hasVisibleFeedback(saveTurn.response.blocks), `保存草稿设置后缺少可见反馈: ${JSON.stringify(saveTurn.response.blocks)}`);
+    assert(findBlock(saveTurn.response.blocks, 'entity-card'), `保存草稿设置后缺少更新后的 draft card: ${JSON.stringify(saveTurn.response.blocks)}`);
+    assert(findBlock(saveTurn.response.blocks, 'cta-group'), `保存草稿设置后缺少下一步 CTA: ${JSON.stringify(saveTurn.response.blocks)}`);
 
     details.push(`活动 ${activityId} 支持 edit_draft -> draft_settings form -> save_draft_settings`);
     details.push('草稿编辑不再回退成文字问答，保存后会返回更新后的草稿卡');
@@ -1336,10 +1335,10 @@ async function scenarioAiJoinAuthResumeDiscussionFlow(context: ScenarioContext):
     });
 
     assert(typeof guestTurn.conversationId === 'string' && guestTurn.conversationId.length > 0, '游客报名首轮未返回 conversationId');
-    assertNoLeakedToolText(guestTurn.turn.blocks, '游客报名挂起');
+    assertNoLeakedToolText(guestTurn.response.blocks, '游客报名挂起');
 
-    const guestAlert = findAlertBlock(guestTurn.turn.blocks);
-    assert(guestAlert, `游客报名首轮缺少 alert: ${JSON.stringify(guestTurn.turn.blocks)}`);
+    const guestAlert = findAlertBlock(guestTurn.response.blocks);
+    assert(guestAlert, `游客报名首轮缺少 alert: ${JSON.stringify(guestTurn.response.blocks)}`);
     const guestMeta = readAlertMeta(guestAlert);
     assert(guestMeta, `游客报名 alert 缺少 meta: ${JSON.stringify(guestAlert)}`);
     assert(guestMeta.authRequired && typeof guestMeta.authRequired === 'object', `游客报名未返回 authRequired meta: ${JSON.stringify(guestMeta)}`);
@@ -1367,9 +1366,9 @@ async function scenarioAiJoinAuthResumeDiscussionFlow(context: ScenarioContext):
       },
     });
 
-    assertNoLeakedToolText(resumeTurn.turn.blocks, '登录后恢复报名');
-    const resumeAlert = findAlertBlock(resumeTurn.turn.blocks);
-    assert(resumeAlert, `恢复报名后缺少 alert: ${JSON.stringify(resumeTurn.turn.blocks)}`);
+    assertNoLeakedToolText(resumeTurn.response.blocks, '登录后恢复报名');
+    const resumeAlert = findAlertBlock(resumeTurn.response.blocks);
+    assert(resumeAlert, `恢复报名后缺少 alert: ${JSON.stringify(resumeTurn.response.blocks)}`);
     const resumeMeta = readAlertMeta(resumeAlert);
     assert(resumeMeta, `恢复报名 alert 缺少 meta: ${JSON.stringify(resumeAlert)}`);
     assert(resumeMeta.navigationIntent === 'open_discussion', `恢复报名后未返回 open_discussion: ${JSON.stringify(resumeMeta)}`);
@@ -1431,13 +1430,13 @@ async function scenarioAiAccessFlow(context: ScenarioContext): Promise<ScenarioR
 
   const anonChat = await postAiChat({ text: '你好，帮我打个招呼' });
   assert(typeof anonChat.conversationId === 'string' && anonChat.conversationId.length > 0, '游客 AI 对话未返回 conversationId');
-  assert(anonChat.turn.blocks.some((block) => block.type === 'text' && typeof block.content === 'string' && block.content.length > 0), '游客 AI 对话未返回文本块');
-  assertNoLeakedToolText(anonChat.turn.blocks, '游客 AI 对话');
+  assert(anonChat.response.blocks.some((block) => block.type === 'text' && typeof block.content === 'string' && block.content.length > 0), '游客 AI 对话未返回文本块');
+  assertNoLeakedToolText(anonChat.response.blocks, '游客 AI 对话');
 
   const authChat = await postAiChat({ user: user1, text: '你好，我想找人吃火锅' });
   assert(typeof authChat.conversationId === 'string' && authChat.conversationId.length > 0, '登录 AI 对话未返回 conversationId');
-  assert(authChat.turn.blocks.some((block) => block.type === 'text' && typeof block.content === 'string' && block.content.length > 0), '登录 AI 对话未返回文本块');
-  assertNoLeakedToolText(authChat.turn.blocks, '登录 AI 对话');
+  assert(authChat.response.blocks.some((block) => block.type === 'text' && typeof block.content === 'string' && block.content.length > 0), '登录 AI 对话未返回文本块');
+  assertNoLeakedToolText(authChat.response.blocks, '登录 AI 对话');
 
   const ownConversations = await getAiConversations(user1);
   assert(ownConversations.items.some((item) => item.id === authChat.conversationId), '登录 AI 对话未持久化到会话列表');
@@ -1500,15 +1499,15 @@ async function scenarioAiLongConversationFlow(context: ScenarioContext): Promise
     });
 
     assert(typeof turn.conversationId === 'string', `长对话 turn${index + 1} 未返回 conversationId`);
-    assertNoLeakedToolText(turn.turn.blocks, `长对话 turn${index + 1}`);
-    assert(turn.turn.blocks.length > 0, `长对话 turn${index + 1} 返回空 blocks`);
+    assertNoLeakedToolText(turn.response.blocks, `长对话 turn${index + 1}`);
+    assert(turn.response.blocks.length > 0, `长对话 turn${index + 1} 返回空 blocks`);
 
     if (conversationId) {
       assert(turn.conversationId === conversationId, `长对话 turn${index + 1} conversationId 漂移`);
     }
 
     conversationId = turn.conversationId;
-    const blockTypes = turn.turn.blocks.map((b) => b.type);
+    const blockTypes = turn.response.blocks.map((b) => b.type);
     details.push(`turn${index + 1}=[${blockTypes.join(',')}]`);
   }
 
@@ -1528,19 +1527,19 @@ async function scenarioAiTransientContextFlow(context: ScenarioContext): Promise
   const conversationId = firstTurn.conversationId;
 
   const locationTurn = await postAiChat({ user, text: '观音桥', conversationId });
-  assertNoLeakedToolText(locationTurn.turn.blocks, 'transient context 位置');
+  assertNoLeakedToolText(locationTurn.response.blocks, 'transient context 位置');
 
   const typeTurn = await postAiChat({ user, text: '桌游', conversationId });
-  assertNoLeakedToolText(typeTurn.turn.blocks, 'transient context 类型');
+  assertNoLeakedToolText(typeTurn.response.blocks, 'transient context 类型');
 
   const partnerTurn = await postAiChat({ user, text: '帮我找同类搭子', conversationId });
-  assertNoLeakedToolText(partnerTurn.turn.blocks, 'transient context 转找搭子');
+  assertNoLeakedToolText(partnerTurn.response.blocks, 'transient context 转找搭子');
 
   const sportTurn = await postAiChat({ user, text: '羽毛球', conversationId });
-  assertNoLeakedToolText(sportTurn.turn.blocks, 'transient context 运动类型');
+  assertNoLeakedToolText(sportTurn.response.blocks, 'transient context 运动类型');
 
   const timeTurn = await postAiChat({ user, text: '周六晚上', conversationId });
-  assertNoLeakedToolText(timeTurn.turn.blocks, 'transient context 时间');
+  assertNoLeakedToolText(timeTurn.response.blocks, 'transient context 时间');
 
   details.push(`会话 ${conversationId} 通过 transient context 完成多轮追问`);
   details.push('位置、类型、运动、时间在多轮对话中被正确保持');
@@ -1571,16 +1570,16 @@ async function scenarioAiMultiIntentCrossFlow(context: ScenarioContext): Promise
   const conversationId = createTurn.conversationId;
 
   const exploreTurn = await postAiChat({ user, text: '观音桥附近还有什么活动', conversationId });
-  assertNoLeakedToolText(exploreTurn.turn.blocks, '多意图交叉探索');
+  assertNoLeakedToolText(exploreTurn.response.blocks, '多意图交叉探索');
 
   const partnerTurn = await postAiChat({ user, text: '帮我找个运动搭子', conversationId });
-  assertNoLeakedToolText(partnerTurn.turn.blocks, '多意图交叉找搭子');
+  assertNoLeakedToolText(partnerTurn.response.blocks, '多意图交叉找搭子');
 
   const refineTurn = await postAiChat({ user, text: '羽毛球', conversationId });
-  assertNoLeakedToolText(refineTurn.turn.blocks, '多意图交叉细化');
+  assertNoLeakedToolText(refineTurn.response.blocks, '多意图交叉细化');
 
   const manageTurn = await postAiChat({ user, text: '我草稿箱里那个活动能改时间吗', conversationId });
-  assertNoLeakedToolText(manageTurn.turn.blocks, '多意图交叉管理');
+  assertNoLeakedToolText(manageTurn.response.blocks, '多意图交叉管理');
 
   details.push(`会话 ${conversationId} 完成 创建->探索->找搭子->管理 多意图交叉`);
   return { name: 'ai-multi-intent-cross-flow', passed: true, details };
@@ -1608,7 +1607,7 @@ async function scenarioAiAnonymousLongFlow(context: ScenarioContext): Promise<Sc
     });
 
     assert(typeof turn.conversationId === 'string', `匿名长对话 turn${index + 1} 未返回 conversationId`);
-    assertNoLeakedToolText(turn.turn.blocks, `匿名长对话 turn${index + 1}`);
+    assertNoLeakedToolText(turn.response.blocks, `匿名长对话 turn${index + 1}`);
 
     conversationId = turn.conversationId;
   }
@@ -1637,21 +1636,21 @@ async function scenarioAiErrorRecoveryFlow(context: ScenarioContext): Promise<Sc
     text: '帮我组个周五的桌游局',
     conversationId,
   });
-  assertNoLeakedToolText(recoveryTurn.turn.blocks, '错误恢复测试恢复对话');
+  assertNoLeakedToolText(recoveryTurn.response.blocks, '错误恢复测试恢复对话');
 
   const emptyResultTurn = await postAiChat({
     user,
     text: '火星上有什么活动',
     conversationId,
   });
-  assertNoLeakedToolText(emptyResultTurn.turn.blocks, '错误恢复测试空结果');
+  assertNoLeakedToolText(emptyResultTurn.response.blocks, '错误恢复测试空结果');
 
   const continueTurn = await postAiChat({
     user,
     text: '观音桥附近有什么',
     conversationId,
   });
-  assertNoLeakedToolText(continueTurn.turn.blocks, '错误恢复测试继续');
+  assertNoLeakedToolText(continueTurn.response.blocks, '错误恢复测试继续');
 
   details.push(`会话 ${conversationId} 完成错误恢复序列`);
   details.push('无效动作->有效输入->空结果->正常继续 全部通过');

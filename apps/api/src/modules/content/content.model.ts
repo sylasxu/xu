@@ -1,5 +1,6 @@
 // Content Model - 内容运营领域 Schema
 
+import { ErrorResponseSchema, type ErrorResponse } from "../../common/common.model";
 import {
   insertContentNoteSchema,
   selectContentNoteSchema,
@@ -99,11 +100,6 @@ const ContentAnalyticsResponseSchema = t.Object({
   newFollowersTotal: t.Integer(),
 })
 
-const ErrorResponseSchema = t.Object({
-  code: t.Number(),
-  msg: t.String(),
-})
-
 const SuccessResponseSchema = t.Object({
   success: t.Boolean(),
   msg: t.String(),
@@ -121,6 +117,7 @@ export const contentModel = new Elysia({ name: 'contentModel' }).model({
   'content.analyticsResponse': ContentAnalyticsResponseSchema,
   'content.error': ErrorResponseSchema,
   'content.success': SuccessResponseSchema,
+  'common.error': ErrorResponseSchema,
 })
 
 export type ContentNoteResponse = Static<typeof ContentNoteResponseSchema>
@@ -132,7 +129,6 @@ export type ContentLibraryResponse = Static<typeof ContentLibraryResponseSchema>
 export type PerformanceUpdateRequest = Static<typeof PerformanceUpdateRequestSchema>
 export type ContentAnalyticsQuery = Static<typeof ContentAnalyticsQuerySchema>
 export type ContentAnalyticsResponse = Static<typeof ContentAnalyticsResponseSchema>
-export type ErrorResponse = Static<typeof ErrorResponseSchema>
 export type SuccessResponse = Static<typeof SuccessResponseSchema>
 
 export { ContentNoteResponseSchema }

@@ -1,8 +1,8 @@
 // Participant Controller - 参与者辅助接口 (MVP 简化版)
 // 主要逻辑已移到 activities 模块
 import { Elysia, t } from 'elysia';
-import { basePlugins, verifyAuth } from '../../setup';
-import { participantModel, ParticipantInfoSchema, type ErrorResponse } from './participant.model';
+import { basePlugins, verifyAuth, type ErrorResponse } from '../../setup';
+import { participantModel, ParticipantInfoSchema } from './participant.model';
 import {
   getActivityParticipants,
   confirmActivityFulfillment,
@@ -13,6 +13,9 @@ export const participantController = new Elysia({ prefix: '/participants' })
   .use(basePlugins)
   .use(participantModel)
 
+  // ==========================================
+  // 公开接口（无需认证）
+  // ==========================================
   // 获取活动参与者列表
   .get(
     '/activity/:id',
@@ -37,11 +40,14 @@ export const participantController = new Elysia({ prefix: '/participants' })
       params: 'participant.idParams',
       response: {
         200: t.Array(ParticipantInfoSchema),
-        500: 'participant.error',
+        500: 'common.error',
       },
     }
   )
 
+  // ==========================================
+  // 需要登录的接口
+  // ==========================================
   // 发起人提交履约确认
   .post(
     '/confirm-fulfillment',
@@ -49,10 +55,7 @@ export const participantController = new Elysia({ prefix: '/participants' })
       const user = await verifyAuth(jwt, headers);
       if (!user) {
         set.status = 401;
-        return {
-          code: 401,
-          msg: '未授权',
-        } satisfies ErrorResponse;
+        return { code: 401, msg: '未授权' } satisfies ErrorResponse;
       }
 
       try {
@@ -90,25 +93,23 @@ export const participantController = new Elysia({ prefix: '/participants' })
       body: 'participant.confirmFulfillmentRequest',
       response: {
         200: 'participant.confirmFulfillmentResponse',
-        400: 'participant.error',
-        401: 'participant.error',
-        403: 'participant.error',
-        404: 'participant.error',
-        500: 'participant.error',
+        400: 'common.error',
+        401: 'common.error',
+        403: 'common.error',
+        404: 'common.error',
+        500: 'common.error',
       },
     }
   )
 
+  // 记录活动后的再约意愿
   .post(
     '/rebook-follow-up',
     async ({ body, set, jwt, headers }) => {
       const user = await verifyAuth(jwt, headers);
       if (!user) {
         set.status = 401;
-        return {
-          code: 401,
-          msg: '未授权',
-        } satisfies ErrorResponse;
+        return { code: 401, msg: '未授权' } satisfies ErrorResponse;
       }
 
       try {
@@ -140,11 +141,11 @@ export const participantController = new Elysia({ prefix: '/participants' })
       body: 'participant.rebookFollowUpRequest',
       response: {
         200: 'participant.actionResponse',
-        400: 'participant.error',
-        401: 'participant.error',
-        403: 'participant.error',
-        404: 'participant.error',
-        500: 'participant.error',
+        400: 'common.error',
+        401: 'common.error',
+        403: 'common.error',
+        404: 'common.error',
+        500: 'common.error',
       },
     }
   );

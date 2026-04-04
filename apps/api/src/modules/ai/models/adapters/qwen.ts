@@ -217,6 +217,7 @@ async function embed(params: EmbedParams): Promise<EmbedResponse> {
       model: modelId,
       input: params.texts,
       dimensions: QWEN_EMBEDDING_DIMENSION,
+      ...(params.textType ? { text_type: params.textType } : {}),
     }),
   });
 
@@ -328,16 +329,16 @@ export const qwenProvider: ModelProvider = {
  * 
  * 直接返回向量，使用 1536 维
  */
-export async function getQwenEmbeddings(texts: string[]): Promise<number[][]> {
-  const result = await embed({ texts });
+export async function getQwenEmbeddings(texts: string[], textType?: EmbedParams['textType']): Promise<number[][]> {
+  const result = await embed({ texts, ...(textType ? { textType } : {}) });
   return result.embeddings;
 }
 
 /**
  * 获取单个文本的 Embedding
  */
-export async function getQwenEmbedding(text: string): Promise<number[]> {
-  const result = await embed({ texts: [text] });
+export async function getQwenEmbedding(text: string, textType?: EmbedParams['textType']): Promise<number[]> {
+  const result = await embed({ texts: [text], ...(textType ? { textType } : {}) });
   const embedding = result.embeddings[0];
   if (!embedding) {
     throw new Error('Qwen embedding result is empty');

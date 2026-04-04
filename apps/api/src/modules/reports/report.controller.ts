@@ -1,15 +1,14 @@
 // Report Controller - 举报管理接口
 import { Elysia } from 'elysia';
-import { basePlugins, verifyAuth, verifyAdmin, AuthError } from '../../setup';
-import { 
-  reportModel, 
-  type ErrorResponse 
+import { basePlugins, verifyAuth, verifyAdmin, type ErrorResponse } from '../../setup';
+import {
+  reportModel,
 } from './report.model';
-import { 
-  createReport, 
-  getReports, 
-  getReportById, 
-  updateReport 
+import {
+  createReport,
+  getReports,
+  getReportById,
+  updateReport,
 } from './report.service';
 
 export const reportController = new Elysia({ prefix: '/reports' })
@@ -23,7 +22,7 @@ export const reportController = new Elysia({ prefix: '/reports' })
       const user = await verifyAuth(jwt, headers);
       if (!user) {
         set.status = 401;
-        return { code: 401, msg: '未授权，请先登录' } satisfies ErrorResponse;
+        return { code: 401, msg: '未授权' } satisfies ErrorResponse;
       }
 
       try {
@@ -44,98 +43,103 @@ export const reportController = new Elysia({ prefix: '/reports' })
       body: 'report.createRequest',
       response: {
         200: 'report.createSuccess',
-        401: 'report.error',
-        500: 'report.error',
+        401: 'common.error',
+        500: 'common.error',
       },
     }
   )
 
-  // 受保护接口（通过 guard 保护）
-  .guard(
-    {
-      async beforeHandle({ jwt, headers, set }) {
-        try {
-          await verifyAdmin(jwt, headers);
-        } catch (error) {
-          if (error instanceof AuthError) {
-            set.status = error.status;
-            return { code: error.status, msg: error.message };
-          }
-        }
-      },
+  // GET /reports - 获取举报列表（管理员）
+  .get(
+    '/',
+    async ({ query, set, jwt, headers }) => {
+      const admin = await verifyAdmin(jwt, headers);
+      if (!admin) {
+        set.status = 403;
+        return { code: 403, msg: '无管理员权限' } satisfies ErrorResponse;
+      }
+
+      const result = await getReports(query);
+      return result;
     },
-    (app) =>
-      app
-        // GET /reports - 获取举报列表（需要管理员权限）
-        .get(
-          '/',
-          async ({ query }) => {
-            const result = await getReports(query);
-            return result;
-          },
-          {
-            detail: {
-              tags: ['Reports'],
-              summary: '获取举报列表',
-              description: '获取举报列表，支持按状态和类型筛选（需要管理员权限）',
-            },
-            query: 'report.listQuery',
-            response: {
-              200: 'report.listResponse',
-            },
-          }
-        )
+    {
+      detail: {
+        tags: ['Reports'],
+        summary: '获取举报列表',
+        description: '获取举报列表，支持按状态和类型筛选（需要管理员权限）',
+      },
+      query: 'report.listQuery',
+      response: {
+        200: 'report.listResponse',
+        401: 'common.error',
+        403: 'common.error',
+      },
+    }
+  )
 
-        // GET /reports/:id - 获取举报详情（需要管理员权限）
-        .get(
-          '/:id',
-          async ({ params, set }) => {
-            const report = await getReportById(params.id);
-            if (!report) {
-              set.status = 404;
-              return { code: 404, msg: '举报不存在' } satisfies ErrorResponse;
-            }
-            return report;
-          },
-          {
-            detail: {
-              tags: ['Reports'],
-              summary: '获取举报详情',
-              description: '根据 ID 获取举报详细信息（需要管理员权限）',
-            },
-            params: 'report.idParams',
-            response: {
-              200: 'report.response',
-              404: 'report.error',
-            },
-          }
-        )
+  // GET /reports/:id - 获取举报详情（管理员）
+  .get(
+    '/:id',
+    async ({ params, set, jwt, headers }) => {
+      const admin = await verifyAdmin(jwt, headers);
+      if (!admin) {
+        set.status = 403;
+        return { code: 403, msg: '无管理员权限' } satisfies ErrorResponse;
+      }
 
-        // PATCH /reports/:id - 更新举报状态（需要管理员权限）
-        .patch(
-          '/:id',
-          async ({ params, body, set, jwt, headers }) => {
-            const operator = await verifyAdmin(jwt, headers);
-            const updated = await updateReport(params.id, body, operator.id);
-            if (!updated) {
-              set.status = 404;
-              return { code: 404, msg: '举报不存在' } satisfies ErrorResponse;
-            }
-            return updated;
-          },
-          {
-            detail: {
-              tags: ['Reports'],
-              summary: '更新举报状态',
-              description: '更新举报处理状态和备注（需要管理员权限）',
-            },
-            params: 'report.idParams',
-            body: 'report.updateRequest',
-            response: {
-              200: 'report.response',
-              401: 'report.error',
-              404: 'report.error',
-            },
-          }
-        )
+      const report = await getReportById(params.id);
+      if (!report) {
+        set.status = 404;
+        return { code: 404, msg: '举报不存在' } satisfies ErrorResponse;
+      }
+      return report;
+    },
+    {
+      detail: {
+        tags: ['Reports'],
+        summary: '获取举报详情',
+        description: '根据 ID 获取举报详细信息（需要管理员权限）',
+      },
+      params: 'report.idParams',
+      response: {
+        200: 'report.response',
+        401: 'common.error',
+        403: 'common.error',
+        404: 'common.error',
+      },
+    }
+  )
+
+  // PATCH /reports/:id - 更新举报状态（管理员）
+  .patch(
+    '/:id',
+    async ({ params, body, set, jwt, headers }) => {
+      const admin = await verifyAdmin(jwt, headers);
+      if (!admin) {
+        set.status = 403;
+        return { code: 403, msg: '无管理员权限' } satisfies ErrorResponse;
+      }
+
+      const updated = await updateReport(params.id, body, admin.id);
+      if (!updated) {
+        set.status = 404;
+        return { code: 404, msg: '举报不存在' } satisfies ErrorResponse;
+      }
+      return updated;
+    },
+    {
+      detail: {
+        tags: ['Reports'],
+        summary: '更新举报状态',
+        description: '更新举报处理状态和备注（需要管理员权限）',
+      },
+      params: 'report.idParams',
+      body: 'report.updateRequest',
+      response: {
+        200: 'report.response',
+        401: 'common.error',
+        403: 'common.error',
+        404: 'common.error',
+      },
+    }
   );

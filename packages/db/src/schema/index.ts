@@ -16,6 +16,7 @@ export * from "./participants";
 // 3. Chat System (v3.3 行业标准命名)
 export * from "./activity_messages";  // 活动群聊
 export * from "./conversations";      // AI 对话历史
+export * from "./user-memories";      // 长期用户记忆
 
 // 4. Notification System
 export * from "./notifications";

@@ -1,5 +1,6 @@
 // Hot Keywords Model - TypeBox schemas (v4.8 Digital Ascension)
 import { Elysia, t, type Static } from 'elysia';
+import { ErrorResponseSchema, type ErrorResponse } from "../../common/common.model";
 import { selectGlobalKeywordSchema } from '@juchang/db';
 
 /**
@@ -85,8 +86,6 @@ const CreateGlobalKeywordRequest = t.Object({
   responseType: t.Union([
     t.Literal('widget_explore'),
     t.Literal('widget_draft'),
-    t.Literal('widget_launcher'),
-    t.Literal('widget_action'),
     t.Literal('widget_ask_preference'),
     t.Literal('text'),
   ], { description: '响应类型' }),
@@ -131,8 +130,6 @@ const HotKeywordsQuery = t.Object({
   responseType: t.Optional(t.Union([
     t.Literal('widget_explore'),
     t.Literal('widget_draft'),
-    t.Literal('widget_launcher'),
-    t.Literal('widget_action'),
     t.Literal('widget_ask_preference'),
     t.Literal('text'),
   ], { description: '响应类型筛选' })),
@@ -202,14 +199,6 @@ const IdParams = t.Object({
 });
 
 // ==========================================
-// 错误响应
-// ==========================================
-
-const ErrorResponse = t.Object({
-  code: t.Number(),
-  msg: t.String(),
-});
-
 // ==========================================
 // 注册到 Elysia
 // ==========================================
@@ -239,7 +228,7 @@ export const hotKeywordsModel = new Elysia({ name: 'hotKeywordsModel' })
     'hotKeywords.idParams': IdParams,
     
     // 错误响应
-    'hotKeywords.error': ErrorResponse,
+    'common.error': ErrorResponseSchema,
   });
 
 // ==========================================
@@ -260,4 +249,3 @@ export type DeleteKeywordResponse = Static<typeof DeleteKeywordResponse>;
 export type KeywordAnalyticsItem = Static<typeof KeywordAnalyticsItem>;
 export type KeywordAnalyticsResponse = Static<typeof KeywordAnalyticsResponse>;
 export type IdParams = Static<typeof IdParams>;
-export type ErrorResponse = Static<typeof ErrorResponse>;

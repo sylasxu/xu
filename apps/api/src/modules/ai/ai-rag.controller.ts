@@ -20,7 +20,7 @@ export const aiRagController = new Elysia({ prefix: '/rag' })
     } catch (error) {
       if (error instanceof AuthError) {
         set.status = error.status;
-        return { code: error.status, msg: error.message };
+        return { code: error.status, msg: error.message } satisfies ErrorResponse;
       }
     }
   })
@@ -49,8 +49,8 @@ export const aiRagController = new Elysia({ prefix: '/rag' })
       },
       response: {
         200: 'ai.ragStatsResponse',
-        401: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -83,8 +83,8 @@ export const aiRagController = new Elysia({ prefix: '/rag' })
       }),
       response: {
         200: 'ai.ragSearchResponse',
-        401: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -119,9 +119,9 @@ export const aiRagController = new Elysia({ prefix: '/rag' })
           success: t.Boolean(),
           msg: t.String(),
         }),
-        400: 'ai.error',
-        401: 'ai.error',
-        500: 'ai.error',
+        400: 'common.error',
+        401: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -149,8 +149,8 @@ export const aiRagController = new Elysia({ prefix: '/rag' })
           started: t.Boolean(),
           message: t.String(),
         }),
-        401: 'ai.error',
-        500: 'ai.error',
+        401: 'common.error',
+        500: 'common.error',
       },
     }
   )
@@ -170,7 +170,7 @@ export const aiRagController = new Elysia({ prefix: '/rag' })
       },
       response: {
         200: 'ai.ragBackfillStatusResponse',
-        401: 'ai.error',
+        401: 'common.error',
       },
     }
   );

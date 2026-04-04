@@ -22,8 +22,6 @@ interface UserInfo {
   avatarUrl: string
   slogan: string
   phoneNumber: string
-  activitiesCreatedCount: number
-  participationCount: number
 }
 
 Page({
@@ -35,8 +33,6 @@ Page({
       avatarUrl: '',
       slogan: '',
       phoneNumber: '',
-      activitiesCreatedCount: 0,
-      participationCount: 0,
     } as UserInfo,
     isLoggedIn: false,
     loading: true,
@@ -73,8 +69,6 @@ Page({
         avatarUrl: userInfo.avatarUrl || '',
         slogan: userInfo.slogan || '在聚场，遇见有趣的人',
         phoneNumber: userInfo.phoneNumber || '',
-        activitiesCreatedCount: userInfo.activitiesCreatedCount || 0,
-        participationCount: userInfo.participationCount || 0,
       },
     })
   },

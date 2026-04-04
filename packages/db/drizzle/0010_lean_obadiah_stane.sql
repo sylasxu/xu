@@ -1,1 +1,1 @@
-ALTER TABLE "conversation_messages" ADD COLUMN "embedding" vector(1024);
+ALTER TABLE "conversation_messages" ADD COLUMN "embedding" vector(1536);

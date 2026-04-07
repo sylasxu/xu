@@ -15,6 +15,12 @@ export interface ContentPublishCheck {
   issues: string[]
 }
 
+export interface ContentTrafficScript {
+  commentPrompt: string
+  dmReply: string
+  wechatHandoff: string
+}
+
 const OFFSITE_TERMS = [
   '加我',
   '加群',
@@ -214,6 +220,63 @@ function buildBuddyStoryBody(topic: string, scene: PartnerScene): string {
       return `想运动又不想一个人去，其实就是很典型的搭子需求。不是要组多大的局，只是有人能一起出门、打完就散，这种和「${topic}」有关的状态我最近碰到很多。`
     default:
       return `最近越来越觉得，和「${topic}」有关的状态其实很多人都有。不是多缺朋友，就是偶尔下班后、周末突然想出门的时候，会想找个能一起吃饭、散步或者随便坐坐的人，所以我也会更留意这种搭子需求。`
+  }
+}
+
+function buildCommentPrompt(topic: string, scene: PartnerScene): string {
+  switch (scene) {
+    case 'meal':
+      return `如果你也是下班后想找饭搭子的人，留一句“想吃饭”就行，我先看看同频的人多不多。`
+    case 'walk':
+      return `如果你也是那种下班后想找人走走的人，留一句“想散步”就行，我先看看有没有同状态的人。`
+    case 'sports':
+      return `如果你也想找个不太卷的运动搭子，留一句“想动一动”就行，我先看看这类人多不多。`
+    case 'tabletop':
+      return `如果你也想找个轻松点的桌游搭子，留一句“想来”就行，我先看看能不能凑成一小局。`
+    case 'drink':
+      return `如果你也是下班后想找人坐坐的人，留一句“想坐坐”就行，我先看看有没有同频的人。`
+    case 'passive':
+      return `如果你也是“谁组我就去”的人，留一句“我也是”就行，我先把这类需求接起来。`
+    default:
+      return `如果你也是这种状态的人，留一句“我也想”就行，我先看看有没有同频的人。`
+  }
+}
+
+function buildDmReply(topic: string, scene: PartnerScene): string {
+  switch (scene) {
+    case 'meal':
+      return `看到你留言啦，你也像是会想找饭搭子的人。你一般更想约工作日下班后，还是周末轻松吃一顿？我先按时间和区域帮你理一下。`
+    case 'walk':
+      return `看到你留言啦，你这个状态我很懂。你一般更偏下班后随便走走，还是周末找个地方慢慢逛？我先按时间和区域帮你理一下。`
+    case 'sports':
+      return `看到你留言啦，如果你最近也想找个轻松点的运动搭子，我们可以先对一下项目、时间和大概区域，我再看看怎么接更顺。`
+    case 'tabletop':
+      return `看到你留言啦，如果你也想找个轻松局，我们可以先对一下你更想玩的类型、时间和大概区域，我再看看怎么接更顺。`
+    case 'drink':
+      return `看到你留言啦，如果你也是想找个能轻松坐坐的人，我们可以先对一下你更偏工作日还是周末、喝茶还是小酌，我再帮你理一下。`
+    case 'passive':
+      return `看到你留言啦，你像是那种“有人组就愿意来”的状态。你先告诉我你更想参加什么类型、什么时间段，我这边会更容易帮你接。`
+    default:
+      return `看到你留言啦，你这个需求还挺典型的。你先告诉我你更想约什么、什么时间、哪一片更方便，我再帮你往下接。`
+  }
+}
+
+function buildWechatHandoff(topic: string, scene: PartnerScene): string {
+  switch (scene) {
+    case 'meal':
+      return `如果你方便的话，后面我们可以微信上对一下时间和区域，这样约饭会更顺一点。`
+    case 'walk':
+      return `如果你方便的话，后面我们可以微信上对一下时间和常活动区域，这样约散步会更顺一点。`
+    case 'sports':
+      return `如果你方便的话，后面我们可以微信上对一下项目、时间和场地偏好，这样会更好约。`
+    case 'tabletop':
+      return `如果你方便的话，后面我们可以微信上对一下时间和想玩的类型，这样成局会更快。`
+    case 'drink':
+      return `如果你方便的话，后面我们可以微信上对一下时间和你更偏的节奏，这样会更顺一点。`
+    case 'passive':
+      return `如果你方便的话，后面我们可以微信上对一下你更想参加的类型和常出没区域，我这边会更好帮你留意。`
+    default:
+      return `如果你方便的话，后面我们可以微信上对一下时间、区域和你更想约的方向，这样往下接会更顺一点。`
   }
 }
 
@@ -653,5 +716,29 @@ export function evaluateContentPublishCheck(params: {
     status: 'ready',
     summary: '这版已经比较像可直接发布的内容。',
     issues: [],
+  }
+}
+
+export function buildContentTrafficScript(params: {
+  topic: string
+  platform: ContentPlatform
+  contentType: ContentType
+  title: string
+}): ContentTrafficScript {
+  const topic = params.topic.replace(/[。！？!?,，、]/g, '').trim() || params.title
+  const scene = inferPartnerScene(topic)
+
+  if (params.platform !== 'xiaohongshu') {
+    return {
+      commentPrompt: '先观察评论区最自然的提问，再顺着对方具体需求往下接。',
+      dmReply: '我看到了你的反馈，你可以直接说说你更想约什么、什么时间方便，我再帮你往下理。',
+      wechatHandoff: '如果后面需要更顺手地对时间和细节，再视情况转到更方便沟通的渠道。',
+    }
+  }
+
+  return {
+    commentPrompt: buildCommentPrompt(topic, scene),
+    dmReply: buildDmReply(topic, scene),
+    wechatHandoff: buildWechatHandoff(topic, scene),
   }
 }

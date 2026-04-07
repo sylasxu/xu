@@ -33,6 +33,11 @@ export interface GeneratedNote {
   hashtags: string[]
   coverText: string | null
   coverImageHint: string | null
+  trafficScript: {
+    commentPrompt: string
+    dmReply: string
+    wechatHandoff: string
+  }
 }
 
 interface ContentGenerateProps {
@@ -204,6 +209,11 @@ export function ContentGenerate({
                   ))}
                 </SelectContent>
               </Select>
+              {platform === 'xiaohongshu' && (
+                <p className='mt-2 text-xs text-muted-foreground'>
+                  当前按小红书优先生成：会更强调首页标题、封面短句、封面图提示词和评论承接话术。
+                </p>
+              )}
             </div>
 
             <div>
@@ -274,7 +284,7 @@ export function ContentGenerate({
               <Card>
                 <CardContent className='flex flex-col items-center justify-center py-12 text-muted-foreground'>
                   <FileText className='h-12 w-12 mb-4' />
-                  <p>输入主题，AI 帮你生成更像传单号的内容稿</p>
+                  <p>输入主题，AI 帮你生成更适合小红书引流的内容稿</p>
                 </CardContent>
               </Card>
           ) : (
@@ -324,9 +334,12 @@ function NoteCard({
         </div>
       </CardHeader>
       <CardContent className='space-y-3'>
-        {/* 标题 */}
+        {/* 首页标题 */}
         <div className='flex items-start justify-between gap-2'>
-          <h3 className='font-semibold text-lg leading-tight'>{note.title}</h3>
+          <div className='space-y-1'>
+            <p className='text-xs font-medium text-muted-foreground'>首页标题</p>
+            <h3 className='font-semibold text-lg leading-tight'>{note.title}</h3>
+          </div>
           <Button
             variant='ghost'
             size='icon'
@@ -337,47 +350,10 @@ function NoteCard({
           </Button>
         </div>
 
-        {/* 正文预览 */}
-        <div className='relative'>
-          <p className='text-sm text-muted-foreground whitespace-pre-line line-clamp-6'>
-            {note.body}
-          </p>
-          <Button
-            variant='ghost'
-            size='sm'
-            className='mt-1'
-            onClick={() => copyToClipboard(note.body)}
-          >
-            <Copy className='h-3.5 w-3.5 mr-1' />
-            复制正文
-          </Button>
-        </div>
-
-        {/* 标签 */}
-        <div>
-          <div className='flex flex-wrap gap-1.5'>
-            {note.hashtags.map((tag) => (
-              <Badge key={tag} variant='secondary' className='text-xs'>
-                #{tag}
-              </Badge>
-            ))}
-          </div>
-          <Button
-            variant='ghost'
-            size='sm'
-            className='mt-1'
-            onClick={() => copyToClipboard(hashtagsText)}
-          >
-            <Copy className='h-3.5 w-3.5 mr-1' />
-            复制标签
-          </Button>
-        </div>
-
-        {/* 配图提示词 */}
         {note.coverText && (
           <div className='border-t pt-3'>
             <div className='flex items-center justify-between gap-2'>
-              <p className='text-xs font-medium text-muted-foreground'>首图文案</p>
+              <p className='text-xs font-medium text-muted-foreground'>首页封面短句</p>
               <Button
                 variant='ghost'
                 size='sm'
@@ -396,7 +372,7 @@ function NoteCard({
         {note.coverImageHint && (
           <div className='border-t pt-3'>
             <div className='flex items-center justify-between gap-2'>
-              <p className='text-xs font-medium text-muted-foreground'>首图配图提示词</p>
+              <p className='text-xs font-medium text-muted-foreground'>首页图片提示词</p>
               <Button
                 variant='ghost'
                 size='sm'
@@ -412,6 +388,96 @@ function NoteCard({
             </p>
           </div>
         )}
+
+        <div className='border-t pt-3 space-y-3'>
+          <div className='flex items-center justify-between gap-2'>
+            <p className='text-xs font-medium text-muted-foreground'>评论区引导句</p>
+            <Button
+              variant='ghost'
+              size='sm'
+              className='h-7 px-2 text-xs'
+              onClick={() => copyToClipboard(note.trafficScript.commentPrompt)}
+            >
+              <Copy className='h-3.5 w-3.5 mr-1' />
+              复制引导句
+            </Button>
+          </div>
+          <p className='text-sm text-muted-foreground'>{note.trafficScript.commentPrompt}</p>
+        </div>
+
+        <div className='border-t pt-3 space-y-3'>
+          <div className='flex items-center justify-between gap-2'>
+            <p className='text-xs font-medium text-muted-foreground'>私聊承接话术</p>
+            <Button
+              variant='ghost'
+              size='sm'
+              className='h-7 px-2 text-xs'
+              onClick={() => copyToClipboard(note.trafficScript.dmReply)}
+            >
+              <Copy className='h-3.5 w-3.5 mr-1' />
+              复制私聊话术
+            </Button>
+          </div>
+          <p className='text-sm text-muted-foreground'>{note.trafficScript.dmReply}</p>
+        </div>
+
+        <div className='border-t pt-3 space-y-3'>
+          <div className='flex items-center justify-between gap-2'>
+            <p className='text-xs font-medium text-muted-foreground'>转微信时参考句</p>
+            <Button
+              variant='ghost'
+              size='sm'
+              className='h-7 px-2 text-xs'
+              onClick={() => copyToClipboard(note.trafficScript.wechatHandoff)}
+            >
+              <Copy className='h-3.5 w-3.5 mr-1' />
+              复制参考句
+            </Button>
+          </div>
+          <p className='text-sm text-muted-foreground'>{note.trafficScript.wechatHandoff}</p>
+        </div>
+
+        {/* 正文预览 */}
+        <div className='relative border-t pt-3'>
+          <div className='flex items-center justify-between gap-2'>
+            <p className='text-xs font-medium text-muted-foreground'>正文</p>
+            <Button
+              variant='ghost'
+              size='sm'
+              className='h-7 px-2 text-xs'
+              onClick={() => copyToClipboard(note.body)}
+            >
+              <Copy className='h-3.5 w-3.5 mr-1' />
+              复制正文
+            </Button>
+          </div>
+          <p className='mt-1 text-sm text-muted-foreground whitespace-pre-line line-clamp-6'>
+            {note.body}
+          </p>
+        </div>
+
+        {/* 标签 */}
+        <div className='border-t pt-3'>
+          <div className='flex items-center justify-between gap-2'>
+            <p className='text-xs font-medium text-muted-foreground'>话题标签</p>
+            <Button
+              variant='ghost'
+              size='sm'
+              className='h-7 px-2 text-xs'
+              onClick={() => copyToClipboard(hashtagsText)}
+            >
+              <Copy className='h-3.5 w-3.5 mr-1' />
+              复制标签
+            </Button>
+          </div>
+          <div className='mt-2 flex flex-wrap gap-1.5'>
+            {note.hashtags.map((tag) => (
+              <Badge key={tag} variant='secondary' className='text-xs'>
+                #{tag}
+              </Badge>
+            ))}
+          </div>
+        </div>
       </CardContent>
     </Card>
   )

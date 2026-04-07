@@ -60,6 +60,11 @@ export interface ContentNote {
     summary: string
     issues: string[]
   }
+  trafficScript: {
+    commentPrompt: string
+    dmReply: string
+    wechatHandoff: string
+  }
   createdAt: string
   updatedAt: string
 }

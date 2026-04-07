@@ -21,6 +21,12 @@ const PublishCheckSchema = t.Object({
   issues: t.Array(t.String(), { maxItems: 3 }),
 })
 
+const TrafficScriptSchema = t.Object({
+  commentPrompt: t.String(),
+  dmReply: t.String(),
+  wechatHandoff: t.String(),
+})
+
 const ContentNoteResponseSchema = t.Composite([
   t.Pick(selectContentNoteSchema, [
     'id',
@@ -41,6 +47,7 @@ const ContentNoteResponseSchema = t.Composite([
   ]),
   t.Object({
     publishCheck: PublishCheckSchema,
+    trafficScript: TrafficScriptSchema,
     createdAt: t.String(),
     updatedAt: t.String(),
   }),

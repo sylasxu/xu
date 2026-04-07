@@ -34,6 +34,7 @@ import {
   normalizeGeneratedContentNote,
   normalizeSuggestedTopics,
   evaluateContentPublishCheck,
+  buildContentTrafficScript,
   type GeneratedContentDraft,
 } from './content-note-normalizer'
 import { createLogger } from '../ai/observability/logger'
@@ -889,6 +890,12 @@ export function formatContentNote(note: ContentNote): ContentNoteResponse {
       hashtags: note.hashtags,
       coverText: note.coverText,
       coverImageHint: note.coverImageHint,
+    }),
+    trafficScript: buildContentTrafficScript({
+      topic: note.topic,
+      platform: note.platform,
+      contentType: note.contentType,
+      title: note.title,
     }),
     batchId: note.batchId,
     createdAt: note.createdAt.toISOString(),

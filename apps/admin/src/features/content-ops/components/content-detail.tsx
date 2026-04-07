@@ -283,9 +283,103 @@ export function ContentDetail({
 
           <Card>
             <CardHeader>
-              <CardTitle>内容正文</CardTitle>
+              <CardTitle>发布素材</CardTitle>
             </CardHeader>
             <CardContent className='space-y-4'>
+              <div>
+                <div className='flex items-center justify-between mb-2'>
+                  <span className='text-sm font-medium text-muted-foreground'>首页标题</span>
+                  <Button variant='ghost' size='sm' onClick={() => copyToClipboard(note.title)}>
+                    <Copy className='h-3.5 w-3.5 mr-1' />
+                    复制
+                  </Button>
+                </div>
+                <p className='text-lg font-semibold leading-tight'>{note.title}</p>
+              </div>
+
+              {note.coverText && (
+                <div>
+                  <div className='flex items-center justify-between gap-2'>
+                    <span className='text-sm font-medium text-muted-foreground'>首页封面短句</span>
+                    <Button
+                      variant='ghost'
+                      size='sm'
+                      onClick={() => copyToClipboard(note.coverText ?? '')}
+                    >
+                      <Copy className='h-3.5 w-3.5 mr-1' />
+                      复制
+                    </Button>
+                  </div>
+                  <p className='mt-1 text-base font-medium'>{note.coverText}</p>
+                </div>
+              )}
+
+              {note.coverImageHint && (
+                <div>
+                  <div className='flex items-center justify-between gap-2'>
+                    <span className='text-sm font-medium text-muted-foreground'>首页图片提示词</span>
+                    <Button
+                      variant='ghost'
+                      size='sm'
+                      onClick={() => copyToClipboard(note.coverImageHint ?? '')}
+                    >
+                      <Copy className='h-3.5 w-3.5 mr-1' />
+                      复制
+                    </Button>
+                  </div>
+                  <p className='mt-1 whitespace-pre-line text-sm text-muted-foreground'>
+                    {note.coverImageHint}
+                  </p>
+                </div>
+              )}
+
+              <div className='rounded-lg border bg-muted/20 p-4 space-y-4'>
+                <div>
+                  <div className='flex items-center justify-between gap-2'>
+                    <span className='text-sm font-medium text-muted-foreground'>评论区引导句</span>
+                    <Button
+                      variant='ghost'
+                      size='sm'
+                      onClick={() => copyToClipboard(note.trafficScript.commentPrompt)}
+                    >
+                      <Copy className='h-3.5 w-3.5 mr-1' />
+                      复制
+                    </Button>
+                  </div>
+                  <p className='mt-1 text-sm'>{note.trafficScript.commentPrompt}</p>
+                </div>
+
+                <div>
+                  <div className='flex items-center justify-between gap-2'>
+                    <span className='text-sm font-medium text-muted-foreground'>私聊承接话术</span>
+                    <Button
+                      variant='ghost'
+                      size='sm'
+                      onClick={() => copyToClipboard(note.trafficScript.dmReply)}
+                    >
+                      <Copy className='h-3.5 w-3.5 mr-1' />
+                      复制
+                    </Button>
+                  </div>
+                  <p className='mt-1 text-sm'>{note.trafficScript.dmReply}</p>
+                </div>
+
+                <div>
+                  <div className='flex items-center justify-between gap-2'>
+                    <span className='text-sm font-medium text-muted-foreground'>转微信时参考句</span>
+                    <Button
+                      variant='ghost'
+                      size='sm'
+                      onClick={() => copyToClipboard(note.trafficScript.wechatHandoff)}
+                    >
+                      <Copy className='h-3.5 w-3.5 mr-1' />
+                      复制
+                    </Button>
+                  </div>
+                  <p className='mt-1 text-sm'>{note.trafficScript.wechatHandoff}</p>
+                </div>
+              </div>
+
               <div>
                 <div className='flex items-center justify-between mb-2'>
                   <span className='text-sm font-medium text-muted-foreground'>正文</span>
@@ -313,42 +407,6 @@ export function ContentDetail({
                   ))}
                 </div>
               </div>
-
-              {note.coverText && (
-                <div>
-                  <div className='flex items-center justify-between gap-2'>
-                    <span className='text-sm font-medium text-muted-foreground'>首图文案</span>
-                    <Button
-                      variant='ghost'
-                      size='sm'
-                      onClick={() => copyToClipboard(note.coverText ?? '')}
-                    >
-                      <Copy className='h-3.5 w-3.5 mr-1' />
-                      复制
-                    </Button>
-                  </div>
-                  <p className='mt-1 text-base font-medium'>{note.coverText}</p>
-                </div>
-              )}
-
-              {note.coverImageHint && (
-                <div>
-                  <div className='flex items-center justify-between gap-2'>
-                    <span className='text-sm font-medium text-muted-foreground'>首图配图提示词</span>
-                    <Button
-                      variant='ghost'
-                      size='sm'
-                      onClick={() => copyToClipboard(note.coverImageHint ?? '')}
-                    >
-                      <Copy className='h-3.5 w-3.5 mr-1' />
-                      复制
-                    </Button>
-                  </div>
-                  <p className='mt-1 whitespace-pre-line text-sm text-muted-foreground'>
-                    {note.coverImageHint}
-                  </p>
-                </div>
-              )}
 
               <p className='text-xs text-muted-foreground border-t pt-3'>
                 创建于 {new Date(note.createdAt).toLocaleString('zh-CN')}

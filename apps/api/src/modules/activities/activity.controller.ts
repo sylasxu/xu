@@ -142,8 +142,9 @@ export const activityController = new Elysia({ prefix: '/activities' })
   // 获取活动详情
   .get(
     '/:id',
-    async ({ params, set }) => {
-      const activity = await getActivityById(params.id);
+    async ({ params, set, jwt, headers }) => {
+      const viewer = await verifyAuth(jwt, headers);
+      const activity = await getActivityById(params.id, viewer?.id ?? null);
 
       if (!activity) {
         set.status = 404;
@@ -414,8 +415,10 @@ export const activityController = new Elysia({ prefix: '/activities' })
         const result = await joinActivity(params.id, user.id);
         return {
           success: true,
-          msg: '报名成功',
-          participantId: result.id,
+          msg: result.message,
+          joinResult: result.joinResult,
+          participantId: result.participantId,
+          navigationIntent: result.navigationIntent,
         };
       } catch (error: any) {
         set.status = 400;
@@ -433,11 +436,7 @@ export const activityController = new Elysia({ prefix: '/activities' })
       },
       params: 'activity.idParams',
       response: {
-        200: t.Object({
-          success: t.Boolean(),
-          msg: t.String(),
-          participantId: t.String(),
-        }),
+        200: 'activity.joinResponse',
         400: 'common.error',
         401: 'common.error',
         403: 'common.error',

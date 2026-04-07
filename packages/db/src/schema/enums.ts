@@ -29,10 +29,11 @@ export const activityStatusEnum = pgEnum("activity_status", [
 // 2. 👥 参与者 (Participant Domain)
 // ==========================================
 
-// 参与者状态 (MVP 简化为 2 种)
+// 参与者状态 (v5.5 扩展候补)
 export const participantStatusEnum = pgEnum("participant_status", [
-  "joined",  // 已加入
-  "quit"     // 已退出
+  "joined",    // 已加入
+  "waitlist",  // 已候补
+  "quit"       // 已退出
 ]);
 
 // ==========================================

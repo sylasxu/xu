@@ -8,7 +8,7 @@ import { useChatStore } from '../../../src/stores/chat';
 import { useAppStore } from '../../../src/stores/app';
 import { useUserStore } from '../../../src/stores/user';
 import { buildJoinStructuredAction } from '../../../src/utils/join-flow'
-import type { ActivityDetailResponse, ActivityPublicResponseRecentMessagesItem as RecentMessage } from '../../../src/api/model';
+import type { ActivityPublicResponseRecentMessagesItem as RecentMessage } from '../../../src/api/model';
 
 interface User {
   id: string;
@@ -20,9 +20,11 @@ interface User {
 interface Participant {
   id: string;
   userId: string;
-  status: 'pending' | 'approved' | 'rejected' | 'joined';
+  status: 'joined' | 'waitlist' | 'quit';
   user?: User;
 }
+
+type ActivityJoinState = 'creator' | 'joined' | 'waitlisted' | 'not_joined' | 'closed';
 
 interface Activity {
   id: string;
@@ -36,8 +38,12 @@ interface Activity {
   locationHint?: string;
   maxParticipants?: number;
   currentParticipants?: number;
+  remainingSeats?: number;
+  isFull?: boolean;
   type?: string;
   status?: 'draft' | 'active' | 'completed' | 'cancelled';
+  joinState?: ActivityJoinState;
+  canJoin?: boolean;
   creatorId: string;
   creator?: User;
   participants?: Participant[];
@@ -56,10 +62,8 @@ interface PageData {
   error: boolean;
   errorMsg: string;
   isJoining: boolean;
-  showJoinDialog: boolean;
-  joinMessage: string;
   isHotActivity: boolean;
-  participantStatus: 'pending' | 'approved' | 'rejected' | 'joined' | null;
+  joinState: ActivityJoinState | null;
   isCreator: boolean;
   // 管理操作面板
   showManageSheet: boolean;
@@ -90,10 +94,14 @@ function normalizeCurrentUser(value: ReturnType<typeof useUserStore.getState>['u
   };
 }
 
-const STATUS_TEXT: Record<string, string> = {
-  pending: '已申请，等待审核',
-  approved: '已通过审核',
-  rejected: '申请被拒绝',
+const STATUS_TEXT: Record<ActivityJoinState | Participant['status'], string> = {
+  creator: '我发起的',
+  joined: '已加入',
+  waitlisted: '候补中',
+  waitlist: '候补中',
+  not_joined: '我要报名',
+  closed: '已停止加入',
+  quit: '已退出',
 };
 
 Page<PageData, WechatMiniprogram.Page.CustomOption>({
@@ -105,10 +113,8 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     error: false,
     errorMsg: '',
     isJoining: false,
-    showJoinDialog: false,
-    joinMessage: '',
     isHotActivity: false,
-    participantStatus: null,
+    joinState: null,
     isCreator: false,
     // 管理操作面板
     showManageSheet: false,
@@ -168,26 +174,18 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
       if (response.status === 200) {
         const activity = response.data as Activity;
 
-        const pendingCount = (activity.participants || []).filter((p) => p.status === 'pending').length;
-        const isHotActivity = pendingCount > 5;
+        const isHotActivity = activity.status === 'active' && (activity.remainingSeats ?? activity.maxParticipants ?? 0) <= 1;
 
         const currentUserId = wx.getStorageSync('userId') as string;
-        const isCreator = activity.creatorId === currentUserId;
-        let participantStatus: PageData['participantStatus'] = null;
-
-        if (currentUserId && activity.participants) {
-          const participant = activity.participants.find((p) => p.userId === currentUserId);
-          if (participant) {
-            participantStatus = participant.status;
-          }
-        }
+        const isCreator = activity.creatorId === currentUserId || activity.joinState === 'creator';
+        const joinState = activity.joinState || (isCreator ? 'creator' : activity.canJoin ? 'not_joined' : 'closed');
 
         this.setData({
           activity,
           loading: false,
           isHotActivity,
           isCreator,
-          participantStatus,
+          joinState,
         });
 
         // v5.0: 异步加载讨论区预览消息（不阻塞主流程）
@@ -266,22 +264,17 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
   },
 
   onJoinTap() {
-    const { activity, participantStatus, isCreator } = this.data;
-    if (!activity) {
+    const { activity, joinState, isCreator, isJoining } = this.data;
+    if (!activity || isJoining) {
       return;
     }
 
-    if (isCreator) {
-      wx.showToast({ title: '你是活动发起人', icon: 'none' });
+    if (!activity.canJoin) {
+      wx.showToast({ title: STATUS_TEXT[joinState || 'closed'] || '当前不能加入', icon: 'none' });
       return;
     }
 
-    if (participantStatus) {
-      wx.showToast({ title: STATUS_TEXT[participantStatus] || '已报名', icon: 'none' });
-      return;
-    }
-
-    this.setData({ showJoinDialog: true });
+    this.submitJoinAction();
   },
   
   /** 手机号绑定成功回调 */
@@ -297,7 +290,6 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     }
 
     useAppStore.getState().clearPendingAction();
-    this.setData({ showJoinDialog: false, joinMessage: '' });
     useChatStore.getState().sendAction({
       action: pendingAction.action,
       payload: pendingAction.payload,
@@ -486,18 +478,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     });
   },
 
-  onCloseJoinDialog() {
-    this.setData({
-      showJoinDialog: false,
-      joinMessage: '',
-    });
-  },
-
-  onJoinMessageInput(e: WechatMiniprogram.Input) {
-    this.setData({ joinMessage: e.detail.value });
-  },
-
-  async onConfirmJoin() {
+  async submitJoinAction() {
     const { activityId, isJoining } = this.data;
     const activity = this.data.activity;
 
@@ -512,11 +493,6 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
         startAt: activity?.startAt,
         locationName: activity?.locationName,
         source: 'activity_detail',
-      });
-
-      this.setData({
-        showJoinDialog: false,
-        joinMessage: '',
       });
 
       useChatStore.getState().sendAction({
@@ -540,10 +516,9 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
       return;
     }
 
-    const { activityId, participantStatus, isCreator } = this.data;
+    const { activityId, joinState, isCreator } = this.data;
 
-    // 创建者或已通过审核的参与者可以进入讨论区
-    if (!isCreator && participantStatus !== 'approved' && participantStatus !== 'joined') {
+    if (!isCreator && joinState !== 'joined') {
       wx.showToast({ title: '需要报名才能进入讨论区', icon: 'none' });
       return;
     }

@@ -12,9 +12,12 @@ export interface PublicActivity {
   status: string
   maxParticipants: number
   currentParticipants: number
+  remainingSeats: number
+  isFull: boolean
   theme: string
   themeConfig: unknown
   isArchived: boolean
+  canJoin: boolean
   creatorNickname: string | null
   creatorAvatarUrl: string | null
   participants: Array<{ nickname: string | null; avatarUrl: string | null }>
@@ -179,6 +182,7 @@ export function ActivityCard({
   const primaryColor = themeConfig.colorScheme?.primary || "#374151"
   const isEnded = activity.status === "completed" || activity.status === "cancelled"
   const typeLabel = ACTIVITY_TYPE_LABELS[activity.type] || "✨ 活动"
+  const seatText = activity.isFull ? "当前已满员，可先到小程序候补" : `还剩 ${activity.remainingSeats} 个位置`
 
   return (
     <div className="w-full max-w-lg mx-auto rounded-2xl bg-white/90 backdrop-blur-sm shadow-xl overflow-hidden">
@@ -280,6 +284,11 @@ export function ActivityCard({
           maxCount={activity.maxParticipants}
           textColor={textColor}
         />
+        {!isEnded && (
+          <p className="text-xs opacity-70" style={{ color: textColor }}>
+            {seatText}
+          </p>
+        )}
       </div>
     </div>
   )

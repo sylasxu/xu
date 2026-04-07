@@ -17,6 +17,7 @@ import {
 } from '@juchang/db';
 import type {
   ActivityDetailResponse,
+  ActivityJoinState,
   ActivityListItem,
   MyActivitiesResponse,
   NearbyActivitiesQuery,
@@ -57,6 +58,27 @@ function filterActivityTypes(values: string[]): ActivityType[] {
 function calculateIsArchived(startAt: Date): boolean {
   const archiveTime = new Date(startAt.getTime() + ARCHIVE_HOURS * 60 * 60 * 1000);
   return new Date() > archiveTime;
+}
+
+function calculateRemainingSeats(currentParticipants: number, maxParticipants: number): number {
+  return Math.max(0, maxParticipants - currentParticipants);
+}
+
+function canExecuteJoinAction(params: {
+  status: string;
+  startAt: Date;
+  isCreator: boolean;
+  participantStatus: string | null;
+}): boolean {
+  if (params.isCreator) {
+    return false;
+  }
+
+  if (params.participantStatus === 'joined' || params.participantStatus === 'waitlist') {
+    return false;
+  }
+
+  return params.status === 'active' && params.startAt > new Date();
 }
 
 function escapeLikePattern(value: string): string {
@@ -124,27 +146,51 @@ export async function getActivitiesList(
     .from(activities)
     .where(conditions.length > 0 ? and(...conditions) : undefined);
 
-  const data: ActivityListItem[] = activityList.map((item) => ({
-    id: item.id,
-    title: item.title,
-    description: item.description,
-    location: item.location
-      ? [item.location.x, item.location.y] as [number, number]
-      : [0, 0] as [number, number],
-    locationName: item.locationName,
-    locationHint: item.locationHint,
-    startAt: item.startAt.toISOString(),
-    type: item.type,
-    maxParticipants: item.maxParticipants,
-    currentParticipants: item.currentParticipants,
-    status: item.status,
-    isArchived: calculateIsArchived(item.startAt),
-    creator: {
-      id: item.creatorId,
-      nickname: item.creatorNickname,
-      avatarUrl: item.creatorAvatar,
-    },
-  }));
+  const activityIds = activityList.map((item) => item.id);
+  const waitlistCounts = activityIds.length > 0
+    ? await db
+      .select({
+        activityId: participants.activityId,
+        waitlistCount: sql<number>`count(*)::int`,
+      })
+      .from(participants)
+      .where(and(
+        inArray(participants.activityId, activityIds),
+        eq(participants.status, 'waitlist'),
+      ))
+      .groupBy(participants.activityId)
+    : [];
+  const waitlistCountByActivityId = new Map(waitlistCounts.map((item) => [item.activityId, item.waitlistCount]));
+
+  const data: ActivityListItem[] = activityList.map((item) => {
+    const remainingSeats = calculateRemainingSeats(item.currentParticipants, item.maxParticipants);
+    const waitlistCount = waitlistCountByActivityId.get(item.id) ?? 0;
+
+    return {
+      id: item.id,
+      title: item.title,
+      description: item.description,
+      location: item.location
+        ? [item.location.x, item.location.y] as [number, number]
+        : [0, 0] as [number, number],
+      locationName: item.locationName,
+      locationHint: item.locationHint,
+      startAt: item.startAt.toISOString(),
+      type: item.type,
+      maxParticipants: item.maxParticipants,
+      currentParticipants: item.currentParticipants,
+      waitlistCount,
+      remainingSeats,
+      isFull: remainingSeats === 0,
+      status: item.status,
+      isArchived: calculateIsArchived(item.startAt),
+      creator: {
+        id: item.creatorId,
+        nickname: item.creatorNickname,
+        avatarUrl: item.creatorAvatar,
+      },
+    };
+  });
 
   return {
     data,
@@ -217,6 +263,24 @@ export async function getMyActivities(
     activityList = [...activityList, ...joinedActivities.map((item) => ({ ...item, source: 'joined' }))];
   }
 
+  const activityIds = activityList
+    .map((item) => typeof item.id === 'string' ? item.id : null)
+    .filter((item): item is string => Boolean(item));
+  const waitlistCounts = activityIds.length > 0
+    ? await db
+      .select({
+        activityId: participants.activityId,
+        waitlistCount: sql<number>`count(*)::int`,
+      })
+      .from(participants)
+      .where(and(
+        inArray(participants.activityId, activityIds),
+        eq(participants.status, 'waitlist'),
+      ))
+      .groupBy(participants.activityId)
+    : [];
+  const waitlistCountByActivityId = new Map(waitlistCounts.map((item) => [item.activityId, item.waitlistCount]));
+
   const data: ActivityListItem[] = activityList.map((item) => {
     const typedItem = item as {
       id: string;
@@ -235,6 +299,9 @@ export async function getMyActivities(
       creatorAvatar: string | null;
     };
 
+    const remainingSeats = calculateRemainingSeats(typedItem.currentParticipants, typedItem.maxParticipants);
+    const waitlistCount = waitlistCountByActivityId.get(typedItem.id) ?? 0;
+
     return {
       id: typedItem.id,
       title: typedItem.title,
@@ -248,6 +315,9 @@ export async function getMyActivities(
       type: typedItem.type,
       maxParticipants: typedItem.maxParticipants,
       currentParticipants: typedItem.currentParticipants,
+      waitlistCount,
+      remainingSeats,
+      isFull: remainingSeats === 0,
       status: typedItem.status,
       isArchived: calculateIsArchived(typedItem.startAt),
       creator: {
@@ -266,7 +336,7 @@ export async function getMyActivities(
   };
 }
 
-export async function getActivityById(id: string): Promise<ActivityDetailResponse | null> {
+export async function getActivityById(id: string, viewerUserId?: string | null): Promise<ActivityDetailResponse | null> {
   const [activity] = await db
     .select()
     .from(activities)
@@ -301,11 +371,37 @@ export async function getActivityById(id: string): Promise<ActivityDetailRespons
     })
     .from(participants)
     .innerJoin(users, eq(participants.userId, users.id))
-    .where(eq(participants.activityId, activity.id));
+    .where(and(
+      eq(participants.activityId, activity.id),
+      sql`${participants.status} != 'quit'`,
+    ));
 
   const location = activity.location
     ? [activity.location.x, activity.location.y] as [number, number]
     : [0, 0] as [number, number];
+
+  const participantStatus = viewerUserId
+    ? participantsList.find((item) => item.userId === viewerUserId)?.status ?? null
+    : null;
+  const isCreator = !!viewerUserId && activity.creatorId === viewerUserId;
+  const remainingSeats = calculateRemainingSeats(activity.currentParticipants, activity.maxParticipants);
+  const isFull = remainingSeats === 0;
+  const waitlistCount = participantsList.filter((item) => item.status === 'waitlist').length;
+  const canJoin = canExecuteJoinAction({
+    status: activity.status,
+    startAt: activity.startAt,
+    isCreator,
+    participantStatus,
+  });
+  const joinState: ActivityJoinState = isCreator
+    ? 'creator'
+    : participantStatus === 'joined'
+      ? 'joined'
+      : participantStatus === 'waitlist'
+        ? 'waitlisted'
+        : canJoin
+          ? 'not_joined'
+          : 'closed';
 
   return {
     id: activity.id,
@@ -320,7 +416,12 @@ export async function getActivityById(id: string): Promise<ActivityDetailRespons
     type: activity.type,
     maxParticipants: activity.maxParticipants,
     currentParticipants: activity.currentParticipants,
+    waitlistCount,
+    remainingSeats,
+    isFull,
     status: activity.status,
+    joinState,
+    canJoin,
     createdAt: activity.createdAt.toISOString(),
     updatedAt: activity.updatedAt.toISOString(),
     isArchived: calculateIsArchived(activity.startAt),
@@ -367,6 +468,10 @@ export async function getPublicActivityById(activityId: string): Promise<PublicA
 
   if (!activity) return null;
 
+  const remainingSeats = calculateRemainingSeats(activity.currentParticipants, activity.maxParticipants);
+  const isFull = remainingSeats === 0;
+  const canJoin = activity.status === 'active' && activity.startAt > new Date();
+
   const participantList = await db
     .select({
       nickname: users.nickname,
@@ -401,9 +506,12 @@ export async function getPublicActivityById(activityId: string): Promise<PublicA
     status: activity.status,
     maxParticipants: activity.maxParticipants,
     currentParticipants: activity.currentParticipants,
+    remainingSeats,
+    isFull,
     theme: activity.theme,
     themeConfig: activity.themeConfig,
     isArchived: calculateIsArchived(activity.startAt),
+    canJoin,
     creator: {
       nickname: activity.creatorNickname,
       avatarUrl: activity.creatorAvatarUrl,
@@ -473,26 +581,32 @@ export async function getNearbyActivities(
     .orderBy(sql`distance ASC`)
     .limit(limit);
 
-  const data: NearbyActivityItem[] = nearbyActivities.map((item) => ({
-    id: item.id,
-    title: item.title,
-    description: item.description,
-    lat: item.location ? item.location.y : lat,
-    lng: item.location ? item.location.x : lng,
-    locationName: item.locationName,
-    locationHint: item.locationHint,
-    startAt: item.startAt.toISOString(),
-    type: item.type,
-    maxParticipants: item.maxParticipants,
-    currentParticipants: item.currentParticipants,
-    status: item.status,
-    distance: Math.round(item.distance || 0),
-    creator: {
-      id: item.creatorId,
-      nickname: item.creatorNickname,
-      avatarUrl: item.creatorAvatar,
-    },
-  }));
+  const data: NearbyActivityItem[] = nearbyActivities.map((item) => {
+    const remainingSeats = calculateRemainingSeats(item.currentParticipants, item.maxParticipants);
+
+    return {
+      id: item.id,
+      title: item.title,
+      description: item.description,
+      lat: item.location ? item.location.y : lat,
+      lng: item.location ? item.location.x : lng,
+      locationName: item.locationName,
+      locationHint: item.locationHint,
+      startAt: item.startAt.toISOString(),
+      type: item.type,
+      maxParticipants: item.maxParticipants,
+      currentParticipants: item.currentParticipants,
+      remainingSeats,
+      isFull: remainingSeats === 0,
+      status: item.status,
+      distance: Math.round(item.distance || 0),
+      creator: {
+        id: item.creatorId,
+        nickname: item.creatorNickname,
+        avatarUrl: item.creatorAvatar,
+      },
+    };
+  });
 
   return {
     data,

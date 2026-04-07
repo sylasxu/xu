@@ -2,6 +2,7 @@
 
 import { agentTasks, and, db, desc, eq, inArray, partnerIntents, userMemories } from '@juchang/db';
 import { app } from '../apps/api/src/index';
+import { readAiChatEnvelope } from './ai-chat-sse';
 
 interface ApiError {
   code?: number;
@@ -226,6 +227,9 @@ const USER_COUNT = 5;
 const DEFAULT_TEST_MODEL = process.env.GENUI_TEST_MODEL?.trim() || 'deepseek-chat';
 const scenarioArgIndex = Bun.argv.indexOf('--scenario');
 const scenarioFilter = scenarioArgIndex >= 0 ? Bun.argv[scenarioArgIndex + 1] : '';
+const suiteArgIndex = Bun.argv.indexOf('--suite');
+const requestedSuite = suiteArgIndex >= 0 ? Bun.argv[suiteArgIndex + 1] : 'core';
+const scenarioSuite = requestedSuite === 'all' || requestedSuite === 'extended' ? requestedSuite : 'core';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -282,6 +286,43 @@ function findAlertBlock(blocks: AiChatEnvelope['response']['blocks']): AiChatBlo
   return blocks.find((block) => block.type === 'alert');
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function findCtaActionInput(
+  blocks: AiChatEnvelope['response']['blocks'],
+  actionName: string,
+  actionId: string,
+  label: string,
+): { action: string; actionId: string; displayText: string; params?: Record<string, unknown> } {
+  for (const block of blocks) {
+    if (block.type !== 'cta-group' || !Array.isArray(block.items)) {
+      continue;
+    }
+
+    for (const item of block.items) {
+      if (!isRecord(item)) {
+        continue;
+      }
+
+      const action = typeof item.action === 'string' ? item.action.trim() : '';
+      if (action !== actionName) {
+        continue;
+      }
+
+      return {
+        action,
+        actionId,
+        displayText: typeof item.label === 'string' && item.label.trim() ? item.label.trim() : action,
+        ...(isRecord(item.params) ? { params: item.params } : {}),
+      };
+    }
+  }
+
+  throw new Error(`${label} 缺少 CTA action=${actionName}`);
+}
+
 async function requestJson<T>(params: {
   method: 'GET' | 'POST' | 'PATCH';
   path: string;
@@ -308,6 +349,29 @@ async function requestJson<T>(params: {
   }
 
   return parsed as T;
+}
+
+async function requestText(params: {
+  method: 'GET' | 'POST' | 'PATCH';
+  path: string;
+  token?: string;
+  payload?: Record<string, unknown>;
+}): Promise<{ status: number; body: string }> {
+  const response = await app.handle(
+    new Request(`${BASE_URL}${params.path}`, {
+      method: params.method,
+      headers: {
+        'content-type': 'application/json',
+        ...(params.token ? { authorization: `Bearer ${params.token}` } : {}),
+      },
+      body: params.payload ? JSON.stringify(params.payload) : undefined,
+    })
+  );
+
+  return {
+    status: response.status,
+    body: await response.text(),
+  };
 }
 
 async function getAdminToken(): Promise<string> {
@@ -368,7 +432,14 @@ async function requestError(params: {
   );
 
   const bodyText = await response.text();
-  const parsed = bodyText ? JSON.parse(bodyText) as ApiError : {};
+  let parsed: ApiError = {};
+  if (bodyText) {
+    try {
+      parsed = JSON.parse(bodyText) as ApiError;
+    } catch {
+      parsed = { msg: bodyText };
+    }
+  }
 
   if (response.ok) {
     throw new Error(`${params.method} ${params.path} 预期失败，但返回成功`);
@@ -470,7 +541,13 @@ async function createActivity(creator: BootstrappedUser, overrides?: Parameters<
 }
 
 async function joinActivity(activityId: string, user: BootstrappedUser) {
-  return requestJson<{ success: boolean; msg: string; participantId: string }>({
+  return requestJson<{
+    success: boolean;
+    msg: string;
+    participantId: string | null;
+    joinResult: 'joined' | 'already_joined' | 'waitlisted' | 'closed';
+    navigationIntent: 'open_discussion' | 'stay_on_detail';
+  }>({
     method: 'POST',
     path: `/activities/${activityId}/join`,
     token: user.token,
@@ -588,7 +665,7 @@ async function postAiChat(params: {
   conversationId?: string;
   context?: AiChatRequestContext;
 }) {
-  return requestJson<AiChatEnvelope>({
+  const response = await requestText({
     method: 'POST',
     path: '/ai/chat',
     token: params.user?.token,
@@ -602,9 +679,14 @@ async function postAiChat(params: {
         timezone: 'Asia/Shanghai',
         ...params.context,
       },
-      stream: false,
     },
   });
+
+  if (response.status !== 200) {
+    throw new Error(`POST /ai/chat 失败: HTTP ${response.status} ${response.body}`);
+  }
+
+  return readAiChatEnvelope<AiChatEnvelope>(response.body, 'sandbox postAiChat');
 }
 
 async function postAiAction(params: {
@@ -616,7 +698,7 @@ async function postAiAction(params: {
   displayText?: string;
   context?: AiChatRequestContext;
 }) {
-  return requestJson<AiChatEnvelope>({
+  const response = await requestText({
     method: 'POST',
     path: '/ai/chat',
     token: params.user?.token,
@@ -636,9 +718,14 @@ async function postAiAction(params: {
         timezone: 'Asia/Shanghai',
         ...params.context,
       },
-      stream: false,
     },
   });
+
+  if (response.status !== 200) {
+    throw new Error(`POST /ai/chat 失败: HTTP ${response.status} ${response.body}`);
+  }
+
+  return readAiChatEnvelope<AiChatEnvelope>(response.body, 'sandbox postAiAction');
 }
 
 async function getAiConversations(user: BootstrappedUser) {
@@ -823,18 +910,17 @@ async function scenarioCapacityLimit(context: ScenarioContext): Promise<Scenario
     await joinActivity(activityId, user3);
     await joinActivity(activityId, user4);
 
-    const fullError = await requestError({
-      method: 'POST',
-      path: `/activities/${activityId}/join`,
-      token: user5.token,
-    });
-    assert(fullError.msg.includes('活动人数已满'), `满员提示异常: ${fullError.msg}`);
+    const waitlisted = await joinActivity(activityId, user5);
+    assert(waitlisted.joinResult === 'waitlisted', `满员后应返回候补: ${JSON.stringify(waitlisted)}`);
+    assert(waitlisted.navigationIntent === 'stay_on_detail', `满员后导航意图异常: ${JSON.stringify(waitlisted)}`);
 
     const publicActivity = await getPublicActivity(activityId);
     assert(publicActivity.currentParticipants === 4, `满员场景人数异常: ${publicActivity.currentParticipants}`);
+    assert(publicActivity.isFull === true, `满员场景 isFull 异常: ${JSON.stringify(publicActivity)}`);
+    assert(publicActivity.remainingSeats === 0, `满员场景 remainingSeats 异常: ${JSON.stringify(publicActivity)}`);
 
-    details.push(`活动 ${activityId} 满员拦截成功`);
-    details.push(`第 5 个尝试报名用户被拦截：${fullError.msg}`);
+    details.push(`活动 ${activityId} 满员后第 5 位用户进入候补`);
+    details.push(`第 5 位用户结果=${waitlisted.joinResult}，文案=${waitlisted.msg}`);
   }, { maxParticipants: 4 });
 
   return { name: 'capacity-limit', passed: true, details };
@@ -847,12 +933,9 @@ async function scenarioDuplicateAndRejoin(context: ScenarioContext): Promise<Sce
   await withActivity(creator, async (activityId) => {
     await joinActivity(activityId, user2);
 
-    const duplicateError = await requestError({
-      method: 'POST',
-      path: `/activities/${activityId}/join`,
-      token: user2.token,
-    });
-    assert(duplicateError.msg.includes('您已报名此活动'), `重复报名提示异常: ${duplicateError.msg}`);
+    const duplicateJoin = await joinActivity(activityId, user2);
+    assert(duplicateJoin.joinResult === 'already_joined', `重复报名结果异常: ${JSON.stringify(duplicateJoin)}`);
+    assert(duplicateJoin.navigationIntent === 'open_discussion', `重复报名导航异常: ${JSON.stringify(duplicateJoin)}`);
 
     await quitActivity(activityId, user2);
     const afterQuit = await getPublicActivity(activityId);
@@ -862,7 +945,7 @@ async function scenarioDuplicateAndRejoin(context: ScenarioContext): Promise<Sce
     const afterRejoin = await getPublicActivity(activityId);
     assert(afterRejoin.currentParticipants === 2, `重新加入后人数异常: ${afterRejoin.currentParticipants}`);
 
-    details.push(`活动 ${activityId} 重复报名被拦截，退出后可重新加入`);
+    details.push(`活动 ${activityId} 重复报名被收口为 already_joined，退出后可重新加入`);
     details.push(`退出后人数=${afterQuit.currentParticipants}，重进后人数=${afterRejoin.currentParticipants}`);
   });
 
@@ -878,12 +961,9 @@ async function scenarioPermissionGuards(context: ScenarioContext): Promise<Scena
     await joinActivity(activityId, user3);
     await joinActivity(activityId, user4);
 
-    const creatorJoinError = await requestError({
-      method: 'POST',
-      path: `/activities/${activityId}/join`,
-      token: creator.token,
-    });
-    assert(creatorJoinError.msg.includes('不能报名自己创建的活动'), `创建者报名提示异常: ${creatorJoinError.msg}`);
+    const creatorJoinResult = await joinActivity(activityId, creator);
+    assert(creatorJoinResult.joinResult === 'closed', `创建者报名结果异常: ${JSON.stringify(creatorJoinResult)}`);
+    assert(creatorJoinResult.msg.includes('自己发起') || creatorJoinResult.msg.includes('自己'), `创建者报名提示异常: ${creatorJoinResult.msg}`);
 
     const outsiderChatError = await requestError({
       method: 'POST',
@@ -902,7 +982,7 @@ async function scenarioPermissionGuards(context: ScenarioContext): Promise<Scena
     assert(nonCreatorStatusError.msg.includes('只有活动发起人可以更新状态'), `非创建者更新状态提示异常: ${nonCreatorStatusError.msg}`);
 
     details.push(`活动 ${activityId} 权限闸门正常`);
-    details.push('创建者自报拦截、非参与者发言拦截、非创建者改状态拦截全部通过');
+    details.push('创建者自报收口为 closed，非参与者发言拦截、非创建者改状态拦截全部通过');
   }, { maxParticipants: 4 });
 
   return { name: 'permission-guards', passed: true, details };
@@ -927,12 +1007,9 @@ async function scenarioCancelVisibility(context: ScenarioContext): Promise<Scena
     });
     assert(publicError.status === 404, `取消后公开详情状态码异常: ${publicError.status}`);
 
-    const joinAfterCancel = await requestError({
-      method: 'POST',
-      path: `/activities/${activityId}/join`,
-      token: user2.token,
-    });
-    assert(joinAfterCancel.msg.includes('活动不在招募中') || joinAfterCancel.msg.includes('您已报名此活动'), `取消后报名提示异常: ${joinAfterCancel.msg}`);
+    const joinAfterCancel = await joinActivity(activityId, user2);
+    assert(joinAfterCancel.joinResult === 'closed' || joinAfterCancel.joinResult === 'already_joined', `取消后报名结果异常: ${JSON.stringify(joinAfterCancel)}`);
+    assert(joinAfterCancel.msg.includes('不在招募中') || joinAfterCancel.msg.includes('已经在这场局里'), `取消后报名提示异常: ${joinAfterCancel.msg}`);
 
     details.push(`活动 ${activityId} 取消后不再公开可见`);
     details.push(`公开详情状态码=${publicError.status}，报名提示=${joinAfterCancel.msg}`);
@@ -1133,12 +1210,17 @@ async function scenarioAiExploreWithoutLocationFlow(context: ScenarioContext): P
   });
   assertNoLeakedToolText(thirdTurn.response.blocks, 'AI 类型追答');
   assert(
-    thirdTurn.response.blocks.some((block) => block.type === 'list' || block.type === 'cta-group'),
+    thirdTurn.response.blocks.some((block) =>
+      block.type === 'list'
+      || block.type === 'cta-group'
+      || block.type === 'choice'
+      || block.type === 'text'
+    ),
     `AI 类型追答后未进入 explore 链路: ${JSON.stringify(thirdTurn.response.blocks)}`,
   );
 
   details.push(`会话 ${firstTurn.conversationId} 对“周末附近有什么活动”先返回位置卡`);
-  details.push('输入“解放碑”后返回类型卡，输入“火锅”后进入 explore/下一步承接');
+  details.push('输入“解放碑”后返回类型卡，输入“火锅”后进入 explore 结果或无结果时的下一步改找承接');
 
   return { name: 'ai-explore-without-location-flow', passed: true, details };
 }
@@ -1194,19 +1276,19 @@ async function scenarioAiPartnerSearchBootstrapFlow(context: ScenarioContext): P
   const [user] = context.users;
   const details: string[] = [];
 
-  await cleanupSandboxAgentTasks([user]);
-  await cleanupSandboxPartnerIntents([user]);
+  await cleanupSandboxAgentTasks(context.users);
+  await cleanupSandboxPartnerIntents(context.users);
 
   const firstTurn = await postAiAction({
     user,
     action: 'find_partner',
-    displayText: '观音桥周围有人打麻将没得？',
+    displayText: '南山附近有人能一起打桌游没得？',
     payload: {
       type: 'boardgame',
-      locationName: '观音桥',
-      rawInput: '观音桥周围有人打麻将没得？',
-      lat: 29.563009,
-      lng: 106.551556,
+      locationName: '南山',
+      rawInput: '南山附近有人能一起打桌游没得？',
+      lat: 29.533009,
+      lng: 106.601556,
     },
   });
 
@@ -1222,8 +1304,99 @@ async function scenarioAiPartnerSearchBootstrapFlow(context: ScenarioContext): P
     `找搭子首轮未返回轻问或搜索结果: ${JSON.stringify(firstTurn.response.blocks)}`
   );
 
+  const searchTurn = await postAiAction({
+    user,
+    action: 'search_partners',
+    conversationId: firstTurn.conversationId,
+    displayText: '继续帮我搜搜',
+    payload: {
+      rawInput: '南山周末桌游搭子，轻松一点就行',
+      activityType: 'boardgame',
+      type: 'boardgame',
+      location: '南山',
+      locationName: '南山',
+      locationHint: '南山',
+      timePreference: '周末晚上',
+      description: '想找能稳定赴约、聊天压力别太大的桌游搭子',
+      lat: 29.533009,
+      lng: 106.601556,
+    },
+  });
+
+  assertNoLeakedToolText(searchTurn.response.blocks, '找搭子搜索结果');
+  assert(hasVisibleFeedback(searchTurn.response.blocks), `找搭子搜索后缺少可见反馈: ${JSON.stringify(searchTurn.response.blocks)}`);
+  assert(
+    !searchTurn.response.blocks.some((block) => block.type === 'form' && block.dedupeKey === 'partner_intent_form'),
+    `找搭子搜索后不应退回完整 form: ${JSON.stringify(searchTurn.response.blocks)}`
+  );
+  assert(
+    searchTurn.response.blocks.some((block) => block.type === 'list' || block.type === 'cta-group'),
+    `找搭子搜索后缺少结果列表或下一步 CTA: ${JSON.stringify(searchTurn.response.blocks)}`
+  );
+
+  const optInCta = findCtaActionInput(
+    searchTurn.response.blocks,
+    'opt_in_partner_pool',
+    'sandbox_partner_opt_in_1',
+    '找搭子搜索结果',
+  );
+  const optInTurn = await postAiAction({
+    user,
+    action: 'opt_in_partner_pool',
+    conversationId: firstTurn.conversationId,
+    actionId: optInCta.actionId,
+    displayText: optInCta.displayText,
+    payload: {
+      rawInput: '南山周末桌游搭子，轻松一点就行',
+      activityType: 'boardgame',
+      type: 'boardgame',
+      location: '南山',
+      locationName: '南山',
+      locationHint: '南山',
+      timePreference: '周末晚上',
+      description: '想找能稳定赴约、聊天压力别太大的桌游搭子',
+      lat: 29.533009,
+      lng: 106.601556,
+    },
+  });
+
+  assertNoLeakedToolText(optInTurn.response.blocks, '继续帮我留意');
+  assert(hasVisibleFeedback(optInTurn.response.blocks), `继续帮我留意后缺少反馈: ${JSON.stringify(optInTurn.response.blocks)}`);
+
+  const currentTasks = await getAiCurrentTasks(user);
+  const partnerTask = currentTasks.items.find((item) => item.taskType === 'find_partner');
+  assert(partnerTask, `继续帮我留意后未找到 find_partner 任务: ${JSON.stringify(currentTasks.items)}`);
+  assert(
+    partnerTask.currentStage === 'awaiting_match' || partnerTask.currentStage === 'match_ready',
+    `继续帮我留意后 stage 异常: ${JSON.stringify(partnerTask)}`
+  );
+
+  const activeIntent = await waitFor(async () => {
+    const [intent] = await db
+      .select({
+        id: partnerIntents.id,
+        status: partnerIntents.status,
+        locationHint: partnerIntents.locationHint,
+        activityType: partnerIntents.activityType,
+      })
+      .from(partnerIntents)
+      .where(and(
+        eq(partnerIntents.userId, user.user.id),
+        eq(partnerIntents.status, 'active'),
+      ))
+      .orderBy(desc(partnerIntents.updatedAt))
+      .limit(1);
+
+    return intent ?? null;
+  }, { retries: 6, delayMs: 200 });
+
+  assert(activeIntent, '继续帮我留意后未落 active partner_intent');
+  assert(activeIntent.locationHint.includes('南山'), `partner_intent locationHint 异常: ${JSON.stringify(activeIntent)}`);
+  assert(activeIntent.activityType === 'boardgame', `partner_intent activityType 异常: ${JSON.stringify(activeIntent)}`);
+
   details.push(`会话 ${firstTurn.conversationId} 首轮已走 search-first 链路，没有再直接弹完整搭子表单`);
-  details.push('当前验收点改为：先给文本说明，再返回轻问 choice 或搜索结果 list，显式入池另走单独动作');
+  details.push('搜索结果后可以继续触发“继续帮我留意”，不会退回旧的完整表单');
+  details.push(`当前任务阶段=${partnerTask.currentStage}，并已落 active partner_intent=${activeIntent.id}`);
 
   return { name: 'ai-partner-search-bootstrap-flow', passed: true, details };
 }
@@ -1301,11 +1474,62 @@ async function scenarioAiDraftSettingsFormFlow(context: ScenarioContext): Promis
 
     assertNoLeakedToolText(saveTurn.response.blocks, '保存草稿设置');
     assert(hasVisibleFeedback(saveTurn.response.blocks), `保存草稿设置后缺少可见反馈: ${JSON.stringify(saveTurn.response.blocks)}`);
-    assert(findBlock(saveTurn.response.blocks, 'entity-card'), `保存草稿设置后缺少更新后的 draft card: ${JSON.stringify(saveTurn.response.blocks)}`);
+    const savedDraftBlock = findBlock(saveTurn.response.blocks, 'entity-card');
+    assert(savedDraftBlock?.fields, `保存草稿设置后缺少更新后的 draft card: ${JSON.stringify(saveTurn.response.blocks)}`);
     assert(findBlock(saveTurn.response.blocks, 'cta-group'), `保存草稿设置后缺少下一步 CTA: ${JSON.stringify(saveTurn.response.blocks)}`);
 
-    details.push(`活动 ${activityId} 支持 edit_draft -> draft_settings form -> save_draft_settings`);
-    details.push('草稿编辑不再回退成文字问答，保存后会返回更新后的草稿卡');
+    const publishTurn = await postAiAction({
+      user,
+      action: 'confirm_publish',
+      conversationId: createTurn.conversationId,
+      actionId: 'sandbox_confirm_publish_1',
+      displayText: '确认发布',
+      payload: {
+        activityId,
+      },
+    });
+
+    assertNoLeakedToolText(publishTurn.response.blocks, '确认发布草稿');
+    assert(hasVisibleFeedback(publishTurn.response.blocks), `确认发布后缺少可见反馈: ${JSON.stringify(publishTurn.response.blocks)}`);
+    const publishedCard = findBlock(publishTurn.response.blocks, 'entity-card');
+    assert(publishedCard?.fields, `确认发布后缺少已发布活动卡: ${JSON.stringify(publishTurn.response.blocks)}`);
+    assert(
+      typeof publishedCard.fields.activityId === 'string' && publishedCard.fields.activityId === activityId,
+      `确认发布后 activityId 异常: ${JSON.stringify(publishedCard.fields)}`
+    );
+
+    const publicActivity = await waitFor(() => getPublicActivity(activityId).catch(() => null), { retries: 6, delayMs: 200 });
+    assert(publicActivity, `活动发布后 public 接口不可见: ${activityId}`);
+    assert(publicActivity.status === 'active', `活动发布后状态应为 active: ${JSON.stringify(publicActivity)}`);
+
+    const publishedTask = await waitFor(async () => {
+      const [task] = await db
+        .select({
+          id: agentTasks.id,
+          status: agentTasks.status,
+          currentStage: agentTasks.currentStage,
+          resultOutcome: agentTasks.resultOutcome,
+        })
+        .from(agentTasks)
+        .where(and(
+          eq(agentTasks.userId, user.user.id),
+          eq(agentTasks.taskType, 'create_activity'),
+          eq(agentTasks.activityId, activityId),
+        ))
+        .orderBy(desc(agentTasks.updatedAt))
+        .limit(1);
+
+      return task ?? null;
+    }, { retries: 6, delayMs: 200 });
+
+    assert(publishedTask, `确认发布后未找到 create_activity 任务: ${activityId}`);
+    assert(publishedTask.status === 'completed', `发布后 create task status 异常: ${JSON.stringify(publishedTask)}`);
+    assert(publishedTask.currentStage === 'done', `发布后 create task stage 异常: ${JSON.stringify(publishedTask)}`);
+    assert(publishedTask.resultOutcome === 'published', `发布后 create task resultOutcome 异常: ${JSON.stringify(publishedTask)}`);
+
+    details.push(`活动 ${activityId} 支持 edit_draft -> draft_settings form -> save_draft_settings -> confirm_publish`);
+    details.push('草稿编辑不再回退成文字问答，确认发布后 public 详情可见且状态变为 active');
+    details.push(`create_activity 任务已收口为 completed/done，resultOutcome=${publishedTask.resultOutcome}`);
 
     return { name: 'ai-draft-settings-form-flow', passed: true, details };
   } finally {
@@ -1458,7 +1682,6 @@ async function scenarioAiAccessFlow(context: ScenarioContext): Promise<ScenarioR
       input: { type: 'text', text: '我要继续这段对话' },
       ai: { model: DEFAULT_TEST_MODEL },
       context: { client: 'web', locale: 'zh-CN', timezone: 'Asia/Shanghai' },
-      stream: false,
     },
   });
   assert(hijackForbidden.status === 403, `跨账号劫持会话状态码异常: ${hijackForbidden.status}`);
@@ -1675,7 +1898,7 @@ async function scenarioAiRapidFireFlow(context: ScenarioContext): Promise<Scenar
   return { name: 'ai-rapid-fire-flow', passed: true, details };
 }
 
-const scenarios = [
+const coreScenarios = [
   scenarioBasicDiscussionFlow,
   scenarioCapacityLimit,
   scenarioDuplicateAndRejoin,
@@ -1689,7 +1912,9 @@ const scenarios = [
   scenarioAiPartnerSearchBootstrapFlow,
   scenarioAiDraftSettingsFormFlow,
   scenarioAiAccessFlow,
-  // v5.5: 新增长对话链路场景
+];
+
+const extendedScenarios = [
   scenarioAiLongConversationFlow,
   scenarioAiTransientContextFlow,
   scenarioAiMultiIntentCrossFlow,
@@ -1704,14 +1929,22 @@ async function main() {
   await cleanupSandboxAgentTasks(users);
   const context: ScenarioContext = { users };
 
+  const scenarioPool = scenarioSuite === 'all'
+    ? [...coreScenarios, ...extendedScenarios]
+    : scenarioSuite === 'extended'
+      ? extendedScenarios
+      : coreScenarios;
+
   const selectedScenarios = scenarioFilter
-    ? scenarios.filter((scenario) => {
+    ? scenarioPool.filter((scenario) => {
         const scenarioName = scenario.name.replace(/^scenario/, '').replace(/([A-Z])/g, '-$1').toLowerCase().replace(/^-/, '');
         return scenarioName.includes(scenarioFilter.toLowerCase());
       })
-    : scenarios;
+    : scenarioPool;
 
-  assert(selectedScenarios.length > 0, `没有匹配到场景: ${scenarioFilter}`);
+  assert(selectedScenarios.length > 0, `没有匹配到场景: ${scenarioFilter || scenarioSuite}`);
+
+  console.log(`Sandbox suite: ${scenarioSuite}`);
 
   const results: ScenarioResult[] = [];
 

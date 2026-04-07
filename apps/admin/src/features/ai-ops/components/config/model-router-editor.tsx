@@ -51,7 +51,7 @@ interface RouteDefinition {
 }
 
 const DEFAULT_FALLBACK_CONFIG: FallbackConfig = {
-  primary: 'openai',
+  primary: 'moonshot',
   fallback: 'deepseek',
   maxRetries: 2,
   enableFallback: true,

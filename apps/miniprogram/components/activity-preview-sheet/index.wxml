@@ -59,11 +59,11 @@
         <text>查看详情</text>
       </button>
       <button 
-        class="preview-sheet__btn preview-sheet__btn--primary {{isFull || isJoined ? 'preview-sheet__btn--disabled' : ''}}"
+        class="preview-sheet__btn preview-sheet__btn--primary {{isJoined ? 'preview-sheet__btn--disabled' : ''}}"
         bindtap="onJoin"
-        disabled="{{isFull || isJoined}}"
+        disabled="{{isJoined}}"
       >
-        <text>{{isJoined ? '已报名' : (isFull ? '已满员' : '直接报名')}}</text>
+        <text>{{isJoined ? '已报名' : (isFull ? '候补排队' : '直接报名')}}</text>
       </button>
     </view>
   </view>

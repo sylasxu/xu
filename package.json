@@ -1,7 +1,7 @@
 {
   "name": "juchang",
   "version": "1.0.0",
-  "description": "聚场 - AI碎片化社交找搭子平台",
+  "description": "聚场 - 帮用户更容易参加一场局的 AI 组局工具",
   "type": "module",
   "workspaces": [
     "apps/*",
@@ -53,9 +53,12 @@
     "format": "turbo run format",
     "type-check": "turbo run type-check",
     "smoke:five-users": "bun scripts/five-user-smoke.ts",
-    "sandbox:regression": "bun scripts/sandbox-regression.ts",
+    "sandbox:regression": "bun scripts/sandbox-regression.ts --suite core",
+    "sandbox:regression:all": "bun scripts/sandbox-regression.ts --suite all",
     "regression:flow": "bun scripts/flow-regression.ts",
-    "regression:protocol": "bun scripts/chat-curl-regression.ts",
+    "regression:flow:extended": "bun scripts/flow-regression.ts --extended",
+    "regression:protocol": "bun scripts/chat-regression.ts --suite core",
+    "regression:protocol:extended": "bun scripts/chat-regression.ts --suite all",
     "regression:protocol:snapshot": "bun scripts/genui-turns-snapshot.ts",
     "release:gate": "bun scripts/release-gate.ts"
   },

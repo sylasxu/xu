@@ -180,8 +180,7 @@ Component({
       const activity = this.data.activityData
       if (!activity?.id) return
       
-      // 检查是否已满员或已报名
-      if (this.data.isFull || this.data.isJoined) return
+      if (this.data.isJoined) return
       
       // 触感反馈
       wx.vibrateShort({ type: 'light' })

@@ -5,8 +5,8 @@ import type {
 } from '@juchang/genui-contract';
 import {
   createAlertBlock,
-} from './shared/genui-blocks';
-import type { StructuredAction } from './user-action';
+} from '../shared/genui-blocks';
+import type { StructuredAction } from '../user-action';
 
 interface ViewerContext {
   id: string;

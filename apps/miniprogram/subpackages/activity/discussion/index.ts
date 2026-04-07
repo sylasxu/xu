@@ -105,7 +105,7 @@ Page<DiscussionPageData, WechatMiniprogram.Page.CustomOption>({
     joinGuideHint: '先打个招呼吧，大家更容易接住你。',
     quickStarters: [],
     taskStageTitle: '当前进度：讨论中',
-    taskStageHint: '这件事已经进入协作阶段，活动后小聚还会继续帮你承接结果。',
+    taskStageHint: '这场局已经进入协作阶段，活动后小聚还会继续帮你承接结果。',
   },
 
   // Store 订阅取消函数
@@ -138,8 +138,8 @@ Page<DiscussionPageData, WechatMiniprogram.Page.CustomOption>({
       quickStarters: isJoinSuccessEntry ? getJoinQuickStarters(title) : [],
       taskStageTitle: isJoinSuccessEntry ? '当前进度：报名完成，已进入讨论' : '当前进度：讨论中',
       taskStageHint: isJoinSuccessEntry
-        ? '这还是刚才那条报名任务，接下来先破冰、再协作，活动后我还会继续跟进。'
-        : '这条任务现在已经进入讨论协作阶段，活动后我还会继续帮你跟进结果。',
+        ? '刚才报的这场局已经接上了，接下来先破冰、再协作，活动后我还会继续跟进。'
+        : '这场局现在已经进入讨论协作阶段，活动后我还会继续帮你跟进结果。',
     })
 
     // 订阅 store 变化

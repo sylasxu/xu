@@ -1466,7 +1466,7 @@ export default function ChatPage() {
   }, []);
 
 
-  const sendTurn = useCallback(
+  const sendChatRequest = useCallback(
     async (
       nextInput: GenUIInput,
       userDisplayText: string,
@@ -1576,7 +1576,6 @@ export default function ChatPage() {
                 : {}),
               ...(contextOverrides || {}),
             },
-            stream: true,
           }),
         });
 
@@ -1724,7 +1723,7 @@ export default function ChatPage() {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
-        let sawTurnComplete = false;
+        let sawResponseComplete = false;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -1775,7 +1774,7 @@ export default function ChatPage() {
               const responseId =
                 typeof eventData.responseId === "string"
                   ? eventData.responseId
-                  : randomId("turn");
+                  : randomId("response");
 
               setConversationId(streamConversationId);
               updateAssistantUiMetadata({
@@ -1817,7 +1816,7 @@ export default function ChatPage() {
 
             if (eventName === "response-complete" && isGenUIResponseEnvelope(eventData)) {
               const completeEnvelope = eventData;
-              sawTurnComplete = true;
+              sawResponseComplete = true;
               setConversationId(completeEnvelope.conversationId);
               updateAssistantUiMetadata({
                 traceId: completeEnvelope.traceId,
@@ -1863,7 +1862,7 @@ export default function ChatPage() {
           }
         }
 
-        if (!sawTurnComplete) {
+        if (!sawResponseComplete) {
           updateAssistantUiMetadata({
             status: "completed",
           });
@@ -1938,7 +1937,7 @@ export default function ChatPage() {
     setPendingAgentAction(null);
     setPendingActionNotice(null);
 
-    await sendTurn(
+    await sendChatRequest(
       {
         type: "action",
         action: actionToResume.action,
@@ -1948,7 +1947,7 @@ export default function ChatPage() {
       },
       actionToResume.originalText || "继续刚才那步"
     );
-  }, [pendingAgentAction, sendTurn]);
+  }, [pendingAgentAction, sendChatRequest]);
 
   useEffect(() => {
     if (!authToken || !pendingAgentAction || isSending || hasResumedPendingActionRef.current) {
@@ -1969,7 +1968,7 @@ export default function ChatPage() {
       }
 
       setInput("");
-      await sendTurn(
+      await sendChatRequest(
         {
           type: "text",
           text: value,
@@ -1977,7 +1976,7 @@ export default function ChatPage() {
         value
       );
     },
-    [isSending, sendTurn]
+    [isSending, sendChatRequest]
   );
 
   const handleActionSelect = useCallback(
@@ -1986,7 +1985,7 @@ export default function ChatPage() {
         return;
       }
 
-      await sendTurn(
+      await sendChatRequest(
         {
           type: "action",
           action: option.action,
@@ -1997,7 +1996,7 @@ export default function ChatPage() {
         option.label
       );
     },
-    [isSending, sendTurn]
+    [isSending, sendChatRequest]
   );
 
   const handleWelcomeDraftContinue = useCallback(async () => {
@@ -2006,7 +2005,7 @@ export default function ChatPage() {
     }
 
     if (welcomeDraftAction.activityId) {
-      await sendTurn(
+      await sendChatRequest(
         {
           type: "action",
           action: "edit_draft",
@@ -2019,14 +2018,14 @@ export default function ChatPage() {
       return;
     }
 
-    await sendTurn(
+    await sendChatRequest(
       {
         type: "text",
         text: welcomeDraftAction.prompt,
       },
       welcomeDraftAction.prompt
     );
-  }, [sendTurn, welcomeDraftAction]);
+  }, [sendChatRequest, welcomeDraftAction]);
 
   const handleOpenPendingActivity = useCallback((activityId: string) => {
     if (typeof window === "undefined") {
@@ -2063,7 +2062,7 @@ export default function ChatPage() {
               openSignal={messageCenterOpenSignal}
               focusPendingMatchId={messageCenterFocusMatchId}
               onSendPrompt={async (prompt, displayText, contextOverrides) => {
-                await sendTurn(
+                await sendChatRequest(
                   {
                     type: "text",
                     text: prompt,
@@ -2317,7 +2316,7 @@ export default function ChatPage() {
                               key={prompt}
                               type="button"
                               onClick={() => {
-                                void sendTurn(
+                                void sendChatRequest(
                                   {
                                     type: "text",
                                     text: prompt,
@@ -3253,8 +3252,10 @@ function ListBlockGlobalActions({
 
   const primaryLabel = typeof primaryAction?.label === "string" ? primaryAction.label : "";
   const primaryActionType = typeof primaryAction?.action === "string" ? primaryAction.action : "";
+  const primaryParams = isRecord(primaryAction?.params) ? primaryAction.params : {};
   const secondaryLabel = typeof secondaryAction?.label === "string" ? secondaryAction.label : "";
   const secondaryActionType = typeof secondaryAction?.action === "string" ? secondaryAction.action : "";
+  const secondaryParams = isRecord(secondaryAction?.params) ? secondaryAction.params : {};
 
   return (
     <div className="mt-4 flex items-center justify-center gap-3 px-4">
@@ -3266,7 +3267,7 @@ function ListBlockGlobalActions({
               void onActionSelect({
                 label: secondaryLabel,
                 action: secondaryActionType,
-                params: {},
+                params: secondaryParams,
               });
             }
           }}
@@ -3284,7 +3285,7 @@ function ListBlockGlobalActions({
               void onActionSelect({
                 label: primaryLabel,
                 action: primaryActionType,
-                params: {},
+                params: primaryParams,
               });
             }
           }}

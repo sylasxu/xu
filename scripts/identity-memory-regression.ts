@@ -6,6 +6,8 @@
  * 改造后：所有身份/闲聊问题统一走 LLM，不再通过 buildIdentityMemoryReply 硬编码短路。
  */
 
+import { readAiChatEnvelope } from './ai-chat-sse';
+
 const CHAT_URL = process.env.GENUI_CHAT_API_URL || 'http://127.0.0.1:1996/ai/chat';
 
 interface ResponseEnvelope {
@@ -30,7 +32,6 @@ async function postChat(input: { type: 'text'; text: string }): Promise<Response
     body: JSON.stringify({
       input,
       context: {},
-      stream: false,
     }),
   });
 
@@ -38,7 +39,7 @@ async function postChat(input: { type: 'text'; text: string }): Promise<Response
     throw new Error(`HTTP ${response.status}: ${await response.text()}`);
   }
 
-  return response.json() as Promise<ResponseEnvelope>;
+  return readAiChatEnvelope<ResponseEnvelope>(await response.text(), 'identity-memory-regression');
 }
 
 function getTextContent(envelope: ResponseEnvelope): string {

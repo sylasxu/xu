@@ -287,6 +287,12 @@ Component({
       };
     },
 
+    buildConfirmPublishPayload(draft: DraftData): Record<string, unknown> {
+      return {
+        activityId: draft.activityId,
+      };
+    },
+
     dispatchDraftAction(action: string, payload: Record<string, unknown>, originalText: string): void {
       const chatStore = useChatStore.getState();
       chatStore.sendAction({
@@ -381,7 +387,7 @@ Component({
       }
 
       this.triggerEvent('confirm', { draft });
-      this.dispatchDraftAction('confirm_publish', this.buildDraftActionPayload(draft), '确认发布');
+      this.dispatchDraftAction('confirm_publish', this.buildConfirmPublishPayload(draft), '确认发布');
     },
 
     /**

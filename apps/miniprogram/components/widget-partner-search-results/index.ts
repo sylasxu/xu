@@ -31,6 +31,7 @@ interface SearchSummary {
 interface GlobalAction {
   label: string
   action: string
+  params?: Record<string, unknown>
 }
 
 interface ComponentData {

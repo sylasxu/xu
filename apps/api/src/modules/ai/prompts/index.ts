@@ -31,6 +31,4 @@ export {
   combinePromptSections,
 } from './builder';
 
-export { ACTIVITY_GUIDE, getActivityGuide } from './activity-guide';
 export { interpolateTemplate } from './interpolator';
-export { generateWidgetCatalog } from './widget-catalog';

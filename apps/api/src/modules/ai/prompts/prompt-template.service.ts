@@ -8,7 +8,7 @@
 import { getRequiredConfigValue } from '../config/config.service';
 import { formatDateTime, getTomorrowStr, escapeXml } from './builder';
 import { interpolateTemplate } from './interpolator';
-import { generateWidgetCatalog } from './widget-catalog';
+import { generateWidgetCatalog } from '../tools/widgets';
 import type { PromptContext } from './types';
 
 /** ai_configs 中的 configKey */

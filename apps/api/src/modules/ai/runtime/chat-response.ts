@@ -13,20 +13,18 @@ import type {
 } from '@juchang/genui-contract';
 import {
   getConversationMessages,
-  executeChatTurn,
+  executeChatRequest,
   isUuidLike,
-  syncConversationResponseSnapshot,
   type ChatExecutionResult,
   type ChatRequest,
-} from './ai.service';
-import { createThread } from './memory';
-import { extractStructuredAction, isStructuredActionType } from './user-action';
-import { applyAiChatResponsePolicies } from './ai-chat-policy.service';
+} from '../ai.service';
+import { createThread } from '../memory';
+import { extractStructuredAction, isStructuredActionType } from '../user-action';
 import {
   buildSuggestionsFromBlocks,
   readSuggestionsFromStoredMessage,
   resolveContinuationFromSuggestions,
-} from './suggestions';
+} from '../suggestions';
 import {
   createChoiceBlock,
   createEntityCardBlock,
@@ -34,22 +32,19 @@ import {
   createAlertBlock,
   createFormBlock,
   pushBlock,
-} from './shared/genui-blocks';
-import { saveActivityReviewSummary } from '../participants/participant.service';
+} from '../shared/genui-blocks';
+import { saveActivityReviewSummary } from '../../participants/participant.service';
 import {
   resolveOpenCreateTaskForConversation,
   resolveOpenJoinTaskForConversation,
   resolveOpenPartnerTaskForConversation,
-  syncCreateTaskFromChatTurn,
-  syncJoinTaskFromChatTurn,
-  syncPartnerTaskFromChatTurn,
-} from './task-runtime/agent-task.service';
+} from '../task-runtime/agent-task.service';
 import {
   buildPartnerIntentFormPayload,
   createPartnerMatchingState,
   shouldRenderPartnerIntentFormFromPayload,
-} from './workflow/partner-matching';
-import { normalizeAiProviderErrorMessage } from './models/provider-error';
+} from '../workflow/partner-matching';
+import { normalizeAiProviderErrorMessage } from '../models/provider-error';
 
 const ID_PREFIX = {
   conversation: 'conv',
@@ -102,16 +97,12 @@ interface AiChatResponseOptions {
   abortSignal?: AbortSignal;
 }
 
-interface AiChatStreamOptions extends AiChatResponseOptions {
-  requestAbortSignal?: AbortSignal;
-}
-
 interface ResolvedStreamOptions {
   includeTrace: boolean;
   eventEnvelope: 'full' | 'compact';
 }
 
-interface AiChatResponseResult {
+export interface AiChatEnvelopeResult {
   envelope: GenUIResponseEnvelope;
   traces: GenUITracePayload[];
   resolvedStructuredAction?: ChatRequest['structuredAction'];
@@ -462,20 +453,20 @@ function looksLikeLocationQuestion(text: string): boolean {
 }
 
 function hasRecentLocationPrompt(historyMessages: ChatRequest['messages']): boolean {
-  let inspectedAssistantTurns = 0;
+  let inspectedAssistantMessages = 0;
 
   for (const message of [...historyMessages].reverse()) {
     if (message.role !== 'assistant') {
       continue;
     }
 
-    inspectedAssistantTurns += 1;
+    inspectedAssistantMessages += 1;
     const content = typeof message.content === 'string' ? message.content.trim() : '';
     if (content && looksLikeLocationQuestion(content)) {
       return true;
     }
 
-    if (inspectedAssistantTurns >= 3) {
+    if (inspectedAssistantMessages >= 3) {
       break;
     }
   }
@@ -484,20 +475,20 @@ function hasRecentLocationPrompt(historyMessages: ChatRequest['messages']): bool
 }
 
 function hasRecentCreatePrompt(historyMessages: ChatRequest['messages']): boolean {
-  let inspectedUserTurns = 0;
+  let inspectedUserMessages = 0;
 
   for (const message of [...historyMessages].reverse()) {
     if (message.role !== 'user') {
       continue;
     }
 
-    inspectedUserTurns += 1;
+    inspectedUserMessages += 1;
     const content = typeof message.content === 'string' ? message.content.trim() : '';
     if (content && CREATE_ACTIVITY_PATTERN.test(content)) {
       return true;
     }
 
-    if (inspectedUserTurns >= 3) {
+    if (inspectedUserMessages >= 3) {
       break;
     }
   }
@@ -510,20 +501,20 @@ function looksLikePartnerQuestion(text: string): boolean {
 }
 
 function hasRecentPartnerPrompt(historyMessages: ChatRequest['messages']): boolean {
-  let inspectedAssistantTurns = 0;
+  let inspectedAssistantMessages = 0;
 
   for (const message of [...historyMessages].reverse()) {
     if (message.role !== 'assistant') {
       continue;
     }
 
-    inspectedAssistantTurns += 1;
+    inspectedAssistantMessages += 1;
     const content = typeof message.content === 'string' ? message.content.trim() : '';
     if (content && looksLikePartnerQuestion(content)) {
       return true;
     }
 
-    if (inspectedAssistantTurns >= 3) {
+    if (inspectedAssistantMessages >= 3) {
       break;
     }
   }
@@ -929,12 +920,12 @@ function selectActivityRecentMessageIndexes(
 
 function compressRecentMessages(
   recentMessages: GenUIRecentMessage[],
-  scope: HistoryScope,
+  historyScope: HistoryScope,
 ): {
   recentMessages: GenUIRecentMessage[];
   conversationSummary?: string;
 } {
-  const maxHistoryMessages = scope === 'activity'
+  const maxHistoryMessages = historyScope === 'activity'
     ? MAX_ACTIVITY_HISTORY_MESSAGES
     : MAX_PRIVATE_HISTORY_MESSAGES;
 
@@ -942,7 +933,7 @@ function compressRecentMessages(
     return { recentMessages };
   }
 
-  const selectedIndexes = scope === 'activity'
+  const selectedIndexes = historyScope === 'activity'
     ? selectActivityRecentMessageIndexes(recentMessages, maxHistoryMessages)
     : new Set(
         recentMessages
@@ -972,12 +963,12 @@ function compressRecentMessages(
 
 function compressConversationHistory(
   historyMessages: ChatRequest['messages'],
-  scope: HistoryScope,
+  historyScope: HistoryScope,
 ): {
   historyMessages: ChatRequest['messages'];
   conversationSummary?: string;
 } {
-  const maxHistoryMessages = scope === 'activity'
+  const maxHistoryMessages = historyScope === 'activity'
     ? MAX_ACTIVITY_HISTORY_MESSAGES
     : MAX_PRIVATE_HISTORY_MESSAGES;
 
@@ -1023,7 +1014,7 @@ function readLatestAssistantSuggestionsFromStoredMessages(
   return undefined;
 }
 
-function readTransientConversationTurnsFromRequest(request: GenUIRequest): {
+function readTransientConversationHistoryFromRequest(request: GenUIRequest): {
   historyMessages: ChatRequest['messages'];
   conversationSummary?: string;
   latestAssistantSuggestions?: GenUISuggestions;
@@ -1031,35 +1022,35 @@ function readTransientConversationTurnsFromRequest(request: GenUIRequest): {
   const recentMessages = Array.isArray(request.context?.recentMessages)
     ? request.context.recentMessages
     : [];
-  const scope = resolveHistoryScope(request);
-  const compressedRecentMessages = compressRecentMessages(recentMessages, scope);
+  const historyScope = resolveHistoryScope(request);
+  const compressedRecentMessages = compressRecentMessages(recentMessages, historyScope);
 
   let latestAssistantSuggestions: GenUISuggestions | undefined;
   const allHistoryMessages = compressedRecentMessages.recentMessages
-    .map((turn) => {
-      if (!isRecord(turn)) {
+    .map((recentMessage) => {
+      if (!isRecord(recentMessage)) {
         return null;
       }
 
-      const role = turn.role === 'assistant' || turn.role === 'user' ? turn.role : null;
-      const text = typeof turn.text === 'string' ? turn.text.trim() : '';
+      const role = recentMessage.role === 'assistant' || recentMessage.role === 'user' ? recentMessage.role : null;
+      const text = typeof recentMessage.text === 'string' ? recentMessage.text.trim() : '';
       if (!role || !text) {
         return null;
       }
 
       if (role === 'assistant') {
-        const suggestions = readSuggestionsFromStoredMessage({ suggestions: turn.suggestions });
+        const suggestions = readSuggestionsFromStoredMessage({ suggestions: recentMessage.suggestions });
         if (suggestions) {
           latestAssistantSuggestions = suggestions;
         }
       }
 
-      const structuredAction = role === 'user' && typeof turn.action === 'string' && isStructuredActionType(turn.action)
+      const structuredAction = role === 'user' && typeof recentMessage.action === 'string' && isStructuredActionType(recentMessage.action)
         ? {
-            action: turn.action,
-            payload: isRecord(turn.params) ? turn.params : {},
-            ...(typeof turn.source === 'string' ? { source: turn.source } : {}),
-            ...(typeof turn.displayText === 'string' ? { originalText: turn.displayText } : {}),
+            action: recentMessage.action,
+            payload: isRecord(recentMessage.params) ? recentMessage.params : {},
+            ...(typeof recentMessage.source === 'string' ? { source: recentMessage.source } : {}),
+            ...(typeof recentMessage.displayText === 'string' ? { originalText: recentMessage.displayText } : {}),
           }
         : undefined;
 
@@ -1088,7 +1079,7 @@ async function resolveConversationContext(
 
   if (!viewer) {
     const conversationId = requestedConversationId || createId(ID_PREFIX.conversation);
-    const transientConversation = readTransientConversationTurnsFromRequest(request);
+    const transientConversation = readTransientConversationHistoryFromRequest(request);
     const historySource: HistorySource = transientConversation.historyMessages.length > 0 ? 'request_transient' : 'empty';
     const conversationMode: ConversationMode = 'anonymous_transient';
 
@@ -2083,6 +2074,9 @@ function mapPartnerSearchResultsPayloadToBlock(
       listKind: 'partner_search_results',
       listPresentation: 'partner-carousel',
       listShowHeader: false,
+      ...(isRecord(payload.searchSummary) ? { searchSummary: payload.searchSummary } : {}),
+      ...(isRecord(payload.primaryAction) ? { primaryAction: payload.primaryAction } : {}),
+      ...(isRecord(payload.secondaryAction) ? { secondaryAction: payload.secondaryAction } : {}),
     },
   });
 }
@@ -2720,11 +2714,12 @@ function serializeSSE(event: GenUIStreamEvent, streamOptions: ResolvedStreamOpti
   return `event: ${event.event}\ndata: ${JSON.stringify(readStreamEventPayload(event, streamOptions))}\n\n`;
 }
 
-export async function streamAiChatResponse(
-  request: GenUIRequest,
-  options?: AiChatStreamOptions
-): Promise<Response> {
-  const streamOptions = resolveStreamOptions(request);
+export async function createAiChatStreamResponse(params: {
+  request: GenUIRequest;
+  envelope: GenUIResponseEnvelope;
+  traces: GenUITracePayload[];
+}): Promise<Response> {
+  const streamOptions = resolveStreamOptions(params.request);
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -2734,36 +2729,31 @@ export async function streamAiChatResponse(
       };
 
       try {
-        const response = await buildAiChatResponse(request, {
-          viewer: options?.viewer ?? null,
-          abortSignal: options?.requestAbortSignal,
-        });
-
         emit(createStreamEvent('response-start', {
-          traceId: response.envelope.traceId,
-          conversationId: response.envelope.conversationId,
-          responseId: response.envelope.response.responseId,
+          traceId: params.envelope.traceId,
+          conversationId: params.envelope.conversationId,
+          responseId: params.envelope.response.responseId,
         }));
         emit(createStreamEvent('response-status', {
-          responseId: response.envelope.response.responseId,
+          responseId: params.envelope.response.responseId,
           status: 'streaming',
         }));
 
-        for (const block of response.envelope.response.blocks) {
+        for (const block of params.envelope.response.blocks) {
           emit(createStreamEvent('block-append', {
-            responseId: response.envelope.response.responseId,
+            responseId: params.envelope.response.responseId,
             block,
           }));
         }
 
         emit(createStreamEvent('response-status', {
-          responseId: response.envelope.response.responseId,
+          responseId: params.envelope.response.responseId,
           status: 'completed',
         }));
-        emit(createStreamEvent('response-complete', response.envelope));
+        emit(createStreamEvent('response-complete', params.envelope));
 
         if (streamOptions.includeTrace) {
-          for (const trace of response.traces) {
+          for (const trace of params.traces) {
             emit(createStreamEvent('trace', trace));
           }
         }
@@ -2794,13 +2784,13 @@ export async function streamAiChatResponse(
   });
 }
 
-export async function buildAiChatResponse(
+export async function buildAiChatEnvelope(
   request: GenUIRequest,
   options?: AiChatResponseOptions
-): Promise<AiChatResponseResult> {
+): Promise<AiChatEnvelopeResult> {
   const viewer = options?.viewer ?? null;
   const execution = await resolveAiChatExecution(request, viewer, options?.abortSignal);
-  const executionResult = await executeChatTurn(execution.chatRequest);
+  const executionResult = await executeChatRequest(execution.chatRequest);
   const mapped = buildBlocksFromExecutionResult(executionResult, request);
   const executionPath = mapped.executionPath;
   const suggestions = buildSuggestionsFromBlocks(mapped.blocks);
@@ -2825,7 +2815,7 @@ export async function buildAiChatResponse(
     ...(execution.resolutionTrace ? [execution.resolutionTrace] : []),
     ...mapped.traces,
     {
-      stage: 'turn_complete',
+      stage: 'response_complete',
       detail: {
         traceId,
         responseId,

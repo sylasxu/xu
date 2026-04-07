@@ -9,7 +9,7 @@ import { createInsertSchema, createSelectSchema } from "drizzle-typebox";
  * 
  * 保留字段：id, activityId, userId, status, joinedAt, updatedAt
  * 
- * 移除字段：applicationMsg, isFastPass, confirmedAt, isDisputed, 
+ * 移除字段：applicationMsg, isFastPass, confirmedAt, isDisputed,
  *          disputedAt, disputeExpiresAt
  */
 export const participants = pgTable("participants", {
@@ -18,7 +18,7 @@ export const participants = pgTable("participants", {
   activityId: uuid("activity_id").notNull().references(() => activities.id),
   userId: uuid("user_id").notNull().references(() => users.id),
   
-  // --- 状态 (MVP 简化) ---
+  // --- 状态 (v5.5: 支持候补) ---
   status: participantStatusEnum("status").default("joined").notNull(),
   
   joinedAt: timestamp("joined_at").defaultNow(),

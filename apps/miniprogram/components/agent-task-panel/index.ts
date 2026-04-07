@@ -78,11 +78,11 @@ Component({
   properties: {
     eyebrow: {
       type: String,
-      value: '持续帮你推进',
+      value: '继续帮你接着办',
     },
     title: {
       type: String,
-      value: '你刚才那件事，我还在盯着',
+      value: '刚才那件事，我还在继续推进',
     },
     tasks: {
       type: Array,

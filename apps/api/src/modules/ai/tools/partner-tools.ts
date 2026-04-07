@@ -98,7 +98,7 @@ export interface SearchSummary {
 }
 
 export interface SearchNextAction {
-  type: 'opt_in_partner_pool' | 'refresh_search';
+  type: 'opt_in_partner_pool' | 'search_partners';
   label: string;
   description?: string;
 }
@@ -349,7 +349,7 @@ export async function searchPartnerCandidates(
 
     // 次要动作：刷新搜索
     const secondaryAction: SearchNextAction = {
-      type: 'refresh_search',
+      type: 'search_partners',
       label: '再看看其他人',
     };
 

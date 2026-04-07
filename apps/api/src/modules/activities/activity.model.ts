@@ -34,6 +34,21 @@ const ParticipantInfo = t.Object({
   user: t.Union([CreatorInfo, t.Null()]),
 });
 
+const ActivityJoinState = t.Union([
+  t.Literal('creator'),
+  t.Literal('joined'),
+  t.Literal('waitlisted'),
+  t.Literal('not_joined'),
+  t.Literal('closed'),
+], { description: '当前用户对该活动的参与态' });
+
+const ActivityJoinResult = t.Union([
+  t.Literal('joined'),
+  t.Literal('already_joined'),
+  t.Literal('waitlisted'),
+  t.Literal('closed'),
+], { description: '执行 join_activity 后的统一结果' });
+
 // 活动详情响应（包含 isArchived 计算字段）
 const ActivityDetailResponse = t.Object({
   id: t.String(),
@@ -48,7 +63,12 @@ const ActivityDetailResponse = t.Object({
   type: t.String(),
   maxParticipants: t.Number(),
   currentParticipants: t.Number(),
+  waitlistCount: t.Number(),
+  remainingSeats: t.Number(),
+  isFull: t.Boolean(),
   status: t.String(),
+  joinState: ActivityJoinState,
+  canJoin: t.Boolean(),
   createdAt: t.String(),
   updatedAt: t.String(),
   // 计算字段
@@ -73,6 +93,9 @@ const ActivityListItem = t.Object({
   type: t.String(),
   maxParticipants: t.Number(),
   currentParticipants: t.Number(),
+  waitlistCount: t.Number(),
+  remainingSeats: t.Number(),
+  isFull: t.Boolean(),
   status: t.String(),
   isArchived: t.Boolean(),
   creator: t.Union([CreatorInfo, t.Null()]),
@@ -157,6 +180,8 @@ const NearbyActivityItem = t.Object({
   type: t.String(),
   maxParticipants: t.Number(),
   currentParticipants: t.Number(),
+  remainingSeats: t.Number(),
+  isFull: t.Boolean(),
   status: t.String(),
   distance: t.Number({ description: '距离（米）' }),
   creator: t.Union([CreatorInfo, t.Null()]),
@@ -203,9 +228,12 @@ const PublicActivityResponse = t.Object({
   status: t.String(),
   maxParticipants: t.Number(),
   currentParticipants: t.Number(),
+  remainingSeats: t.Number(),
+  isFull: t.Boolean(),
   theme: t.String(),
   themeConfig: t.Union([t.Any(), t.Null()]),
   isArchived: t.Boolean(),
+  canJoin: t.Boolean(),
   creator: t.Object({
     nickname: t.Union([t.String(), t.Null()]),
     avatarUrl: t.Union([t.String(), t.Null()]),
@@ -282,6 +310,17 @@ const CreateActivityResponse = t.Object({
   msg: t.String(),
 });
 
+const JoinActivityResponse = t.Object({
+  success: t.Boolean(),
+  msg: t.String(),
+  joinResult: ActivityJoinResult,
+  participantId: t.Union([t.String(), t.Null()]),
+  navigationIntent: t.Union([
+    t.Literal('open_discussion'),
+    t.Literal('stay_on_detail'),
+  ]),
+});
+
 // ==========================================
 // 活动统计 (新增)
 // ==========================================
@@ -333,6 +372,7 @@ export const activityModel = new Elysia({ name: 'activityModel' })
     'activity.publishDraftRequest': PublishDraftRequest,
     'activity.updateStatusRequest': UpdateStatusRequest,
     'activity.createResponse': CreateActivityResponse,
+    'activity.joinResponse': JoinActivityResponse,
     'activity.idParams': IdParams,
     'common.error': ErrorResponseSchema,
     'activity.success': SuccessResponse,
@@ -346,6 +386,8 @@ export const activityModel = new Elysia({ name: 'activityModel' })
 export type CreatorInfo = Static<typeof CreatorInfo>;
 export type ParticipantInfo = Static<typeof ParticipantInfo>;
 export type ActivityDetailResponse = Static<typeof ActivityDetailResponse>;
+export type ActivityJoinState = Static<typeof ActivityJoinState>;
+export type ActivityJoinResult = Static<typeof ActivityJoinResult>;
 export type ActivityListItem = Static<typeof ActivityListItem>;
 export type MyActivitiesResponse = Static<typeof MyActivitiesResponse>;
 export type MyActivitiesQuery = Static<typeof MyActivitiesQuery>;
@@ -361,6 +403,7 @@ export type UpdateStatusRequest = Static<typeof UpdateStatusRequest>;
 export type IdParams = Static<typeof IdParams>;
 export type SuccessResponse = Static<typeof SuccessResponse>;
 export type CreateActivityResponse = Static<typeof CreateActivityResponse>;
+export type JoinActivityResponse = Static<typeof JoinActivityResponse>;
 // 活动统计类型
 export type ActivityStatsQuery = Static<typeof ActivityStatsQuerySchema>;
 export type ActivityOverviewStats = Static<typeof ActivityOverviewStatsSchema>;

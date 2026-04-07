@@ -102,7 +102,7 @@ type LocalGenUIRecentMessage = GenUIRecentMessage & {
   displayText?: string
 }
 
-const MAX_TRANSIENT_TURNS = 10
+const MAX_TRANSIENT_RECENT_MESSAGES = 10
 
 // ============================================================================
 // Protocol and message operations
@@ -318,7 +318,7 @@ function readMessagePrimaryBlockType(message: UIMessage): GenUIRecentMessage['pr
   }
 }
 
-function extractMessageTextForTransientTurn(message: UIMessage): string {
+function extractMessageTextForRecentMessage(message: UIMessage): string {
   const text = getTextContent(message).trim()
   if (text) {
     return text
@@ -327,11 +327,11 @@ function extractMessageTextForTransientTurn(message: UIMessage): string {
   return readWidgetSummaryText(getWidgetPart(message))
 }
 
-function buildTransientTurns(messages: UIMessage[]): LocalGenUIRecentMessage[] {
+function buildTransientRecentMessages(messages: UIMessage[]): LocalGenUIRecentMessage[] {
   return messages
-    .slice(-MAX_TRANSIENT_TURNS)
+    .slice(-MAX_TRANSIENT_RECENT_MESSAGES)
     .map((message): LocalGenUIRecentMessage | null => {
-      const text = extractMessageTextForTransientTurn(message)
+      const text = extractMessageTextForRecentMessage(message)
       if (!text) {
         return null
       }
@@ -591,6 +591,39 @@ function applyCompletionEffectsFromBlocks(blocks: GenUIBlock[]): void {
       return
     }
 
+    if (meta && meta.navigationIntent === 'stay_on_detail') {
+      const payload = readDiscussionNavigationPayload(meta.navigationPayload)
+
+      if (!onHomePage && block.message.trim()) {
+        wx.showToast({
+          title: block.message.trim(),
+          icon: 'none',
+        })
+      }
+
+      if (payload) {
+        const pages = getCurrentPages()
+        const currentPage = pages[pages.length - 1] as WechatMiniprogram.Page.Instance<
+          Record<string, unknown>,
+          Record<string, unknown>
+        > & {
+          route?: string
+          data?: { activityId?: string }
+          loadActivityDetail?: (activityId: string) => void
+        }
+
+        if (
+          currentPage?.route === 'subpackages/activity/detail/index' &&
+          currentPage.data?.activityId === payload.activityId &&
+          typeof currentPage.loadActivityDetail === 'function'
+        ) {
+          currentPage.loadActivityDetail(payload.activityId)
+        }
+      }
+
+      return
+    }
+
     if (meta && meta.navigationIntent === 'open_message_center') {
       const focusIntent = isRecord(meta.navigationPayload)
         ? {
@@ -837,10 +870,12 @@ function mapListToWidgetPart(block: GenUIListBlock): WidgetPart {
         primaryAction: primaryAction ? {
           label: toStringValue(primaryAction.label, '帮我继续留意'),
           action: toStringValue(primaryAction.action, 'opt_in_partner_pool'),
+          ...(isRecord(primaryAction.params) ? { params: primaryAction.params } : {}),
         } : undefined,
         secondaryAction: secondaryAction ? {
           label: toStringValue(secondaryAction.label, '再看看其他人'),
-          action: toStringValue(secondaryAction.action, 'refresh_search'),
+          action: toStringValue(secondaryAction.action, 'search_partners'),
+          ...(isRecord(secondaryAction.params) ? { params: secondaryAction.params } : {}),
         } : undefined,
       },
     }
@@ -1059,7 +1094,7 @@ function buildAssistantPartsFromBlocks(blocks: GenUIBlock[]): (UIMessagePart | W
   return parts
 }
 
-type ChatGatewayTurnsRequest = {
+type ChatRuntimeRequest = {
   conversationId?: string
   input: GenUIInput
   context?: {
@@ -1075,11 +1110,10 @@ type ChatGatewayTurnsRequest = {
     recentMessages?: GenUIRequestContext['recentMessages']
   }
   trace?: boolean
-  stream?: boolean
   [key: string]: unknown
 }
 
-interface ChatGatewayStreamCallbacks {
+interface ChatRuntimeStreamCallbacks {
   onStart?: () => void
   onEvent?: (eventName: string, payload: unknown) => void
   onDone?: () => void
@@ -1096,10 +1130,10 @@ type RequestTaskWithHeadersListener = WechatMiniprogram.RequestTask & {
   onHeadersReceived?: (callback: (result: RequestHeadersReceivedResult) => void) => void
 }
 
-const CHAT_GATEWAY_URL = `${API_CONFIG.BASE_URL}/ai/chat`
+const CHAT_RUNTIME_URL = `${API_CONFIG.BASE_URL}/ai/chat`
 const TYPEWRITER_INTERVAL_MS = 60  // v5.5: 调慢打字机速度，提升可读性
 
-function buildChatGatewayTurnsRequest(
+function buildChatRuntimeRequest(
   conversationId: string | null,
   input: GenUIInput,
   context: {
@@ -1112,7 +1146,7 @@ function buildChatGatewayTurnsRequest(
     entry?: string
     recentMessages?: GenUIRequestContext['recentMessages']
   }
-): ChatGatewayTurnsRequest {
+): ChatRuntimeRequest {
   return {
     ...(conversationId ? { conversationId } : {}),
     input,
@@ -1215,9 +1249,9 @@ function hasAuthenticatedSession(): boolean {
   return readStorageString('token').trim().length > 0
 }
 
-function streamChatGatewayTurns(
-  request: ChatGatewayTurnsRequest,
-  callbacks: ChatGatewayStreamCallbacks
+function streamChatRuntimeResponse(
+  request: ChatRuntimeRequest,
+  callbacks: ChatRuntimeStreamCallbacks
 ): SSEController {
   const token = readStorageString('token')
   let buffer = ''
@@ -1277,7 +1311,7 @@ function streamChatGatewayTurns(
   callbacks.onStart?.()
 
   const requestTask = wx.request({
-    url: CHAT_GATEWAY_URL,
+    url: CHAT_RUNTIME_URL,
     method: 'POST',
     data: request,
     header: {
@@ -1401,11 +1435,11 @@ interface ChatState {
 export const useChatStore = create<ChatState>()(
   persist(
     immer((set, get) => {
-      const streamAssistantTurn = (params: {
+      const streamAssistantResponse = (params: {
         aiMessageId: string
-        chatRequest: ChatGatewayTurnsRequest
+        chatRequest: ChatRuntimeRequest
         fallbackConversationId: string
-        turnErrorFallbackMessage: string
+        responseErrorFallbackMessage: string
         buildErrorWidgetData: (normalizedError: string) => WidgetPart['data']
       }) => {
         let currentEnvelope: GenUIResponseEnvelope | null = null
@@ -1446,8 +1480,8 @@ export const useChatStore = create<ChatState>()(
           currentEnvelope = {
             traceId: `trace_${Date.now()}`,
             conversationId: params.fallbackConversationId,
-            response: {
-              responseId: `turn_${Date.now()}`,
+              response: {
+              responseId: `response_${Date.now()}`,
               role: 'assistant',
               status: 'streaming',
               blocks: [],
@@ -1528,7 +1562,7 @@ export const useChatStore = create<ChatState>()(
           }
         }
 
-        const finalizeSuccessfulTurn = () => {
+        const finalizeSuccessfulResponse = () => {
           if (settled || !isCurrentController()) {
             return
           }
@@ -1558,7 +1592,7 @@ export const useChatStore = create<ChatState>()(
           }
         }
 
-        const finalizeFailedTurn = (errorMessage: string) => {
+        const finalizeFailedResponse = (errorMessage: string) => {
           if (settled || !isCurrentController()) {
             return
           }
@@ -1603,7 +1637,7 @@ export const useChatStore = create<ChatState>()(
             const message =
               errorData && typeof errorData.message === 'string'
                 ? normalizeChatErrorMessage(errorData.message)
-                : params.turnErrorFallbackMessage
+                : params.responseErrorFallbackMessage
             throw new Error(message)
           }
 
@@ -1614,7 +1648,7 @@ export const useChatStore = create<ChatState>()(
               data && typeof data.conversationId === 'string'
                 ? data.conversationId
                 : params.fallbackConversationId
-            const responseId = data && typeof data.responseId === 'string' ? data.responseId : `turn_${Date.now()}`
+            const responseId = data && typeof data.responseId === 'string' ? data.responseId : `response_${Date.now()}`
 
             currentEnvelope = {
               traceId,
@@ -1673,7 +1707,7 @@ export const useChatStore = create<ChatState>()(
           }
         }
 
-        controller = streamChatGatewayTurns(params.chatRequest, {
+        controller = streamChatRuntimeResponse(params.chatRequest, {
           onEvent: (eventName, payload) => {
             eventQueue = eventQueue
               .then(() => consumeStreamEvent(eventName, payload))
@@ -1681,23 +1715,23 @@ export const useChatStore = create<ChatState>()(
                 const message = normalizeChatErrorMessage(
                   error instanceof Error ? error.message : '流式处理失败'
                 )
-                finalizeFailedTurn(message)
+                finalizeFailedResponse(message)
               })
           },
           onDone: () => {
             void eventQueue
-              .then(() => finalizeSuccessfulTurn())
+              .then(() => finalizeSuccessfulResponse())
               .catch((error) => {
                 const message = normalizeChatErrorMessage(
                   error instanceof Error ? error.message : '流式处理失败'
                 )
-                finalizeFailedTurn(message)
+                finalizeFailedResponse(message)
               })
           },
           onError: (message) => {
             void eventQueue.then(() => {
-              finalizeFailedTurn(
-                normalizeChatErrorMessage(message || params.turnErrorFallbackMessage)
+              finalizeFailedResponse(
+                normalizeChatErrorMessage(message || params.responseErrorFallbackMessage)
               )
             })
           },
@@ -1740,7 +1774,7 @@ export const useChatStore = create<ChatState>()(
 
         const state = get()
         const recentMessages = !hasAuthenticatedSession()
-          ? buildTransientTurns(state.messages)
+          ? buildTransientRecentMessages(state.messages)
           : undefined
         
         // 如果正在请求中，先停止
@@ -1775,7 +1809,7 @@ export const useChatStore = create<ChatState>()(
           draft._controller = null
         })
 
-        const chatRequest = buildChatGatewayTurnsRequest(
+        const chatRequest = buildChatRuntimeRequest(
           state.conversationId,
           {
             type: 'text',
@@ -1790,12 +1824,11 @@ export const useChatStore = create<ChatState>()(
             ...(contextOverrides || {}),
           }
         )
-        chatRequest.stream = true
-        streamAssistantTurn({
+        streamAssistantResponse({
           aiMessageId,
           chatRequest,
           fallbackConversationId: state.conversationId || `conv_${Date.now()}`,
-          turnErrorFallbackMessage: '生成失败，请稍后再试',
+          responseErrorFallbackMessage: '生成失败，请稍后再试',
           buildErrorWidgetData: () => ({
             message: '抱歉，这次没生成成功，试试再说一次～',
             showRetry: true,
@@ -1884,7 +1917,7 @@ export const useChatStore = create<ChatState>()(
       sendAction: (action: StructuredActionInput) => {
         const state = get()
         const recentMessages = !hasAuthenticatedSession()
-          ? buildTransientTurns(state.messages)
+          ? buildTransientRecentMessages(state.messages)
           : undefined
         
         // 如果正在请求中，先停止
@@ -1926,7 +1959,7 @@ export const useChatStore = create<ChatState>()(
           draft._controller = null
         })
 
-        const chatRequest = buildChatGatewayTurnsRequest(
+        const chatRequest = buildChatRuntimeRequest(
           state.conversationId,
           {
             type: 'action',
@@ -1944,12 +1977,11 @@ export const useChatStore = create<ChatState>()(
             ...(recentMessages && recentMessages.length > 0 ? { recentMessages } : {}),
           }
         )
-        chatRequest.stream = true
-        streamAssistantTurn({
+        streamAssistantResponse({
           aiMessageId,
           chatRequest,
           fallbackConversationId: state.conversationId || `conv_${Date.now()}`,
-          turnErrorFallbackMessage: '操作失败，请稍后再试',
+          responseErrorFallbackMessage: '操作失败，请稍后再试',
           buildErrorWidgetData: (normalizedError) => ({
             message: normalizedError,
             showRetry: true,

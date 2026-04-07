@@ -475,7 +475,7 @@ Component({
     },
 
     /** 卡内操作按钮点击 */
-    toTurnsAction(actionType: string): string {
+    toChatAction(actionType: string): string {
       const map: Record<string, string> = {
         join: 'join_activity',
         publish: 'confirm_publish',
@@ -564,12 +564,12 @@ Component({
         return;
       }
 
-      // 通用操作：统一走 turns action
+      // 通用操作：统一走 chat action
       this.setData({ [`actionStates.${stateKey}`]: 'loading' });
       const chatStore = useChatStore.getState();
 
       chatStore.sendAction({
-        action: this.toTurnsAction(actionType),
+        action: this.toChatAction(actionType),
         payload,
         source: 'widget_explore',
         originalText: activityTitle ? `处理「${activityTitle}」` : `执行${actionType}`,

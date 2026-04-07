@@ -66,7 +66,8 @@
       >
         <text wx:if="{{joinState === 'loading'}}">报名中...</text>
         <text wx:elif="{{joinState === 'success'}}">已报名</text>
-        <text wx:else>报名</text>
+        <text wx:elif="{{activity.canJoin === false}}">{{activity.joinState === 'waitlisted' ? '候补中' : activity.joinState === 'joined' ? '已加入' : '暂不可加入'}}</text>
+        <text wx:else>{{activity.isFull ? '候补排队' : '报名'}}</text>
       </view>
     </view>
   </view>

@@ -349,7 +349,6 @@ function postResponseStream(
       model: DEFAULT_TEST_MODEL,
     },
     ...(options?.trace ? { trace: true } : {}),
-    stream: true,
   };
 
   const result = execCurl([

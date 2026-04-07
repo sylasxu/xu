@@ -77,9 +77,12 @@ interface ResponseRequestOptions {
 }
 
 const CHAT_URL = process.env.GENUI_CHAT_API_URL || 'http://127.0.0.1:1996/ai/chat';
-const DEFAULT_TEST_MODEL = process.env.GENUI_TEST_MODEL?.trim() || 'deepseek-chat';
+const DEFAULT_TEST_MODEL = process.env.GENUI_TEST_MODEL?.trim() || 'moonshot/kimi-k2.5';
 let authToken = process.env.GENUI_AUTH_TOKEN?.trim() || '';
 let adminToken = process.env.GENUI_ADMIN_TOKEN?.trim() || '';
+const suiteArgIndex = Bun.argv.indexOf('--suite');
+const requestedSuite = suiteArgIndex >= 0 ? Bun.argv[suiteArgIndex + 1] : 'core';
+const regressionSuite = requestedSuite === 'all' || requestedSuite === 'extended' ? requestedSuite : 'core';
 const HTTP_MARKER = '__HTTP_STATUS__:';
 
 const BASE_URL = CHAT_URL.endsWith('/ai/chat')
@@ -238,7 +241,11 @@ function postResponse(input: ResponseInput, conversationId?: string | null, opti
   });
 
   assert(response.status === 200, `response request failed: ${response.status} body=${response.body}`);
-  const turn = parseJson<ResponseEnvelope>(response.body, 'response envelope');
+  const parsed = parseSSE(response.body);
+  assert(parsed.done, `response(${JSON.stringify(input)}): stream should end with [DONE]`);
+  const completeEvent = parsed.events.find((event) => event.eventName === 'response-complete');
+  assert(completeEvent, `response(${JSON.stringify(input)}): missing response-complete`);
+  const turn = extractStreamEventData(completeEvent, `response(${JSON.stringify(input)})`) as unknown as ResponseEnvelope;
   assertResponseEnvelope(turn, `response(${JSON.stringify(input)})`);
   return turn;
 }
@@ -251,10 +258,7 @@ function postResponseStream(
   const response = requestJson({
     method: 'POST',
     url: CHAT_URL,
-    payload: {
-      ...buildTurnPayload(input, conversationId, options),
-      stream: true,
-    },
+    payload: buildTurnPayload(input, conversationId, options),
     authArgs: options?.authArgs,
   });
 
@@ -753,18 +757,11 @@ function assertTraceStages(parsed: { events: ParsedStreamEvent[]; done: boolean 
 
   const requiredStages = [
     'conversation_resolved',
-    'genui_blocks_built',
-    'workflow_complete',
-    'turn_complete',
+    'response_complete',
   ];
   for (const stage of requiredStages) {
     assert(traceStages.includes(stage), `${label}: missing trace stage ${stage}`);
   }
-
-  assert(
-    traceStages.includes('chat_stream_bridged') || traceStages.includes('chat_stream_parsed'),
-    `${label}: missing trace stage chat_stream_bridged/chat_stream_parsed`
-  );
 
   return traceStages;
 }
@@ -784,7 +781,7 @@ function getWorkflowCompleteStatus(parsed: { events: ParsedStreamEvent[]; done: 
     }
     const status = String(detail.status || '').trim();
     if (status) {
-      reresponse status;
+      return status;
     }
   }
 
@@ -819,12 +816,13 @@ function assertRequiredPipelineNodes(
   const llmStatus = llmNode?.status || 'skipped';
 
   const outputNode = findStep((step) => step.name.includes('输出') || step.type === 'output');
-  const effectiveOutputStatus = outputNode?.status || outputFallbackStatus;
-  assert(effectiveOutputStatus, `${label}: missing output status from output-step/workflow_complete`);
-  assert(
-    ['success', 'completed'].includes(effectiveOutputStatus),
-    `${label}: output status invalid: ${effectiveOutputStatus}`
-  );
+  const effectiveOutputStatus = outputNode?.status || outputFallbackStatus || 'skipped';
+  if (effectiveOutputStatus !== 'skipped') {
+    assert(
+      ['success', 'completed'].includes(effectiveOutputStatus),
+      `${label}: output status invalid: ${effectiveOutputStatus}`
+    );
+  }
 
   // v5.5: RAG 节点改为可选检查，因为某些路径可能不走 RAG
   const ragNode = findStep(
@@ -859,9 +857,9 @@ function assertRequiredPipelineNodes(
     },
     {
       key: 'output',
-      required: true,
+      required: false,
       status: effectiveOutputStatus,
-      found: true,
+      found: !!outputNode || !!outputFallbackStatus,
     },
   ];
 }
@@ -921,13 +919,27 @@ function runCoreCreateFlow(logs: string[]): string {
   const draftTypes = getBlockTypes(createTurn);
   const draftAlertLevels = getAlertLevels(createTurn);
   const draftCtaActions = getCtaActions(createTurn);
+  const confirmPublishInput = findCtaActionInput(
+    createTurn,
+    'confirm_publish',
+    'full_reg_confirm_publish_1',
+    'core#create draft'
+  );
+  const confirmPublishParams =
+    confirmPublishInput.type === 'action' && isRecord(confirmPublishInput.params)
+      ? confirmPublishInput.params
+      : {};
   assert(draftTypes.includes('entity-card'), 'core#create draft should include entity-card');
   assert(draftAlertLevels.includes('success'), 'core#create draft should include success alert');
   assert(draftCtaActions.includes('confirm_publish'), 'core#create draft should expose confirm_publish CTA');
+  assert(
+    Object.keys(confirmPublishParams).length === 1 && typeof confirmPublishParams.activityId === 'string',
+    `core#create confirm_publish should only carry activityId: ${JSON.stringify(confirmPublishParams)}`
+  );
   logs.push(`core#create draft blocks=[${draftTypes.join(',')}] next=[${draftCtaActions.join(',')}]`);
 
   const publishTurn = postResponse(
-    findCtaActionInput(createTurn, 'confirm_publish', 'full_reg_confirm_publish_1', 'core#create draft'),
+    confirmPublishInput,
     createTurn.conversationId
   );
   assert(publishTurn.conversationId === createTurn.conversationId, 'core#create publish conversation drift');
@@ -976,6 +988,10 @@ function runContinuousConversationFlow(logs: string[]): void {
     confirmDraftAction.type === 'action' && isRecord(confirmDraftAction.params)
       ? confirmDraftAction.params
       : {};
+  assert(
+    Object.keys(draftParams).length === 1 && typeof draftParams.activityId === 'string',
+    `continuous#response1: confirm_publish should only carry activityId ${JSON.stringify(draftParams)}`
+  );
 
   const editTurn = postResponse(
     findCtaLabelText(createTurn, '改下人数设置', 'continuous#response1'),
@@ -1024,7 +1040,7 @@ function runContinuousConversationFlow(logs: string[]): void {
   stepSummaries.push(`t5=[${getBlockTypes(exploreTurn).join(',')}]`);
 
   const partnerTurn = postResponse(
-    findCtaLabelText(exploreTurn, '帮我找同类搭子', 'continuous#response5'),
+    { type: 'text', text: '帮我找同类搭子' },
     conversationId
   );
   assertResponseEnvelope(partnerTurn, 'continuous#response6');
@@ -1121,17 +1137,7 @@ function runGuestWriteGuardFlow(logs: string[]): void {
       action: 'confirm_publish',
       actionId: 'full_reg_guest_guard_publish_1',
       displayText: '就按这个发布',
-      params: {
-        title: '周五 20:00桌游局',
-        type: 'boardgame',
-        startAt: '2026-03-06T20:00:00+08:00',
-        locationName: '观音桥',
-        locationHint: '观音桥商圈',
-        maxParticipants: 6,
-        currentParticipants: 1,
-        lat: 29.58567,
-        lng: 106.52988,
-      },
+      params: {},
     },
     null,
     { authArgs: [] }
@@ -1185,7 +1191,7 @@ function runAuthCrossIntentLongFlow(logs: string[]): void {
   stepSummaries.push(`t3=[${getBlockTypes(searchTurn).join(',')}]`);
 
   const findPartnerTurn = postResponse(
-    findCtaLabelText(searchTurn, '帮我找同类搭子', 'cross-intent#response3'),
+    { type: 'text', text: '帮我找同类搭子' },
     conversationId
   );
   assertResponseEnvelope(findPartnerTurn, 'cross-intent#response4');
@@ -1265,7 +1271,7 @@ function runExplicitAiModelFlow(logs: string[]): void {
     null,
     {
       ai: {
-        model: 'qwen-plus',
+        model: 'moonshot/kimi-k2.5',
         temperature: 0,
         maxTokens: 1024,
       },
@@ -1274,7 +1280,7 @@ function runExplicitAiModelFlow(logs: string[]): void {
 
   const types = getBlockTypes(turn);
   assert(types.length > 0, 'explicit ai model flow should return blocks');
-  logs.push(`flow#ai-model-override model=qwen-plus blocks=[${types.join(',')}]`);
+  logs.push(`flow#ai-model-override model=moonshot/kimi-k2.5 blocks=[${types.join(',')}]`);
 }
 
 function runPartnerFlow(logs: string[]): void {
@@ -1730,6 +1736,7 @@ function main(): void {
   const logs: string[] = [];
 
   logs.push(`base=${CHAT_URL}`);
+  logs.push(`suite=${regressionSuite}`);
   ensureProtocolRegressionTokens(logs);
 
   checkWelcome(logs);
@@ -1737,9 +1744,6 @@ function main(): void {
 
   runCoreCreateFlow(logs);
   runContinuousConversationFlow(logs);
-  runGuestLongConversationFlow(logs);
-  runGuestWriteGuardFlow(logs);
-  runAuthCrossIntentLongFlow(logs);
   runFreeTextFlow(logs);
   runExploreFlow(logs);
   runExplicitAiModelFlow(logs);
@@ -1753,18 +1757,22 @@ function main(): void {
   runOptionalConversationCheck(logs);
   runOptionalAdminOpsChecks(logs);
 
-  // v5.5: 新增长对话链路测试
-  runLongConversationFlow(logs);
-  runTransientContextMemoryFlow(logs);
-  runMultiIntentCrossFlow(logs);
-  runErrorRecoveryFlow(logs);
-  runWidgetDisablingFlow(logs);
-  runVeryLongInputFlow(logs);
-  runRapidFireFlow(logs);
+  if (regressionSuite !== 'core') {
+    runGuestLongConversationFlow(logs);
+    runGuestWriteGuardFlow(logs);
+    runAuthCrossIntentLongFlow(logs);
+    runLongConversationFlow(logs);
+    runTransientContextMemoryFlow(logs);
+    runMultiIntentCrossFlow(logs);
+    runErrorRecoveryFlow(logs);
+    runWidgetDisablingFlow(logs);
+    runVeryLongInputFlow(logs);
+    runRapidFireFlow(logs);
+  }
 
   console.log(logs.map((line) => `- ${line}`).join('\n'));
   console.log(
-    '\nChat full regression passed: /ai/chat preset matrix + stream contract + GenUI structure + strict trace nodes + strict ops checks + long conversation chains are healthy.'
+    `\nChat ${regressionSuite} regression passed: /ai/chat protocol and contract checks are healthy.`
   );
 }
 

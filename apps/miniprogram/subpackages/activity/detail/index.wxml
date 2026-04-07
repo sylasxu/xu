@@ -22,7 +22,14 @@
   }
   
   function getStatusText(status) {
-    var map = { pending: '审核中', approved: '已通过', rejected: '已拒绝' };
+    var map = {
+      creator: '我发起的',
+      joined: '已加入',
+      waitlisted: '候补中',
+      waitlist: '候补中',
+      quit: '已退出',
+      closed: '已停止加入'
+    };
     return map[status] || '';
   }
   
@@ -92,10 +99,10 @@
       </view>
       
       <!-- 活动状态 -->
-      <view wx:if="{{participantStatus}}" class="flex items-center gap-2 mb-3">
+      <view wx:if="{{joinState}}" class="flex items-center gap-2 mb-3">
         <t-tag size="small" variant="light" 
-               theme="{{participantStatus === 'approved' ? 'success' : participantStatus === 'rejected' ? 'danger' : 'warning'}}">
-          {{utils.getStatusText(participantStatus)}}
+               theme="{{joinState === 'joined' ? 'success' : joinState === 'waitlisted' ? 'warning' : 'default'}}">
+          {{utils.getStatusText(joinState)}}
         </t-tag>
         <text wx:if="{{isCreator}}" class="text-xs text-brand bg-brand-light px-2 py-1 rounded-sm">我发起的</text>
       </view>
@@ -129,6 +136,8 @@
             {{activity.currentParticipants || 0}}/{{activity.maxParticipants}}人
             <text wx:if="{{isHotActivity}}" class="text-xs text-error ml-2">🔥热门</text>
           </text>
+          <text wx:if="{{activity.isFull}}" class="block text-xs text-warning mt-1">当前已满员，可先候补排队</text>
+          <text wx:elif="{{activity.remainingSeats >= 0}}" class="block text-xs text-gray-500 mt-1">还剩 {{activity.remainingSeats}} 个位置</text>
         </view>
       </view>
       
@@ -166,7 +175,7 @@
     </view>
     
     <!-- 参与者列表 -->
-    <view wx:if="{{(isCreator || participantStatus === 'approved') && activity.participants && activity.participants.length > 0}}" 
+    <view wx:if="{{(isCreator || joinState === 'joined') && activity.participants && activity.participants.length > 0}}" 
           class="bg-white p-4 mb-2">
       <text class="block text-lg font-semibold text-gray-900 mb-3">参与者 ({{activity.participants.length}})</text>
       <view class="flex flex-wrap gap-3">
@@ -174,8 +183,8 @@
           <t-avatar image="{{item.user.avatarUrl}}" size="64rpx" icon="user" />
           <view class="flex-1 ml-2 min-w-0">
             <text class="block text-sm text-gray-900 truncate mb-1">{{item.user.nickname || '匿名用户'}}</text>
-            <t-tag size="small" variant="light" 
-                   theme="{{item.status === 'approved' ? 'success' : item.status === 'rejected' ? 'danger' : 'warning'}}">
+            <t-tag size="small" variant="light"
+                   theme="{{item.status === 'joined' ? 'success' : item.status === 'waitlist' ? 'warning' : 'default'}}">
               {{utils.getStatusText(item.status)}}
             </t-tag>
           </view>
@@ -208,7 +217,7 @@
         <text>分享</text>
       </button>
       
-      <button wx:if="{{isCreator || participantStatus === 'approved' || participantStatus === 'joined'}}" 
+      <button wx:if="{{isCreator || joinState === 'joined'}}" 
               class="chat-btn flex flex-col items-center justify-center w-100 h-100 text-xs text-gray-600 ml-2" 
               bindtap="onEnterChat">
         <t-icon name="chat" size="40rpx" />
@@ -223,15 +232,15 @@
         <text>举报</text>
       </button>
       
-      <button wx:if="{{!isCreator && !participantStatus}}" 
+      <button wx:if="{{!isCreator && activity.canJoin}}" 
               class="join-btn flex-1 h-88 ml-4 text-white text-lg font-medium rounded-full" 
               bindtap="onJoinTap">
-        我要报名
+        {{activity.isFull ? '候补排队' : '我要报名'}}
       </button>
       
-      <view wx:elif="{{participantStatus && !isCreator}}" 
+      <view wx:elif="{{joinState && !isCreator}}" 
             class="flex-1 flex items-center justify-center h-88 ml-4 bg-gray-100 text-gray-400 text-lg rounded-full">
-        <text>{{utils.getStatusText(participantStatus)}}</text>
+        <text>{{utils.getStatusText(joinState)}}</text>
       </view>
       
       <view wx:elif="{{isCreator}}" class="flex-1 ml-4">
@@ -239,33 +248,6 @@
       </view>
     </view>
   </view>
-  
-  <!-- 报名对话框 -->
-  <t-popup visible="{{showJoinDialog}}" placement="bottom" bind:visible-change="onCloseJoinDialog">
-    <view class="join-dialog bg-white">
-      <view class="flex items-center justify-between p-4 border-b border-gray-100">
-        <text class="text-xl font-semibold text-gray-900">报名参加</text>
-        <t-icon name="close" size="40rpx" bindtap="onCloseJoinDialog" />
-      </view>
-      
-      <view class="p-4">
-        <view class="mb-4">
-          <text class="block text-sm text-gray-900 mb-2">留言（选填）</text>
-          <textarea class="message-input" 
-                    placeholder="向发起人介绍一下自己吧~" 
-                    value="{{joinMessage}}"
-                    bindinput="onJoinMessageInput"
-                    maxlength="200" />
-        </view>
-        
-      </view>
-      
-      <view class="flex gap-3 p-4 border-t border-gray-100">
-        <t-button theme="light" size="large" class="flex-1" bindtap="onCloseJoinDialog">取消</t-button>
-        <t-button theme="primary" size="large" class="flex-1" loading="{{isJoining}}" bindtap="onConfirmJoin">确认报名</t-button>
-      </view>
-    </view>
-  </t-popup>
   
   <!-- 活动管理操作面板 -->
   <t-action-sheet

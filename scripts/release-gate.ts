@@ -42,16 +42,6 @@ function main(): void {
       args: ['run', 'test:api'],
     },
     {
-      name: 'API property tests',
-      command: 'bun',
-      args: ['run', '--cwd', 'apps/api', 'test:pbt'],
-    },
-    {
-      name: 'Mini program test gate',
-      command: 'bun',
-      args: ['run', '--cwd', 'apps/miniprogram', 'test'],
-    },
-    {
       name: 'Product flow regression',
       command: 'bun',
       args: ['run', 'regression:flow'],

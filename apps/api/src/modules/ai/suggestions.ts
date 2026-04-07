@@ -433,7 +433,7 @@ function createStructuredActionFromSuggestions(params: {
   return {
     action: params.action,
     payload: params.rawParams || {},
-    source: 'turn_context',
+    source: 'recent_message_context',
     originalText: params.inputText.trim(),
   };
 }

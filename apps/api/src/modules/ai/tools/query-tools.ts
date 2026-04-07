@@ -75,8 +75,9 @@ export function joinActivityTool(userId: string | null) {
           success: true as const,
           activityId,
           activityTitle: activity?.title || '活动',
-          participantId: result.id,
-          message: activity?.title ? `报名成功！「${activity.title}」等你来～` : '报名成功！等你来～',
+          participantId: result.participantId,
+          joinResult: result.joinResult,
+          message: result.message,
         };
       } catch (error) {
         console.error('[joinActivity] Error:', error);
@@ -250,29 +251,43 @@ export function getActivityDetailTool(userId: string | null) {
           .select({ id: participants.id, nickname: users.nickname, avatarUrl: users.avatarUrl })
           .from(participants)
           .innerJoin(users, eq(participants.userId, users.id))
-          .where(eq(participants.activityId, activity.id))
+          .where(and(
+            eq(participants.activityId, activity.id),
+            eq(participants.status, 'joined'),
+          ))
           .limit(10);
         
         let isJoined = false;
+        let isWaitlisted = false;
         let isCreator = false;
         if (userId) {
           isCreator = activity.creatorId === userId;
           const [joined] = await db
-            .select({ id: participants.id })
+            .select({ id: participants.id, status: participants.status })
             .from(participants)
-            .where(sql`${participants.activityId} = ${activity.id} AND ${participants.userId} = ${userId} AND ${participants.status} = 'joined'`)
+            .where(sql`${participants.activityId} = ${activity.id} AND ${participants.userId} = ${userId}`)
             .limit(1);
-          isJoined = !!joined;
+          isJoined = joined?.status === 'joined';
+          isWaitlisted = joined?.status === 'waitlist';
         }
+
+        const remainingSeats = Math.max(0, activity.maxParticipants - activity.currentParticipants);
+        const isFull = remainingSeats === 0;
+        const canJoin = activity.status === 'active' && activity.startAt > new Date() && !isCreator && !isJoined && !isWaitlisted;
         
         return {
           success: true as const,
           activity: { ...activity, startAt: activity.startAt.toISOString() },
           participants: participantList,
           isJoined,
+          isWaitlisted,
           isCreator,
-          canJoin: activity.status === 'active' && activity.currentParticipants < activity.maxParticipants && !isJoined && !isCreator,
-          message: `「${activity.title}」${activity.currentParticipants}/${activity.maxParticipants} 人`,
+          isFull,
+          remainingSeats,
+          canJoin,
+          message: isFull
+            ? `「${activity.title}」已经满员，可先候补`
+            : `「${activity.title}」${activity.currentParticipants}/${activity.maxParticipants} 人`,
         };
       } catch (error) {
         console.error('[getActivityDetail] Error:', error);

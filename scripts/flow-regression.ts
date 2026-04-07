@@ -32,50 +32,29 @@ function runTask(task: CheckTask): void {
 }
 
 function main(): void {
-  // Core regression tests (must pass)
-  const coreTasks: CheckTask[] = [
+  const runExtended = Bun.argv.includes('--extended');
+  const tasks: CheckTask[] = [
     {
-      name: 'Sandbox multi-user regression',
+      name: runExtended ? 'Sandbox extended regression' : 'Sandbox core regression',
       command: 'bun',
-      args: ['scripts/sandbox-regression.ts'],
-    },
-    {
-      name: 'Five-user smoke regression',
-      command: 'bun',
-      args: ['scripts/five-user-smoke.ts', '--cleanup'],
-    },
-  ];
-
-  // Extended regression tests (v5.5+)
-  const extendedTasks: CheckTask[] = [
-    {
-      name: 'Chat regression suite',
-      command: 'bun',
-      args: ['scripts/chat-regression.ts'],
+      args: ['scripts/sandbox-regression.ts', '--suite', runExtended ? 'all' : 'core'],
     },
   ];
 
   console.log('=== Flow Regression Test Suite (v5.5) ===');
   console.log(`Started at: ${new Date().toISOString()}`);
+  console.log(`Mode: ${runExtended ? 'extended' : 'core'}`);
 
-  // Run core tests
-  console.log('\n--- Core Tests ---');
-  for (const task of coreTasks) {
-    runTask(task);
-  }
-
-  // Run extended tests
-  console.log('\n--- Extended Tests (v5.5) ---');
-  for (const task of extendedTasks) {
+  for (const task of tasks) {
     runTask(task);
   }
 
   console.log('\n=== Flow Regression Summary ===');
   console.log('All required tests passed!');
   console.log('\nTest Coverage:');
-  console.log('- Core: multi-user journeys, smoke tests');
-  console.log('- Extended: 10+ turn conversations, transient context, multi-intent crossovers');
-  console.log('- Long conversation: 15-turn linear chains, boundary values, rapid context switching');
+  console.log('- Core: 报名、候补、讨论区、通知、活动后跟进、AI 动作闸门');
+  console.log('- Extended: 长对话、瞬时上下文、多意图切换、匿名多轮、快速连发');
+  console.log('- Manual smoke: five-user-smoke 保留为手动联调工具，不再进入默认门禁');
   console.log(`\nCompleted at: ${new Date().toISOString()}`);
 }
 

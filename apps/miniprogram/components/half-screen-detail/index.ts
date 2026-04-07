@@ -12,7 +12,12 @@ import type { ActionState } from '../../src/utils/widget-actions'
 import { buildJoinStructuredAction } from '../../src/utils/join-flow'
 import type { ActivityDetailResponse } from '../../src/api/model'
 
-type ActivityDetail = ActivityDetailResponse;
+type ActivityDetail = ActivityDetailResponse & {
+  canJoin?: boolean
+  joinState?: 'creator' | 'joined' | 'waitlisted' | 'not_joined' | 'closed'
+  isFull?: boolean
+  remainingSeats?: number
+};
 
 interface ComponentData {
   activity: ActivityDetail | null;
@@ -85,6 +90,7 @@ Component({
     async onJoinTap() {
       const activity = this.data.activity
       if (!activity || this.data.joinState === 'loading') return
+      if (activity.canJoin === false) return
 
       const pendingAction = buildJoinStructuredAction({
         activityId: activity.id,

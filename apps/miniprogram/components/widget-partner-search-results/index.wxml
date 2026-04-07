@@ -78,7 +78,7 @@
         class="action-btn action-btn--secondary action-btn--large"
         data-label="{{renderSecondaryAction.label}}"
         data-action="{{renderSecondaryAction.action}}"
-        data-params="{}"
+        data-params="{{renderSecondaryAction.params || {}}}"
         catchtap="onActionTap"
       >
         {{renderSecondaryAction.label}}
@@ -88,7 +88,7 @@
         class="action-btn action-btn--primary action-btn--large"
         data-label="{{renderPrimaryAction.label}}"
         data-action="{{renderPrimaryAction.action}}"
-        data-params="{}"
+        data-params="{{renderPrimaryAction.params || {}}}"
         catchtap="onActionTap"
       >
         {{renderPrimaryAction.label}}

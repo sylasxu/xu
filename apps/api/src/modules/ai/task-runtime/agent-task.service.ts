@@ -1658,7 +1658,7 @@ async function updateJoinTask(params: {
   return updatedTask;
 }
 
-export async function syncJoinTaskFromChatTurn(params: {
+export async function syncJoinTaskFromChatResponse(params: {
   userId: string | null;
   conversationId: string;
   request: GenUIRequest;
@@ -1865,7 +1865,7 @@ export async function syncJoinTaskFromChatTurn(params: {
   }
 }
 
-export async function syncPartnerTaskFromChatTurn(params: {
+export async function syncPartnerTaskFromChatResponse(params: {
   userId: string | null;
   conversationId: string;
   request: GenUIRequest;
@@ -1970,7 +1970,7 @@ export async function syncPartnerTaskFromChatTurn(params: {
   }
 }
 
-export async function syncCreateTaskFromChatTurn(params: {
+export async function syncCreateTaskFromChatResponse(params: {
   userId: string | null;
   conversationId: string;
   request: GenUIRequest;

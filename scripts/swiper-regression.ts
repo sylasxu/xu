@@ -11,6 +11,7 @@ import {
   users,
 } from '@juchang/db';
 import { app } from '../apps/api/src/index';
+import { readAiChatEnvelope } from './ai-chat-sse';
 import { indexActivities } from '../apps/api/src/modules/ai/rag';
 
 interface ApiError {
@@ -199,6 +200,29 @@ async function requestJson<T>(params: {
   return parsed as T;
 }
 
+async function requestText(params: {
+  method: 'GET' | 'POST' | 'PATCH';
+  path: string;
+  token?: string;
+  payload?: Record<string, unknown>;
+}): Promise<{ status: number; body: string }> {
+  const response = await app.handle(
+    new Request(`${BASE_URL}${params.path}`, {
+      method: params.method,
+      headers: {
+        'content-type': 'application/json',
+        ...(params.token ? { authorization: `Bearer ${params.token}` } : {}),
+      },
+      body: params.payload ? JSON.stringify(params.payload) : undefined,
+    })
+  );
+
+  return {
+    status: response.status,
+    body: await response.text(),
+  };
+}
+
 async function getAdminToken(): Promise<string> {
   const response = await requestJson<LoginResponse>({
     method: 'POST',
@@ -368,7 +392,7 @@ async function postAiAction(params: {
   displayText: string;
   payload: Record<string, unknown>;
 }): Promise<AiChatEnvelope> {
-  return requestJson<AiChatEnvelope>({
+  const response = await requestText({
     method: 'POST',
     path: '/ai/chat',
     token: params.user.token,
@@ -389,9 +413,14 @@ async function postAiAction(params: {
         timezone: 'Asia/Shanghai',
         entry: 'swiper_regression',
       },
-      stream: false,
     },
   });
+
+  if (response.status !== 200) {
+    throw new Error(`POST /ai/chat 失败: HTTP ${response.status} ${response.body}`);
+  }
+
+  return readAiChatEnvelope<AiChatEnvelope>(response.body, 'swiper-regression postAiAction');
 }
 
 function findFirstListBlock(blocks: AiChatBlock[]): AiChatBlock {

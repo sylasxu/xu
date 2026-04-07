@@ -359,8 +359,7 @@ export async function handleStructuredAction(
       success: false,
       error: getErrorMessage(error),
       durationMs: Date.now() - startTime,
-      fallbackToLLM: true,
-      fallbackText: structuredAction.originalText,
+      fallbackToLLM: false,
     }, structuredAction);
   }
 }
@@ -746,26 +745,26 @@ async function handleJoinActivity(
   }
   
   try {
-    // 调用现有的 activity.service 函数
-    await joinActivity(activityId, userId);
-    
-    // 获取活动标题用于返回消息
+    const joinResult = await joinActivity(activityId, userId);
     const activity = await getActivityById(activityId);
-    
+
+    const navigationPayload = {
+      activityId,
+      ...(activity?.title ? { title: activity.title } : {}),
+      ...(typeof payload.source === 'string' && payload.source.trim()
+        ? { source: payload.source.trim() }
+        : {}),
+    };
+
     return {
       success: true,
       data: {
         activityId,
         activityTitle: activity?.title,
-        message: `报名成功！「${activity?.title || '活动'}」等你来～`,
-        navigationIntent: 'open_discussion',
-        navigationPayload: {
-          activityId,
-          ...(activity?.title ? { title: activity.title } : {}),
-          ...(typeof payload.source === 'string' && payload.source.trim()
-            ? { source: payload.source.trim() }
-            : {}),
-        },
+        joinResult: joinResult.joinResult,
+        message: joinResult.message,
+        navigationIntent: joinResult.navigationIntent,
+        navigationPayload,
       },
     };
   } catch (error) {
@@ -1405,6 +1404,22 @@ async function handleSearchPartners(
 
   const partnerSearchResults = {
     title: searchResult.items.length > 0 ? '先看看这些搭子' : '暂时还没搜到特别合适的',
+    searchSummary: {
+      ...searchResult.searchSummary,
+      count: searchResult.total,
+    },
+    primaryAction: {
+      label: searchResult.nextAction.label,
+      action: searchResult.nextAction.type,
+      params: searchPayload,
+    },
+    ...(searchResult.secondaryAction ? {
+      secondaryAction: {
+        label: searchResult.secondaryAction.label,
+        action: searchResult.secondaryAction.type,
+        params: searchPayload,
+      },
+    } : {}),
     items: searchResult.items.map((item) => ({
       id: item.intentId,
       partnerIntentId: item.intentId,

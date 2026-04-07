@@ -1,4 +1,4 @@
-import type { StructuredAction } from './user-action';
+import type { StructuredAction } from '../user-action';
 
 export interface NextBestActionItem {
   label: string;
@@ -70,6 +70,20 @@ function buildDraftActionPayload(data: Record<string, unknown> | undefined): Rec
   };
 }
 
+function buildConfirmPublishParams(data: Record<string, unknown> | undefined): Record<string, unknown> | null {
+  const activityId = typeof data?.activityId === 'string' && data.activityId.trim()
+    ? data.activityId.trim()
+    : '';
+
+  if (!activityId) {
+    return null;
+  }
+
+  return {
+    activityId,
+  };
+}
+
 export function buildNextBestActions(params: NextBestActionInput): NextBestActionItem[] {
   const { actionType, data } = params;
   const activityId = typeof data?.activityId === 'string' ? data.activityId : undefined;
@@ -107,7 +121,8 @@ export function buildNextBestActions(params: NextBestActionInput): NextBestActio
     case 'create_activity':
     case 'save_draft_settings': {
       const draftActionPayload = buildDraftActionPayload(data);
-      if (!draftActionPayload) {
+      const confirmPublishParams = buildConfirmPublishParams(data);
+      if (!draftActionPayload || !confirmPublishParams) {
         return [];
       }
 
@@ -115,7 +130,7 @@ export function buildNextBestActions(params: NextBestActionInput): NextBestActio
         {
           label: '确认发布',
           action: 'confirm_publish',
-          params: draftActionPayload,
+          params: confirmPublishParams,
         },
         {
           label: '改下地点',

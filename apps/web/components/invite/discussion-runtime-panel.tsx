@@ -506,12 +506,12 @@ export function DiscussionRuntimePanel({
           </div>
           <p className="mt-1 text-xs leading-5 text-gray-500">
             {loadState === "visitor"
-              ? "登录并报名后，这里会继续承接同一条 agent 任务里的讨论协作。"
+              ? "登录并加入后，这里会继续承接后续讨论和安排。"
               : loadState === "not_participant"
-                ? "你还没加入这场活动，报名后这里会自动变成可继续协作的讨论区。"
+                ? "你还没加入这场活动，加入后这里会自动变成可继续沟通的讨论区。"
                 : isArchived
                   ? "活动已归档，目前保留只读记录。"
-                  : "报名成功后，接下来就在这里继续破冰、对齐和协作。"}
+                  : "加入成功后，接下来就在这里继续破冰、对齐和协作。"}
           </p>
         </div>
 
@@ -530,7 +530,7 @@ export function DiscussionRuntimePanel({
             <p className="text-sm font-semibold">{buildJoinGuideTitle(activityTitle)}</p>
           </div>
           <p className="mt-1 text-xs leading-5 text-[#6673a8]">
-            这还是刚才那条报名任务，先发一句招呼，大家更容易接住你。
+            刚才报的这场局已经接上了，先发一句招呼，大家更容易接住你。
           </p>
           {quickStarters.length > 0 ? (
             <div className="mt-3 flex flex-wrap gap-2">
@@ -641,7 +641,7 @@ export function DiscussionRuntimePanel({
           {loadState === "visitor"
             ? "登录后这里会自动恢复为可继续讨论的实时面板。"
             : loadState === "not_participant"
-              ? "报名成功后，agent 会把你重新带回这里继续推进。"
+              ? "加入成功后，这里就会继续安排和沟通。"
               : isArchived
                 ? "活动已归档，当前保留讨论记录供回看。"
                 : "讨论区暂时不可用，请稍后刷新再试。"}

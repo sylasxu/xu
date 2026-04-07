@@ -126,9 +126,17 @@ export const activitiesColumns: ColumnDef<Activity>[] = [
     ),
     cell: ({ row }) => {
       const activity = row.original
+      const waitlistText = 'waitlistCount' in activity && typeof activity.waitlistCount === 'number' && activity.waitlistCount > 0
+        ? ` · 候补${activity.waitlistCount}`
+        : ''
+      const remainingSeatsText = 'remainingSeats' in activity && typeof activity.remainingSeats === 'number'
+        ? ` · 剩余${activity.remainingSeats}`
+        : ''
       return (
         <div className='text-sm'>
           {activity.currentParticipants}/{activity.maxParticipants}
+          {waitlistText}
+          {remainingSeatsText}
         </div>
       )
     },

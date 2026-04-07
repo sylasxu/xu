@@ -49,7 +49,7 @@ const openApiPlugin = openapi({
     info: {
       title: '聚场 API',
       version: '1.0.0',
-      description: 'LBS-based P2P social platform API - MVP Version',
+      description: '帮助用户更容易参加一场局的聚场后端 API',
     },
     tags: [
       { name: 'Auth', description: '认证相关' },

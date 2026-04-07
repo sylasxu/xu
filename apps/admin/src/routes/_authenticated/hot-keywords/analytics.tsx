@@ -1,6 +1,11 @@
-import { createFileRoute } from '@tanstack/react-router'
-import { HotKeywordsAnalytics } from '@/features/hot-keywords/components/hot-keywords-analytics'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 
 export const Route = createFileRoute('/_authenticated/hot-keywords/analytics')({
-  component: HotKeywordsAnalytics,
+  beforeLoad: () => {
+    throw redirect({
+      to: '/content',
+      search: { tab: 'keywords' },
+    })
+  },
+  component: () => null,
 })

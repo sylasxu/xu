@@ -3,6 +3,10 @@ import { createFileRoute } from '@tanstack/react-router'
 import { ContentLibrary } from '@/features/content-ops'
 
 const contentSearchSchema = Type.Object({
+  tab: Type.Optional(Type.Union([
+    Type.Literal('notes'),
+    Type.Literal('keywords'),
+  ])),
   page: Type.Optional(Type.Number({ minimum: 1, default: 1 })),
   pageSize: Type.Optional(Type.Number({ minimum: 1, maximum: 100, default: 10 })),
   platform: Type.Optional(Type.Array(Type.Union([
@@ -23,6 +27,7 @@ type ContentSearchParams = Static<typeof contentSearchSchema>
 
 export const Route = createFileRoute('/_authenticated/content/')({
   validateSearch: (search: Record<string, unknown>): ContentSearchParams => ({
+    tab: search.tab === 'keywords' ? 'keywords' : undefined,
     page: typeof search.page === 'number' ? search.page : 1,
     pageSize: typeof search.pageSize === 'number' ? search.pageSize : 10,
     platform: Array.isArray(search.platform)

@@ -5,35 +5,23 @@ import { basePlugins, verifyAuth, verifyAdmin, AuthError } from '../../setup';
 import { aiModel, type ErrorResponse } from './ai.model';
 import {
   clearConversations,
-  getWelcomeCard,
-  listUserConversations,
-  listConversationMessages,
-  getActivityConversationMessages,
-  addMessageToConversation,
-  getOrCreateCurrentConversation,
-  syncConversationResponseSnapshot,
-} from './ai.service';
-import { getSystemPrompt, getPromptTemplateConfig, getPromptTemplateMetadata } from './prompts';
-import {
+  getPromptTemplateConfig,
+  getPromptTemplateMetadata,
+  getSystemPrompt,
   getTokenUsageStats,
   getTokenUsageSummary,
   getToolCallStats,
-} from './observability/metrics';
-import {
+  getWelcomeCard,
+  getActivityConversationMessages,
+  listConversationMessages,
   listCurrentAgentTaskSnapshots,
-  syncCreateTaskFromChatTurn,
+  listUserConversations,
   markJoinTaskDiscussionEntered,
-  syncPartnerTaskFromChatTurn,
-  syncJoinTaskFromChatTurn,
-} from './task-runtime/agent-task.service';
+  normalizeAiProviderErrorMessage,
+  streamAiChatResponse,
+} from './ai.service';
 import type { GenUIRequest } from '@juchang/genui-contract';
 import { db, users, activities, eq } from '@juchang/db';
-import {
-  buildAiChatResponse,
-  streamAiChatResponse,
-} from './ai-chat-gateway.service';
-import { applyAiChatResponsePolicies } from './ai-chat-policy.service';
-import { normalizeAiProviderErrorMessage } from './models/provider-error';
 
 // 子领域 controller
 import { aiSessionsController } from './ai-sessions.controller';
@@ -41,29 +29,6 @@ import { aiRagController } from './ai-rag.controller';
 import { aiMemoryController } from './ai-memory.controller';
 import { aiSecurityController } from './ai-security.controller';
 import { aiMetricsController } from './ai-metrics.controller';
-
-function resolveConversationUserText(input: GenUIRequest['input']): string {
-  if (input.type === 'text') {
-    return input.text.trim();
-  }
-
-  if (typeof input.displayText === 'string' && input.displayText.trim()) {
-    return input.displayText.trim();
-  }
-
-  const params = input.params && typeof input.params === 'object' ? input.params : null;
-  const candidates = params
-    ? [params.location, params.value, params.activityType, params.type, params.slot, params.title]
-    : [];
-
-  for (const value of candidates) {
-    if (typeof value === 'string' && value.trim()) {
-      return value.trim();
-    }
-  }
-
-  return input.action.trim();
-}
 
 export const aiController = new Elysia({ prefix: '/ai' })
   .use(basePlugins)
@@ -127,93 +92,28 @@ export const aiController = new Elysia({ prefix: '/ai' })
   )
 
   // ==========================================
-  // 统一 AI Chat Gateway
-  // - 单一 GenUI 协议：conversationId + input + context (+ stream)
+  // 统一对话运行时入口
+  // - 单一 GenUI 协议：conversationId + input + context
   // - 全链路走 Processor/Intent/RAG/Tools 工作流
+  // - 始终返回 SSE 事件流
   // ==========================================
   .post(
     '/chat',
     async ({ body, set, jwt, headers, request: rawRequest }) => {
       try {
         const viewer = await verifyAuth(jwt, headers);
-        const request = body as GenUIRequest & { stream?: boolean };
-
-        if (request.stream) {
-          return streamAiChatResponse(request, {
-            viewer,
-            requestAbortSignal: rawRequest.signal,
-          });
-        }
-
-        const result = await buildAiChatResponse(request, { viewer });
-        const normalized = applyAiChatResponsePolicies({
-          request,
+        const request = body as GenUIRequest;
+        return await streamAiChatResponse(request, {
           viewer,
-          envelope: result.envelope,
-          traces: result.traces,
-          resolvedStructuredAction: result.resolvedStructuredAction,
-          executionPath: result.executionPath,
+          requestAbortSignal: rawRequest.signal,
         });
-        const responseTraces = [
-          ...normalized.traces,
-          {
-            stage: 'controller_response_ready',
-            detail: {
-              executionPath: result.executionPath,
-              structuredAction: result.resolvedStructuredAction?.action || null,
-              stream: false,
-              authenticated: !!viewer,
-              blockCount: normalized.envelope.response.blocks.length,
-            },
-          },
-        ];
-
-        if (viewer) {
-          void Promise.allSettled([
-            syncJoinTaskFromChatTurn({
-              userId: viewer.id,
-              conversationId: normalized.envelope.conversationId,
-              request,
-              blocks: normalized.envelope.response.blocks,
-            }),
-            syncPartnerTaskFromChatTurn({
-              userId: viewer.id,
-              conversationId: normalized.envelope.conversationId,
-              request,
-              blocks: normalized.envelope.response.blocks,
-            }),
-            syncCreateTaskFromChatTurn({
-              userId: viewer.id,
-              conversationId: normalized.envelope.conversationId,
-              request,
-              blocks: normalized.envelope.response.blocks,
-            }),
-            syncConversationResponseSnapshot({
-              conversationId: normalized.envelope.conversationId,
-              userId: viewer.id,
-              userText: resolveConversationUserText(request.input),
-              blocks: normalized.envelope.response.blocks,
-              responseId: normalized.envelope.response.responseId,
-              traceId: normalized.envelope.traceId,
-              inputType: request.input.type,
-              resolvedStructuredAction: result.resolvedStructuredAction,
-              activityId: typeof request.context?.activityId === 'string' ? request.context.activityId : undefined,
-            }),
-          ]).then((results) => {
-            results.forEach((settled, index) => {
-              if (settled.status === 'rejected') {
-                const labels = ['syncJoinTaskFromChatTurn', 'syncPartnerTaskFromChatTurn', 'syncCreateTaskFromChatTurn', 'syncConversationResponseSnapshot'] as const;
-                console.error(`[AI Chat Async] ${labels[index]} failed:`, settled.reason);
-              }
-            });
-          });
-        }
-
-        return normalized.envelope;
       } catch (error: any) {
-        if (error instanceof Error && error.message === '无权限访问该会话') {
+        if (
+          error instanceof Error
+          && (error.message === '无权限访问该会话' || error.message === '会话与用户不匹配')
+        ) {
           set.status = 403;
-          return { code: 403, msg: error.message } satisfies ErrorResponse;
+          return { code: 403, msg: '无权限访问该会话' } satisfies ErrorResponse;
         }
         console.error('AI Chat 失败:', error);
         set.status = 500;
@@ -226,8 +126,8 @@ export const aiController = new Elysia({ prefix: '/ai' })
     {
       detail: {
         tags: ['AI'],
-        summary: 'AI 对话（Chat Gateway）',
-        description: `统一的 GenUI Chat 网关：\n\n- 请求体固定为 conversationId + input + context\n- 全部请求统一走 AI Workflow（Processor/Intent/RAG/Tools）\n- stream=false 返回 GenUI response envelope\n- stream=true 返回 GenUI SSE 事件序列`,
+        summary: 'AI 对话',
+        description: `统一的对话运行时入口：\n\n- 请求体固定为 conversationId + input + context\n- 全部请求统一走 Processor / Intent / RAG / Tools 主链路\n- 始终返回 GenUI SSE 事件序列\n- response-complete 事件携带完整 response envelope`,
       },
       body: 'ai.chatRequest',
     }
@@ -483,60 +383,6 @@ export const aiController = new Elysia({ prefix: '/ai' })
     }
   )
 
-  // 添加用户消息
-  .post(
-    '/conversations',
-    async ({ body, set, jwt, headers }) => {
-      const user = await verifyAuth(jwt, headers);
-      if (!user) {
-        set.status = 401;
-        return {
-          code: 401,
-          msg: '未授权',
-        } satisfies ErrorResponse;
-      }
-
-      try {
-        // 获取或创建当前会话
-        const { id: conversationId } = await getOrCreateCurrentConversation(user.id);
-
-        // 添加消息到会话
-        const result = await addMessageToConversation({
-          conversationId,
-          userId: user.id,
-          role: 'user',
-          messageType: 'text',
-          content: { text: body.content },
-        });
-
-        return {
-          success: true as const,
-          msg: '消息已添加',
-          id: result.id,
-        };
-      } catch (error: any) {
-        set.status = 400;
-        return {
-          code: 400,
-          msg: error.message || '添加消息失败',
-        } satisfies ErrorResponse;
-      }
-    },
-    {
-      detail: {
-        tags: ['AI'],
-        summary: '添加用户消息到对话',
-        description: '将用户发送的文本消息添加到对话历史中。',
-      },
-      body: 'ai.addMessageRequest',
-      response: {
-        200: 'ai.addMessageResponse',
-        400: 'common.error',
-        401: 'common.error',
-      },
-    }
-  )
-
   // 清空对话历史（开始新对话）
   .delete(
     '/conversations',
@@ -573,48 +419,6 @@ export const aiController = new Elysia({ prefix: '/ai' })
       },
       response: {
         200: 'ai.clearConversationsResponse',
-        401: 'common.error',
-        500: 'common.error',
-      },
-    }
-  )
-
-  // ==========================================
-  // AI 内容生成
-  // ==========================================
-  .post(
-    '/generate/content',
-    async ({ body, set, jwt, headers }) => {
-      const user = await verifyAuth(jwt, headers);
-      if (!user) {
-        set.status = 401;
-        return {
-          code: 401,
-          msg: '未授权',
-        } satisfies ErrorResponse;
-      }
-
-      try {
-        const { generateContent } = await import('./ai.service');
-        const result = await generateContent(body);
-        return result;
-      } catch (error: any) {
-        set.status = 500;
-        return {
-          code: 500,
-          msg: error.message || '生成失败',
-        } satisfies ErrorResponse;
-      }
-    },
-    {
-      detail: {
-        tags: ['AI'],
-        summary: 'AI 生成内容',
-        description: '根据主题生成海报文案、小红书笔记等社交媒体内容。',
-      },
-      body: 'ai.contentGenerationRequest',
-      response: {
-        200: 'ai.contentGenerationResponse',
         401: 'common.error',
         500: 'common.error',
       },

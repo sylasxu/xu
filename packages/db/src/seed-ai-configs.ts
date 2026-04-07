@@ -51,21 +51,21 @@ const welcomeUiConfig = {
 };
 
 const modelIntentMapConfig = {
-  chat: 'moonshot/kimi-k2-32k',
-  reasoning: 'moonshot/kimi-k2-32k',
-  agent: 'moonshot/kimi-k2-32k',
-  vision: 'qwen/qwen-vl-max',
+  chat: 'moonshot/kimi-k2.5',
+  reasoning: 'moonshot/kimi-k2-thinking',
+  agent: 'moonshot/kimi-k2.5',
+  vision: 'moonshot/kimi-k2.5',
 };
 
 const modelRouteMapConfig = {
-  chat: 'moonshot/kimi-k2-32k',
-  reasoning: 'moonshot/kimi-k2-32k',
-  agent: 'moonshot/kimi-k2-32k',
-  vision: 'qwen/qwen-vl-max',
-  content_generation: 'moonshot/kimi-k2-32k',
-  content_topic_suggestions: 'moonshot/kimi-k2-32k',
+  chat: 'moonshot/kimi-k2.5',
+  reasoning: 'moonshot/kimi-k2-thinking',
+  agent: 'moonshot/kimi-k2.5',
+  vision: 'moonshot/kimi-k2.5',
+  content_generation: 'moonshot/kimi-k2.5',
+  content_topic_suggestions: 'moonshot/kimi-k2.5',
   embedding: 'qwen/text-embedding-v4',
-  rerank: 'qwen/qwen3-rerank',
+  rerank: 'moonshot/kimi-k2.5',
 };
 
 const aiConfigSeeds = [

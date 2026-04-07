@@ -317,8 +317,8 @@ export async function search(params: HybridSearchParams): Promise<ScoredActivity
     LIMIT ${limit * 2}
   `);
 
-  // 6. Rerank 重排序 (v4.6 新增)
-  // 使用 qwen3-rerank 对 Vector Rank 结果进行语义重排序
+  // 6. 本地轻量重排序
+  // 在 Vector Rank 结果基础上做一次关键词覆盖度重排
   let rerankedResults = [...results];
   if (results.length > 3) {
     try {

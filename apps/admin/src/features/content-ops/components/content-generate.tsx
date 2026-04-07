@@ -239,7 +239,7 @@ export function ContentGenerate({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {[1, 2, 3, 4, 5].map((n) => (
+                  {[1, 2, 3].map((n) => (
                     <SelectItem key={n} value={String(n)}>
                       {n} 篇
                     </SelectItem>

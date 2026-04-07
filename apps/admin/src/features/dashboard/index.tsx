@@ -2,6 +2,7 @@ import { Link } from '@tanstack/react-router'
 import {
   ArrowRight,
   Calendar,
+  FileText,
   RefreshCw,
   TrendingUp,
   UserPlus,
@@ -37,15 +38,14 @@ export function Dashboard() {
   const { data, isLoading, error, refetch } = useOperationsDashboardData()
 
   const metrics = data?.businessMetrics
-  const topContentTypes = [...(data?.content.byType ?? [])]
+  const topContentType = [...(data?.content.byType ?? [])]
     .sort((a, b) => {
       if (b.avgViews !== a.avgViews) {
         return b.avgViews - a.avgViews
       }
 
       return b.count - a.count
-    })
-    .slice(0, 3)
+    })[0]
 
   const priorityItems = [
     {
@@ -68,9 +68,13 @@ export function Dashboard() {
     },
     {
       key: 'content-winning',
-      show: (data?.content.highPerformingCount ?? 0) > 0,
-      title: `已经有 ${data?.content.highPerformingCount ?? 0} 篇高表现内容`,
-      description: '优先沿着已经跑出来的方向再出 1 到 2 个变体，不要从零猜题。',
+      show: Boolean(topContentType),
+      title: topContentType
+        ? `当前最值得继续做的是「${contentTypeLabelMap[topContentType.contentType] ?? topContentType.contentType}」`
+        : '当前最值得继续做的内容方向',
+      description: topContentType
+        ? `平均浏览 ${Math.round(topContentType.avgViews)}，先沿这个方向继续扩写，不要从零猜题。`
+        : '优先沿着已经跑出来的方向继续扩写。',
       to: '/content' as const,
       action: '继续扩写',
     },
@@ -99,7 +103,7 @@ export function Dashboard() {
         <div className='mb-4 flex flex-wrap items-end justify-between gap-3'>
           <div>
             <h1 className='text-2xl font-bold tracking-tight'>指挥舱</h1>
-            <p className='text-muted-foreground'>先看转化，再决定今天推什么。</p>
+            <p className='text-muted-foreground'>只看最关键的四个数，再决定今天先推什么。</p>
           </div>
           <Button
             variant='outline'
@@ -153,8 +157,8 @@ export function Dashboard() {
           <Card>
             <CardHeader className='flex flex-row items-center justify-between'>
               <CardTitle>今天优先处理</CardTitle>
-              <Link to='/activities' className='text-sm text-primary hover:underline'>
-                去活动与搭子
+              <Link to='/content' className='text-sm text-primary hover:underline'>
+                去内容工作台
               </Link>
             </CardHeader>
             <CardContent>
@@ -174,64 +178,6 @@ export function Dashboard() {
                 </div>
               ) : (
                 <EmptyHint text='今天暂时没有特别紧急的处理项，先去看内容和热词表现。' />
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className='flex flex-row items-center justify-between'>
-              <CardTitle>热词 Top 3</CardTitle>
-              <Link to='/hot-keywords' className='text-sm text-primary hover:underline'>
-                去热词运营
-              </Link>
-            </CardHeader>
-            <CardContent>
-              {isLoading ? (
-                <LoadingRows count={3} />
-              ) : data?.hotKeywords.topKeywords.length ? (
-                <div className='space-y-4'>
-                  {data.hotKeywords.topKeywords.map((item, index) => (
-                    <RankedRow
-                      key={item.keyword}
-                      rank={index + 1}
-                      title={item.keyword}
-                      subtitle={`${item.hitCount} 次命中 · ${item.conversionCount} 次转化`}
-                      meta={`${item.conversionRate.toFixed(1)}%`}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <EmptyHint text='还没有足够的热词数据，先从直播间和内容主推词开始积累。' />
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className='grid gap-4 lg:grid-cols-2'>
-          <Card>
-            <CardHeader className='flex flex-row items-center justify-between'>
-              <CardTitle>内容方向</CardTitle>
-              <Link to='/content' className='text-sm text-primary hover:underline'>
-                去内容工作台
-              </Link>
-            </CardHeader>
-            <CardContent>
-              {isLoading ? (
-                <LoadingRows count={3} />
-              ) : topContentTypes.length ? (
-                <div className='space-y-4'>
-                  {topContentTypes.map((item, index) => (
-                    <RankedRow
-                      key={item.contentType}
-                      rank={index + 1}
-                      title={contentTypeLabelMap[item.contentType] ?? item.contentType}
-                      subtitle={`${item.count} 篇内容 · 平均点赞 ${Math.round(item.avgLikes)}`}
-                      meta={`平均浏览 ${Math.round(item.avgViews)}`}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <EmptyHint text='内容还不够多，先持续积累 1 到 2 周，再看哪个方向更稳。' />
               )}
             </CardContent>
           </Card>
@@ -258,11 +204,37 @@ export function Dashboard() {
                   ))}
                 </div>
               ) : (
-                <EmptyHint text='先补一些内容效果，后面这里就能更稳地告诉你哪些内容值得继续发。' />
+                <EmptyHint text='先补一些内容效果，后面这里会更稳地告诉你哪些内容值得继续发。' />
               )}
             </CardContent>
           </Card>
         </div>
+
+        <Card>
+          <CardHeader className='flex flex-row items-center justify-between'>
+            <CardTitle>当前主线</CardTitle>
+            <Link to='/activities' className='text-sm text-primary hover:underline'>
+              去组局
+            </Link>
+          </CardHeader>
+          <CardContent className='grid gap-4 lg:grid-cols-3'>
+            <FocusCard
+              icon={Calendar}
+              title='成局优先'
+              description='找搭子和组局不是两个副线，先把能成局的真实需求接住，再往外扩散。'
+            />
+            <FocusCard
+              icon={FileText}
+              title='内容是分发器'
+              description='内容工作台的职责不是做复杂分析，而是把真实需求翻成可批量分发的内容。'
+            />
+            <FocusCard
+              icon={Zap}
+              title='热词是入口'
+              description='热词只负责把外部流量顺手带进来，不替代小红书和抖音的站内分析。'
+            />
+          </CardContent>
+        </Card>
       </Main>
     </>
   )
@@ -351,31 +323,6 @@ function ContentNoteRow({
   )
 }
 
-function RankedRow({
-  rank,
-  title,
-  subtitle,
-  meta,
-}: {
-  rank: number
-  title: string
-  subtitle: string
-  meta: string
-}) {
-  return (
-    <div className='flex items-start justify-between gap-4 border-b pb-4 last:border-0 last:pb-0'>
-      <div className='flex min-w-0 items-start gap-3'>
-        <span className='text-muted-foreground w-5 shrink-0 text-sm font-medium'>{rank}</span>
-        <div className='min-w-0 space-y-1'>
-          <p className='font-medium'>{title}</p>
-          <p className='text-sm text-muted-foreground'>{subtitle}</p>
-        </div>
-      </div>
-      <span className='shrink-0 text-sm font-medium'>{meta}</span>
-    </div>
-  )
-}
-
 function LoadingRows({ count }: { count: number }) {
   return (
     <div className='space-y-4'>
@@ -388,4 +335,24 @@ function LoadingRows({ count }: { count: number }) {
 
 function EmptyHint({ text }: { text: string }) {
   return <p className='text-sm text-muted-foreground'>{text}</p>
+}
+
+function FocusCard({
+  icon: Icon,
+  title,
+  description,
+}: {
+  icon: typeof Calendar
+  title: string
+  description: string
+}) {
+  return (
+    <div className='rounded-lg border p-4'>
+      <div className='mb-3 flex items-center gap-2'>
+        <Icon className='text-muted-foreground h-4 w-4' />
+        <p className='font-medium'>{title}</p>
+      </div>
+      <p className='text-sm text-muted-foreground'>{description}</p>
+    </div>
+  )
 }

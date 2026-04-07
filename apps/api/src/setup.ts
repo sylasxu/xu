@@ -130,42 +130,50 @@ export async function verifySelfOrAdmin(
  * Elysia guard beforeHandle hooks
  * These attach user to context on success
  */
-export async function requireAuth({ jwt, headers, set }: { jwt: any; headers: Record<string, string | undefined>; set: any }): Promise<{ user: { id: string; role: string } } | void> {
+export async function requireAuth(
+  { jwt, headers, set }: { jwt: any; headers: Record<string, string | undefined>; set: any },
+): Promise<{ code: number; msg: string } | void> {
   const user = await verifyAuth(jwt, headers);
   if (!user) {
     set.status = 401;
-    return { user: { id: '', role: '' } };
+    return { code: 401, msg: '未授权' };
   }
-  return { user };
 }
 
 export function requireUserOrAdmin(paramName: string) {
-  return async function({ jwt, headers, params, set }: { jwt: any; headers: Record<string, string | undefined>; params: Record<string, string>; set: any }): Promise<{ user: { id: string; role: string } } | void> {
+  return async function(
+    { jwt, headers, params, set }: {
+      jwt: any
+      headers: Record<string, string | undefined>
+      params: Record<string, string>
+      set: any
+    },
+  ): Promise<{ code: number; msg: string } | void> {
     const user = await verifyAuth(jwt, headers);
     if (!user) {
       set.status = 401;
-      return { user: { id: '', role: '' } };
+      return { code: 401, msg: '未授权' };
     }
     const targetUserId = params[paramName];
     if (user.role !== 'admin' && user.id !== targetUserId) {
       set.status = 403;
-      return { user: { id: '', role: '' } };
+      return { code: 403, msg: '无权限访问该用户' };
     }
-    return { user };
   };
 }
 
-export async function requireAdmin({ jwt, headers, set }: { jwt: any; headers: Record<string, string | undefined>; set: any }): Promise<{ user: { id: string; role: string } } | void> {
+export async function requireAdmin(
+  { jwt, headers, set }: { jwt: any; headers: Record<string, string | undefined>; set: any },
+): Promise<{ code: number; msg: string } | void> {
   const user = await verifyAuth(jwt, headers);
   if (!user) {
     set.status = 401;
-    return { user: { id: '', role: '' } };
+    return { code: 401, msg: '未授权' };
   }
   if (user.role !== 'admin') {
     set.status = 403;
-    return { user: { id: '', role: '' } };
+    return { code: 403, msg: '无管理员权限' };
   }
-  return { user };
 }
 
 // Re-export ErrorResponse from common for convenience

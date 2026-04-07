@@ -397,9 +397,8 @@ export interface SessionStats {
 
 /** 模型成本粗估系数 (USD per token) */
 export const MODEL_PRICE: Partial<Record<string, { input: number; output: number }>> = {
-  'qwen-flash': { input: 0.0 / 1_000_000, output: 0.0 / 1_000_000 },
-  'qwen-plus': { input: 0.8 / 1_000_000, output: 2.0 / 1_000_000 },
-  'qwen3-max': { input: 2.0 / 1_000_000, output: 6.0 / 1_000_000 },
+  'kimi-k2.5': { input: 0.0 / 1_000_000, output: 0.0 / 1_000_000 },
+  'kimi-k2-thinking': { input: 0.0 / 1_000_000, output: 0.0 / 1_000_000 },
 }
 
 /** 计算会话统计 */

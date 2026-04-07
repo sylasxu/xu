@@ -1,6 +1,7 @@
 import { Zap } from 'lucide-react'
 import { getRouteApi } from '@tanstack/react-router'
 import { ListPage, DataTable } from '@/components/list-page'
+import { type NavigateFn } from '@/hooks/use-table-url-state'
 import { useHotKeywordsList } from '../hooks/use-hot-keywords'
 import { hotKeywordsColumns } from './hot-keywords-columns'
 import { HotKeywordsDialogs } from './hot-keywords-dialogs'
@@ -10,9 +11,19 @@ import { HotKeywordsListProvider } from './list-context'
 
 const route = getRouteApi('/_authenticated/hot-keywords/')
 
-export function HotKeywordsList() {
-  const search = route.useSearch()
-  const navigate = route.useNavigate()
+interface HotKeywordsListViewProps {
+  search: Record<string, unknown>
+  navigate: NavigateFn
+  showPageTitle?: boolean
+  dialogs?: React.ReactNode
+}
+
+export function HotKeywordsListView({
+  search,
+  navigate,
+  showPageTitle = true,
+  dialogs,
+}: HotKeywordsListViewProps) {
   const pageSize = search.pageSize ?? 10
 
   const { data, isLoading, error } = useHotKeywordsList({
@@ -29,30 +40,51 @@ export function HotKeywordsList() {
   const keywords = data?.data ?? []
   const total = data?.total ?? 0
 
-  return (
+  const content = (
     <HotKeywordsListProvider>
-      <ListPage
-        title='热词运营'
-        description='统一看直播间、海报和群分发入口里的热词命中、承接内容和转化效果'
-        icon={Zap}
-        isLoading={isLoading}
-        error={error ?? undefined}
-        headerActions={<HotKeywordsPrimaryButtons />}
-        dialogs={<HotKeywordsDialogs />}
-      >
-        <DataTable
-          data={keywords}
-          columns={hotKeywordsColumns}
-          pageCount={Math.ceil(total / pageSize)}
-          search={search}
-          navigate={navigate}
-          getRowId={(row) => row.id}
-          searchPlaceholder='按关键词搜索...'
-          emptyMessage='暂无热词'
-          enableRowSelection={true}
-          bulkActions={(table) => <HotKeywordsBulkActions table={table} />}
-        />
-      </ListPage>
+      <DataTable
+        data={keywords}
+        columns={hotKeywordsColumns}
+        pageCount={Math.ceil(total / pageSize)}
+        search={search}
+        navigate={navigate}
+        getRowId={(row) => row.id}
+        searchPlaceholder='按关键词搜索...'
+        emptyMessage='暂无热词'
+        enableRowSelection={true}
+        bulkActions={(table) => <HotKeywordsBulkActions table={table} />}
+      />
+      {dialogs}
     </HotKeywordsListProvider>
+  )
+
+  if (!showPageTitle) {
+    return content
+  }
+
+  return (
+    <ListPage
+      title='热词运营'
+      description='统一看直播间、海报和群分发入口里的热词命中、承接内容和转化效果'
+      icon={Zap}
+      isLoading={isLoading}
+      error={error ?? undefined}
+      headerActions={<HotKeywordsPrimaryButtons />}
+    >
+      {content}
+    </ListPage>
+  )
+}
+
+export function HotKeywordsList() {
+  const search = route.useSearch()
+  const navigate = route.useNavigate()
+
+  return (
+    <HotKeywordsListView
+      search={search}
+      navigate={navigate}
+      dialogs={<HotKeywordsDialogs />}
+    />
   )
 }

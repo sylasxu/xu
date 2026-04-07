@@ -55,6 +55,11 @@ export interface ContentNote {
   collects: number | null
   comments: number | null
   newFollowers: number | null
+  publishCheck: {
+    status: 'ready' | 'review' | 'rewrite'
+    summary: string
+    issues: string[]
+  }
   createdAt: string
   updatedAt: string
 }

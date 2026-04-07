@@ -9,6 +9,18 @@ import { Elysia, t, type Static } from 'elysia'
 import { ContentTypeSchema } from './content-type'
 import { ContentPlatformSchema } from './content-platform'
 
+const PublishCheckStatusSchema = t.Union([
+  t.Literal('ready'),
+  t.Literal('review'),
+  t.Literal('rewrite'),
+])
+
+const PublishCheckSchema = t.Object({
+  status: PublishCheckStatusSchema,
+  summary: t.String(),
+  issues: t.Array(t.String(), { maxItems: 3 }),
+})
+
 const ContentNoteResponseSchema = t.Composite([
   t.Pick(selectContentNoteSchema, [
     'id',
@@ -28,6 +40,7 @@ const ContentNoteResponseSchema = t.Composite([
     'batchId',
   ]),
   t.Object({
+    publishCheck: PublishCheckSchema,
     createdAt: t.String(),
     updatedAt: t.String(),
   }),
@@ -36,7 +49,7 @@ const ContentNoteResponseSchema = t.Composite([
 const GenerateContentRequestSchema = t.Composite([
   t.Pick(insertContentNoteSchema, ['topic', 'platform', 'contentType']),
   t.Object({
-    count: t.Optional(t.Integer({ minimum: 1, maximum: 5, default: 1, description: '生成数量' })),
+    count: t.Optional(t.Integer({ minimum: 1, maximum: 3, default: 1, description: '生成数量' })),
     trendKeywords: t.Optional(t.Array(t.String(), { description: '趋势关键词' })),
   }),
 ])

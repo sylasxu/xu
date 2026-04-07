@@ -35,7 +35,7 @@ import {
 } from 'ai';
 import { randomUUID } from 'crypto';
 import type { ProcessorLogEntry } from '@juchang/db';
-import type { GenUIBlock, GenUITracePayload, GenUISuggestions } from '@juchang/genui-contract';
+import type { GenUIBlock, GenUIRequest, GenUITracePayload, GenUISuggestions } from '@juchang/genui-contract';
 
 // 新架构模块
 import { type ClassifyResult } from './intent';
@@ -44,7 +44,7 @@ import { getConversationMessageExpiresAt, refreshMessageEmbedding } from './memo
 import { resolveToolsForIntent } from './tools';
 import { getSystemPrompt, type PromptContext, type ActivityDraftForPrompt } from './prompts';
 import { getFallbackConfig, resolveChatModelSelection, resolveFallbackChatModelSelection } from './models/router';
-import { runObject, runText } from './models/runtime';
+import { runText } from './models/runtime';
 import { generateText } from 'ai';
 // Guardrails
 import { checkRateLimit } from './guardrails/rate-limiter';
@@ -94,14 +94,51 @@ import {
 import { handleStructuredAction, type StructuredAction } from './user-action';
 import { buildSuggestionsFromBlocks } from './suggestions';
 import { getConfigValue } from './config/config.service';
-import { buildNextBestActions, type NextBestActionItem } from './next-best-action.service';
-import { resolveConversationTaskId } from './task-runtime/agent-task.service';
+import { buildNextBestActions, type NextBestActionItem } from './workflow/next-actions';
+import {
+  listCurrentAgentTaskSnapshots,
+  markJoinTaskDiscussionEntered,
+  resolveConversationTaskId,
+  syncCreateTaskFromChatResponse,
+  syncJoinTaskFromChatResponse,
+  syncPartnerTaskFromChatResponse,
+} from './task-runtime/agent-task.service';
 import { isIdentityMemoryQuestion } from './identity-reply';
+import { applyAiChatResponsePolicies } from './runtime/response-policy';
+import type { AiChatEnvelopeResult } from './runtime/chat-response';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+interface ViewerContext {
+  id: string;
+  role: string;
+}
+
 export function isUuidLike(value: string | null | undefined): value is string {
   return typeof value === 'string' && UUID_PATTERN.test(value);
+}
+
+function resolveConversationUserText(input: GenUIRequest['input']): string {
+  if (input.type === 'text') {
+    return input.text.trim();
+  }
+
+  if (typeof input.displayText === 'string' && input.displayText.trim()) {
+    return input.displayText.trim();
+  }
+
+  const params = input.params && typeof input.params === 'object' ? input.params : null;
+  const candidates = params
+    ? [params.location, params.value, params.activityType, params.type, params.slot, params.title]
+    : [];
+
+  for (const value of candidates) {
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return input.action.trim();
 }
 
 type ConversationMessageRecord = typeof conversationMessages.$inferSelect;
@@ -172,6 +209,27 @@ export {
   getPlaygroundStats,
   getAIHealthMetrics,
 } from './observability/ai-metrics.service';
+
+export {
+  getTokenUsageStats,
+  getTokenUsageSummary,
+  getToolCallStats,
+} from './observability/metrics';
+
+export {
+  getSystemPrompt,
+  getPromptTemplateConfig,
+  getPromptTemplateMetadata,
+} from './prompts';
+
+export {
+  listCurrentAgentTaskSnapshots,
+  markJoinTaskDiscussionEntered,
+} from './task-runtime/agent-task.service';
+
+export {
+  normalizeAiProviderErrorMessage,
+} from './models/provider-error';
 
 const logger = createLogger('ai.service');
 
@@ -616,7 +674,7 @@ function inferIntentFromStructuredAction(actionType: StructuredAction['action'] 
 // AI Chat 核心
 // ==========================================
 
-export async function executeChatTurn(request: ChatRequest): Promise<ChatExecutionResult> {
+export async function executeChatRequest(request: ChatRequest): Promise<ChatExecutionResult> {
   return runWithTrace(async () => {
     const {
       messages,
@@ -688,7 +746,7 @@ export async function executeChatTurn(request: ChatRequest): Promise<ChatExecuti
         location ? { lat: location[1], lng: location[0] } : undefined
       );
 
-      if (actionResult.success && !actionResult.fallbackToLLM) {
+      if (!actionResult.fallbackToLLM) {
         return buildStructuredActionResult(actionResult, structuredAction);
       }
 
@@ -720,10 +778,6 @@ export async function executeChatTurn(request: ChatRequest): Promise<ChatExecuti
 
           sanitizedInput = fallbackGuardResult.context.userInput;
         }
-      }
-
-      if (!actionResult.success && !actionResult.fallbackToLLM) {
-        return buildDirectResponseResult({ type: 'error', error: actionResult.error || '操作失败' });
       }
     }
 
@@ -1059,7 +1113,7 @@ const XIAOJU_PERSONA = `你是"小聚"，一个热情、接地气、有活力的
 
 /**
  * 轻量 LLM 生成有灵魂的回复
- * 使用 qwen-flash 快速生成，成本低且快
+ * 默认跟随当前主聊天链路的 Kimi 路由
  */
 async function generateSoulfulResponse(
   userInput: string,
@@ -1299,6 +1353,11 @@ function buildStructuredActionResult(
         ...(isRecord(data?.navigationPayload) ? { navigationPayload: data.navigationPayload } : {}),
       }
     : null;
+  const errorWidgetPayload = !result.success && !authRequiredPayload
+    ? {
+        message: actionMessage,
+      }
+    : null;
   const shouldWritePrimaryText = !authRequiredPayload && !successWidgetPayload;
   const nextActions = buildNextBestActions({ actionType, data });
   const assistantReplyText = buildStructuredActionReplyText({
@@ -1341,6 +1400,9 @@ function buildStructuredActionResult(
   }
   if (authRequiredPayload) {
     blockPayloads.push({ widgetType: 'widget_auth_required', payload: authRequiredPayload });
+  }
+  if (errorWidgetPayload) {
+    blockPayloads.push({ widgetType: 'widget_error', payload: errorWidgetPayload });
   }
   if (successWidgetPayload) {
     blockPayloads.push({ widgetType: 'widget_success', payload: successWidgetPayload });
@@ -2049,7 +2111,7 @@ export async function syncConversationResponseSnapshot(params: {
     .orderBy(desc(conversationMessages.createdAt))
     .limit(4);
 
-  const existingAssistantForTurn = params.responseId
+  const existingAssistantResponse = params.responseId
     ? recentMessages.find((message) => {
       if (message.role !== 'assistant' || !isRecord(message.content)) {
         return false;
@@ -2060,8 +2122,8 @@ export async function syncConversationResponseSnapshot(params: {
     })
     : undefined;
 
-  if (existingAssistantForTurn) {
-    const previousAssistantText = extractStoredConversationText(existingAssistantForTurn.content);
+  if (existingAssistantResponse) {
+    const previousAssistantText = extractStoredConversationText(existingAssistantResponse.content);
     const nextAssistantText = extractStoredConversationText(assistantRecord.content);
     const shouldRefreshEmbedding = nextAssistantText.length > 0 && nextAssistantText !== previousAssistantText;
 
@@ -2081,10 +2143,10 @@ export async function syncConversationResponseSnapshot(params: {
         taskId: resolvedTaskId ?? null,
         expiresAt: getConversationMessageExpiresAt(),
       })
-      .where(eq(conversationMessages.id, existingAssistantForTurn.id));
+      .where(eq(conversationMessages.id, existingAssistantResponse.id));
 
     if (shouldRefreshEmbedding) {
-      refreshMessageEmbedding(existingAssistantForTurn.id, nextAssistantText);
+      refreshMessageEmbedding(existingAssistantResponse.id, nextAssistantText);
     }
 
     if (hasError) {
@@ -2206,26 +2268,6 @@ export async function deleteConversationsBatch(ids: string[]): Promise<{ deleted
 
 export async function clearConversations(userId: string): Promise<{ deletedCount: number }> {
   return clearUserThreads(userId);
-}
-
-export async function getOrCreateCurrentConversation(userId: string) {
-  return getOrCreateThread(userId);
-}
-
-export async function addMessageToConversation(params: {
-  conversationId: string;
-  userId: string;
-  role: 'user' | 'assistant';
-  messageType: ConversationMessageRecord['messageType'];
-  content: unknown;
-}) {
-  return saveMessage({
-    conversationId: params.conversationId,
-    userId: params.userId,
-    role: params.role,
-    messageType: params.messageType,
-    content: params.content,
-  });
 }
 
 export async function getActivityConversationMessages(activityId: string) {
@@ -2756,107 +2798,98 @@ export async function getWelcomeCard(
   };
 }
 
+async function buildAiChatEnvelopeInternal(
+  request: GenUIRequest,
+  options: { viewer?: ViewerContext | null; abortSignal?: AbortSignal } = {}
+): Promise<AiChatEnvelopeResult> {
+  const chatRuntime = await import('./runtime/chat-response');
+  return chatRuntime.buildAiChatEnvelope(request, options);
+}
 
-// ==========================================
-// AI 内容生成
-// ==========================================
+async function finalizeAiChatResponse(params: {
+  request: GenUIRequest;
+  viewer: ViewerContext | null;
+  result: AiChatEnvelopeResult;
+}): Promise<AiChatEnvelopeResult> {
+  const normalized = applyAiChatResponsePolicies({
+    request: params.request,
+    viewer: params.viewer,
+    envelope: params.result.envelope,
+    traces: params.result.traces,
+    resolvedStructuredAction: params.result.resolvedStructuredAction,
+    executionPath: params.result.executionPath,
+  });
 
-import { jsonSchema } from 'ai';
-import { t } from 'elysia';
-import { toJsonSchema } from '@juchang/utils';
-import type { ContentGenerationRequest, ContentGenerationResponse } from './ai.model';
+  if (params.viewer) {
+    const syncResults = await Promise.allSettled([
+      syncJoinTaskFromChatResponse({
+        userId: params.viewer.id,
+        conversationId: normalized.envelope.conversationId,
+        request: params.request,
+        blocks: normalized.envelope.response.blocks,
+      }),
+      syncPartnerTaskFromChatResponse({
+        userId: params.viewer.id,
+        conversationId: normalized.envelope.conversationId,
+        request: params.request,
+        blocks: normalized.envelope.response.blocks,
+      }),
+      syncCreateTaskFromChatResponse({
+        userId: params.viewer.id,
+        conversationId: normalized.envelope.conversationId,
+        request: params.request,
+        blocks: normalized.envelope.response.blocks,
+      }),
+      syncConversationResponseSnapshot({
+        conversationId: normalized.envelope.conversationId,
+        userId: params.viewer.id,
+        userText: resolveConversationUserText(params.request.input),
+        blocks: normalized.envelope.response.blocks,
+        responseId: normalized.envelope.response.responseId,
+        traceId: normalized.envelope.traceId,
+        inputType: params.request.input.type,
+        resolvedStructuredAction: params.result.resolvedStructuredAction,
+        activityId: typeof params.request.context?.activityId === 'string' ? params.request.context.activityId : undefined,
+      }),
+    ]);
 
-// AI 输出 Schema
-const NoteOutputSchema = t.Object({
-  title: t.String({ description: '标题，不超过20字，含emoji' }),
-  body: t.String({ description: '正文300-800字，分段结构，含emoji排版' }),
-  hashtags: t.Array(t.String(), { description: '5-10个话题标签' }),
-  coverImageHint: t.String({ description: '封面图片描述提示' }),
-});
-type NoteOutput = typeof NoteOutputSchema.static;
-
-// 默认 Prompt 模板
-const DEFAULT_SYSTEM_PROMPT = `你是"搭子观察员"，一个热爱重庆生活、擅长记录搭子故事的小红书博主。
-你的风格：接地气、温暖、真实分享，像朋友聊天一样自然。
-绝对禁止：营销腔、广告感、生硬推销。`;
-
-const DEFAULT_CONTENT_PROMPT = `请为以下主题生成一篇小红书笔记：
-
-主题：{topic}
-内容类型：{contentType}
-
-要求：
-1. 标题：不超过20字，包含吸引点击的emoji和关键词
-2. 正文：300-800字，分段结构（开头hook + 正文内容 + 引导互动结尾），包含适量emoji排版
-3. 话题标签：5-10个，混合热门大标签和精准小标签
-4. 封面图片描述：描述适合这篇笔记的封面图片风格和内容
-5. 在正文末尾自然植入引导语（如"评论区聊聊"、"想加群的扣1"）
-6. 使用"搭子观察员"第三人称叙事视角`;
-
-/**
- * AI 生成内容（文案/笔记）
- */
-export async function generateContent(
-  request: ContentGenerationRequest
-): Promise<ContentGenerationResponse> {
-  const { topic, contentType, style, trendKeywords, count = 1 } = request;
-  const batchId = crypto.randomUUID();
-
-  const results = [];
-  const generatedTitles: string[] = [];
-
-  for (let i = 0; i < count; i++) {
-    // 构建 Prompt
-    let contentPrompt = DEFAULT_CONTENT_PROMPT
-      .replace('{topic}', topic)
-      .replace('{contentType}', contentType);
-
-    // 趋势关键词注入
-    if (trendKeywords && trendKeywords.length > 0) {
-      contentPrompt += `\n\n当前热门关键词：${trendKeywords.join('、')}，请适当融入内容中。`;
-    }
-
-    // 风格提示
-    if (style) {
-      const styleHints: Record<string, string> = {
-        'minimal': '风格要求：极简、干净、留白多',
-        'cyberpunk': '风格要求：赛博朋克、未来感、霓虹色调',
-        'handwritten': '风格要求：手写风、温暖、亲切',
-        'xiaohongshu': '风格要求：小红书热门风格、精致生活',
-        'casual': '风格要求： casual、随意、轻松',
-        'professional': '风格要求：专业、简洁、高效',
-      };
-      if (styleHints[style]) {
-        contentPrompt += `\n\n${styleHints[style]}`;
+    syncResults.forEach((settled, index) => {
+      if (settled.status === 'rejected') {
+        const labels = [
+          'syncJoinTaskFromChatResponse',
+          'syncPartnerTaskFromChatResponse',
+          'syncCreateTaskFromChatResponse',
+          'syncConversationResponseSnapshot',
+        ] as const;
+        console.error(`[AI Chat Finalize] ${labels[index]} failed:`, settled.reason);
       }
-    }
-
-    // 避免重复
-    if (generatedTitles.length > 0) {
-      contentPrompt += `\n\n注意：以下标题已被使用，请确保你的标题与它们完全不同：\n${generatedTitles.map(t => `- ${t}`).join('\n')}`;
-    }
-
-    const fullPrompt = `${DEFAULT_SYSTEM_PROMPT}\n\n${contentPrompt}`;
-    const { model } = await resolveChatModelSelection({ routeKey: 'content_generation' });
-
-    const result = await runObject<NoteOutput>({
-      model,
-      schema: jsonSchema<NoteOutput>(toJsonSchema(NoteOutputSchema)),
-      prompt: fullPrompt,
-    });
-
-    generatedTitles.push(result.object.title);
-
-    results.push({
-      title: result.object.title,
-      body: result.object.body,
-      hashtags: result.object.hashtags,
-      coverImageHint: result.object.coverImageHint,
     });
   }
 
   return {
-    items: results,
-    batchId,
+    ...params.result,
+    envelope: normalized.envelope,
+    traces: normalized.traces,
   };
+}
+
+export async function streamAiChatResponse(
+  request: GenUIRequest,
+  options: { viewer?: ViewerContext | null; abortSignal?: AbortSignal; requestAbortSignal?: AbortSignal } = {}
+) {
+  const result = await buildAiChatEnvelopeInternal(request, {
+    viewer: options.viewer,
+    abortSignal: options.requestAbortSignal ?? options.abortSignal,
+  });
+  const finalized = await finalizeAiChatResponse({
+    request,
+    viewer: options.viewer ?? null,
+    result,
+  });
+  const chatRuntime = await import('./runtime/chat-response');
+  return chatRuntime.createAiChatStreamResponse({
+    request,
+    envelope: finalized.envelope,
+    traces: finalized.traces,
+  });
 }

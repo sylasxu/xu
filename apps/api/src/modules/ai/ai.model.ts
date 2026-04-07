@@ -1,14 +1,14 @@
-// AI Model - v4.6 Chat-First: AI 解析 + 对话历史管理 + Admin 运营 Schema
+// AI Model - AI 对话协议、会话历史与运营 Schema
 import { Elysia, t, type Static } from 'elysia';
 import { ErrorResponseSchema, type ErrorResponse } from "../../common/common.model";
 import { selectConversationSchema, selectMessageSchema } from '@juchang/db';
 
 /**
- * AI Model Plugin - v3.3 Chat-First (行业标准命名)
- * 
+ * AI Model Plugin
+ *
  * 功能：
- * - AI Chat 统一网关（GenUI 协议）
- * - 对话历史管理（GET/POST/DELETE /ai/conversations）
+ * - `/ai/chat` SSE 对话协议
+ * - 对话历史管理（GET/DELETE /ai/conversations）
  */
 
 // ==========================================
@@ -131,9 +131,7 @@ const ChatRequestSchema = t.Object({
   input: t.Union([ChatInputTextSchema, ChatInputActionSchema]),
   context: t.Optional(ChatContextSchema),
   ai: t.Optional(ChatAiSchema),
-  trace: t.Optional(t.Boolean({ description: 'stream=true 时是否返回 trace 调试事件；H5/小程序默认 false，Admin 可动态开启' })),
-  stream: t.Optional(t.Boolean({ description: 'true 时返回 GenUI SSE 事件流' })),
-  // v5.4: 传递最近一次 Assistant response 的上下文，用于无登录状态下感知已收集的偏好
+  trace: t.Optional(t.Boolean({ description: '是否返回 trace 调试事件；默认返回精简 SSE，Admin 可动态开启' })),
   latestAssistantSuggestions: t.Optional(SuggestionsSchema),
 });
 
@@ -418,18 +416,6 @@ const ActivityConversationMessagesResponse = t.Object({
   activityId: t.String({ format: 'uuid', description: '活动 ID' }),
   items: t.Array(ConversationMessageItem),
   total: t.Number({ description: '关联消息总数' }),
-});
-
-// 添加用户消息请求
-const AddMessageRequest = t.Object({
-  content: t.String({ minLength: 1, maxLength: 2000, description: '消息内容' }),
-});
-
-// 添加用户消息响应
-const AddMessageResponse = t.Object({
-  success: t.Literal(true),
-  msg: t.String(),
-  id: t.String(),
 });
 
 // 清空对话响应
@@ -829,45 +815,6 @@ const ViolationStatsResponse = t.Object({
 });
 
 // ==========================================
-// AI 内容生成 Schema
-// ==========================================
-
-// 内容生成请求
-const ContentGenerationRequest = t.Object({
-  topic: t.String({ description: '内容主题/描述', minLength: 1, maxLength: 500 }),
-  contentType: t.Union([
-    t.Literal('poster'),        // 海报文案
-    t.Literal('social-note'),   // 小红书笔记
-    t.Literal('social-post'),   // 社交媒体帖子
-  ], { description: '内容类型' }),
-  style: t.Optional(t.Union([
-    t.Literal('minimal'),       // 极简
-    t.Literal('cyberpunk'),     // 赛博朋克
-    t.Literal('handwritten'),   // 手写风
-    t.Literal('xiaohongshu'),   // 小红书风格
-    t.Literal('casual'),        //  casual
-    t.Literal('professional'),  // 专业
-  ], { default: 'minimal', description: '文案风格' })),
-  trendKeywords: t.Optional(t.Array(t.String(), { description: '趋势关键词' })),
-  count: t.Optional(t.Number({ minimum: 1, maximum: 5, default: 1, description: '生成数量' })),
-});
-
-// 内容生成响应项
-const GeneratedContentItem = t.Object({
-  title: t.String({ description: '标题' }),
-  body: t.String({ description: '正文内容' }),
-  hashtags: t.Array(t.String(), { description: '话题标签' }),
-  coverImageHint: t.Optional(t.String({ description: '封面图片描述' })),
-  cta: t.Optional(t.String({ description: '行动号召' })),
-});
-
-// 内容生成响应
-const ContentGenerationResponse = t.Object({
-  items: t.Array(GeneratedContentItem),
-  batchId: t.String({ description: '批次ID' }),
-});
-
-// ==========================================
 // Metrics 子 Controller Schema (v4.6)
 // 指标聚合 - AI 特有类型
 // ==========================================
@@ -1032,8 +979,6 @@ export const aiModel = new Elysia({ name: 'aiModel' })
     'ai.conversationMessageItem': ConversationMessageItem,
     'ai.activityConversationMessageParams': ActivityConversationMessageParams,
     'ai.activityConversationMessagesResponse': ActivityConversationMessagesResponse,
-    'ai.addMessageRequest': AddMessageRequest,
-    'ai.addMessageResponse': AddMessageResponse,
     'ai.clearConversationsResponse': ClearConversationsResponse,
     // Welcome Card (v3.4 新增)
     'ai.welcomeQuery': WelcomeQuery,
@@ -1087,11 +1032,6 @@ export const aiModel = new Elysia({ name: 'aiModel' })
     'ai.securityDeleteSensitiveWordResponse': SecurityDeleteSensitiveWordResponse,
     'ai.securityEventsResponse': SecurityEventsResponse,
     'ai.securityStatsDBResponse': SecurityStatsDBResponse,
-    // ==========================================
-    // AI 内容生成
-    // ==========================================
-    'ai.contentGenerationRequest': ContentGenerationRequest,
-    'ai.contentGenerationResponse': ContentGenerationResponse,
 });
 
 // 导出 TS 类型
@@ -1115,8 +1055,6 @@ export type ConversationMessageItem = Static<typeof ConversationMessageItem>;
 export type ConversationsResponse = Static<typeof ConversationsResponse>;
 export type ConversationMessagesResponse = Static<typeof ConversationMessagesResponse>;
 export type ActivityConversationMessagesResponse = Static<typeof ActivityConversationMessagesResponse>;
-export type AddMessageRequest = Static<typeof AddMessageRequest>;
-export type AddMessageResponse = Static<typeof AddMessageResponse>;
 export type ClearConversationsResponse = Static<typeof ClearConversationsResponse>;
 
 // Welcome Card 类型导出 (v3.4 新增)
@@ -1133,8 +1071,3 @@ export type MetricsUsageResponse = Static<typeof MetricsUsageResponse>;
 
 // Prompt 类型导出 (v3.4 新增)
 export type PromptInfoResponse = Static<typeof PromptInfoResponse>;
-
-// AI 内容生成类型导出
-export type ContentGenerationRequest = Static<typeof ContentGenerationRequest>;
-export type GeneratedContentItem = Static<typeof GeneratedContentItem>;
-export type ContentGenerationResponse = Static<typeof ContentGenerationResponse>;

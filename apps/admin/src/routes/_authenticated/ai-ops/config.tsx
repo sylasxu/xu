@@ -1,6 +1,11 @@
-import { createFileRoute } from '@tanstack/react-router'
-import { AiConfig } from '@/features/ai-ops/ai-config'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 
 export const Route = createFileRoute('/_authenticated/ai-ops/config')({
-  component: AiConfig,
+  beforeLoad: () => {
+    throw redirect({
+      to: '/ai-ops/playground',
+      search: { view: 'config' },
+    })
+  },
+  component: () => null,
 })

@@ -66,8 +66,8 @@ inclusion: always
 - **AI 模块结构 (v4.6)**:
   - `ai.service.ts` - 核心入口
   - `processors/` - Processor 纯函数 (input-guard, user-profile, semantic-recall, token-limit, save-history, extract-preferences)
-  - `models/` - 模型路由 (Qwen3 主力 + DeepSeek 备选)
-  - `rag/` - 语义检索 + Rerank
+  - `models/` - 模型路由 (Kimi 主力 + DeepSeek 备选，Qwen 仅 embedding)
+  - `rag/` - 语义检索 + 本地轻量重排
 - **文件结构**: `*.controller.ts` / `*.service.ts` (纯函数) / `*.model.ts`
 - **用户态查询规则**: 统一按 `userId` 显式查询，禁止 `mine/me/scope` 语义接口
 - **禁止**: `export namespace`、class Service、手动定义 DB 表 Schema
@@ -248,10 +248,10 @@ bunx <package>       # 执行包命令
 - 支持按 `activityId` 查询关联的对话历史
 
 **AI 模型配置 (v4.6)**:
-- **主力**: Qwen3 (qwen-flash 闲聊 / qwen-plus 推理 / qwen-max Agent)
+- **主力**: Moonshot / Kimi (`kimi-k2.5` 主聊天/Agent，`kimi-k2-thinking` 深度推理)
 - **备选**: DeepSeek (deepseek-chat)
-- **Embedding**: Qwen text-embedding-v4 (1536 维)
-- **Rerank**: qwen3-rerank
+- **Embedding**: Qwen text-embedding-v4 (1536 维，Qwen 仅保留这一项)
+- **Rerank**: 本地轻量排序（不走外部 Qwen 模型）
 
 ---
 

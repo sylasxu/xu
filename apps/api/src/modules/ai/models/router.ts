@@ -4,9 +4,9 @@
  * 提供统一的模型访问接口，支持降级和意图路由
  * 
  * 策略 (v4.6):
- * - 主力 Chat: Moonshot / Qwen / DeepSeek
+ * - 主力 Chat / Reasoning / Agent / Vision: Moonshot / Kimi
  * - Embedding: Qwen text-embedding-v4
- * - Rerank: qwen3-rerank
+ * - Rerank: 本地轻量排序
  */
 
 import type { LanguageModel } from 'ai';
@@ -29,6 +29,7 @@ import {
   DEFAULT_FALLBACK_CONFIG,
   ACTIVE_MODELS,
   DEFAULT_MODEL_ROUTE_MAP,
+  MODEL_IDS,
 } from './types';
 import { getConfigValue } from '../config/config.service';
 
@@ -249,20 +250,16 @@ function getDefaultChatModelIdForProvider(
 ): string {
   switch (provider) {
     case 'qwen':
+      return MODEL_IDS.QWEN_EMBEDDING;
+    case 'moonshot':
       switch (routeKey) {
         case 'reasoning':
-          return ACTIVE_MODELS.REASONING;
-        case 'agent':
-        case 'content_generation':
-        case 'content_topic_suggestions':
-          return ACTIVE_MODELS.AGENT;
+          return MODEL_IDS.MOONSHOT_KIMI_K2_THINKING;
+        case 'vision':
+          return DEFAULT_MODEL_ROUTE_MAP.vision.modelId;
         default:
-          return ACTIVE_MODELS.CHAT_PRIMARY;
+          return MODEL_IDS.MOONSHOT_KIMI_K2_5;
       }
-    case 'moonshot':
-      return routeKey === 'vision'
-        ? DEFAULT_MODEL_ROUTE_MAP.vision.modelId
-        : ACTIVE_MODELS.CHAT_PRIMARY;
     case 'deepseek':
       return routeKey === 'reasoning' ? 'deepseek-reasoner' : 'deepseek-chat';
     case 'openai':
@@ -373,12 +370,8 @@ export async function getEmbedding(
  * 新主链路请优先使用 resolveChatModelSelection，从 AI 配置读取默认模型。
  */
 export function getDefaultChatModel(): LanguageModel {
-  if (process.env.MOONSHOT_API_KEY) {
-    const selection = DEFAULT_MODEL_ROUTE_MAP.chat;
-    return getChatModel(selection.modelId, selection.provider, { allowFallback: true });
-  }
-
-  return qwenProvider.getChatModel(ACTIVE_MODELS.CHAT_PRIMARY);
+  const selection = DEFAULT_MODEL_ROUTE_MAP.chat;
+  return getChatModel(selection.modelId, selection.provider, { allowFallback: true });
 }
 
 type IntentModelType = LegacyIntentRouteKey;
@@ -455,28 +448,34 @@ export async function getModelByIntent(intent: 'chat' | 'reasoning' | 'agent' | 
 }
 
 /**
- * Rerank 检索重排 (v4.6 新增)
- * 
- * 使用 qwen3-rerank 对检索结果进行语义重排序
+ * Rerank 检索重排
+ *
+ * 当前使用本地轻量排序，不再依赖外部 Qwen rerank 模型。
  */
 export async function rerank(
   query: string,
   documents: string[],
   topK: number = 10
 ): Promise<RerankResponse> {
-  const selection = await getModelRouteSelection('rerank');
-  const provider = providers[selection.provider];
+  const queryTokens = tokenizeForLocalRerank(query);
+  const scored = documents.map((document, index) => ({
+    index,
+    document,
+    score: computeLocalRerankScore(queryTokens, document),
+  }));
 
-  if (!provider?.rerank) {
-    throw new Error(`Provider ${selection.provider} does not support rerank`);
-  }
+  const results = scored
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, Math.max(1, topK));
 
-  return provider.rerank({
-    modelId: selection.modelId,
-    query,
-    documents,
-    topK,
-  });
+  return {
+    results,
+    usage: {
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+    },
+  };
 }
 
 /**
@@ -563,7 +562,7 @@ export async function checkProviderHealth(
 /**
  * 检查所有提供商健康状态
  * 
- * v5.4: 检查当前实际使用的 moonshot + qwen + deepseek
+ * v5.4: 检查当前实际使用的 moonshot + qwen(embedding) + deepseek
  */
 export async function checkAllProvidersHealth(): Promise<Partial<Record<ModelProviderName, boolean>>> {
   const results = await Promise.all([
@@ -593,4 +592,30 @@ export async function getAvailableProviders(): Promise<ModelProviderName[]> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function tokenizeForLocalRerank(input: string): string[] {
+  return input
+    .toLowerCase()
+    .split(/[\s|,.;:!?/\-_()\[\]{}，。！？、：；"'`]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2);
+}
+
+function computeLocalRerankScore(queryTokens: string[], document: string): number {
+  if (queryTokens.length === 0) {
+    return 0;
+  }
+
+  const normalizedDocument = document.toLowerCase();
+  let hits = 0;
+  for (const token of queryTokens) {
+    if (normalizedDocument.includes(token)) {
+      hits += 1;
+    }
+  }
+
+  const coverage = hits / queryTokens.length;
+  const densityBoost = Math.min(normalizedDocument.length / 120, 1);
+  return coverage * 0.9 + densityBoost * 0.1;
 }

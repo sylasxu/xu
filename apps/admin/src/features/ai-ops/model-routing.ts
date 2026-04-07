@@ -40,14 +40,14 @@ export const PROVIDER_OPTIONS: Array<{ value: ProviderName; label: string }> = [
 ]
 
 export const DEFAULT_ROUTE_MAP: RouteMapConfig = {
-  chat: 'moonshot/kimi-k2-32k',
-  reasoning: 'moonshot/kimi-k2-32k',
-  agent: 'moonshot/kimi-k2-32k',
-  vision: 'qwen/qwen-vl-max',
-  content_generation: 'moonshot/kimi-k2-32k',
-  content_topic_suggestions: 'moonshot/kimi-k2-32k',
+  chat: 'moonshot/kimi-k2.5',
+  reasoning: 'moonshot/kimi-k2-thinking',
+  agent: 'moonshot/kimi-k2.5',
+  vision: 'moonshot/kimi-k2.5',
+  content_generation: 'moonshot/kimi-k2.5',
+  content_topic_suggestions: 'moonshot/kimi-k2.5',
   embedding: 'qwen/text-embedding-v4',
-  rerank: 'qwen/qwen3-rerank',
+  rerank: 'moonshot/kimi-k2.5',
 }
 
 export const CHAT_ROUTE_KEYS: ChatRouteKey[] = ['chat', 'reasoning', 'agent']
@@ -58,19 +58,9 @@ export const CHAT_CHAIN_PRESETS: ChatChainPreset[] = [
     label: 'Kimi 主链路',
     description: '境内默认链路，适合主聊天、推理和 Agent 一起走同一条链路。',
     routes: {
-      chat: 'moonshot/kimi-k2-32k',
-      reasoning: 'moonshot/kimi-k2-32k',
-      agent: 'moonshot/kimi-k2-32k',
-    },
-  },
-  {
-    key: 'qwen',
-    label: 'Qwen 主链路',
-    description: '适合想把对话链路整体切回 Qwen 时快速回切。',
-    routes: {
-      chat: 'qwen/qwen-flash',
-      reasoning: 'qwen/qwen-plus',
-      agent: 'qwen/qwen3-max',
+      chat: 'moonshot/kimi-k2.5',
+      reasoning: 'moonshot/kimi-k2-thinking',
+      agent: 'moonshot/kimi-k2.5',
     },
   },
   {
@@ -86,11 +76,9 @@ export const CHAT_CHAIN_PRESETS: ChatChainPreset[] = [
 ]
 
 export const PLAYGROUND_MANUAL_MODEL_OPTIONS = [
-  { value: 'moonshot/kimi-k2-32k', label: 'Moonshot Kimi K2 32K' },
+  { value: 'moonshot/kimi-k2.5', label: 'Moonshot Kimi K2.5' },
+  { value: 'moonshot/kimi-k2-thinking', label: 'Moonshot Kimi K2 Thinking' },
   { value: 'deepseek/deepseek-chat', label: 'DeepSeek Chat' },
-  { value: 'qwen/qwen-flash', label: 'Qwen Flash' },
-  { value: 'qwen/qwen-plus', label: 'Qwen Plus' },
-  { value: 'qwen/qwen3-max', label: 'Qwen3 Max' },
 ] as const
 
 function isRecord(value: unknown): value is Record<string, unknown> {

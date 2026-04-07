@@ -55,6 +55,33 @@ function describeContentState(note: {
   }
 }
 
+function describePublishCheck(note: {
+  publishCheck: {
+    status: 'ready' | 'review' | 'rewrite'
+    summary: string
+    issues: string[]
+  }
+}) {
+  if (note.publishCheck.status === 'ready') {
+    return {
+      label: '可直接发',
+      variant: 'default' as const,
+    }
+  }
+
+  if (note.publishCheck.status === 'review') {
+    return {
+      label: '建议改一下',
+      variant: 'secondary' as const,
+    }
+  }
+
+  return {
+    label: '先别发',
+    variant: 'destructive' as const,
+  }
+}
+
 function copyToClipboard(text: string) {
   navigator.clipboard.writeText(text)
   toast.success('已复制到剪贴板')
@@ -119,6 +146,7 @@ export function ContentDetail({
   const hashtagsText = note.hashtags.map((tag) => `#${tag}`).join(' ')
   const fullText = `${note.title}\n\n${note.body}\n\n${hashtagsText}`
   const currentState = describeContentState(note)
+  const publishCheck = describePublishCheck(note)
 
   const jumpToPerformance = () => {
     setActiveTab('current')
@@ -147,7 +175,7 @@ export function ContentDetail({
                 <Badge variant='outline'>{PLATFORM_LABEL[note.platform] ?? note.platform}</Badge>
                 <Badge variant='outline'>{TYPE_LABEL[note.contentType] ?? note.contentType}</Badge>
                 <Badge variant='secondary'>{note.topic}</Badge>
-                <Badge variant={currentState.variant}>当前主版本</Badge>
+                <Badge variant={publishCheck.variant}>{publishCheck.label}</Badge>
               </div>
               <CardTitle className='text-2xl'>{note.title}</CardTitle>
               <p className='text-sm text-muted-foreground'>
@@ -186,10 +214,41 @@ export function ContentDetail({
         <TabsContent value='current' className='space-y-6'>
           <Card>
             <CardHeader>
+              <CardTitle className='text-base'>发布前检查</CardTitle>
+            </CardHeader>
+            <CardContent className='space-y-4'>
+              <div className='flex items-center gap-2'>
+                <Badge variant={publishCheck.variant}>{publishCheck.label}</Badge>
+                <p className='text-sm text-muted-foreground'>{note.publishCheck.summary}</p>
+              </div>
+              {note.publishCheck.issues.length > 0 ? (
+                <ul className='space-y-2 text-sm text-muted-foreground'>
+                  {note.publishCheck.issues.map((issue) => (
+                    <li key={issue} className='rounded-md border bg-muted/30 px-3 py-2'>
+                      {issue}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className='text-sm text-muted-foreground'>
+                  这版没有明显硬伤，先发出去验证结果就行。
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle className='text-base'>现在该怎么处理这版</CardTitle>
             </CardHeader>
             <CardContent className='space-y-4'>
               <div className='grid gap-3 md:grid-cols-3'>
+                <QuickStatCard
+                  label='发布检查'
+                  value={publishCheck.label}
+                  hint={note.publishCheck.summary}
+                  badgeVariant={publishCheck.variant}
+                />
                 <QuickStatCard
                   label='当前判断'
                   value={currentState.label}

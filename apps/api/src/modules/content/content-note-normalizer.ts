@@ -9,6 +9,12 @@ export interface GeneratedContentDraft {
   coverImageHint: string
 }
 
+export interface ContentPublishCheck {
+  status: 'ready' | 'review' | 'rewrite'
+  summary: string
+  issues: string[]
+}
+
 const OFFSITE_TERMS = [
   '加我',
   '加群',
@@ -71,6 +77,30 @@ const ORGANIZING_MARKERS = [
   '更适合',
   '想来',
   '同频',
+] as const
+
+const HYPE_MARKERS = [
+  '闭眼冲',
+  '冲就完了',
+  '错过血亏',
+  '全网爆火',
+  '天花板',
+  '家人们',
+  '姐妹们',
+  '评论区聊聊',
+] as const
+
+const DIRECT_OPENING_MARKERS = [
+  '坐标',
+  '周五',
+  '周末',
+  '下班',
+  '最近',
+  '我自己',
+  '总是',
+  '想',
+  '有人',
+  '有没有',
 ] as const
 
 const FALLBACK_TAGS_BY_TYPE: Record<ContentType, string[]> = {
@@ -531,4 +561,97 @@ export function normalizeSuggestedTopics(params: {
   }
 
   return uniqueItems.slice(0, 3)
+}
+
+export function evaluateContentPublishCheck(params: {
+  contentType: ContentType
+  title: string
+  body: string
+  hashtags: string[]
+  coverText: string | null
+  coverImageHint: string | null
+}): ContentPublishCheck {
+  const rewriteIssues: string[] = []
+  const reviewIssues: string[] = []
+
+  const title = params.title.trim()
+  const body = params.body.trim()
+  const combinedText = `${title}\n${body}\n${params.coverText ?? ''}`
+  const firstSentence = splitSentences(body)[0] ?? body
+
+  if (!title || !body) {
+    rewriteIssues.push('标题或正文还不完整')
+  }
+
+  if (OFFSITE_TERMS.some((term) => combinedText.includes(term))) {
+    rewriteIssues.push('还有站外引流或私聊表达')
+  }
+
+  if (HYPE_MARKERS.some((term) => combinedText.includes(term))) {
+    rewriteIssues.push('营销腔太重，像硬广')
+  }
+
+  if (body.length < 55) {
+    reviewIssues.push('正文偏短，信息还不够完整')
+  }
+
+  if (looksStoryLike(body)) {
+    reviewIssues.push('开头太像故事，不够直接')
+  }
+
+  if (soundsLikeMetaExplanation(body)) {
+    reviewIssues.push('正文里有幕后分析口吻')
+  }
+
+  if (
+    firstSentence
+    && !DIRECT_OPENING_MARKERS.some((marker) => firstSentence.includes(marker))
+    && !/搭子|组局|火锅|羽毛球|饭局|散步|桌游|喝茶|吃饭/.test(firstSentence)
+  ) {
+    reviewIssues.push('首句还不够像真人直接发帖')
+  }
+
+  if (
+    (params.contentType === 'activity_recruit' || params.contentType === 'product_seed')
+    && lacksFlyerSignal(body)
+  ) {
+    reviewIssues.push('这版的组织入口感还不够明确')
+  }
+
+  if (params.hashtags.length < 2 || params.hashtags.length > 4) {
+    reviewIssues.push('标签数量建议控制在 2 到 4 个')
+  }
+
+  if (!(params.coverText ?? '').trim()) {
+    reviewIssues.push('首图文案还不够稳')
+  }
+
+  if (!(params.coverImageHint ?? '').includes('主体：')) {
+    reviewIssues.push('首图配图提示词还不够完整')
+  }
+
+  const uniqueRewriteIssues = Array.from(new Set(rewriteIssues))
+  const uniqueReviewIssues = Array.from(new Set(reviewIssues))
+
+  if (uniqueRewriteIssues.length > 0) {
+    return {
+      status: 'rewrite',
+      summary: '这版先别发，建议先改掉明显问题。',
+      issues: uniqueRewriteIssues.slice(0, 3),
+    }
+  }
+
+  if (uniqueReviewIssues.length > 0) {
+    return {
+      status: 'review',
+      summary: '这版可以继续看，但建议先顺手改一下。',
+      issues: uniqueReviewIssues.slice(0, 3),
+    }
+  }
+
+  return {
+    status: 'ready',
+    summary: '这版已经比较像可直接发布的内容。',
+    issues: [],
+  }
 }

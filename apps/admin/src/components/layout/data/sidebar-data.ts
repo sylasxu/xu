@@ -1,19 +1,19 @@
 import {
   LayoutDashboard,
-  Settings,
-  Users,
   Calendar,
   Command,
-  MessageSquare,
-  Play,
   Shield,
-  TrendingUp,
   FileText,
   Zap,
+  Bot,
+  MessageSquare,
+  Settings,
+  Users,
+  Wrench,
 } from 'lucide-react'
 import { type SidebarData } from '../types'
 
-// v4.7: Admin Cockpit Redesign - AI 驾驶舱 + 内容运营工作台
+// v5.6: Admin IA 收口为稳定领域分组，保留完整能力但不再按角色或临时主线组织
 export const sidebarData: SidebarData = {
   user: {
     name: '管理员',
@@ -29,28 +29,38 @@ export const sidebarData: SidebarData = {
   ],
   navGroups: [
     {
-      title: '运营主线',
+      title: '概览',
       items: [
         {
-          title: '首页',
+          title: '指挥舱',
           url: '/',
           icon: LayoutDashboard,
         },
+      ],
+    },
+    {
+      title: '内容',
+      items: [
         {
           title: '内容工作台',
           url: '/content',
           icon: FileText,
         },
+      ],
+    },
+    {
+      title: '组局',
+      items: [
         {
-          title: '热词运营',
-          url: '/hot-keywords',
-          icon: Zap,
-        },
-        {
-          title: '活动与搭子',
+          title: '组局',
           url: '/activities',
           icon: Calendar,
         },
+      ],
+    },
+    {
+      title: '风控',
+      items: [
         {
           title: '风险审核',
           url: '/safety/moderation',
@@ -59,30 +69,40 @@ export const sidebarData: SidebarData = {
       ],
     },
     {
-      title: '辅助工具',
+      title: 'AI',
       items: [
         {
-          title: 'AI 调试',
+          title: 'AI Playground',
           url: '/ai-ops/playground',
-          icon: Play,
+          icon: Bot,
         },
         {
-          title: '对话审计',
+          title: '对话记录',
           url: '/ai-ops/conversations',
           icon: MessageSquare,
         },
         {
+          title: '模型路由',
+          url: '/ai-ops/config',
+          icon: Wrench,
+        },
+        {
           title: '用量统计',
           url: '/ai-ops/usage',
-          icon: TrendingUp,
+          icon: Zap,
         },
+      ],
+    },
+    {
+      title: '设置',
+      items: [
         {
           title: '用户管理',
           url: '/users',
           icon: Users,
         },
         {
-          title: '系统配置',
+          title: '系统设置',
           url: '/settings',
           icon: Settings,
         },

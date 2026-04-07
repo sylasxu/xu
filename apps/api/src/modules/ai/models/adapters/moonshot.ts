@@ -2,7 +2,8 @@
  * Moonshot Adapter - Moonshot / Kimi 模型适配器
  *
  * 支持：
- * - Chat: kimi-k2-32k
+ * - Chat / Agent / 内容生成: kimi-k2.5
+ * - 深度思考: kimi-k2-thinking
  *
  * 配置：
  * - 环境变量: MOONSHOT_API_KEY
@@ -39,7 +40,7 @@ function getProvider() {
 }
 
 function getChatModel(modelId?: string): LanguageModel {
-  const id = modelId || MODEL_IDS.MOONSHOT_KIMI_K2_32K;
+  const id = modelId || MODEL_IDS.MOONSHOT_KIMI_K2_5;
   return getProvider().chat(id);
 }
 

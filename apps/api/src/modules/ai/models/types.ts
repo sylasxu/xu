@@ -2,9 +2,9 @@
  * Models Module Types - 模型抽象层类型定义
  * 
  * 架构设计：
- * - Chat: Moonshot / Qwen / DeepSeek
+ * - Chat / Reasoning / Agent / Vision: Moonshot / Kimi
  * - Embedding: Qwen text-embedding-v4 (主力)
- * - 未来扩展: Doubao, OpenAI 等
+ * - 未来扩展: DeepSeek, Doubao, OpenAI 等
  */
 
 import type { LanguageModel } from 'ai';
@@ -91,8 +91,6 @@ export interface ChatParams {
   maxTokens?: number;
   /** 工具列表 */
   tools?: Record<string, unknown>;
-  /** 是否流式 */
-  stream?: boolean;
 }
 
 /**
@@ -231,11 +229,11 @@ export interface FallbackConfig {
 }
 
 /**
- * 默认降级配置 (v5.4: Moonshot 主力 + Qwen 备选)
+ * 默认降级配置 (v5.4: Moonshot 主力 + DeepSeek 备选)
  */
 export const DEFAULT_FALLBACK_CONFIG: FallbackConfig = {
   primary: 'moonshot',
-  fallback: 'qwen',
+  fallback: 'deepseek',
   maxRetries: 2,
   retryDelay: 1000,
   enableFallback: true,
@@ -254,19 +252,13 @@ export const MODEL_IDS = {
   DEEPSEEK_REASONER: 'deepseek-reasoner',
 
   // Moonshot / Kimi - 境内主力 Chat
-  MOONSHOT_KIMI_K2_32K: 'kimi-k2-32k',
+  MOONSHOT_KIMI_K2_5: 'kimi-k2.5',
+  MOONSHOT_KIMI_K2_THINKING: 'kimi-k2-thinking',
 
   // OpenAI - 主力 Chat（可通过 OPENAI_BASE_URL 接 OpenAI 兼容网关，如 sub2api）
   OPENAI_GPT_54: 'gpt-5.4',
   OPENAI_GPT_54_MINI: 'gpt-5.4-mini',
 
-
-  // Qwen3 - 分层 Chat (v4.6 新增，使用 OpenAI 兼容接口)
-  // 官方文档: https://help.aliyun.com/zh/model-studio/getting-started/models
-  QWEN_FLASH: 'qwen-flash',                   // 极速闲聊 (最便宜，已升级至 Qwen3)
-  QWEN_PLUS: 'qwen-plus',                     // 深度思考 (推荐，已升级至 Qwen3)
-  QWEN_MAX: 'qwen3-max',                      // 精准 Tool Calling (最强，Qwen3 旗舰)
-  QWEN_VL_MAX: 'qwen-vl-max',                 // 视觉理解
 
   // ==========================================
   // Embedding 模型 (向量化)
@@ -275,12 +267,6 @@ export const MODEL_IDS = {
   // Qwen - 主力 Embedding
   QWEN_EMBEDDING: 'text-embedding-v4',
 
-
-  // ==========================================
-  // Rerank 模型 (v4.6 新增)
-  // ==========================================
-  QWEN_RERANK: 'qwen3-rerank',
-
 } as const;
 
 /**
@@ -288,19 +274,17 @@ export const MODEL_IDS = {
  */
 export const ACTIVE_MODELS = {
   /** Chat 主力模型 (日常对话) */
-  CHAT_PRIMARY: MODEL_IDS.MOONSHOT_KIMI_K2_32K,
+  CHAT_PRIMARY: MODEL_IDS.MOONSHOT_KIMI_K2_5,
   /** Chat 备选模型 */
-  CHAT_FALLBACK: MODEL_IDS.QWEN_PLUS,
+  CHAT_FALLBACK: MODEL_IDS.DEEPSEEK_CHAT,
   /** 深度思考模型 (找搭子/复杂匹配) */
-  REASONING: MODEL_IDS.MOONSHOT_KIMI_K2_32K,
+  REASONING: MODEL_IDS.MOONSHOT_KIMI_K2_THINKING,
   /** Agent 模型 (Tool Calling/Generative UI) */
-  AGENT: MODEL_IDS.MOONSHOT_KIMI_K2_32K,
+  AGENT: MODEL_IDS.MOONSHOT_KIMI_K2_5,
   /** 视觉模型 (识图) */
-  VISION: MODEL_IDS.QWEN_VL_MAX,
+  VISION: MODEL_IDS.MOONSHOT_KIMI_K2_5,
   /** Embedding 主力模型 */
   EMBEDDING_PRIMARY: MODEL_IDS.QWEN_EMBEDDING,
-  /** Rerank 模型 */
-  RERANK: MODEL_IDS.QWEN_RERANK,
 } as const;
 
 /**
@@ -309,40 +293,42 @@ export const ACTIVE_MODELS = {
  * 说明：
  * - Chat / Reasoning / Agent 默认走 Moonshot（Kimi）
  * - 内容生成与主题建议默认跟随 Moonshot 主链路
- * - Embedding / Rerank / Vision 继续走 Qwen
+ * - Vision 跟随 Kimi 主链路
+ * - Embedding 保留 Qwen
+ * - Rerank 改为本地轻量排序，不再依赖外部 Qwen 模型
  */
 export const DEFAULT_MODEL_ROUTE_MAP: Record<ModelRouteKey, ModelRouteSelection> = {
   chat: {
     provider: 'moonshot',
-    modelId: MODEL_IDS.MOONSHOT_KIMI_K2_32K,
+    modelId: MODEL_IDS.MOONSHOT_KIMI_K2_5,
   },
   reasoning: {
     provider: 'moonshot',
-    modelId: MODEL_IDS.MOONSHOT_KIMI_K2_32K,
+    modelId: MODEL_IDS.MOONSHOT_KIMI_K2_THINKING,
   },
   agent: {
     provider: 'moonshot',
-    modelId: MODEL_IDS.MOONSHOT_KIMI_K2_32K,
+    modelId: MODEL_IDS.MOONSHOT_KIMI_K2_5,
   },
   vision: {
-    provider: 'qwen',
-    modelId: MODEL_IDS.QWEN_VL_MAX,
+    provider: 'moonshot',
+    modelId: MODEL_IDS.MOONSHOT_KIMI_K2_5,
   },
   content_generation: {
     provider: 'moonshot',
-    modelId: MODEL_IDS.MOONSHOT_KIMI_K2_32K,
+    modelId: MODEL_IDS.MOONSHOT_KIMI_K2_5,
   },
   content_topic_suggestions: {
     provider: 'moonshot',
-    modelId: MODEL_IDS.MOONSHOT_KIMI_K2_32K,
+    modelId: MODEL_IDS.MOONSHOT_KIMI_K2_5,
   },
   embedding: {
     provider: 'qwen',
     modelId: MODEL_IDS.QWEN_EMBEDDING,
   },
   rerank: {
-    provider: 'qwen',
-    modelId: MODEL_IDS.QWEN_RERANK,
+    provider: 'moonshot',
+    modelId: MODEL_IDS.MOONSHOT_KIMI_K2_5,
   },
 };
 

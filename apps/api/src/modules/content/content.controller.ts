@@ -52,7 +52,7 @@ export const contentController = new Elysia({ prefix: '/content' })
             detail: {
               tags: ['Content'],
               summary: '生成多平台内容',
-              description: 'AI 按平台（小红书 / 抖音 / 微信）和内容类型生成内容稿。',
+              description: '当前唯一主入口。AI 按平台（小红书 / 抖音 / 微信）和内容类型生成内容稿。',
             },
             body: 'content.generateRequest',
             response: {

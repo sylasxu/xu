@@ -40,6 +40,18 @@ function hasPerformanceData(note: ContentNote) {
   )
 }
 
+function getPublishCheckBadge(status: ContentNote['publishCheck']['status']) {
+  if (status === 'ready') {
+    return { label: '可直接发', variant: 'default' as const }
+  }
+
+  if (status === 'review') {
+    return { label: '建议改一下', variant: 'secondary' as const }
+  }
+
+  return { label: '先别发', variant: 'destructive' as const }
+}
+
 function ContentRowActions({
   note,
   onOpen,
@@ -180,7 +192,18 @@ export function getContentColumns(params: {
     {
       id: 'status',
       header: ({ column }) => (
-        <DataTableColumnHeader column={column} title='状态' />
+        <DataTableColumnHeader column={column} title='发布检查' />
+      ),
+      cell: ({ row }) => {
+        const publishCheck = getPublishCheckBadge(row.original.publishCheck.status)
+        return <Badge variant={publishCheck.variant}>{publishCheck.label}</Badge>
+      },
+      enableSorting: false,
+    },
+    {
+      id: 'performance',
+      header: ({ column }) => (
+        <DataTableColumnHeader column={column} title='效果回填' />
       ),
       cell: ({ row }) => (
         <Badge variant={hasPerformanceData(row.original) ? 'secondary' : 'outline'}>

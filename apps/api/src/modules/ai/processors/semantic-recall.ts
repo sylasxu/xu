@@ -5,7 +5,7 @@
  * - 同时搜索 activities 表和 conversation_messages 表
  * - 搜索独立的长期 user_memories 表
  * - 相似度阈值 0.5
- * - 合并结果后使用 qwen3-rerank 重排序
+ * - 合并结果后使用本地轻量排序
  * - 返回 top-K 结果（K=5）
  */
 
@@ -167,7 +167,7 @@ export async function semanticRecallProcessor(context: ProcessorContext): Promis
       };
     }
 
-    // 使用 qwen3-rerank 重排序
+    // 使用本地轻量重排序
     let finalResults = allDocuments;
     let rerankApplied = false;
 

@@ -69,6 +69,12 @@ inclusion: always
   - `models/` - 模型路由 (Qwen3 主力 + DeepSeek 备选)
   - `rag/` - 语义检索 + Rerank
 - **文件结构**: `*.controller.ts` / `*.service.ts` (纯函数) / `*.model.ts`
+- **AI 顶层纯化规则**:
+  - `apps/api/src/modules/ai` 顶层只保留主门面：`ai.controller.ts`、`ai.model.ts`、`ai.service.ts`
+  - `ai.controller.ts` 只能直接依赖 `ai.service.ts`，不要再直接 import `runtime/`、`workflow/`、`task-runtime/`、`prompts/`、`observability/metrics` 等实现细节
+  - 对话主链实现统一下沉到子目录，例如 `runtime/`、`workflow/`、`task-runtime/`
+  - 禁止在 AI 顶层继续新增并列 `*.service.ts`，除 `ai.service.ts` 外一律下沉到明确子域目录
+  - 禁止重新引入 `Gateway`、`Turn` 这类过时主链语义作为顶层文件或主入口命名；优先使用 `request`、`response`、`runtime`、`recentMessages`
 - **用户态查询规则**: 统一按 `userId` 显式查询，禁止 `mine/me/scope` 语义接口
 - **客户端无关原则**:
   - API 必须先按“没有任何客户端消费”来设计，表达稳定的领域能力，而不是为 H5 / Admin / 小程序定制接口
@@ -126,6 +132,8 @@ myProcessor.processorName = 'my-processor';
 ### apps/admin (管理后台)
 - **Tech**: Vite + React 19 + TanStack Router + Eden Treaty
 - **禁止**: Zod、zodResolver
+- **信息架构优先按领域组织**: Admin 默认按 `概览 / 内容 / 组局 / 风控 / AI / 设置` 分组，而不是按角色或临时工作流拆菜单
+- **瘦身方式**: 通过稳定分组、明确命名、页内 tabs 收口复杂度；`热词` 收到 `内容工作台` 内部，`AI 配置` 收到 `AI Playground` 工作区内；不要靠隐藏真实能力或额外造一套“开发后台 / 运营后台”
 
 ### apps/miniprogram (小程序)
 - **Tech**: Native WeChat + TypeScript + Zustand Vanilla + LESS
@@ -147,7 +155,9 @@ myProcessor.processorName = 'my-processor';
 ## 🔁 当前主流程规则 (v5.3)
 
 - **Visitor-First + Action-Gated Auth**：浏览、欢迎卡、附近探索可先体验；报名、发布、找搭子确认等写入动作统一先登录 + 绑定手机号
-- **`/ai/chat` 统一协议**：请求体固定为 `conversationId? + input + context + stream?`，禁止继续使用旧 `messages[]` / `scene` 风格请求
+- **找搭子 / 组局 Agent 是主引擎**：产品主线优先围绕 `find_partner / create_activity / join_activity` 收口；内容工作台负责把真实需求翻成外部分发内容
+- **内容生成主入口统一**：当前只允许 `POST /content/generate` 与 `POST /content/topic-suggestions`；旧 AI 内容路由已删除，禁止恢复兼容别名
+- **`/ai/chat` 统一协议**：请求体固定为 `conversationId? + input + context`，统一返回 SSE 事件流；`response-complete` 事件携带完整 response envelope，禁止继续使用旧 `messages[]` / `scene` / 非流式主响应
 - **报名成功统一链路**：活动详情、半屏详情、地图探索、AI 推荐卡报名成功后，统一走 `join_success -> discussion -> quick starters`
 - **真实结果驱动 Memory**：`join` 只算轻信号；强反馈来自 `confirm-fulfillment`、`rebook-follow-up` 等真实社交结果
 
@@ -232,6 +242,14 @@ bunx <package>       # 执行包命令
   - `bun test` 负责业务规则、服务函数、API 集成
   - `bun scripts/*.ts` 负责多用户流程、结果漏斗、发布前验收
   - 黑盒 HTTP 回归负责流式协议、多端 GenUI 契约、真实 transport 边界
+- **内部自测默认流程**：
+  - 改 API 或业务规则后先跑：`bun run test:api`
+  - 改用户主流程后至少加跑：`bun run regression:flow`
+  - 改 `/ai/chat`、SSE、GenUI blocks、多端流解析后至少加跑：`bun run regression:protocol`
+  - 准备收口一个迭代时统一跑：`bun run release:gate`
+  - 内部自测必须覆盖两条关键 AI 主流程：
+    - `create_activity -> edit_draft/save_draft_settings -> confirm_publish`
+    - `find_partner -> search_partners -> opt_in_partner_pool`
 
 ---
 
@@ -277,10 +295,10 @@ bunx <package>       # 执行包命令
 - 支持按 `activityId` 查询关联的对话历史
 
 **AI 模型配置 (v4.6)**:
-- **主力**: Qwen3 (qwen-flash 闲聊 / qwen-plus 推理 / qwen3-max Agent)
+- **主力**: Moonshot / Kimi (`kimi-k2.5` 主聊天/Agent，`kimi-k2-thinking` 深度推理)
 - **备选**: DeepSeek (deepseek-chat)
-- **Embedding**: Qwen text-embedding-v4 (1536 维)
-- **Rerank**: qwen3-rerank
+- **Embedding**: Qwen text-embedding-v4 (1536 维，Qwen 仅保留这一项)
+- **Rerank**: 本地轻量排序（不走外部 Qwen 模型）
 
 ---
 

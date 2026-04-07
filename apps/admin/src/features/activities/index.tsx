@@ -37,7 +37,12 @@ export function Activities() {
     type: item.type,
     maxParticipants: item.maxParticipants,
     currentParticipants: item.currentParticipants,
+    waitlistCount: 'waitlistCount' in item && typeof item.waitlistCount === 'number' ? item.waitlistCount : 0,
+    remainingSeats: 'remainingSeats' in item && typeof item.remainingSeats === 'number' ? item.remainingSeats : undefined,
+    isFull: 'isFull' in item && typeof item.isFull === 'boolean' ? item.isFull : undefined,
     status: item.status,
+    createdAt: 'createdAt' in item ? item.createdAt : undefined,
+    updatedAt: 'updatedAt' in item ? item.updatedAt : undefined,
     creator: item.creator || null,
     isArchived: item.isArchived || false,
   }))
@@ -46,8 +51,8 @@ export function Activities() {
   return (
     <ActivitiesListProvider>
       <ListPage
-        title='活动与搭子'
-        description='看哪些活动和搭子结果值得继续扩散，哪些匹配还需要跟进'
+        title='组局'
+        description='统一看活动盘面、搭子意向和待跟进匹配，判断哪些结果值得继续扩散'
         icon={Calendar}
         isLoading={isLoading}
         error={error ?? undefined}

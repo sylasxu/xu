@@ -18,7 +18,7 @@ const ErrorResponseSchema = t.Object({
   msg: t.String(),
 });
 
-export const moderationController = new Elysia({ prefix: '/ai/moderation' })
+export const moderationController = new Elysia({ prefix: '/moderation' })
   .use(basePlugins)
   .onBeforeHandle(async ({ jwt, headers, set }) => {
     try {

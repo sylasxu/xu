@@ -2,7 +2,7 @@
  * AI 配置管理 Controller
  *
  * 提供 AI 系统配置的 CRUD、版本历史和回滚 API。
- * 端点前缀：/ai/configs
+ * 端点前缀：/ai/configs（由 ai.controller.ts 统一挂载）
  *
  * 需求: 6.7, 6.9
  */
@@ -19,7 +19,7 @@ import {
 
 type ErrorResponse = { code: number; msg: string };
 
-export const configController = new Elysia({ prefix: '/ai/configs' })
+export const configController = new Elysia({ prefix: '/configs' })
   .use(basePlugins)
   .onBeforeHandle(async ({ jwt, headers, set }) => {
     try {

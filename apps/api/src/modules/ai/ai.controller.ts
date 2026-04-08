@@ -23,6 +23,8 @@ import { db, users, activities, eq } from '@juchang/db';
 import { aiSessionsController } from './ai-sessions.controller';
 import { aiSecurityController } from './ai-security.controller';
 import { aiMetricsController } from './ai-metrics.controller';
+import { configController } from './config/config.controller';
+import { moderationController } from './moderation/moderation.controller';
 
 export const aiController = new Elysia({ prefix: '/ai' })
   .use(basePlugins)
@@ -479,6 +481,8 @@ export const aiController = new Elysia({ prefix: '/ai' })
   // ==========================================
   // 挂载子领域 controller
   // ==========================================
+  .use(configController)
+  .use(moderationController)
   .use(aiSessionsController)
   .use(aiSecurityController)
   .use(aiMetricsController);

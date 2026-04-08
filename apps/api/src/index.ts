@@ -21,9 +21,7 @@ import { participantController } from './modules/participants/participant.contro
 import { chatController } from './modules/chat/chat.controller';
 import { notificationController } from './modules/notifications/notification.controller';
 import { reportController } from './modules/reports/report.controller';
-import { moderationController } from './modules/ai/moderation/moderation.controller';
 import { hotKeywordsController } from './modules/hot-keywords/hot-keywords.controller';
-import { configController } from './modules/ai/config/config.controller';
 import { contentController } from './modules/content/content.controller';
 import { ensureSystemPromptConfigured } from './modules/ai/prompts';
 
@@ -138,9 +136,7 @@ export const app = appWithBase
   .use(chatController)
   .use(notificationController)
   .use(reportController)
-  .use(moderationController)
   .use(hotKeywordsController)
-  .use(configController)
   .use(contentController);
 
 if (import.meta.main) {

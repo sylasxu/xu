@@ -2035,6 +2035,12 @@ const questions = [
 ];
 ```
 
+> v5.6 当前执行补充：`PartnerMatchingState` 不再承担首轮自由文本语义理解的全部职责。实际实现先通过 `partner-understanding.ts` 对自然语言做轻量结构化理解，抽出 `scenarioType / activityType / locationText / destinationText / timeText / constraints`，再由 `partner-matching.ts` 负责状态推进、缺槽位判断与追问。这样可以在不改 `/ai/chat` 主协议的前提下，同时承接：
+> - 本地搭子：`周五观音桥饭搭子`
+> - 目的地同行：`泸州音乐节有人去吗`
+> - 临时补位：`差一个麻将搭子`
+> - 动态必填：本地搭子默认仍补 `activityType + location`；目的地同行不再强行追问“想玩点什么”，而是优先确认去哪里/去哪个活动
+
 ### 6.9 保障层：可观测性 (Observability)
 
 **追踪 (Tracing)**：
@@ -2529,16 +2535,21 @@ sequenceDiagram
 位置：`apps/api/src/modules/ai/workflow/partner-matching.ts`
 
 1.  **首轮搜索 (Search-First)**：
-    - `activityType` 必须相同
-    - `timePreference` 尽量重叠
-    - `areaText/locationHint` 文本归一后尽量相近
+    - 先通过 `partner-understanding.ts` 把自然语言抽成：
+      - `scenarioType`: `local_partner | destination_companion | fill_seat`
+      - `activityType`: `food | sports | boardgame | entertainment | event | travel | other`
+      - `locationText / destinationText / timeText / constraints`
+    - `activityType` 必须处于同一大类
+    - `timePreference` 尽量重叠，并保留原始自由文本作为摘要和后续追问依据
+    - `areaText/locationHint` 文本归一后尽量相近；重庆片区白名单只作为标准化增强，不再作为理解入口
     - `status` 必须为 `active` 或候选对外开放
 
 2.  **精排 (Rank)**：
+    - **场景一致性**：`local_partner / destination_companion / fill_seat` 优先匹配同类
     - **语义相似度**：基于 `textarea description` 与内部标签做向量检索 / rerank
     - **时间重叠度**：计算两个意向的时间窗口交集
     - **偏好兼容度**：性别 / 年龄等显式约束存在时参与排序或过滤
-    - **距离/区域可达性**：无法精确选点时，以区域文本归一与近似距离综合判断
+    - **距离/区域可达性**：本地搭子优先看片区可达性；目的地同行优先看 `destinationText + timeText + activityText`
 
 3.  **握手协议 (Handshake Protocol)**：
     - 搜索结果页只返回匿名化候选摘要，不返回联系方式

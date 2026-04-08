@@ -1489,6 +1489,44 @@ function runLongConversationFlow(logs: string[]): void {
   logs.push(`flow#long-conversation ${stepSummaries.join(' ')}`);
 }
 
+function runPartnerUnderstandingRegression(logs: string[]): void {
+  const partnerTurn = postResponse({
+    type: 'text',
+    text: '泸州音乐节有人去吗',
+  });
+
+  const partnerText = partnerTurn.response.blocks
+    .map((block) => {
+      const content = (block as Record<string, unknown>).content;
+      return typeof content === 'string' ? content : '';
+    })
+    .join('\n');
+
+  assert(
+    /泸州|音乐节|同去|一起去|搭子|找人/.test(partnerText),
+    `destination companion turn should mention destination context: ${JSON.stringify(partnerTurn.response.blocks)}`
+  );
+
+  const followupTurn = postResponse({
+    type: 'text',
+    text: '周6平顶山有没有人',
+  }, partnerTurn.conversationId);
+
+  const followupText = followupTurn.response.blocks
+    .map((block) => {
+      const content = (block as Record<string, unknown>).content;
+      return typeof content === 'string' ? content : '';
+    })
+    .join('\n');
+
+  assert(
+    /平顶山|周6|周六|一起去|有人/.test(followupText),
+    `partner followup should keep free-text destination/time understanding: ${JSON.stringify(followupTurn.response.blocks)}`
+  );
+
+  logs.push('partner understanding regression OK destination_companion phrases');
+}
+
 function runTransientContextMemoryFlow(logs: string[]): void {
   const steps: { input: ResponseInput; expectedContext?: string[] }[] = [
     { input: { type: 'text', text: '周末附近有什么活动' }, expectedContext: ['location'] },
@@ -1714,6 +1752,7 @@ function main(): void {
     runGuestWriteGuardFlow(logs);
     runAuthCrossIntentLongFlow(logs);
     runLongConversationFlow(logs);
+    runPartnerUnderstandingRegression(logs);
     runTransientContextMemoryFlow(logs);
     runMultiIntentCrossFlow(logs);
     runErrorRecoveryFlow(logs);

@@ -29,6 +29,7 @@ import {
   resolvePartnerFormStageFromPayload,
   shouldRenderPartnerIntentFormFromPayload,
 } from '../workflow/partner-matching';
+import { understandPartnerRequest } from '../workflow/partner-understanding';
 
 const logger = createLogger('structured-action');
 
@@ -1193,18 +1194,42 @@ async function handleFindPartner(
 }
 
 function normalizePartnerSearchPayload(payload: Record<string, unknown>) {
-  const activityType = normalizePartnerActivityType(typeof payload.activityType === 'string' ? payload.activityType : undefined);
+  const rawInputSource = typeof payload.rawInput === 'string' && payload.rawInput.trim()
+    ? payload.rawInput.trim()
+    : typeof payload.prompt === 'string' && payload.prompt.trim()
+      ? payload.prompt.trim()
+      : '';
+  const understanding = rawInputSource ? understandPartnerRequest(rawInputSource) : null;
+  const activityType = normalizePartnerActivityType(typeof payload.activityType === 'string'
+    ? payload.activityType
+    : understanding?.activityType === 'food'
+      ? 'food'
+      : understanding?.activityType === 'sports'
+        ? 'sports'
+        : understanding?.activityType === 'boardgame'
+          ? 'boardgame'
+          : understanding?.activityType === 'entertainment'
+            ? 'entertainment'
+            : undefined);
   const sportType = normalizePartnerSportType(typeof payload.sportType === 'string' ? payload.sportType.trim() : undefined);
   const timeRange = typeof payload.timeRange === 'string' ? payload.timeRange.trim() : '';
   const locationHint = typeof payload.location === 'string' && payload.location.trim()
     ? payload.location.trim()
     : typeof payload.locationName === 'string' && payload.locationName.trim()
       ? payload.locationName.trim()
+      : understanding?.locationText || understanding?.destinationText
+        ? (understanding.locationText || understanding.destinationText || '')
       : '';
   const description = typeof payload.description === 'string' && payload.description.trim()
     ? payload.description.trim()
     : typeof payload.note === 'string' && payload.note.trim()
       ? payload.note.trim()
+      : understanding?.activityText || understanding?.destinationText
+        ? [
+            understanding?.destinationText,
+            understanding?.activityText,
+            understanding?.timeText,
+          ].filter(Boolean).join(' ')
       : '';
   const preferredGender = typeof payload.preferredGender === 'string' && payload.preferredGender.trim()
     ? payload.preferredGender.trim()
@@ -1212,10 +1237,11 @@ function normalizePartnerSearchPayload(payload: Record<string, unknown>) {
   const preferredAgeRange = typeof payload.preferredAgeRange === 'string' && payload.preferredAgeRange.trim()
     ? payload.preferredAgeRange.trim()
     : '';
-  const timePreference = timeRange ? getPartnerTimeLabel(timeRange) : undefined;
+  const resolvedTimeRange = timeRange || understanding?.normalizedTimeRange || '';
+  const timePreference = resolvedTimeRange ? getPartnerTimeLabel(resolvedTimeRange) : understanding?.timeText;
   const sportLabel = getPartnerSportTypeLabel(sportType);
   const rawInputParts = [
-    typeof payload.rawInput === 'string' ? payload.rawInput.trim() : '',
+    rawInputSource,
     sportLabel ? `${sportLabel}搭子` : '',
     timePreference || '',
     locationHint,
@@ -1225,7 +1251,7 @@ function normalizePartnerSearchPayload(payload: Record<string, unknown>) {
   return {
     activityType,
     sportType,
-    timeRange,
+    timeRange: resolvedTimeRange,
     timePreference,
     locationHint,
     description,
@@ -1235,6 +1261,46 @@ function normalizePartnerSearchPayload(payload: Record<string, unknown>) {
   };
 }
 
+function buildPartnerSearchResultMessage(params: {
+  scenarioType?: string;
+  hasResults: boolean;
+  locationHint: string;
+  targetLabel: string;
+}): string {
+  const locationLabel = params.locationHint || '这边';
+
+  if (params.scenarioType === 'destination_companion') {
+    return params.hasResults
+      ? `我先按“去${locationLabel}同去”的方向帮你筛了一轮。你现在还在“先搜一下”这一步，先看看有没有顺眼的人，再决定要不要继续推进。`
+      : `我先按“去${locationLabel}同去”的方向帮你筛了一轮，暂时还没碰到特别合适的。你可以补一句是想找同行、同路，还是到了当地再一起玩，我继续帮你收窄。`;
+  }
+
+  if (params.scenarioType === 'fill_seat') {
+    return params.hasResults
+      ? `我先按${locationLabel}这边“补位”的方向帮你找了一轮。你现在还在“先搜一下”这一步，先挑一位继续，或者这轮没有就让我继续替你留意。`
+      : `我先按${locationLabel}这边“补位”的方向帮你搜了一轮，暂时还没看到特别合适的。你可以补一句时间、人数或玩法要求，我继续帮你捞。`;
+  }
+
+  return params.hasResults
+    ? `先按${locationLabel}附近的${params.targetLabel}帮你找了一圈。你现在还在“先搜一下”这一步，先挑一位继续，或者这轮没有就让我继续替你留意。`
+    : `先按${locationLabel}附近的${params.targetLabel}帮你搜了一圈，暂时还没看到特别合适的。你可以换个片区、补一句你想找的人是什么样，或者登录后让我继续替你留意。`;
+}
+
+function buildPartnerSearchResultsTitle(params: {
+  scenarioType?: string;
+  hasResults: boolean;
+}): string {
+  if (params.scenarioType === 'destination_companion') {
+    return params.hasResults ? '先搜到这些同去伙伴' : '暂时还没搜到特别合适的同去伙伴';
+  }
+
+  if (params.scenarioType === 'fill_seat') {
+    return params.hasResults ? '先搜到这些补位人选' : '暂时还没搜到特别合适的补位人选';
+  }
+
+  return params.hasResults ? '先搜到这几位' : '暂时还没搜到特别合适的';
+}
+
 function buildPartnerSearchCardActions(params: {
   userId: string | null;
   partnerIntentId: string;
@@ -1242,11 +1308,23 @@ function buildPartnerSearchCardActions(params: {
   candidateTitle: string;
   activityType: string;
   sportType?: string;
+  scenarioType?: string;
   searchPayload: Record<string, unknown>;
 }): Array<{ label: string; action: string; params: Record<string, unknown> }> {
+  const connectLabel = params.scenarioType === 'destination_companion'
+    ? (params.userId ? '发起同去邀约' : '登录后发起同去邀约')
+    : params.scenarioType === 'fill_seat'
+      ? (params.userId ? '发起补位邀约' : '登录后发起补位邀约')
+      : (params.userId ? '发起搭子邀请' : '登录后发起搭子邀请');
+  const groupUpLabel = params.scenarioType === 'destination_companion'
+    ? (params.userId ? '让小聚帮我问要不要一起去' : '登录后让小聚帮我问要不要一起去')
+    : params.scenarioType === 'fill_seat'
+      ? (params.userId ? '让小聚帮我问能不能补位' : '登录后让小聚帮我问能不能补位')
+      : (params.userId ? '让小聚帮我问能不能组局' : '登录后让小聚帮我问能不能组局');
+
   return [
     {
-      label: params.userId ? '发起搭子邀请' : '登录后发起搭子邀请',
+      label: connectLabel,
       action: 'connect_partner',
       params: {
         partnerIntentId: params.partnerIntentId,
@@ -1258,7 +1336,7 @@ function buildPartnerSearchCardActions(params: {
       },
     },
     {
-      label: params.userId ? '让小聚帮我问能不能组局' : '登录后让小聚帮我问能不能组局',
+      label: groupUpLabel,
       action: 'request_partner_group_up',
       params: {
         partnerIntentId: params.partnerIntentId,
@@ -1403,7 +1481,10 @@ async function handleSearchPartners(
   }
 
   const partnerSearchResults = {
-    title: searchResult.items.length > 0 ? '先搜到这几位' : '暂时还没搜到特别合适的',
+    title: buildPartnerSearchResultsTitle({
+      scenarioType: searchResult.searchSummary.scenarioType,
+      hasResults: searchResult.items.length > 0,
+    }),
     searchSummary: {
       ...searchResult.searchSummary,
       count: searchResult.total,
@@ -1423,9 +1504,9 @@ async function handleSearchPartners(
     items: searchResult.items.map((item) => ({
       id: item.intentId,
       partnerIntentId: item.intentId,
-      candidateUserId: item.userId,
-      title: item.nickname,
-      avatarUrl: item.avatarUrl,
+        candidateUserId: item.userId,
+        title: item.nickname,
+        avatarUrl: item.avatarUrl,
       type: item.typeName,
       locationName: item.locationHint,
       locationHint: item.locationHint,
@@ -1441,6 +1522,7 @@ async function handleSearchPartners(
         candidateTitle: item.nickname,
         activityType: normalized.activityType,
         ...(normalized.sportType ? { sportType: normalized.sportType } : {}),
+        scenarioType: searchResult.searchSummary.scenarioType,
         searchPayload,
       }),
     })),
@@ -1454,9 +1536,12 @@ async function handleSearchPartners(
       locationName: normalized.locationHint,
       searchPayload,
       partnerSearchResults,
-      message: searchResult.items.length > 0
-        ? `先按${normalized.locationHint}附近的${getPartnerSearchTargetLabel(normalized.activityType, normalized.sportType)}帮你找了一圈。你现在还在“先搜一下”这一步，先挑一位继续，或者这轮没有就让我继续替你留意。`
-        : `先按${normalized.locationHint}附近的${getPartnerSearchTargetLabel(normalized.activityType, normalized.sportType)}帮你搜了一圈，暂时还没看到特别合适的。你可以换个片区、补一句你想找的人是什么样，或者登录后让我继续替你留意。`,
+      message: buildPartnerSearchResultMessage({
+        scenarioType: searchResult.searchSummary.scenarioType,
+        hasResults: searchResult.items.length > 0,
+        locationHint: normalized.locationHint,
+        targetLabel: getPartnerSearchTargetLabel(normalized.activityType, normalized.sportType),
+      }),
     },
   };
 }

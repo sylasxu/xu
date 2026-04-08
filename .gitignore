@@ -213,6 +213,8 @@ apps/miniprogram/.openapi/
 **/*.spec.js
 **/*.spec.ts
 !apps/api/src/modules/ai/__tests__/agent-task-runtime.integration.test.ts
+!apps/api/src/modules/ai/workflow/partner-understanding.test.ts
+!apps/api/src/modules/ai/workflow/partner-matching.test.ts
 test-*.js
 test-*.ts
 

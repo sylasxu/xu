@@ -8,6 +8,7 @@
 import { db, conversationMessages, eq, desc } from '@juchang/db';
 import { randomUUID } from 'crypto';
 import { createLogger } from '../observability/logger';
+import { understandPartnerRequest, type PartnerScenarioType, type PartnerSemanticType } from './partner-understanding';
 
 const logger = createLogger('partner-matching');
 
@@ -33,6 +34,8 @@ export interface PartnerMatchingState {
   rawInput: string;
   /** 状态 */
   status: 'collecting' | 'searching' | 'completed' | 'paused';
+  /** 自然语言场景 */
+  scenarioType?: PartnerScenarioType;
   /** 已收集的偏好 */
   collectedPreferences: {
     activityType?: string;
@@ -127,6 +130,7 @@ interface StoredPartnerMatchingState {
     workflowId: string;
     rawInput: string;
     status: PartnerMatchingState['status'];
+    scenarioType?: PartnerScenarioType;
     collectedPreferences: Record<string, unknown>;
     missingRequired: string[];
     round: number;
@@ -211,6 +215,11 @@ function readStoredPartnerMatchingState(value: unknown): StoredPartnerMatchingSt
     : null;
   const createdAt = readRequiredText(value.state.createdAt);
   const updatedAt = readRequiredText(value.state.updatedAt);
+  const scenarioType = value.state.scenarioType === 'local_partner'
+    || value.state.scenarioType === 'destination_companion'
+    || value.state.scenarioType === 'fill_seat'
+    ? value.state.scenarioType
+    : undefined;
 
   if (!workflowId || !status || round === null || !createdAt || !updatedAt) {
     return null;
@@ -222,6 +231,7 @@ function readStoredPartnerMatchingState(value: unknown): StoredPartnerMatchingSt
       workflowId,
       rawInput,
       status,
+      ...(scenarioType ? { scenarioType } : {}),
       collectedPreferences: readPartnerCollectedPreferences(value.state.collectedPreferences),
       missingRequired,
       round,
@@ -233,7 +243,7 @@ function readStoredPartnerMatchingState(value: unknown): StoredPartnerMatchingSt
 
 // ============ 配置 ============
 
-const REQUIRED_FIELDS: Array<'activityType' | 'location'> = ['activityType', 'location'];
+const DEFAULT_REQUIRED_FIELDS: Array<'activityType' | 'location'> = ['activityType', 'location'];
 
 const PARTNER_ACTIVITY_LABELS: Record<PartnerActivityType, string> = {
   food: '美食',
@@ -327,6 +337,18 @@ const PARTNER_SPORT_OPTIONS: Array<{ label: string; value: PartnerSportType }> =
   { label: '骑行', value: 'cycling' },
 ];
 
+function mapSemanticTypeToPartnerActivityType(value: PartnerSemanticType): PartnerActivityType | undefined {
+  switch (value) {
+    case 'food':
+    case 'sports':
+    case 'boardgame':
+    case 'entertainment':
+      return value;
+    default:
+      return undefined;
+  }
+}
+
 function inferPartnerActivityTypeFromText(message: string): PartnerActivityType | undefined {
   if (/(麻将|桌游|狼人杀|剧本杀)/.test(message)) {
     return 'boardgame';
@@ -385,6 +407,30 @@ function inferPartnerLocationFromText(message: string): string | undefined {
   return undefined;
 }
 
+function resolvePartnerRequiredFields(state: Pick<PartnerMatchingState, 'scenarioType'>): Array<'activityType' | 'location'> {
+  if (state.scenarioType === 'destination_companion') {
+    return ['location'];
+  }
+
+  return DEFAULT_REQUIRED_FIELDS;
+}
+
+function buildPartnerLocationQuestion(state: Pick<PartnerMatchingState, 'scenarioType'>): string {
+  if (state.scenarioType === 'destination_companion') {
+    return '你想一起去哪个地方，或者去哪个活动？';
+  }
+
+  return QUESTION_TEMPLATES.location.question;
+}
+
+function buildPartnerLocationPlaceholder(state: Pick<PartnerMatchingState, 'scenarioType'>): string {
+  if (state.scenarioType === 'destination_companion') {
+    return '比如泸州音乐节、平顶山、成都';
+  }
+
+  return '比如观音桥、南坪、大学城';
+}
+
 export function buildPartnerIntentFormPayload(params: {
   state: PartnerMatchingState;
   fallbackLocationHint: string;
@@ -393,10 +439,14 @@ export function buildPartnerIntentFormPayload(params: {
   defaultLocation?: string;
 }): PartnerIntentFormPayload {
   const rawInput = params.rawInput?.trim() || params.state.rawInput.trim();
-  const inferredActivityType = inferPartnerActivityTypeFromText(rawInput || '');
+  const understanding = understandPartnerRequest(rawInput || '');
+  const inferredActivityType = mapSemanticTypeToPartnerActivityType(understanding.activityType)
+    || inferPartnerActivityTypeFromText(rawInput || '');
   const inferredSportType = inferPartnerSportTypeFromText(rawInput || '');
-  const inferredTimeRange = inferPartnerTimeRangeFromText(rawInput || '');
-  const inferredLocation = inferPartnerLocationFromText(rawInput || '');
+  const inferredTimeRange = understanding.normalizedTimeRange || inferPartnerTimeRangeFromText(rawInput || '');
+  const inferredLocation = understanding.locationText
+    || understanding.destinationText
+    || inferPartnerLocationFromText(rawInput || '');
 
   const activityType = normalizePartnerActivityType(
     params.state.collectedPreferences.activityType
@@ -406,7 +456,7 @@ export function buildPartnerIntentFormPayload(params: {
   const sportType = activityType === 'sports'
     ? (params.state.collectedPreferences.sportType || inferredSportType || '')
     : '';
-  const shouldAskActivityType = activityType !== 'sports' && activityType === 'other';
+  const shouldAskActivityType = activityType === 'other' && understanding.scenarioType !== 'destination_companion';
   const selectedLocation = params.state.collectedPreferences.location
     || params.defaultLocation
     || inferredLocation
@@ -468,10 +518,10 @@ export function buildPartnerIntentFormPayload(params: {
     },
     {
       name: 'location',
-      label: '你一般在哪片活动方便',
+      label: understanding.scenarioType === 'destination_companion' ? '你想一起去哪里' : '你一般在哪片活动方便',
       type: 'text',
       required: true,
-      placeholder: '比如观音桥、南坪、大学城',
+      placeholder: buildPartnerLocationPlaceholder({ scenarioType: understanding.scenarioType }),
       maxLength: 30,
     },
     {
@@ -539,19 +589,41 @@ export function shouldStartPartnerMatching(
 
 export function createPartnerMatchingState(rawInput: string): PartnerMatchingState {
   const now = new Date();
-  const inferredActivityType = inferPartnerActivityTypeFromText(rawInput);
+  const understanding = understandPartnerRequest(rawInput);
+  const inferredActivityType = mapSemanticTypeToPartnerActivityType(understanding.activityType)
+    || inferPartnerActivityTypeFromText(rawInput);
   const inferredSportType = inferPartnerSportTypeFromText(rawInput);
-  const inferredTimeRange = inferPartnerTimeRangeFromText(rawInput);
-  const inferredLocation = inferPartnerLocationFromText(rawInput);
-  const inferredTags = inferPartnerTagsFromText(rawInput);
+  const inferredTimeRange = understanding.normalizedTimeRange || inferPartnerTimeRangeFromText(rawInput);
+  const inferredLocation = understanding.locationText
+    || understanding.destinationText
+    || inferPartnerLocationFromText(rawInput);
+  const inferredTags = Array.from(new Set([
+    ...understanding.constraints,
+    ...inferPartnerTagsFromText(rawInput),
+  ]));
+  const inferredGenericType = !inferredActivityType && understanding.scenarioType === 'destination_companion'
+    ? 'other'
+    : undefined;
   const collectedPreferences: PartnerMatchingState['collectedPreferences'] = {
-    ...(inferredActivityType ? { activityType: inferredActivityType } : {}),
+    ...((inferredActivityType || inferredGenericType) ? { activityType: inferredActivityType || inferredGenericType } : {}),
     ...(inferredSportType ? { sportType: inferredSportType } : {}),
     ...(inferredTimeRange ? { timeRange: inferredTimeRange } : {}),
     ...(inferredLocation ? { location: inferredLocation } : {}),
+    ...(
+      understanding.activityText || understanding.destinationText
+        ? {
+            description: [
+              understanding.destinationText,
+              understanding.activityText,
+              understanding.timeText,
+            ].filter(Boolean).join(' '),
+          }
+        : {}
+    ),
     ...(inferredTags.length > 0 ? { tags: inferredTags } : {}),
   };
-  const missingRequired: string[] = REQUIRED_FIELDS.filter((field) => {
+  const requiredFields = resolvePartnerRequiredFields({ scenarioType: understanding.scenarioType });
+  const missingRequired: string[] = requiredFields.filter((field) => {
     if (field === 'activityType') {
       return !collectedPreferences.activityType;
     }
@@ -567,6 +639,7 @@ export function createPartnerMatchingState(rawInput: string): PartnerMatchingSta
     workflowId: randomUUID(),
     rawInput,
     status: 'collecting',
+    scenarioType: understanding.scenarioType,
     collectedPreferences,
     missingRequired,
     round: 0,
@@ -600,7 +673,8 @@ export function updatePartnerMatchingState(
     updatedAt: new Date(),
   };
 
-  newState.missingRequired = REQUIRED_FIELDS.filter((field) => {
+  const requiredFields = resolvePartnerRequiredFields(newState);
+  newState.missingRequired = requiredFields.filter((field) => {
     if (field === 'activityType') {
       return !newState.collectedPreferences.activityType;
     }
@@ -638,7 +712,19 @@ export function completePartnerMatchingState(state: PartnerMatchingState): Partn
 export function getNextQuestion(state: PartnerMatchingState): PartnerMatchingQuestion | null {
   if (state.missingRequired.length > 0) {
     const field = state.missingRequired[0];
-    return QUESTION_TEMPLATES[field] || null;
+    const template = QUESTION_TEMPLATES[field];
+    if (!template) {
+      return null;
+    }
+
+    if (field === 'location') {
+      return {
+        ...template,
+        question: buildPartnerLocationQuestion(state),
+      };
+    }
+
+    return template;
   }
 
   return null;
@@ -697,15 +783,24 @@ export function inferPartnerMessageHints(message: string): {
   tags?: string[];
 } {
   const hints: { location?: string; tags?: string[] } = {};
+  const understanding = understandPartnerRequest(message);
+  if (understanding.locationText || understanding.destinationText) {
+    hints.location = understanding.locationText || understanding.destinationText;
+  }
+
+  if (understanding.constraints.length > 0) {
+    hints.tags = [...understanding.constraints];
+  }
+
   const locations = ['观音桥', '解放碑', '南坪', '沙坪坝', '江北嘴', '杨家坪', '大坪'];
   for (const location of locations) {
-    if (message.includes(location)) {
+    if (!hints.location && message.includes(location)) {
       hints.location = location;
       break;
     }
   }
 
-  const tags: string[] = [];
+  const tags: string[] = [...(hints.tags || [])];
   if (/(^|\b)aa(制)?(\b|$)/i.test(message)) {
     tags.push('AA');
   }
@@ -869,7 +964,8 @@ export function hydratePartnerMatchingStateFromPayload(
     ...(tags.length > 0 ? { tags } : {}),
   };
 
-  const missingRequired: string[] = REQUIRED_FIELDS.filter((field) => {
+  const requiredFields = resolvePartnerRequiredFields(state);
+  const missingRequired: string[] = requiredFields.filter((field) => {
     if (field === 'activityType') {
       return !collectedPreferences.activityType;
     }
@@ -919,6 +1015,22 @@ export function buildPartnerWorkflowIntroText(state: PartnerMatchingState): stri
     : getPartnerActivityTypeLabel(state.collectedPreferences.activityType);
   const resolvedLocationLabel = state.collectedPreferences.location?.trim() || '';
 
+  if (state.scenarioType === 'destination_companion') {
+    if (resolvedLocationLabel) {
+      return `你想找一起去${resolvedLocationLabel}的人，我先按“同去/同行”这个方向帮你收窄。`;
+    }
+
+    return '你像是在找一起去同一个地方或活动的人，我先按“同去/同行”这个方向帮你收窄。';
+  }
+
+  if (state.scenarioType === 'fill_seat') {
+    if (resolvedLocationLabel) {
+      return `你像是在找${resolvedLocationLabel}这边的临时补位，我先按补位方向帮你收窄。`;
+    }
+
+    return '你像是在找临时补位的人，我先按补位方向帮你收窄。';
+  }
+
   if (resolvedTypeLabel && resolvedLocationLabel) {
     return `你想找${resolvedLocationLabel}附近的${resolvedTypeLabel}搭子，我先按这个方向帮你收窄。`;
   }
@@ -954,11 +1066,15 @@ export function buildPartnerAskPreferencePayload(
     return null;
   }
 
+  const optionList = nextQuestion.field === 'location' && state.scenarioType === 'destination_companion'
+    ? []
+    : nextQuestion.options;
+
   return {
     status: 'collecting',
     questionType: resolvePartnerQuestionType(nextQuestion.field),
     question: nextQuestion.question,
-    options: nextQuestion.options.map((option) => ({
+    options: optionList.map((option) => ({
       label: option.label,
       value: option.value,
       action: 'find_partner',
@@ -1092,6 +1208,7 @@ export async function persistPartnerMatchingState(
         workflowId: state.workflowId,
         rawInput: state.rawInput,
         status: state.status,
+        ...(state.scenarioType ? { scenarioType: state.scenarioType } : {}),
         collectedPreferences: state.collectedPreferences,
         missingRequired: state.missingRequired,
         round: state.round,
@@ -1142,6 +1259,7 @@ export async function recoverPartnerMatchingState(
           workflowId: stored.workflowId,
           rawInput: stored.rawInput || '',
           status: stored.status,
+          ...(stored.scenarioType ? { scenarioType: stored.scenarioType } : {}),
           collectedPreferences: readPartnerCollectedPreferences(stored.collectedPreferences),
           missingRequired: stored.missingRequired,
           round: stored.round,

@@ -12,6 +12,7 @@ import { toJsonSchema } from '@juchang/utils';
 import { db, users, partnerIntents, eq, and, desc, not, sql, type PartnerIntent } from '@juchang/db';
 import { detectMatchesForIntent, getPendingMatchesForUser, confirmMatch as confirmMatchService } from './partner-match';
 import { recordPartnerTaskIntentPosted } from '../task-runtime/agent-task.service';
+import { understandPartnerRequest } from '../workflow/partner-understanding';
 
 // ============ Schema 定义 ============
 
@@ -95,6 +96,7 @@ export interface SearchSummary {
   total: number;
   locationHint: string;
   timeHint: string;
+  scenarioType?: string;
 }
 
 export interface SearchNextAction {
@@ -192,6 +194,96 @@ function extractCommonLocationHint(candidates: SearchPartnerCandidate[], queryLo
   return `在${candidates[0].locationHint}附近`;
 }
 
+function buildSearchScenarioSummary(rawInput: string): string | undefined {
+  const understanding = understandPartnerRequest(rawInput);
+
+  if (understanding.scenarioType === 'destination_companion') {
+    return 'destination_companion';
+  }
+
+  if (understanding.scenarioType === 'fill_seat') {
+    return 'fill_seat';
+  }
+
+  return 'local_partner';
+}
+
+function buildSearchLocationSummary(rawInput: string, queryLocation: string, candidates: SearchPartnerCandidate[]): string {
+  const understanding = understandPartnerRequest(rawInput);
+
+  if (understanding.scenarioType === 'destination_companion') {
+    const destination = understanding.destinationText || queryLocation;
+    return destination ? `都在看${destination}这个方向` : '都在看同去同一个地方这件事';
+  }
+
+  if (understanding.scenarioType === 'fill_seat') {
+    return queryLocation ? `${queryLocation}这边的补位需求` : '这轮补位方向';
+  }
+
+  return extractCommonLocationHint(candidates, queryLocation);
+}
+
+function buildPartnerCandidateTypeName(params: {
+  scenarioType?: string;
+  defaultTypeName: string;
+}): string {
+  if (params.scenarioType === 'destination_companion') {
+    return '同去伙伴';
+  }
+
+  if (params.scenarioType === 'fill_seat') {
+    return `${params.defaultTypeName}补位`;
+  }
+
+  return `${params.defaultTypeName}搭子`;
+}
+
+function buildPartnerCandidateSummary(params: {
+  scenarioType?: string;
+  rawInput: string;
+  defaultTypeName: string;
+  locationHint: string;
+  timePreference?: string | null;
+  destinationText?: string;
+}): string {
+  const trimmedRawInput = params.rawInput.trim();
+  if (trimmedRawInput) {
+    return trimmedRawInput;
+  }
+
+  if (params.scenarioType === 'destination_companion') {
+    const destination = params.destinationText || params.locationHint;
+    const timeLabel = params.timePreference || '时间待确认';
+    return destination ? `想找一起去${destination}的人，${timeLabel}` : `想找一起去同一个地方的人，${timeLabel}`;
+  }
+
+  if (params.scenarioType === 'fill_seat') {
+    const timeLabel = params.timePreference || '时间待确认';
+    return `${params.locationHint || '这边'}想找${params.defaultTypeName}补位，${timeLabel}`;
+  }
+
+  return `想找${params.defaultTypeName}搭子`;
+}
+
+function buildPartnerCandidateReason(params: {
+  scenarioType?: string;
+  reasons: string[];
+}): string {
+  if (params.reasons.length > 0) {
+    return params.reasons.join(' · ');
+  }
+
+  if (params.scenarioType === 'destination_companion') {
+    return '你们都在看同去同一个地方这件事';
+  }
+
+  if (params.scenarioType === 'fill_seat') {
+    return '你们都在找临时补位的人';
+  }
+
+  return '你们想找的是同一类搭子';
+}
+
 /**
  * 提取共同时间提示
  */
@@ -225,15 +317,28 @@ function calculatePartnerSearchScore(params: {
   candidate: typeof partnerIntents.$inferSelect;
 }): { score: number; reasons: string[] } {
   const { query, candidate } = params;
+  const queryUnderstanding = understandPartnerRequest(`${query.rawInput} ${query.description}`.trim());
+  const candidateRawInput = typeof candidate.metaData?.rawInput === 'string' ? candidate.metaData.rawInput : '';
+  const candidateUnderstanding = understandPartnerRequest(
+    `${candidateRawInput} ${candidate.locationHint} ${candidate.timePreference || ''}`.trim()
+  );
   let score = 35;
   const reasons: string[] = [];
   const candidateTags = Array.isArray(candidate.metaData?.tags) ? candidate.metaData.tags : [];
-  const candidateRawInput = typeof candidate.metaData?.rawInput === 'string' ? candidate.metaData.rawInput : '';
   const queryDescription = `${query.description} ${query.rawInput}`.trim();
   const queryTokens = extractSearchTokens(queryDescription);
   const candidateTokens = extractSearchTokens(`${candidateRawInput} ${candidate.locationHint} ${candidate.timePreference || ''} ${candidateTags.join(' ')}`);
   const normalizedQueryLocation = normalizeSearchText(query.locationHint);
   const normalizedCandidateLocation = normalizeSearchText(candidate.locationHint);
+
+  if (queryUnderstanding.scenarioType === candidateUnderstanding.scenarioType) {
+    score += 12;
+    if (queryUnderstanding.scenarioType === 'destination_companion') {
+      reasons.push('都是同去同一目的地方向');
+    } else if (queryUnderstanding.scenarioType === 'fill_seat') {
+      reasons.push('都是临时补位方向');
+    }
+  }
 
   if (query.activityType === 'sports' && query.sportType) {
     if (candidate.metaData?.sportType === query.sportType) {
@@ -261,6 +366,21 @@ function calculatePartnerSearchScore(params: {
     reasons.push(`都提到${candidate.locationHint}附近更方便`);
   }
 
+  const queryDestination = normalizeSearchText(queryUnderstanding.destinationText || '');
+  const candidateDestination = normalizeSearchText(candidateUnderstanding.destinationText || '');
+  if (queryDestination && candidateDestination && queryDestination === candidateDestination) {
+    score += 20;
+    reasons.push(`都提到去${candidateUnderstanding.destinationText}`);
+  }
+
+  if (
+    query.timePreference &&
+    candidate.timePreference &&
+    normalizeSearchText(query.timePreference) === normalizeSearchText(candidate.timePreference)
+  ) {
+    score += 8;
+  }
+
   const overlapCount = queryTokens.filter((token) => candidateTokens.includes(token)).length;
   if (overlapCount > 0) {
     score += Math.min(18, overlapCount * 5);
@@ -282,6 +402,7 @@ export async function searchPartnerCandidates(
   params: SearchPartnerCandidatesParams
 ): Promise<SearchPartnerCandidatesResult> {
   try {
+    const queryUnderstanding = understandPartnerRequest(`${params.rawInput} ${params.description}`.trim());
     const rows = await db
       .select({
         intent: partnerIntents,
@@ -312,20 +433,36 @@ export async function searchPartnerCandidates(
           candidate: row.intent,
         });
         const typeName = getPartnerIntentTypeName(row.intent.activityType, row.intent.metaData?.sportType);
-        const summary = typeof row.intent.metaData?.rawInput === 'string' && row.intent.metaData.rawInput.trim()
-          ? row.intent.metaData.rawInput.trim()
-          : `想找${typeName}搭子`;
+        const candidateRawInput = typeof row.intent.metaData?.rawInput === 'string' ? row.intent.metaData.rawInput : '';
+        const candidateUnderstanding = understandPartnerRequest(
+          `${candidateRawInput} ${row.intent.locationHint} ${row.intent.timePreference || ''}`.trim()
+        );
+        const resolvedScenarioType = queryUnderstanding.scenarioType || candidateUnderstanding.scenarioType;
+        const summary = buildPartnerCandidateSummary({
+          scenarioType: resolvedScenarioType,
+          rawInput: candidateRawInput,
+          defaultTypeName: typeName,
+          locationHint: row.intent.locationHint,
+          timePreference: row.intent.timePreference || null,
+          destinationText: candidateUnderstanding.destinationText,
+        });
 
         return {
           intentId: row.intent.id,
           userId: row.intent.userId,
           nickname: row.nickname?.trim() || '匿名搭子',
           avatarUrl: row.avatarUrl ?? null,
-          typeName: `${typeName}搭子`,
+          typeName: buildPartnerCandidateTypeName({
+            scenarioType: resolvedScenarioType,
+            defaultTypeName: typeName,
+          }),
           locationHint: row.intent.locationHint,
           timePreference: row.intent.timePreference || null,
           summary,
-          matchReason: reasons.join(' · ') || '你们想找的是同一类搭子',
+          matchReason: buildPartnerCandidateReason({
+            scenarioType: resolvedScenarioType,
+            reasons,
+          }),
           score,
           tags: Array.isArray(row.intent.metaData?.tags) ? row.intent.metaData.tags.slice(0, 3) : [],
         } satisfies SearchPartnerCandidate;
@@ -336,8 +473,9 @@ export async function searchPartnerCandidates(
     // 构建搜索摘要
     const searchSummary: SearchSummary = {
       total: scored.length,
-      locationHint: extractCommonLocationHint(scored, params.locationHint),
+      locationHint: buildSearchLocationSummary(params.rawInput, params.locationHint, scored),
       timeHint: extractCommonTimeHint(scored, params.timePreference),
+      scenarioType: buildSearchScenarioSummary(params.rawInput),
     };
 
     // 主要下一步动作：入池等待

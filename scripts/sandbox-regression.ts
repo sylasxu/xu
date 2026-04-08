@@ -262,6 +262,13 @@ function hasTextContent(blocks: AiChatEnvelope['response']['blocks']): boolean {
   return blocks.some((block) => block.type === 'text' && typeof block.content === 'string' && block.content.trim().length > 0);
 }
 
+function extractVisibleText(blocks: AiChatEnvelope['response']['blocks']): string {
+  return blocks
+    .filter((block) => block.type === 'text' && typeof block.content === 'string' && block.content.trim().length > 0)
+    .map((block) => block.content!.trim())
+    .join('\n');
+}
+
 function hasVisibleFeedback(blocks: AiChatEnvelope['response']['blocks']): boolean {
   return blocks.some((block) => {
     if (block.type === 'text' && typeof block.content === 'string' && block.content.trim().length > 0) {
@@ -1401,6 +1408,54 @@ async function scenarioAiPartnerSearchBootstrapFlow(context: ScenarioContext): P
   return { name: 'ai-partner-search-bootstrap-flow', passed: true, details };
 }
 
+async function scenarioAiDestinationCompanionFlow(context: ScenarioContext): Promise<ScenarioResult> {
+  const [user] = context.users;
+  const details: string[] = [];
+
+  const firstTurn = await postAiAction({
+    user,
+    action: 'find_partner',
+    displayText: '泸州音乐节有人去吗',
+    payload: {
+      rawInput: '泸州音乐节有人去吗',
+      prompt: '泸州音乐节有人去吗',
+    },
+  });
+
+  assert(typeof firstTurn.conversationId === 'string' && firstTurn.conversationId.length > 0, '异地同行首轮未返回 conversationId');
+  assertNoLeakedToolText(firstTurn.response.blocks, '异地同行首轮');
+  assert(hasTextContent(firstTurn.response.blocks), `异地同行首轮缺少说明文本: ${JSON.stringify(firstTurn.response.blocks)}`);
+
+  const firstText = extractVisibleText(firstTurn.response.blocks);
+  assert(
+    /泸州|音乐节|同去|一起去|找人/.test(firstText),
+    `异地同行首轮未体现目的地语义: ${JSON.stringify(firstTurn.response.blocks)}`
+  );
+
+  const secondTurn = await postAiAction({
+    user,
+    action: 'find_partner',
+    conversationId: firstTurn.conversationId,
+    displayText: '周6平顶山有没有人',
+    payload: {
+      rawInput: '周6平顶山有没有人',
+      prompt: '周6平顶山有没有人',
+    },
+  });
+
+  assertNoLeakedToolText(secondTurn.response.blocks, '异地同行追答');
+  const secondText = extractVisibleText(secondTurn.response.blocks);
+  assert(
+    /平顶山|周6|周六|同去|有人/.test(secondText),
+    `异地同行追答未保持自由文本理解: ${JSON.stringify(secondTurn.response.blocks)}`
+  );
+
+  details.push(`会话 ${firstTurn.conversationId} 已能承接“泸州音乐节有人去吗 / 周6平顶山有没有人”这类异地同行表达`);
+  details.push('系统没有退回重庆片区词表模式，仍保持在同一条 find_partner 主链内推进');
+
+  return { name: 'ai-destination-companion-flow', passed: true, details };
+}
+
 async function scenarioAiDraftSettingsFormFlow(context: ScenarioContext): Promise<ScenarioResult> {
   const [user] = context.users;
   const details: string[] = [];
@@ -1910,6 +1965,7 @@ const coreScenarios = [
   scenarioAiLocationFollowupFlow,
   scenarioAiJoinAuthResumeDiscussionFlow,
   scenarioAiPartnerSearchBootstrapFlow,
+  scenarioAiDestinationCompanionFlow,
   scenarioAiDraftSettingsFormFlow,
   scenarioAiAccessFlow,
 ];

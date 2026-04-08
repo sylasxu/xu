@@ -63,7 +63,7 @@ inclusion: always
 ### apps/api (业务网关)
 - **Tech**: ElysiaJS + TypeBox
 - **模块与对外门面以 `apps/api/src/index.ts` 当前注册结果为准**；主流程域长期收口在 `auth / ai / activities / participants / chat / notifications / content`
-- **AI 模块结构 (v4.6)**:
+- **AI 模块结构**:
   - `ai.service.ts` - 核心入口
   - `processors/` - Processor 纯函数 (input-guard, user-profile, semantic-recall, token-limit, save-history, extract-preferences)
   - `models/` - 模型路由 (Moonshot / Kimi 主力，Qwen 仅保留 embedding)
@@ -81,7 +81,7 @@ inclusion: always
   - 禁止为同一领域能力新增 `admin/*`、`web/*`、`h5/*`、`miniprogram/*` 风格的后端模块、service、route、DTO
   - 当不同客户端有差异化消费方式时，统一通过同一领域接口的显式参数或上下文标记承接，例如 `client`、`entry`、`userId`、`activityId`
   - Admin/H5/小程序的差异，优先体现在鉴权、字段裁剪、响应组装或前端消费层，不体现在后端按端分叉的领域建模
-  - 只有“该能力本身就是独立领域”时，才允许独立模块，例如 analytics、dashboard、wechat callback；不得因为某个端要用就反向拆后端
+  - 只有“该能力本身就是独立领域”时，才允许独立模块，例如 reports、wechat callback；不得因为某个端要用就反向拆后端
 - **禁止**: `export namespace`、class Service、手动定义 DB 表 Schema
 
 ---
@@ -269,10 +269,10 @@ bunx <package>       # 执行包命令
 - `activityStatusEnum`: draft, active, completed, cancelled
 - `conversationRoleEnum`: user, assistant
 - `conversationMessageTypeEnum`: text, user_action, widget_dashboard, widget_launcher, widget_action, widget_draft, widget_share, widget_explore, widget_error, widget_ask_preference
-- `partnerIntentStatusEnum`: active, matched, expired, cancelled (v4.0)
-- `intentMatchOutcomeEnum`: pending, confirmed, expired, cancelled (v4.0)
+- `partnerIntentStatusEnum`: active, matched, expired, cancelled
+- `intentMatchOutcomeEnum`: pending, confirmed, expired, cancelled
 
-**核心表** (v4.6 - 13 张):
+**主链与支撑表速查**：
 | 表 | 核心字段 |
 |---|---------|
 | users | id, wxOpenId, phoneNumber, nickname, avatarUrl, aiCreateQuotaToday |
@@ -282,19 +282,20 @@ bunx <package>       # 执行包命令
 | conversation_messages | id, conversationId, userId, role, messageType, content, activityId (消息) |
 | activity_messages | id, activityId, senderId, messageType, content |
 | notifications | id, userId, type, title, isRead, activityId |
-| partner_intents | id, userId, type, tags, location, expiresAt, status (v4.0) |
-| intent_matches | id, intentAId, intentBId, tempOrganizerId, outcome (v4.0) |
-| match_messages | id, matchId, senderId, content (v4.0) |
-| ai_requests | id, userId, modelId, inputTokens, outputTokens, latencyMs (v4.6) |
-| ai_tool_calls | id, requestId, toolName, durationMs, success (v4.6) |
-| ai_eval_samples | id, input, output, intent, score (v4.6) |
+| partner_intents | id, userId, activityType, scenarioType, locationHint, destinationText, timeText, status |
+| intent_matches | id, activityType, scenarioType, centerLocationHint, destinationText, tempOrganizerId, outcome |
+| match_messages | id, matchId, senderId, content |
+| agent_tasks | id, userId, taskType, currentStage, status, partnerIntentId, intentMatchId |
+| agent_task_events | id, taskId, eventType, eventPayload, createdAt |
+| ai_requests | id, userId, modelId, inputTokens, outputTokens, latencyMs |
+| ai_tool_calls | id, requestId, toolName, durationMs, success |
 
 **AI 对话持久化 (v3.9)**:
 - 有登录用户的 AI 对话自动保存到 `conversation_messages` 表
 - Tool 返回的 `activityId` 自动关联到消息
 - 支持按 `activityId` 查询关联的对话历史
 
-**AI 模型配置 (v4.6)**:
+**AI 模型配置**:
 - **主力**: Moonshot / Kimi（默认统一走 `kimi-k2.5`，避免 thinking/tool-call 兼容问题）
 - **Embedding**: Qwen text-embedding-v4 (1536 维，Qwen 仅保留这一项)
 - **Rerank**: 本地轻量排序（不走外部 Qwen 模型）
@@ -316,10 +317,10 @@ bunx <package>       # 执行包命令
 - **CP-20**: AI 对话自动持久化 - 有 userId 时保存到 conversation_messages
 - **CP-21**: Tool 返回的 activityId 自动关联到 AI 响应消息
 
-### 找搭子 (v4.0)
-- **CP-23**: 同一用户同一类型只能有一个 active 意向
+### 找搭子
+- **CP-23**: 同一用户同一场景在同一时间只能保留一个 active 意向
 - **CP-24**: 意向 24h 自动过期
-- **CP-25**: 匹配只在无 tag 冲突、同类型、3km 内、score ≥ 80% 时创建
+- **CP-25**: 匹配只在同场景、无明显冲突且达到搜索评分阈值时创建
 - **CP-26**: Temp_Organizer 是最早创建意向的用户
 
 ---

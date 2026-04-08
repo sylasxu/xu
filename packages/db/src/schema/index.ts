@@ -1,5 +1,6 @@
 // ==========================================
-// Schema Exports - v4.5 Semantic Search
+// Schema Exports
+// 以当前主流程与内部支撑真源为准
 // ==========================================
 
 // 0. Custom Types (pgvector support)
@@ -8,7 +9,7 @@ export * from "./custom-types";
 // 1. Enums
 export * from "./enums";
 
-// 2. Core Tables
+// 2. Core Business Tables
 export * from "./users";
 export * from "./activities";
 export * from "./participants";
@@ -21,28 +22,28 @@ export * from "./user-memories";      // 长期用户记忆
 // 4. Notification System
 export * from "./notifications";
 
-// 4.5 Agent Task Runtime (v5.4)
+// 4.5 Agent Task Runtime
 export * from "./agent-tasks";
 export * from "./agent-task-events";
 
 // 5. Report System (内容审核)
 export * from "./reports";
 
-// 6. Partner Intent System (v4.0 Smart Broker - 3表精简版)
-export * from "./partner-intents";    // 搭子意向
-export * from "./intent-matches";     // 意向匹配 (含 intentIds[], userIds[] 数组)
-export * from "./match-messages";     // 匹配消息 (直接关联 matchId)
+// 6. Partner Intent System
+export * from "./partner-intents";    // 搭子意向（含 local_partner / destination_companion / fill_seat）
+export * from "./intent-matches";     // 意向匹配结果
+export * from "./match-messages";     // 匹配消息
 
-// 7. AI Ops (安全持久化 + 请求日志)
+// 7. AI Internal Support (安全持久化 + 请求日志)
 export * from "./ai-sensitive-words";
 export * from "./ai-security-events";
-export * from "./ai-requests";        // v4.8 AI 请求日志
-export * from "./ai-tool-calls";      // v4.8 AI Tool 调用日志
+export * from "./ai-requests";
+export * from "./ai-tool-calls";
 
-// 8. Global Keywords System (v4.8 Digital Ascension)
+// 8. Global Keywords System
 export * from "./global_keywords";
 
-// 9. AI Config System (v4.8 AI 参数配置)
+// 9. AI Config System
 export * from "./ai-configs";
 
 // 10. Content Operations (自媒体内容运营)
@@ -51,21 +52,7 @@ export * from "./content-notes";
 // 11. Relations (must be last to avoid circular imports)
 export * from "./relations";
 
-// ==========================================
-// v4.5 变更说明 (Semantic Search):
-// - activities: 新增 embedding vector(1536) 列 (Qwen text-embedding-v4)
-// - custom-types: 新增 pgvector 的 vector 类型支持
-// - 迁移文件: 0009_add_embedding.sql
-// ==========================================
-
-// ==========================================
-// v4.0 变更说明 (3表精简版):
-// - partner_intents: 搭子意向 (保持不变)
-// - intent_matches: 意向匹配 (新增 intentIds[], userIds[] 数组，移除 liteChatId)
-// - match_messages: 匹配消息 (直接关联 matchId，替代 lite_chat_messages)
-// 
-// 删除的表:
-// - intent_match_members (用 uuid[] 数组替代)
-// - lite_chats (Match 本身就是群组)
-// - lite_chat_messages (改为 match_messages)
-// ==========================================
+// 说明：
+// - activities / conversation_messages 仍保留向量字段，用于语义检索
+// - partner_intents / intent_matches 已跟上新的搭子语义字段
+// - 已删除的过时 AI 观测表不再从这里导出

@@ -105,34 +105,34 @@
 │   ├── admin/                # Vite + React 管理后台
 │   │   └── src/
 │   │       ├── features/     # 功能模块
-│   │       │   ├── dashboard/      # 指挥舱 God View
-│   │       │   ├── ai-ops/         # AI Ops (Playground/对话审计/用量统计)
-│   │       │   ├── hot-keywords/   # P0 层热词管理
-│   │       │   ├── activities/     # 活动与搭子运营入口（活动盘面 + 搭子进展）
+│   │       │   ├── dashboard/      # 概览页（Overview）
+│   │       │   ├── ai-ops/         # AI 工具工作区（Playground/对话记录/模型路由/用量统计）
+│   │       │   ├── activities/     # 组局盘面
 │   │       │   ├── content-ops/    # 内容运营工作台
+│   │       │   ├── reports/        # 举报处理
+│   │       │   ├── safety/         # 风险审核
 │   │       │   ├── users/          # 用户管理
 │   │       │   └── settings/       # 系统设置
 │   │       ├── routes/       # TanStack Router
 │   │       │   ├── _authenticated/
-│   │       │   │   ├── index.tsx           # 指挥舱 God View
+│   │       │   │   ├── index.tsx           # 概览
 │   │       │   │   ├── ai-ops/
-│   │       │   │   │   ├── playground.tsx  # AI 调试场
-│   │       │   │   │   ├── conversations.tsx # 对话审计
-│   │       │   │   │   └── usage.tsx       # 用量统计（合并 Token + 额度）
-│   │       │   │   ├── hot-keywords/
-│   │       │   │   │   └── index.tsx       # 热词管理
+│   │       │   │   │   └── index.tsx       # AI 工作区（页内 view/tabs）
 │   │       │   │   ├── activities/
-│   │       │   │   │   ├── index.tsx       # 活动与搭子运营入口
+│   │       │   │   │   ├── index.tsx       # 组局盘面
 │   │       │   │   │   └── $id.tsx         # 活动详情
 │   │       │   │   ├── content/
-│   │       │   │   │   ├── index.tsx       # 内容运营工作台
+│   │       │   │   │   ├── index.tsx       # 内容工作台（含热词内联承接）
 │   │       │   │   │   └── $id.tsx         # 内容详情 / 效果回填
+│   │       │   │   ├── reports/
+│   │       │   │   │   └── index.tsx       # 举报处理
 │   │       │   │   ├── safety/
-│   │       │   │   │   └── moderation.tsx  # 风险审核
+│   │       │   │   │   └── index.tsx       # 风险审核
 │   │       │   │   ├── users/
-│   │       │   │   │   └── index.tsx       # 用户列表
+│   │       │   │   │   ├── index.tsx       # 用户列表
+│   │       │   │   │   └── $id.tsx         # 用户详情
 │   │       │   │   └── settings/
-│   │       │   │       └── index.tsx       # 系统设置
+│   │       │   │       └── route.tsx       # 系统设置（页内 tabs）
 │   │       │   └── login.tsx
 │   │       └── lib/          # Eden Treaty
 │   │
@@ -180,9 +180,9 @@
 │               ├── hot-keywords/     # P0 层热词管理
 │               ├── content/          # 内容运营
 │               ├── notifications/    # 通知管理、消息中心聚合
-│               ├── reports/          # 举报管理
-│               ├── content-security/ # 内容安全检测、微信 API 封装
-│               └── wechat/           # 微信能力封装
+│               ├── reports/          # 举报管理（Internal）
+│               ├── content-security/ # 内部内容安全服务（不单独暴露主 API 域）
+│               └── wechat/           # 内部微信能力封装（不单独暴露主 API 域）
 │
 ├── packages/
 │   ├── db/                   # Drizzle ORM
@@ -212,6 +212,8 @@
 | `partner_intents` | 搭子意向表 | userId, activityType, scenarioType, locationHint, destinationText, timeText, status |
 | `intent_matches` | 意向匹配表 | activityType, scenarioType, centerLocationHint, destinationText, tempOrganizerId, outcome |
 | `match_messages` | 匹配消息表 | matchId, senderId, content |
+| `agent_tasks` | 任务运行时表 | userId, taskType, currentStage, status, partnerIntentId, intentMatchId |
+| `agent_task_events` | 任务事件表 | taskId, eventType, eventPayload, createdAt |
 | `global_keywords` | 全局热词表 | keyword, matchType, responseType, responseContent, priority, hitCount, conversionCount |
 | `ai_configs` | AI 配置表 | configKey, configValue, category, version, updatedBy |
 | `ai_config_history` | AI 配置历史表 | configKey, configValue, version, updatedAt, updatedBy |
@@ -568,9 +570,9 @@ export const matchMessages = pgTable('match_messages', {
 ```
 
 **找搭子业务规则**：
-- **CP-23**: 同一用户同一类型只能有一个 active 意向
+- **CP-23**: 同一用户同一场景在同一时间只能保留一个 active 意向
 - **CP-24**: 意向 24h 自动过期
-- **CP-25**: 匹配只在无 tag 冲突、同类型、3km 内、score ≥ 80% 时创建；当类型为运动时，还必须具体运动一致（如羽毛球只匹配羽毛球）
+- **CP-25**: 匹配只在同场景、无明显冲突且达到搜索评分阈值时创建；本地搭子优先参考区域与类型，目的地同行优先参考 `destinationText + timeText`
 - **CP-26**: Temp_Organizer 是最早创建意向的用户
 - `scenarioType` 现在是 `find_partner` 主链的一等字段，统一覆盖 `local_partner / destination_companion / fill_seat`
 - `destinationText + timeText` 保留用户原始自然语言表达，`locationHint + timePreference` 继续承担本地归一化与兜底摘要
@@ -707,8 +709,6 @@ export const aiConfigHistory = pgTable("ai_config_history", {
 | `content` | `/content` | **内容运营**：传单式内容生成、内容库管理、效果追踪 |
 | `notifications` | `/notifications` | 通知管理 |
 | `reports` | `/reports` | **Internal**：举报管理 |
-| `wechat` | `/wechat` | 微信能力封装（模板消息、OpenID / 手机号相关能力） |
-| `content-security` | `/content-security` | **Internal**：内容安全检测、微信 API 封装 |
 
 **当前主流程 API 门面只保留 7 组领域**：
 - `auth`
@@ -723,6 +723,7 @@ export const aiConfigHistory = pgTable("ai_config_history", {
 - `users`
 - `reports`
 - `/ai/*` 下的 metrics / security / rag / memory / anomaly / sessions / configs / moderation
+- 微信能力与内容安全能力已收口到现有领域服务内部，不再单独暴露 `/wechat`、`/content-security` API 模块
 
 这些接口不再作为产品主流程 API 面继续扩张；已确认不再需要的对外路由应直接删除，而不是长期保留“冻结”状态。
 
@@ -2119,7 +2120,7 @@ printEvalReport(result);
 ```
 
 说明：
-- Evals 保留为内部开发质量工具，运行结果默认以内存结果集返回，不再单独持久化 `ai_eval_samples` 表。
+- Evals 保留为内部开发质量工具，运行结果默认以内存结果集返回，不再单独持久化独立评测结果表。
 
 ### 6.11 七层主链路流程图（结果导向）
 
@@ -3323,7 +3324,7 @@ const isExpired = (draft: ActivityDraft) => {
 |------|--------|----------------|
 | **定位** | 全能管理后台 | AI Cockpit + Ops Workbench |
 | **用户** | 运营团队 | Solo Founder |
-| **首页** | 数据大屏 | 极简指挥舱（只看关键数和今日待办） |
+| **首页** | 数据大屏 | 极简概览（只看关键数和今日待办） |
 | **导航** | 功能平铺 | 按稳定领域组织：概览 / 内容 / 组局 / 风控 / AI / 设置 |
 | **AI 调试** | 分散的配置页 | 统一 Playground |
 | **运营视图** | 无 | 组局盘面 + 内容运营工作台 |
@@ -3332,7 +3333,7 @@ const isExpired = (draft: ActivityDraft) => {
 
 ```
 概览
-  └── 指挥舱 - 极简看板（本周成局、J2C、热词整体转化、累计涨粉 + 今日优先处理）
+  └── 概览页 - 极简看板（本周成局、J2C、热词整体转化、累计涨粉 + 今日优先处理）
 
 内容
   └── 内容工作台 - 内容 / 热词 tabs，统一处理内容生成、内容库、效果回填、热词配置和轻量效果分析
@@ -3359,7 +3360,7 @@ AI
 **删除的低频入口**：
 - ❌ RAG 管理（开发者工具，不需要 UI）
 - ❌ Memory 管理（自动化，不需要手动干预）
-- ❌ 异常检测（合并到 God View 警报）
+- ❌ 异常检测（保留为内部 detector，不再单独做后台入口）
 - ❌ 通知管理（低频操作）
 - ❌ 按角色再拆一套“开发后台 / 运营后台”
 - ❌ 额度管理页（合并到用量统计）
@@ -3373,7 +3374,7 @@ AI
 - `找搭子 / 组局 Agent` 是主产品引擎；内容工作台定位为外部分发器，不与主链路分叉成独立产品。
 
 **新增功能**：
-- ✅ 极简指挥舱（只看最关键的几个数）
+- ✅ 极简概览（只看最关键的几个数）
 - ✅ Playground 统一调试（模拟身份/思维链/Tool 追踪）
 - ✅ 活动与搭子统一运营入口（活动盘面 + 搭子进展）
 - ✅ 内容运营工作台（内容生成 + 内容库 + 效果回填）
@@ -3418,7 +3419,7 @@ export function useUsers(params = {}) {
 }
 ```
 
-### 9.4 God View Dashboard
+### 9.4 Overview Dashboard
 
 **实时概览卡片**：
 

@@ -4,9 +4,6 @@ import { Elysia, t } from 'elysia';
 import { basePlugins, verifyAdmin, AuthError } from '../../setup';
 import { aiModel, type ErrorResponse } from './ai.model';
 import {
-  getQualityMetrics,
-  getConversionMetrics,
-  getPlaygroundStats,
   getSensitiveWordsFromDB,
   addSensitiveWordToDB,
   deleteSensitiveWordFromDB,
@@ -27,115 +24,6 @@ const createAiMetricsController = (prefix = '') => new Elysia({ prefix })
       }
     }
   })
-
-  // ==========================================
-  // 对话质量监控 API (v4.6)
-  // ==========================================
-
-  // 获取对话质量指标
-  .get(
-    '/metrics/quality',
-    async ({ query, set }) => {
-      try {
-        const endDate = query.endDate
-          ? new Date(query.endDate + 'T23:59:59')
-          : new Date();
-        const startDate = query.startDate
-          ? new Date(query.startDate + 'T00:00:00')
-          : new Date(endDate.getTime() - 30 * 24 * 60 * 60 * 1000);
-
-        const result = await getQualityMetrics({ startDate, endDate });
-        return result;
-      } catch (error: any) {
-        set.status = 500;
-        return { code: 500, msg: error.message || '获取质量指标失败' } satisfies ErrorResponse;
-      }
-    },
-    {
-      detail: {
-        tags: ['Internal'],
-        summary: '获取对话质量指标',
-        description: '获取对话质量评分、意图识别率、Tool 成功率等指标（Admin 用）。',
-      },
-      query: t.Object({
-        startDate: t.Optional(t.String({ description: '开始日期 YYYY-MM-DD' })),
-        endDate: t.Optional(t.String({ description: '结束日期 YYYY-MM-DD' })),
-      }),
-      response: {
-        200: 'ai.qualityMetricsResponse',
-        401: 'common.error',
-        500: 'common.error',
-      },
-    }
-  )
-
-  // 获取转化率指标
-  .get(
-    '/metrics/conversion',
-    async ({ query, set }) => {
-      try {
-        const endDate = query.endDate
-          ? new Date(query.endDate + 'T23:59:59')
-          : new Date();
-        const startDate = query.startDate
-          ? new Date(query.startDate + 'T00:00:00')
-          : new Date(endDate.getTime() - 30 * 24 * 60 * 60 * 1000);
-
-        const result = await getConversionMetrics({
-          startDate,
-          endDate,
-          intent: query.intent,
-        });
-        return result;
-      } catch (error: any) {
-        set.status = 500;
-        return { code: 500, msg: error.message || '获取转化指标失败' } satisfies ErrorResponse;
-      }
-    },
-    {
-      detail: {
-        tags: ['Internal'],
-        summary: '获取转化率指标',
-        description: '获取对话到活动创建/报名的转化漏斗数据（Admin 用）。',
-      },
-      query: t.Object({
-        startDate: t.Optional(t.String({ description: '开始日期 YYYY-MM-DD' })),
-        endDate: t.Optional(t.String({ description: '结束日期 YYYY-MM-DD' })),
-        intent: t.Optional(t.String({ description: '意图类型过滤' })),
-      }),
-      response: {
-        200: 'ai.conversionMetricsResponse',
-        401: 'common.error',
-        500: 'common.error',
-      },
-    }
-  )
-
-  // 获取 Playground 统计
-  .get(
-    '/metrics/playground-stats',
-    async ({ set }) => {
-      try {
-        const result = await getPlaygroundStats();
-        return result;
-      } catch (error: any) {
-        set.status = 500;
-        return { code: 500, msg: error.message || '获取 Playground 统计失败' } satisfies ErrorResponse;
-      }
-    },
-    {
-      detail: {
-        tags: ['Internal'],
-        summary: '获取 Playground 统计',
-        description: '获取意图分布、Tool 成功率等 Playground 调试统计（Admin 用）。',
-      },
-      response: {
-        200: 'ai.playgroundStatsResponse',
-        401: 'common.error',
-        500: 'common.error',
-      },
-    }
-  )
 
   // ==========================================
   // Security 持久化 API (v4.6)

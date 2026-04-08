@@ -4,7 +4,7 @@
  * 架构设计：
  * - Chat / Reasoning / Agent / Vision: Moonshot / Kimi
  * - Embedding: Qwen text-embedding-v4 (主力)
- * - 未来扩展: DeepSeek, Doubao, OpenAI 等
+ * - 兼容扩展: Doubao, OpenAI 等（默认主链不使用）
  */
 
 import type { LanguageModel } from 'ai';
@@ -12,7 +12,7 @@ import type { LanguageModel } from 'ai';
 /**
  * 模型提供商名称
  */
-export type ModelProviderName = 'deepseek' | 'qwen' | 'doubao' | 'openai' | 'moonshot';
+export type ModelProviderName = 'qwen' | 'doubao' | 'openai' | 'moonshot';
 
 /**
  * 模型路由键
@@ -133,7 +133,7 @@ export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
-  /** DeepSeek 缓存 Token */
+  /** 兼容部分提供商的缓存 Token */
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
 }
@@ -229,14 +229,16 @@ export interface FallbackConfig {
 }
 
 /**
- * 默认降级配置 (v5.4: Moonshot 主力 + DeepSeek 备选)
+ * 默认降级配置
+ *
+ * 当前默认关闭 provider 级自动降级，避免主链悄悄切到其他提供商。
  */
 export const DEFAULT_FALLBACK_CONFIG: FallbackConfig = {
   primary: 'moonshot',
-  fallback: 'deepseek',
+  fallback: 'moonshot',
   maxRetries: 2,
   retryDelay: 1000,
-  enableFallback: true,
+  enableFallback: false,
 };
 
 /**
@@ -246,10 +248,6 @@ export const MODEL_IDS = {
   // ==========================================
   // Chat 模型 (对话/Agent)
   // ==========================================
-
-  // DeepSeek - 主力 Chat
-  DEEPSEEK_CHAT: 'deepseek-chat',
-  DEEPSEEK_REASONER: 'deepseek-reasoner',
 
   // Moonshot / Kimi - 境内主力 Chat
   MOONSHOT_KIMI_K2_5: 'kimi-k2.5',
@@ -275,10 +273,8 @@ export const MODEL_IDS = {
 export const ACTIVE_MODELS = {
   /** Chat 主力模型 (日常对话) */
   CHAT_PRIMARY: MODEL_IDS.MOONSHOT_KIMI_K2_5,
-  /** Chat 备选模型 */
-  CHAT_FALLBACK: MODEL_IDS.DEEPSEEK_CHAT,
-  /** 深度思考模型 (找搭子/复杂匹配) */
-  REASONING: MODEL_IDS.MOONSHOT_KIMI_K2_THINKING,
+  /** 推理模型（默认与主聊天链路保持一致，避免 thinking/tool-call 兼容问题） */
+  REASONING: MODEL_IDS.MOONSHOT_KIMI_K2_5,
   /** Agent 模型 (Tool Calling/Generative UI) */
   AGENT: MODEL_IDS.MOONSHOT_KIMI_K2_5,
   /** 视觉模型 (识图) */
@@ -304,7 +300,7 @@ export const DEFAULT_MODEL_ROUTE_MAP: Record<ModelRouteKey, ModelRouteSelection>
   },
   reasoning: {
     provider: 'moonshot',
-    modelId: MODEL_IDS.MOONSHOT_KIMI_K2_THINKING,
+    modelId: MODEL_IDS.MOONSHOT_KIMI_K2_5,
   },
   agent: {
     provider: 'moonshot',

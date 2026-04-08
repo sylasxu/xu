@@ -52,9 +52,9 @@ interface RouteDefinition {
 
 const DEFAULT_FALLBACK_CONFIG: FallbackConfig = {
   primary: 'moonshot',
-  fallback: 'deepseek',
+  fallback: 'moonshot',
   maxRetries: 2,
-  enableFallback: true,
+  enableFallback: false,
   retryDelay: 1000,
 }
 
@@ -152,13 +152,22 @@ function normalizeFallbackConfig(value: unknown): FallbackConfig {
     return DEFAULT_FALLBACK_CONFIG
   }
 
-  return {
+  const normalized: FallbackConfig = {
     primary: readString(value.primary, DEFAULT_FALLBACK_CONFIG.primary),
     fallback: readString(value.fallback, DEFAULT_FALLBACK_CONFIG.fallback),
     maxRetries: readNumber(value.maxRetries, DEFAULT_FALLBACK_CONFIG.maxRetries),
     enableFallback: readBoolean(value.enableFallback, DEFAULT_FALLBACK_CONFIG.enableFallback),
     retryDelay: readNumber(value.retryDelay, DEFAULT_FALLBACK_CONFIG.retryDelay),
   }
+
+  if (normalized.fallback === normalized.primary) {
+    return {
+      ...normalized,
+      enableFallback: false,
+    }
+  }
+
+  return normalized
 }
 
 function getProviderBadgeVariant(routeIdentifier: string): 'default' | 'secondary' | 'outline' {
@@ -386,7 +395,7 @@ export function ModelRouterEditor({ onSelectConfig }: Props) {
               <Input
                 value={fallbackConfig.primary}
                 onChange={(event) => setFallbackConfig({ ...fallbackConfig, primary: event.target.value })}
-                placeholder="openai"
+                placeholder="moonshot"
                 className="mt-2 h-8 text-sm"
               />
             </div>
@@ -395,7 +404,7 @@ export function ModelRouterEditor({ onSelectConfig }: Props) {
               <Input
                 value={fallbackConfig.fallback}
                 onChange={(event) => setFallbackConfig({ ...fallbackConfig, fallback: event.target.value })}
-                placeholder="deepseek"
+                placeholder="moonshot"
                 className="mt-2 h-8 text-sm"
               />
             </div>

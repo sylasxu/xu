@@ -43,7 +43,7 @@ import { getOrCreateThread, saveMessage, clearUserThreads, deleteThread } from '
 import { getConversationMessageExpiresAt, refreshMessageEmbedding } from './memory/store';
 import { resolveToolsForIntent } from './tools';
 import { getSystemPrompt, type PromptContext, type ActivityDraftForPrompt } from './prompts';
-import { getFallbackConfig, resolveChatModelSelection, resolveFallbackChatModelSelection } from './models/router';
+import { getFallbackConfig, resolveChatModelSelection, resolveFallbackChatModelSelection, shouldOmitTemperatureForModelId } from './models/router';
 import { runText } from './models/runtime';
 import { generateText } from 'ai';
 // Guardrails
@@ -67,7 +67,6 @@ import {
   outputGuardProcessor,
   recordMetricsProcessor,
   persistRequestProcessor,
-  evaluateQualityProcessor,
   runProcessors,
   runPostLLMProcessors,
   runAsyncProcessors,
@@ -202,12 +201,6 @@ export {
   getSecurityEvents,
   getSecurityStatsFromDB,
 } from './security/security.service';
-
-export {
-  getQualityMetrics,
-  getConversionMetrics,
-  getPlaygroundStats,
-} from './observability/ai-metrics.service';
 
 export {
   getTokenUsageStats,
@@ -928,7 +921,22 @@ export async function executeChatRequest(request: ChatRequest): Promise<ChatExec
       system: systemPrompt,
       messages: aiMessages,
       tools,
-      temperature: ai?.temperature ?? 0,
+      ...(
+        selectedProvider === 'moonshot'
+          ? {
+              providerOptions: {
+                moonshotai: {
+                  reasoningHistory: 'disabled' as const,
+                },
+              },
+            }
+          : {}
+      ),
+      ...(
+        shouldOmitTemperatureForModelId(selectedModelId)
+          ? {}
+          : { temperature: ai?.temperature ?? 0 }
+      ),
       maxOutputTokens: ai?.maxTokens,
       abortSignal,
       stopWhen: [stepCountIs(5), hasToolCall('askPreference')],
@@ -962,7 +970,18 @@ export async function executeChatRequest(request: ChatRequest): Promise<ChatExec
       });
     } catch (primaryError) {
       const fallbackConfig = await getFallbackConfig();
+      if (!fallbackConfig.enableFallback) {
+        throw primaryError;
+      }
+
       const fallbackSelection = await resolveFallbackChatModelSelection({ intent: modelType });
+
+      if (
+        fallbackSelection.provider === selectedProvider
+        && fallbackSelection.modelId === selectedModelId
+      ) {
+        throw primaryError;
+      }
 
       logger.warn('Primary chat model failed, retrying with fallback provider', {
         primaryProvider: selectedProvider,
@@ -1024,19 +1043,6 @@ export async function executeChatRequest(request: ChatRequest): Promise<ChatExec
           input: rawUserInput,
           output: aiResponseText,
         },
-        qualityData: {
-          rawUserInput,
-          aiResponseText,
-          intent: intentResult.intent,
-          intentConfidence: intentResult.confidence,
-          toolCallRecords: toolCallRecords.map((step) => ({ toolName: step.toolName, result: step.result })),
-          userId,
-          inputTokens: totalUsage.promptTokens,
-          outputTokens: totalUsage.completionTokens,
-          totalTokens: totalUsage.totalTokens,
-          latencyMs: duration,
-          source,
-        },
       },
     };
 
@@ -1061,7 +1067,6 @@ export async function executeChatRequest(request: ChatRequest): Promise<ChatExec
       [
         { processor: recordMetricsProcessor },
         { processor: persistRequestProcessor },
-        { processor: evaluateQualityProcessor },
       ],
       postLLMContext
     ).then(({ logs: asyncLogs }) => {
@@ -1144,7 +1149,7 @@ async function generateSoulfulResponse(
       model,
       system: XIAOJU_PERSONA,
       prompt,
-      temperature: 0.8,
+      ...(shouldOmitTemperatureForModelId(modelId) ? {} : { temperature: 0.8 }),
       maxOutputTokens: 150,
     });
 
@@ -1228,7 +1233,7 @@ async function xiaoJuQuickReply(scenario: DirectResponseScenario): Promise<strin
       model,
       system: XIAOJU_PERSONA,
       prompt,
-      temperature: 0.7,
+      ...(shouldOmitTemperatureForModelId(modelId) ? {} : { temperature: 0.7 }),
       maxOutputTokens: 100,
     });
 

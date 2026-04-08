@@ -14,7 +14,6 @@ import type {
 } from './types';
 import { DEFAULT_EVAL_CONFIG } from './types';
 import { defaultScorers } from './scorers';
-import { db, aiEvalSamples } from '@juchang/db';
 import { getConfigValue } from '../config/config.service';
 
 /**
@@ -87,45 +86,6 @@ async function evaluateSample(
 }
 
 /**
- * 持久化评估结果到 ai_eval_samples 表
- */
-async function persistEvalResults(
-  runResult: EvalRunResult,
-  dataset: Dataset,
-): Promise<void> {
-  try {
-    const rows = runResult.results.map((result) => {
-      const sample = dataset.samples.find(s => s.id === result.sampleId);
-      const scoreValues = Object.values(result.scores);
-      const totalScore = scoreValues.length > 0
-        ? scoreValues.reduce((a, b) => a + b, 0) / scoreValues.length
-        : 0;
-
-      return {
-        runId: runResult.runId,
-        datasetName: runResult.datasetName,
-        sampleId: result.sampleId,
-        input: sample?.input ?? '',
-        expectedIntent: sample?.expectedIntent ?? null,
-        actualIntent: result.actualIntent ?? null,
-        actualOutput: result.actualOutput || null,
-        scores: result.scores,
-        totalScore: Math.round(totalScore * 1000) / 1000,
-        passed: result.passed,
-        durationMs: result.duration,
-        error: result.error ?? null,
-      };
-    });
-
-    if (rows.length > 0) {
-      await db.insert(aiEvalSamples).values(rows);
-    }
-  } catch (error) {
-    console.error('[Evals] 持久化评估结果失败:', error);
-  }
-}
-
-/**
  * 运行评估
  */
 export async function runEval(
@@ -193,9 +153,6 @@ export async function runEval(
     averageScores,
     results,
   };
-
-  // 持久化评估结果
-  await persistEvalResults(runResult, dataset);
 
   return runResult;
 }
@@ -424,4 +381,3 @@ export function printEvalReport(result: EvalRunResult): void {
   }
   console.log('================================\n');
 }
-

@@ -33,8 +33,7 @@ export * from "./partner-intents";    // 搭子意向
 export * from "./intent-matches";     // 意向匹配 (含 intentIds[], userIds[] 数组)
 export * from "./match-messages";     // 匹配消息 (直接关联 matchId)
 
-// 7. AI Ops (v4.6 对话质量监控 + 安全持久化)
-export * from "./ai-conversation-metrics";
+// 7. AI Ops (安全持久化 + 请求日志)
 export * from "./ai-sensitive-words";
 export * from "./ai-security-events";
 export * from "./ai-requests";        // v4.8 AI 请求日志
@@ -46,13 +45,10 @@ export * from "./global_keywords";
 // 9. AI Config System (v4.8 AI 参数配置)
 export * from "./ai-configs";
 
-// 10. AI Eval Samples (v4.6 评估结果持久化)
-export * from "./ai-eval-samples";
-
-// 11. Content Operations (自媒体内容运营)
+// 10. Content Operations (自媒体内容运营)
 export * from "./content-notes";
 
-// 12. Relations (must be last to avoid circular imports)
+// 11. Relations (must be last to avoid circular imports)
 export * from "./relations";
 
 // ==========================================

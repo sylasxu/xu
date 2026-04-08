@@ -51,7 +51,10 @@ function toTemplateValue(value: string, maxLength = 20): string {
 function buildIntentSummary(params: {
   rawInput?: string;
   tags?: string[];
+  scenarioType?: string | null;
+  destinationText?: string | null;
   timePreference?: string | null;
+  timeText?: string | null;
   locationHint: string;
 }): string {
   const rawInput = typeof params.rawInput === 'string' ? params.rawInput.replace(/\s+/g, ' ').trim() : '';
@@ -61,11 +64,25 @@ function buildIntentSummary(params: {
 
   const segments = [
     params.tags && params.tags.length > 0 ? `偏好 ${params.tags.slice(0, 3).join('、')}` : '',
-    params.timePreference ? `时间 ${params.timePreference}` : '',
-    params.locationHint ? `地点 ${params.locationHint}` : '',
+    (params.timeText || params.timePreference) ? `时间 ${params.timeText || params.timePreference}` : '',
+    params.scenarioType === 'destination_companion'
+      ? (params.destinationText ? `目的地 ${params.destinationText}` : '')
+      : (params.locationHint ? `地点 ${params.locationHint}` : ''),
   ].filter(Boolean);
 
   return segments.join(' · ') || '这次主要想找个合拍搭子先碰一碰';
+}
+
+function resolvePendingMatchLocationHint(params: {
+  scenarioType?: string | null;
+  destinationText?: string | null;
+  centerLocationHint: string;
+}): string {
+  if (params.scenarioType === 'destination_companion' && params.destinationText?.trim()) {
+    return params.destinationText.trim();
+  }
+
+  return params.centerLocationHint;
 }
 
 function inferPendingMatchRequestMode(messageType: string | null | undefined): 'auto_match' | 'connect' | 'group_up' {
@@ -156,10 +173,13 @@ export async function getPendingMatches(userId: string): Promise<MatchPendingRes
     .select({
       id: intentMatches.id,
       activityType: intentMatches.activityType,
+      scenarioType: intentMatches.scenarioType,
       intentIds: intentMatches.intentIds,
       matchScore: intentMatches.matchScore,
       commonTags: intentMatches.commonTags,
       centerLocationHint: intentMatches.centerLocationHint,
+      destinationText: intentMatches.destinationText,
+      timeText: intentMatches.timeText,
       confirmDeadline: intentMatches.confirmDeadline,
       tempOrganizerId: intentMatches.tempOrganizerId,
     })
@@ -199,6 +219,10 @@ export async function getPendingMatches(userId: string): Promise<MatchPendingRes
     ? await db
       .select({
         id: partnerIntents.id,
+        scenarioType: partnerIntents.scenarioType,
+        destinationText: partnerIntents.destinationText,
+        timeText: partnerIntents.timeText,
+        description: partnerIntents.description,
         metaData: partnerIntents.metaData,
       })
       .from(partnerIntents)
@@ -218,7 +242,11 @@ export async function getPendingMatches(userId: string): Promise<MatchPendingRes
     requestMode: inferPendingMatchRequestMode(latestModeByMatchId.get(row.id)),
     matchScore: row.matchScore,
     commonTags: Array.isArray(row.commonTags) ? row.commonTags : [],
-    locationHint: row.centerLocationHint,
+    locationHint: resolvePendingMatchLocationHint({
+      scenarioType: row.scenarioType,
+      destinationText: row.destinationText,
+      centerLocationHint: row.centerLocationHint,
+    }),
     confirmDeadline: row.confirmDeadline.toISOString(),
     taskId: await findLatestPartnerTaskIdForMatch({
       userId,
@@ -240,9 +268,12 @@ export async function getPendingMatchDetail(
     .select({
       id: intentMatches.id,
       activityType: intentMatches.activityType,
+      scenarioType: intentMatches.scenarioType,
       matchScore: intentMatches.matchScore,
       commonTags: intentMatches.commonTags,
       centerLocationHint: intentMatches.centerLocationHint,
+      destinationText: intentMatches.destinationText,
+      timeText: intentMatches.timeText,
       confirmDeadline: intentMatches.confirmDeadline,
       tempOrganizerId: intentMatches.tempOrganizerId,
       intentIds: intentMatches.intentIds,
@@ -269,8 +300,12 @@ export async function getPendingMatchDetail(
     db
       .select({
         userId: partnerIntents.userId,
+        scenarioType: partnerIntents.scenarioType,
         locationHint: partnerIntents.locationHint,
+        destinationText: partnerIntents.destinationText,
         timePreference: partnerIntents.timePreference,
+        timeText: partnerIntents.timeText,
+        description: partnerIntents.description,
         metaData: partnerIntents.metaData,
         createdAt: partnerIntents.createdAt,
         nickname: users.nickname,
@@ -312,9 +347,14 @@ export async function getPendingMatchDetail(
         timePreference: row.timePreference || null,
         tags,
         intentSummary: buildIntentSummary({
-          rawInput: row.metaData?.rawInput,
+          rawInput: typeof row.metaData?.rawInput === 'string'
+            ? row.metaData.rawInput
+            : row.description || undefined,
           tags,
+          scenarioType: row.scenarioType,
+          destinationText: row.destinationText,
           timePreference: row.timePreference,
+          timeText: row.timeText,
           locationHint: row.locationHint,
         }),
         createdAt: row.createdAt,
@@ -358,7 +398,11 @@ export async function getPendingMatchDetail(
     requestMode,
     matchScore: match.matchScore,
     commonTags: Array.isArray(match.commonTags) ? match.commonTags : [],
-    locationHint: match.centerLocationHint,
+    locationHint: resolvePendingMatchLocationHint({
+      scenarioType: match.scenarioType,
+      destinationText: match.destinationText,
+      centerLocationHint: match.centerLocationHint,
+    }),
     confirmDeadline: match.confirmDeadline.toISOString(),
     isTempOrganizer: match.tempOrganizerId === userId,
     organizerUserId: match.tempOrganizerId,

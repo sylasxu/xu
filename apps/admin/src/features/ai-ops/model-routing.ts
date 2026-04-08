@@ -12,7 +12,7 @@ export type RouteKey =
 
 export type ChatRouteKey = 'chat' | 'reasoning' | 'agent'
 
-export type ProviderName = 'moonshot' | 'qwen' | 'deepseek' | 'doubao'
+export type ProviderName = 'moonshot' | 'qwen' | 'doubao'
 
 export interface RouteMapConfig {
   chat: string
@@ -35,13 +35,12 @@ export interface ChatChainPreset {
 export const PROVIDER_OPTIONS: Array<{ value: ProviderName; label: string }> = [
   { value: 'moonshot', label: 'Moonshot / Kimi' },
   { value: 'qwen', label: 'Qwen' },
-  { value: 'deepseek', label: 'DeepSeek' },
   { value: 'doubao', label: 'Doubao' },
 ]
 
 export const DEFAULT_ROUTE_MAP: RouteMapConfig = {
   chat: 'moonshot/kimi-k2.5',
-  reasoning: 'moonshot/kimi-k2-thinking',
+  reasoning: 'moonshot/kimi-k2.5',
   agent: 'moonshot/kimi-k2.5',
   vision: 'moonshot/kimi-k2.5',
   content_generation: 'moonshot/kimi-k2.5',
@@ -59,18 +58,8 @@ export const CHAT_CHAIN_PRESETS: ChatChainPreset[] = [
     description: '境内默认链路，适合主聊天、推理和 Agent 一起走同一条链路。',
     routes: {
       chat: 'moonshot/kimi-k2.5',
-      reasoning: 'moonshot/kimi-k2-thinking',
+      reasoning: 'moonshot/kimi-k2.5',
       agent: 'moonshot/kimi-k2.5',
-    },
-  },
-  {
-    key: 'deepseek',
-    label: 'DeepSeek 主链路',
-    description: '适合低成本压测或做备用链路验证。',
-    routes: {
-      chat: 'deepseek/deepseek-chat',
-      reasoning: 'deepseek/deepseek-reasoner',
-      agent: 'deepseek/deepseek-chat',
     },
   },
 ]
@@ -78,7 +67,6 @@ export const CHAT_CHAIN_PRESETS: ChatChainPreset[] = [
 export const PLAYGROUND_MANUAL_MODEL_OPTIONS = [
   { value: 'moonshot/kimi-k2.5', label: 'Moonshot Kimi K2.5' },
   { value: 'moonshot/kimi-k2-thinking', label: 'Moonshot Kimi K2 Thinking' },
-  { value: 'deepseek/deepseek-chat', label: 'DeepSeek Chat' },
 ] as const
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -106,10 +94,6 @@ export function inferProviderName(modelId: string): ProviderName | null {
     || normalized.includes('rerank')
   ) {
     return 'qwen'
-  }
-
-  if (normalized.startsWith('deepseek/') || normalized.startsWith('deepseek')) {
-    return 'deepseek'
   }
 
   if (normalized.startsWith('doubao/') || normalized.startsWith('doubao')) {
@@ -172,7 +156,7 @@ export function splitRouteIdentifier(routeIdentifier: string): {
     const provider = normalized.slice(0, separatorIndex).trim()
     const modelId = normalized.slice(separatorIndex + 1).trim()
     if (
-      (['moonshot', 'qwen', 'deepseek', 'doubao'] as const).includes(provider as ProviderName)
+      (['moonshot', 'qwen', 'doubao'] as const).includes(provider as ProviderName)
       && modelId
     ) {
       return {

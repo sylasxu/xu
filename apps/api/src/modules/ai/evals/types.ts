@@ -84,8 +84,6 @@ export interface EvalRunConfig {
   concurrency?: number;
   /** 超时时间（毫秒） */
   timeout?: number;
-  /** 是否保存结果 */
-  saveResults?: boolean;
 }
 
 /**
@@ -121,6 +119,4 @@ export const DEFAULT_EVAL_CONFIG = {
   concurrency: 3,
   timeout: 30000,
   passThreshold: 0.6,
-  saveResults: true,
 };
-

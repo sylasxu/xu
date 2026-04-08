@@ -436,59 +436,6 @@ export const aiController = new Elysia({ prefix: '/ai' })
       },
     },
     (app) => app
-      // DeepSeek 余额查询 (Admin Playground 用)
-      .get(
-        '/balance',
-        async ({ set }) => {
-          const apiKey = process.env.DEEPSEEK_API_KEY;
-
-          if (!apiKey) {
-            set.status = 500;
-            return { code: 500, msg: 'DeepSeek API Key 未配置' } satisfies ErrorResponse;
-          }
-
-          try {
-            const response = await fetch('https://api.deepseek.com/user/balance', {
-              method: 'GET',
-              headers: {
-                'Accept': 'application/json',
-                'Authorization': `Bearer ${apiKey}`,
-              },
-            });
-
-            if (!response.ok) {
-              set.status = response.status;
-              return { code: response.status, msg: '余额查询失败' } satisfies ErrorResponse;
-            }
-
-            const data = await response.json();
-            return data;
-          } catch (error: any) {
-            set.status = 500;
-            return { code: 500, msg: error.message || '余额查询失败' } satisfies ErrorResponse;
-          }
-        },
-        {
-          detail: {
-            tags: ['AI'],
-            summary: '查询 DeepSeek 余额',
-            description: '查询 DeepSeek API 账户余额（Admin Playground 用）',
-          },
-          response: {
-            200: t.Object({
-              is_available: t.Boolean(),
-              balance_infos: t.Array(t.Object({
-                currency: t.String(),
-                total_balance: t.String(),
-                granted_balance: t.String(),
-                topped_up_balance: t.String(),
-              })),
-            }),
-            500: 'common.error',
-          },
-        }
-      )
-
       // Token 使用统计 (v3.4 新增)
       .get(
         '/metrics/usage',

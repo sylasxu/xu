@@ -11,7 +11,7 @@
  */
 
 import { runText } from '../models/runtime';
-import { resolveChatModelSelection } from '../models/router';
+import { resolveChatModelSelection, shouldOmitTemperatureForModelId } from '../models/router';
 import { getConfigValue } from '../config/config.service';
 import type { IntentType, ClassifyResult } from './types';
 
@@ -336,7 +336,7 @@ export async function classifyByLLMFewShot(
     const result = await runText({
       model,
       prompt,
-      temperature: 0,
+      ...(shouldOmitTemperatureForModelId(modelId) ? {} : { temperature: 0 }),
     });
 
     // 解析 JSON 响应

@@ -10,7 +10,6 @@
  */
 
 import type { LanguageModel } from 'ai';
-import { deepseekProvider } from './adapters/deepseek';
 import { moonshotProvider } from './adapters/moonshot';
 import { openaiProvider } from './adapters/openai';
 import { qwenProvider } from './adapters/qwen';
@@ -37,7 +36,6 @@ import { getConfigValue } from '../config/config.service';
  * 提供商映射
  */
 const providers: Partial<Record<ModelProviderName, ModelProvider>> = {
-  deepseek: deepseekProvider,
   moonshot: moonshotProvider,
   openai: openaiProvider,
   qwen: qwenProvider,
@@ -47,6 +45,22 @@ const providers: Partial<Record<ModelProviderName, ModelProvider>> = {
  * 当前降级配置
  */
 let fallbackConfig: FallbackConfig = { ...DEFAULT_FALLBACK_CONFIG };
+
+function normalizeFallbackConfig(config: Partial<FallbackConfig> | null | undefined): FallbackConfig {
+  const merged: FallbackConfig = {
+    ...DEFAULT_FALLBACK_CONFIG,
+    ...(config ?? {}),
+  };
+
+  if (merged.fallback === merged.primary) {
+    return {
+      ...merged,
+      enableFallback: false,
+    };
+  }
+
+  return merged;
+}
 
 const EMBEDDING_CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -74,10 +88,6 @@ function inferProviderFromModelId(modelId?: string): ModelProviderName | undefin
     return 'moonshot';
   }
 
-  if (normalized.startsWith('deepseek')) {
-    return 'deepseek';
-  }
-
   if (normalized.startsWith('doubao')) {
     return 'doubao';
   }
@@ -94,8 +104,12 @@ function inferProviderFromModelId(modelId?: string): ModelProviderName | undefin
   return undefined;
 }
 
+export function shouldOmitTemperatureForModelId(modelId?: string): boolean {
+  return inferProviderFromModelId(modelId) === 'moonshot';
+}
+
 function isModelProviderName(value: string): value is ModelProviderName {
-  return value === 'openai' || value === 'qwen' || value === 'deepseek' || value === 'doubao' || value === 'moonshot';
+  return value === 'openai' || value === 'qwen' || value === 'doubao' || value === 'moonshot';
 }
 
 export function parseModelRouteIdentifier(identifier: string): ModelRouteSelection | null {
@@ -195,7 +209,7 @@ export async function getModelRouteSelection(routeKey: ModelRouteKey): Promise<M
  * 设置降级配置
  */
 export function setFallbackConfig(config: Partial<FallbackConfig>): void {
-  fallbackConfig = { ...fallbackConfig, ...config };
+  fallbackConfig = normalizeFallbackConfig({ ...fallbackConfig, ...config });
 }
 
 /**
@@ -203,7 +217,7 @@ export function setFallbackConfig(config: Partial<FallbackConfig>): void {
  */
 export async function getFallbackConfig(): Promise<FallbackConfig> {
   const dbConfig = await getConfigValue<Partial<FallbackConfig>>('model.fallback_config', {});
-  return { ...fallbackConfig, ...dbConfig };
+  return normalizeFallbackConfig({ ...fallbackConfig, ...dbConfig });
 }
 
 /**
@@ -254,14 +268,12 @@ function getDefaultChatModelIdForProvider(
     case 'moonshot':
       switch (routeKey) {
         case 'reasoning':
-          return MODEL_IDS.MOONSHOT_KIMI_K2_THINKING;
+          return MODEL_IDS.MOONSHOT_KIMI_K2_5;
         case 'vision':
           return DEFAULT_MODEL_ROUTE_MAP.vision.modelId;
         default:
           return MODEL_IDS.MOONSHOT_KIMI_K2_5;
       }
-    case 'deepseek':
-      return routeKey === 'reasoning' ? 'deepseek-reasoner' : 'deepseek-chat';
     case 'openai':
       return DEFAULT_MODEL_ROUTE_MAP.chat.modelId;
     case 'doubao':
@@ -427,6 +439,9 @@ export async function resolveFallbackChatModelSelection(params?: {
 }): Promise<{ provider: ModelProviderName; modelId: string; model: LanguageModel }> {
   const routeKey = params?.routeKey || params?.intent || 'chat';
   const currentFallbackConfig = await getFallbackConfig();
+  if (!currentFallbackConfig.enableFallback) {
+    throw new Error('Fallback is disabled');
+  }
   const provider = currentFallbackConfig.fallback;
   const modelId = getDefaultChatModelIdForProvider(provider, routeKey);
 
@@ -562,19 +577,17 @@ export async function checkProviderHealth(
 /**
  * 检查所有提供商健康状态
  * 
- * v5.4: 检查当前实际使用的 moonshot + qwen(embedding) + deepseek
+ * v5.4: 检查当前实际使用的 moonshot + qwen(embedding)
  */
 export async function checkAllProvidersHealth(): Promise<Partial<Record<ModelProviderName, boolean>>> {
   const results = await Promise.all([
     checkProviderHealth('moonshot'),
     checkProviderHealth('qwen'),
-    checkProviderHealth('deepseek'),
   ]);
 
   return {
     moonshot: results[0],
     qwen: results[1],
-    deepseek: results[2],
   };
 }
 

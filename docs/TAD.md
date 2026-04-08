@@ -170,15 +170,14 @@
 │       └── src/
 │           ├── index.ts      # 应用入口
 │           ├── setup.ts      # 全局插件
-│           └── modules/      # 功能模块 (13 个)
+│           └── modules/      # 领域模块（以 index.ts 当前注册与子目录实现为准）
 │               ├── auth/             # 微信登录、手机号绑定
-│               ├── users/            # 用户 CRUD、额度、统计
+│               ├── users/            # 用户资料与后台查询
 │               ├── activities/       # 活动 CRUD、报名、附近搜索
 │               ├── participants/     # 参与者管理、履约确认、再约跟进
 │               ├── chat/             # 活动群聊消息
-│               ├── ai/               # AI 解析、对话历史、Memory
+│               ├── ai/               # AI 解析、对话历史、模型路由、内部工具
 │               ├── hot-keywords/     # P0 层热词管理
-│               ├── analytics/        # 数据分析、运营指标、平台概览
 │               ├── content/          # 内容运营
 │               ├── notifications/    # 通知管理、消息中心聚合
 │               ├── reports/          # 举报管理
@@ -187,7 +186,7 @@
 │
 ├── packages/
 │   ├── db/                   # Drizzle ORM
-│   │   └── src/schema/       # 21 张表（13 张核心业务表 + 8 张运营/安全/配置支撑表）
+│   │   └── src/schema/       # Schema 以 pgTable 定义为准（当前已含搭子、任务、AI 观测、配置、安全、内容等真源表）
 │   ├── genui-contract/       # 界面块协议合同 (Schema + Fixtures + Types)
 │   ├── utils/                # 通用工具
 │   └── ts-config/            # TypeScript 配置
@@ -210,16 +209,14 @@
 | `conversation_messages` | 对话消息表 | conversationId, userId, role, messageType, content, activityId, embedding |
 | `activity_messages` | 活动群聊消息表 | activityId, senderId, messageType, content |
 | `notifications` | 通知表 | userId, type, title, content, isRead, activityId |
-| `partner_intents` | 搭子意向表 | userId, type, tags, location, locationName, expiresAt, status |
-| `intent_matches` | 意向匹配表 | intentAId, intentBId, tempOrganizerId, outcome, activityId, expiresAt |
+| `partner_intents` | 搭子意向表 | userId, activityType, scenarioType, locationHint, destinationText, timeText, status |
+| `intent_matches` | 意向匹配表 | activityType, scenarioType, centerLocationHint, destinationText, tempOrganizerId, outcome |
 | `match_messages` | 匹配消息表 | matchId, senderId, content |
 | `global_keywords` | 全局热词表 | keyword, matchType, responseType, responseContent, priority, hitCount, conversionCount |
 | `ai_configs` | AI 配置表 | configKey, configValue, category, version, updatedBy |
 | `ai_config_history` | AI 配置历史表 | configKey, configValue, version, updatedAt, updatedBy |
 | `ai_requests` | AI 请求记录表 | userId, modelId, inputTokens, outputTokens, latencyMs, processorLog |
 | `ai_tool_calls` | AI 工具调用表 | requestId, toolName, durationMs, success |
-| `ai_eval_samples` | AI 评估样本表 | input, output, intent, score |
-| `ai_conversation_metrics` | 对话质量指标表 | conversationId, userId, intent, qualityScore, latencyMs, activityCreated, activityJoined |
 | `ai_security_events` | AI 安全事件表 | userId, eventType, triggerWord, severity, metadata |
 | `ai_sensitive_words` | AI 敏感词表 | word, category, severity, isActive |
 | `content_notes` | 内容运营笔记表 | topic, platform, contentType, batchId, title, body, hashtags, coverText, coverImageHint（存储 Admin 侧面向小红书 / 抖音 / 微信的成品内容稿，默认按“传单式 / 组织号”表达生成） |
@@ -517,7 +514,8 @@ export const intentMatchOutcomeEnum = pgEnum('intent_match_outcome', [
 export const partnerIntents = pgTable('partner_intents', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').notNull().references(() => users.id),
-  type: activityTypeEnum('type').notNull(),  // 活动类型
+  activityType: activityTypeEnum('activity_type').notNull(),  // 活动类型
+  scenarioType: partnerScenarioTypeEnum('scenario_type').default('local_partner').notNull(),  // local_partner | destination_companion | fill_seat
   tags: jsonb('tags').$type<string[]>().default([]),  // 偏好标签 ['AA', 'NoAlcohol']
   metaData: jsonb('meta_data').$type<{
     sportType?: 'badminton' | 'basketball' | 'running' | 'tennis' | 'swimming' | 'cycling';
@@ -525,24 +523,37 @@ export const partnerIntents = pgTable('partner_intents', {
     budgetType?: 'AA' | 'Treat' | 'Free';
     rawInput: string;
   }>(),  // 结构化补充信息：具体运动、预算、原话等
-  location: geometry('location', { type: 'point', mode: 'xy', srid: 4326 }),
-  locationName: varchar('location_name', { length: 100 }),
-  timeRange: varchar('time_range', { length: 50 }),  // 'tonight' | 'tomorrow' | 'weekend'
+  locationHint: varchar('location_hint', { length: 100 }).notNull(),
+  destinationText: varchar('destination_text', { length: 120 }),
+  location: geometry('location', { type: 'point', mode: 'xy', srid: 4326 }).notNull(),
+  timePreference: varchar('time_preference', { length: 50 }),
+  timeText: varchar('time_text', { length: 80 }),
+  description: varchar('description', { length: 240 }),
   expiresAt: timestamp('expires_at').notNull(),  // 24h 后过期
   status: partnerIntentStatusEnum('status').default('active').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
 // intent_matches 表 - 意向匹配
 export const intentMatches = pgTable('intent_matches', {
   id: uuid('id').primaryKey().defaultRandom(),
-  intentAId: uuid('intent_a_id').notNull().references(() => partnerIntents.id),
-  intentBId: uuid('intent_b_id').notNull().references(() => partnerIntents.id),
-  tempOrganizerId: uuid('temp_organizer_id').notNull().references(() => users.id),
+  activityType: activityTypeEnum('activity_type').notNull(),
+  scenarioType: partnerScenarioTypeEnum('scenario_type').default('local_partner').notNull(),
   matchScore: integer('match_score').notNull(),  // 0-100
+  commonTags: jsonb('common_tags').$type<string[]>().notNull(),
+  centerLocation: geometry('center_location', { type: 'point', mode: 'xy', srid: 4326 }).notNull(),
+  centerLocationHint: varchar('center_location_hint', { length: 100 }).notNull(),
+  destinationText: varchar('destination_text', { length: 120 }),
+  timeText: varchar('time_text', { length: 80 }),
+  tempOrganizerId: uuid('temp_organizer_id').notNull().references(() => users.id),
+  intentIds: uuid('intent_ids').array().notNull(),
+  userIds: uuid('user_ids').array().notNull(),
   outcome: intentMatchOutcomeEnum('outcome').default('pending').notNull(),
-  activityId: uuid('activity_id').references(() => activities.id),  // 确认后关联的活动
-  expiresAt: timestamp('expires_at').notNull(),  // 6h 后过期
+  activityId: uuid('activity_id').references(() => activities.id),
+  confirmDeadline: timestamp('confirm_deadline').notNull(),
+  matchedAt: timestamp('matched_at').defaultNow().notNull(),
+  confirmedAt: timestamp('confirmed_at'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
@@ -561,6 +572,8 @@ export const matchMessages = pgTable('match_messages', {
 - **CP-24**: 意向 24h 自动过期
 - **CP-25**: 匹配只在无 tag 冲突、同类型、3km 内、score ≥ 80% 时创建；当类型为运动时，还必须具体运动一致（如羽毛球只匹配羽毛球）
 - **CP-26**: Temp_Organizer 是最早创建意向的用户
+- `scenarioType` 现在是 `find_partner` 主链的一等字段，统一覆盖 `local_partner / destination_companion / fill_seat`
+- `destinationText + timeText` 保留用户原始自然语言表达，`locationHint + timePreference` 继续承担本地归一化与兜底摘要
 
 ### 4.7 全局热词表
 
@@ -706,12 +719,12 @@ export const aiConfigHistory = pgTable("ai_config_history", {
 - `chat`
 - `content`
 
-其余接口统一视为 **Internal** 或 **Frozen**：
+其余接口统一视为 **Internal**：
 - `users`
 - `reports`
 - `/ai/*` 下的 metrics / security / rag / memory / anomaly / sessions / configs / moderation
 
-这些接口暂不一定删除代码，但不再作为产品主流程 API 面继续扩张。
+这些接口不再作为产品主流程 API 面继续扩张；已确认不再需要的对外路由应直接删除，而不是长期保留“冻结”状态。
 
 **当前领域主路径**：
 
@@ -1121,7 +1134,7 @@ type SSEEvent =
 │                         │                                        │
 │  ┌──────────────────────▼────────────────────────┐              │
 │  │           Model Router (模型路由)              │              │
-│  │      (Qwen3 主力 + DeepSeek Fallback 备选)       │              │
+│  │   (Moonshot / Kimi 主力，默认不启用 provider fallback) │              │
 │  └──────────────────────┬────────────────────────┘              │
 │                         │                                        │
 │  ┌─────────────┐  ┌─────▼─────┐  ┌─────────────┐              │
@@ -1233,7 +1246,6 @@ apps/api/src/modules/ai/
 │   ├── provider-error.ts # 提供商错误归一化
 │   └── adapters/         # 提供商适配器
 │       ├── qwen.ts       # Qwen Embedding 适配
-│       ├── deepseek.ts   # DeepSeek 适配 (备选)
 │       ├── openai.ts     # OpenAI 适配
 │       └── moonshot.ts   # Moonshot 适配
 │
@@ -1260,7 +1272,6 @@ apps/api/src/modules/ai/
 │   ├── logger.ts         # 日志器
 │   ├── metrics.ts        # 指标收集
 │   ├── ai-metrics.service.ts # AI 请求统计持久化
-│   └── quality-metrics.ts # 质量评估指标
 │
 ├── evals/                # 评估系统模块
 │   ├── types.ts          # EvalSample, Scorer
@@ -1918,11 +1929,9 @@ if (maxSim > 0.5) {
 
 | 提供商 | 模型 | 用途 |
 |--------|------|------|
-| **Moonshot / Kimi** | `kimi-k2.5` | **主力 Chat / Agent / 内容生成 / 视觉理解** |
-| **Moonshot / Kimi** | `kimi-k2-thinking` | **深度思考** (找搭子/复杂匹配) |
+| **Moonshot / Kimi** | `kimi-k2.5` | **主力 Chat / 推理 / Agent / 内容生成 / 视觉理解** |
 | **Qwen** | `text-embedding-v4` | 文本向量化 (1536 维，Qwen 仅保留这一项) |
 | **OpenAI Compatible** | `gpt-5.4` | 可通过 `OPENAI_BASE_URL` 接兼容网关 |
-| DeepSeek | `deepseek-chat` | 备选 Chat |
 
 **意图路由**：
 
@@ -1930,31 +1939,31 @@ if (maxSim > 0.5) {
 // 根据业务意图选择最合适的模型
 export function getModelByIntent(intent: 'chat' | 'reasoning' | 'agent' | 'vision'): LanguageModel {
   switch (intent) {
-    case 'chat':      return moonshot('kimi-k2.5');          // 日常对话
-    case 'reasoning': return moonshot('kimi-k2-thinking');   // 深度思考
-    case 'agent':     return moonshot('kimi-k2.5');          // Tool Calling
-    case 'vision':    return moonshot('kimi-k2.5');  // 视觉理解
+    case 'chat':      return moonshot('kimi-k2.5');   // 日常对话
+    case 'reasoning': return moonshot('kimi-k2.5');   // 默认推理链路
+    case 'agent':     return moonshot('kimi-k2.5');   // Tool Calling
+    case 'vision':    return moonshot('kimi-k2.5');   // 视觉理解
   }
 }
 ```
 
-**降级策略 (withFallback)**：
+**降级策略**：
 
 ```typescript
 const DEFAULT_FALLBACK_CONFIG = {
   primary: 'moonshot',  // 主力使用 Kimi
-  fallback: 'deepseek', // 备选
+  fallback: 'moonshot',
   maxRetries: 2,
   retryDelay: 1000,
-  enableFallback: true,
+  enableFallback: false,
 };
-
-// 带降级的模型调用
-const result = await withFallback(
-  () => generateText({ model: moonshot('kimi-k2.5'), prompt }),
-  () => generateText({ model: deepseek('deepseek-chat'), prompt })
-);
 ```
+
+说明：
+- 默认关闭 provider 级自动降级，避免主链悄悄切到非 Kimi 提供商。
+- Moonshot / Kimi 统一走官方 `@ai-sdk/moonshotai` provider，不再通过通用 OpenAI 兼容适配层承接主链。
+- Tool Calling / 多步对话默认关闭 `reasoningHistory`，避免普通多步历史被 Moonshot 按 thinking 消息格式校验。
+- 如果后续确实需要容灾，必须通过显式配置开启，而不是依赖代码默认值。
 
 **重试机制 (withRetry)**：
 
@@ -2067,13 +2076,13 @@ logger.info('AI request completed', {
 
 ```typescript
 // 请求计数
-countAIRequest('deepseek-chat', 'success');
+countAIRequest(actualModelId, 'success');
 
 // 延迟记录
-recordAILatency('deepseek-chat', duration);
+recordAILatency(actualModelId, duration);
 
 // Token 用量
-recordTokenUsage('deepseek-chat', promptTokens, completionTokens);
+recordTokenUsage(actualModelId, promptTokens, completionTokens);
 ```
 
 ### 6.10 保障层：评估系统 (Evals)
@@ -2108,6 +2117,9 @@ const result = await runEval({
 
 printEvalReport(result);
 ```
+
+说明：
+- Evals 保留为内部开发质量工具，运行结果默认以内存结果集返回，不再单独持久化 `ai_eval_samples` 表。
 
 ### 6.11 七层主链路流程图（结果导向）
 
@@ -3501,7 +3513,7 @@ PlaygroundLayout (全屏容器)
 - Error：红色高亮错误信息
 
 **模型配置**（Admin 调试视图）：
-- 模型选择：`moonshot/kimi-k2.5` / `moonshot/kimi-k2-thinking` / `deepseek/deepseek-chat`
+- 模型选择：默认 `moonshot/kimi-k2.5`，如需特殊排查可手动切换其他模型
 - 默认模型：`moonshot/kimi-k2.5`
 - 成本粗估：按当前实际 `modelId` 做粗估，默认以 Kimi 主链路展示
 - Temperature（0-2）、MaxTokens（256-8192）

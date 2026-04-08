@@ -143,6 +143,7 @@ export async function detectMatchesForIntent(intentId: string): Promise<IntentMa
     .from(partnerIntents)
     .where(and(
       eq(partnerIntents.activityType, intent.activityType),
+      eq(partnerIntents.scenarioType, intent.scenarioType),
       eq(partnerIntents.status, 'active'),
       not(eq(partnerIntents.id, intentId)),
       not(eq(partnerIntents.userId, intent.userId)),
@@ -233,6 +234,34 @@ function getCommonTags(intents: PartnerIntent[]): string[] {
     .map(([tag]) => tag);
 }
 
+function pickSharedPartnerScenario(intents: PartnerIntent[]) {
+  return intents[0]?.scenarioType ?? 'local_partner';
+}
+
+function pickSharedPartnerDestination(intents: PartnerIntent[]): string | null {
+  const destination = intents
+    .map((intent) => intent.destinationText?.trim())
+    .find((value): value is string => Boolean(value));
+
+  return destination || null;
+}
+
+function pickSharedPartnerTimeText(intents: PartnerIntent[]): string | null {
+  const exactTime = intents
+    .map((intent) => intent.timeText?.trim())
+    .find((value): value is string => Boolean(value));
+
+  if (exactTime) {
+    return exactTime;
+  }
+
+  const fallback = intents
+    .map((intent) => intent.timePreference?.trim())
+    .find((value): value is string => Boolean(value));
+
+  return fallback || null;
+}
+
 function calculateConfirmDeadline(): Date {
   const now = new Date();
   const sixHoursLater = new Date(now.getTime() + 6 * 60 * 60 * 1000);
@@ -306,13 +335,19 @@ async function createMatch(
     const confirmDeadline = calculateConfirmDeadline();
     const commonTags = getCommonTags(availableIntents);
     const userIds = availableIntents.map(intent => intent.userId);
+    const scenarioType = pickSharedPartnerScenario(availableIntents);
+    const destinationText = pickSharedPartnerDestination(availableIntents);
+    const timeText = pickSharedPartnerTimeText(availableIntents);
 
     const [match] = await tx.insert(intentMatches).values({
       activityType: firstIntent.activityType,
+      scenarioType,
       matchScore,
       commonTags,
       centerLocation: firstIntent.location,
       centerLocationHint: firstIntent.locationHint,
+      destinationText,
+      timeText,
       tempOrganizerId: tempOrganizer.userId,
       intentIds: availableIntents.map(intent => intent.id),
       userIds,
@@ -778,6 +813,10 @@ export async function createManualPartnerMatch(params: {
       return { success: false as const, error: '这位搭子的意向类型已经变了，请重新搜索一下' };
     }
 
+    if (sourceIntent.scenarioType !== targetIntent.scenarioType) {
+      return { success: false as const, error: '你们当前看的不是同一类搭子场景，换一个更合适的人选吧' };
+    }
+
     if (sourceIntent.activityType === 'sports') {
       const sourceSportType = readPartnerSportType(sourceIntent);
       const targetSportType = readPartnerSportType(targetIntent);
@@ -815,13 +854,19 @@ export async function createManualPartnerMatch(params: {
     const matchScore = Math.max(rawScore, 88);
     const targetLocationHint = targetIntent.locationHint.trim();
     const sourceLocationHint = sourceIntent.locationHint.trim();
+    const scenarioType = pickSharedPartnerScenario([sourceIntent, targetIntent]);
+    const destinationText = pickSharedPartnerDestination([sourceIntent, targetIntent]);
+    const timeText = pickSharedPartnerTimeText([sourceIntent, targetIntent]);
 
     const [match] = await tx.insert(intentMatches).values({
       activityType: sourceIntent.activityType,
+      scenarioType,
       matchScore,
       commonTags,
       centerLocation: targetIntent.location,
       centerLocationHint: targetLocationHint || sourceLocationHint || '待沟通',
+      destinationText,
+      timeText,
       tempOrganizerId: targetIntent.userId,
       intentIds,
       userIds: [sourceIntent.userId, targetIntent.userId],

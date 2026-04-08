@@ -12,7 +12,7 @@ import { toJsonSchema } from '@juchang/utils';
 import { db, users, partnerIntents, eq, and, desc, not, sql, type PartnerIntent } from '@juchang/db';
 import { detectMatchesForIntent, getPendingMatchesForUser, confirmMatch as confirmMatchService } from './partner-match';
 import { recordPartnerTaskIntentPosted } from '../task-runtime/agent-task.service';
-import { understandPartnerRequest } from '../workflow/partner-understanding';
+import { understandPartnerRequest, type PartnerScenarioType } from '../workflow/partner-understanding';
 
 // ============ Schema 定义 ============
 
@@ -71,6 +71,9 @@ export interface SearchPartnerCandidatesParams {
   activityType: CreatePartnerIntentParams['activityType'];
   sportType?: CreatePartnerIntentParams['sportType'];
   locationHint: string;
+  scenarioType?: PartnerScenarioType;
+  destinationText?: string;
+  timeText?: string;
   timePreference?: string;
   description: string;
   preferredGender?: string;
@@ -85,7 +88,10 @@ export interface SearchPartnerCandidate {
   avatarUrl: string | null;
   typeName: string;
   locationHint: string;
+  destinationText?: string | null;
+  scenarioType?: string;
   timePreference: string | null;
+  timeText?: string | null;
   summary: string;
   matchReason: string;
   score: number;
@@ -98,6 +104,15 @@ export interface SearchSummary {
   timeHint: string;
   scenarioType?: string;
 }
+
+type PartnerIntentWriteSnapshot = {
+  scenarioType: PartnerScenarioType;
+  locationHint: string;
+  destinationText: string | null;
+  timeText: string | null;
+  description: string | null;
+  rawInput: string;
+};
 
 export interface SearchNextAction {
   type: 'opt_in_partner_pool' | 'search_partners';
@@ -284,6 +299,42 @@ function buildPartnerCandidateReason(params: {
   return '你们想找的是同一类搭子';
 }
 
+function buildPartnerIntentWriteSnapshot(params: {
+  rawInput: string;
+  locationHint: string;
+  timePreference?: string;
+  description?: string;
+}): PartnerIntentWriteSnapshot {
+  const rawInput = params.rawInput.trim();
+  const understanding = understandPartnerRequest([
+    rawInput,
+    params.description?.trim() || '',
+  ].filter(Boolean).join(' '));
+
+  const destinationText = understanding.destinationText?.trim()
+    || (understanding.scenarioType === 'destination_companion' ? params.locationHint.trim() : '')
+    || null;
+  const timeText = understanding.timeText?.trim()
+    || params.timePreference?.trim()
+    || null;
+  const description = params.description?.trim()
+    || [
+      understanding.destinationText,
+      understanding.activityText,
+      understanding.timeText,
+    ].filter(Boolean).join(' ').trim()
+    || null;
+
+  return {
+    scenarioType: understanding.scenarioType,
+    locationHint: params.locationHint.trim() || '附近',
+    destinationText,
+    timeText,
+    description,
+    rawInput,
+  };
+}
+
 /**
  * 提取共同时间提示
  */
@@ -457,7 +508,10 @@ export async function searchPartnerCandidates(
             defaultTypeName: typeName,
           }),
           locationHint: row.intent.locationHint,
+          ...(row.intent.destinationText ? { destinationText: row.intent.destinationText } : {}),
+          ...(row.intent.scenarioType ? { scenarioType: row.intent.scenarioType } : {}),
           timePreference: row.intent.timePreference || null,
+          ...(row.intent.timeText ? { timeText: row.intent.timeText } : {}),
           summary,
           matchReason: buildPartnerCandidateReason({
             scenarioType: resolvedScenarioType,
@@ -564,19 +618,29 @@ export async function createPartnerIntent(
     }
 
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const writeSnapshot = buildPartnerIntentWriteSnapshot({
+      rawInput: params.rawInput.trim() || `想找${getPartnerIntentTypeName(params.activityType, normalizedSportType)}搭子`,
+      locationHint: normalizedLocationHint,
+      timePreference: params.timePreference?.trim(),
+      description: params.poiPreference?.trim(),
+    });
 
     const [intent] = await db.insert(partnerIntents).values({
       userId,
       activityType: params.activityType,
-      locationHint: normalizedLocationHint,
+      scenarioType: writeSnapshot.scenarioType,
+      locationHint: writeSnapshot.locationHint,
+      destinationText: writeSnapshot.destinationText,
       location: sql`ST_SetSRID(ST_MakePoint(${userLocation.lng}, ${userLocation.lat}), 4326)`,
       timePreference: params.timePreference?.trim() || null,
+      timeText: writeSnapshot.timeText,
+      description: writeSnapshot.description,
       metaData: {
         tags: normalizedTags,
         ...(normalizedSportType ? { sportType: normalizedSportType } : {}),
         poiPreference: params.poiPreference?.trim() || undefined,
         budgetType: params.budgetType,
-        rawInput: params.rawInput.trim() || `想找${getPartnerIntentTypeName(params.activityType, normalizedSportType)}搭子`,
+        rawInput: writeSnapshot.rawInput,
       },
       expiresAt,
       status: 'active',
@@ -587,11 +651,14 @@ export async function createPartnerIntent(
     await recordPartnerTaskIntentPosted({
       userId,
       partnerIntentId: intent.id,
-      rawInput: params.rawInput.trim() || `想找${getPartnerIntentTypeName(params.activityType, normalizedSportType)}搭子`,
+      rawInput: writeSnapshot.rawInput,
       activityType: params.activityType,
+      scenarioType: writeSnapshot.scenarioType,
       ...(normalizedSportType ? { sportType: normalizedSportType } : {}),
-      locationHint: normalizedLocationHint,
+      locationHint: writeSnapshot.locationHint,
+      ...(writeSnapshot.destinationText ? { destinationText: writeSnapshot.destinationText } : {}),
       ...(params.timePreference?.trim() ? { timePreference: params.timePreference.trim() } : {}),
+      ...(writeSnapshot.timeText ? { timeText: writeSnapshot.timeText } : {}),
       ...(matchResult ? { intentMatchId: matchResult.id } : {}),
     });
 
@@ -687,18 +754,28 @@ export async function ensureSearchDrivenPartnerIntent(params: {
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
   const normalizedLocationHint = params.locationHint.trim() || '附近';
   const rawInput = params.rawInput.trim() || `想找${getPartnerIntentTypeName(params.activityType, normalizedSportType)}搭子`;
+  const writeSnapshot = buildPartnerIntentWriteSnapshot({
+    rawInput,
+    locationHint: normalizedLocationHint,
+    timePreference: params.timePreference?.trim(),
+    description: params.description?.trim(),
+  });
 
   const [intent] = await db.insert(partnerIntents).values({
     userId,
     activityType: params.activityType,
-    locationHint: normalizedLocationHint,
+    scenarioType: writeSnapshot.scenarioType,
+    locationHint: writeSnapshot.locationHint,
+    destinationText: writeSnapshot.destinationText,
     location: sql`ST_SetSRID(ST_MakePoint(${userLocation.lng}, ${userLocation.lat}), 4326)`,
     timePreference: params.timePreference?.trim() || null,
+    timeText: writeSnapshot.timeText,
+    description: writeSnapshot.description,
     metaData: {
       tags: [],
       ...(normalizedSportType ? { sportType: normalizedSportType } : {}),
       ...(params.description?.trim() ? { poiPreference: params.description.trim() } : {}),
-      rawInput,
+      rawInput: writeSnapshot.rawInput,
     },
     expiresAt,
     status: 'active',
@@ -707,11 +784,14 @@ export async function ensureSearchDrivenPartnerIntent(params: {
   await recordPartnerTaskIntentPosted({
     userId,
     partnerIntentId: intent.id,
-    rawInput,
+    rawInput: writeSnapshot.rawInput,
     activityType: params.activityType,
+    scenarioType: writeSnapshot.scenarioType,
     ...(normalizedSportType ? { sportType: normalizedSportType } : {}),
-    locationHint: normalizedLocationHint,
+    locationHint: writeSnapshot.locationHint,
+    ...(writeSnapshot.destinationText ? { destinationText: writeSnapshot.destinationText } : {}),
     ...(params.timePreference?.trim() ? { timePreference: params.timePreference.trim() } : {}),
+    ...(writeSnapshot.timeText ? { timeText: writeSnapshot.timeText } : {}),
   });
 
   return {

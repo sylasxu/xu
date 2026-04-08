@@ -5,7 +5,7 @@
  */
 
 import { runText } from '../models/runtime';
-import { resolveChatModelSelection } from '../models/router';
+import { resolveChatModelSelection, shouldOmitTemperatureForModelId } from '../models/router';
 import type { IntentType, ClassifyResult, ClassifyContext } from './types';
 import { intentPatterns, intentPriority, draftModifyPatterns } from './definitions';
 
@@ -186,7 +186,7 @@ ${conversationText}
 
 请以 JSON 格式返回，只返回 JSON，不要其他内容：
 {"intent": "意图类型", "confidence": 0.0-1.0}`,
-      temperature: 0,
+      ...(shouldOmitTemperatureForModelId(modelId) ? {} : { temperature: 0 }),
     });
 
     // 解析 JSON 响应

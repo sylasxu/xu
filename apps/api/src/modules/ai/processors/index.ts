@@ -28,7 +28,6 @@ export { extractPreferencesProcessor } from './extract-preferences';
 export { outputGuardProcessor } from './output-guard';
 export { recordMetricsProcessor } from './record-metrics';
 export { persistRequestProcessor } from './persist-request';
-export { evaluateQualityProcessor } from './evaluate-quality';
 
 // Pipeline 注册表和工厂函数
 export { registerProcessor, buildPreLLMPipeline, clearRegistry } from './pipeline';
@@ -397,4 +396,3 @@ export function runAsyncProcessors(
 
   return execution;
 }
-

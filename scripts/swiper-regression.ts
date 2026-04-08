@@ -73,7 +73,7 @@ const BASE_URL = 'http://localhost';
 const USER_COUNT = 5;
 const ACTIVITY_TITLE_PREFIX = '【Swiper验收】';
 const PARTNER_RAW_INPUT_PREFIX = '【Swiper验收】';
-const DEFAULT_AI_MODEL = process.env.GENUI_TEST_MODEL?.trim() || 'deepseek-chat';
+const DEFAULT_AI_MODEL = process.env.GENUI_TEST_MODEL?.trim() || 'moonshot/kimi-k2.5';
 const CENTER = {
   lat: 29.58567,
   lng: 106.52988,

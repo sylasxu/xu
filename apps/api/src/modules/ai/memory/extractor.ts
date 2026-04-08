@@ -7,7 +7,7 @@
 import { runObject } from '../models/runtime';
 import { t } from 'elysia';
 import { jsonSchema } from 'ai';
-import { resolveChatModelSelection } from '../models/router';
+import { resolveChatModelSelection, shouldOmitTemperatureForModelId } from '../models/router';
 import { toJsonSchema } from '@juchang/utils';
 import { createLogger } from '../observability/logger';
 
@@ -211,7 +211,7 @@ export async function extractPreferencesWithLLM(
   }
 
   try {
-    const { model } = await resolveChatModelSelection({ intent: 'chat' });
+    const { model, modelId } = await resolveChatModelSelection({ intent: 'chat' });
 
     const result = await runObject<PreferenceExtraction>({
       model,
@@ -233,7 +233,7 @@ ${userMessages}
 6. 提取用户明确说过的身份线索到 identityFacts，例如名字、住在哪、在哪里上班、是什么身份
 7. 提取用户明确提过的重要人物/关系线索到 socialContextFacts，例如喜欢的人、对方住哪、对方性格
 8. 如果没有明确线索，返回空数组`,
-      temperature: 0,
+      ...(shouldOmitTemperatureForModelId(modelId) ? {} : { temperature: 0 }),
     });
 
     const extraction = result.object;

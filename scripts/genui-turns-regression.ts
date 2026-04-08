@@ -73,7 +73,7 @@ const BASE_URL =
   process.env.GENUI_CHAT_API_URL ||
   process.env.GENUI_TURNS_API_URL ||
   "http://127.0.0.1:1996/ai/chat";
-const DEFAULT_TEST_MODEL = process.env.GENUI_TEST_MODEL?.trim() || "deepseek-chat";
+const DEFAULT_TEST_MODEL = process.env.GENUI_TEST_MODEL?.trim() || "moonshot/kimi-k2.5";
 const CURL_TIMEOUT_MS = Number.parseInt(process.env.GENUI_CURL_TIMEOUT_MS || "45000", 10);
 const MAX_TRANSIENT_TURNS = 8;
 const ROOT_API_URL = BASE_URL.endsWith("/ai/chat")

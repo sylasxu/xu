@@ -51,7 +51,7 @@ inclusion: always
 
 ### @juchang/db (数据源)
 - **Tech**: Drizzle ORM (PostgreSQL + PostGIS + pgvector) + `drizzle-typebox`
-- **21 张表**：13 张核心业务表 + 8 张运营/安全/配置支撑表（以 `packages/db/src/schema` 为准）
+- **Schema 以 `packages/db/src/schema` 中的 `pgTable(...)` 定义为准**，当前已包含用户、活动、搭子、通知、AI 观测、配置、安全、内容运营等多类真源表
 - **Schema 规范**:
   ```typescript
   export const users = pgTable("users", { ... });
@@ -62,11 +62,11 @@ inclusion: always
 
 ### apps/api (业务网关)
 - **Tech**: ElysiaJS + TypeBox
-- **15 个模块**：auth, users, activities, participants, chat, ai, hot-keywords, dashboard, analytics, content, growth, notifications, reports, content-security, wechat
+- **模块与对外门面以 `apps/api/src/index.ts` 当前注册结果为准**；主流程域长期收口在 `auth / ai / activities / participants / chat / notifications / content`
 - **AI 模块结构 (v4.6)**:
   - `ai.service.ts` - 核心入口
   - `processors/` - Processor 纯函数 (input-guard, user-profile, semantic-recall, token-limit, save-history, extract-preferences)
-  - `models/` - 模型路由 (Qwen3 主力 + DeepSeek 备选)
+- `models/` - 模型路由 (Moonshot / Kimi 主力，Qwen 仅保留 embedding)
   - `rag/` - 语义检索 + Rerank
 - **文件结构**: `*.controller.ts` / `*.service.ts` (纯函数) / `*.model.ts`
 - **AI 顶层纯化规则**:
@@ -272,7 +272,7 @@ bunx <package>       # 执行包命令
 - `partnerIntentStatusEnum`: active, matched, expired, cancelled (v4.0)
 - `intentMatchOutcomeEnum`: pending, confirmed, expired, cancelled (v4.0)
 
-**核心表** (v4.6 - 13 张):
+**主链与支撑表速查**：
 | 表 | 核心字段 |
 |---|---------|
 | users | id, wxOpenId, phoneNumber, nickname, avatarUrl, aiCreateQuotaToday |
@@ -282,12 +282,13 @@ bunx <package>       # 执行包命令
 | conversation_messages | id, conversationId, userId, role, messageType, content, activityId (消息) |
 | activity_messages | id, activityId, senderId, messageType, content |
 | notifications | id, userId, type, title, isRead, activityId |
-| partner_intents | id, userId, type, tags, location, expiresAt, status (v4.0) |
-| intent_matches | id, intentAId, intentBId, tempOrganizerId, outcome (v4.0) |
+| partner_intents | id, userId, activityType, scenarioType, locationHint, destinationText, timeText, status |
+| intent_matches | id, activityType, scenarioType, centerLocationHint, destinationText, tempOrganizerId, outcome |
 | match_messages | id, matchId, senderId, content (v4.0) |
+| agent_tasks | id, userId, taskType, currentStage, status, partnerIntentId, intentMatchId |
+| agent_task_events | id, taskId, eventType, eventPayload, createdAt |
 | ai_requests | id, userId, modelId, inputTokens, outputTokens, latencyMs (v4.6) |
 | ai_tool_calls | id, requestId, toolName, durationMs, success (v4.6) |
-| ai_eval_samples | id, input, output, intent, score (v4.6) |
 
 **AI 对话持久化 (v3.9)**:
 - 有登录用户的 AI 对话自动保存到 `conversation_messages` 表
@@ -295,8 +296,7 @@ bunx <package>       # 执行包命令
 - 支持按 `activityId` 查询关联的对话历史
 
 **AI 模型配置 (v4.6)**:
-- **主力**: Moonshot / Kimi (`kimi-k2.5` 主聊天/Agent，`kimi-k2-thinking` 深度推理)
-- **备选**: DeepSeek (deepseek-chat)
+- **主力**: Moonshot / Kimi（默认统一走 `kimi-k2.5`，避免 thinking/tool-call 兼容问题）
 - **Embedding**: Qwen text-embedding-v4 (1536 维，Qwen 仅保留这一项)
 - **Rerank**: 本地轻量排序（不走外部 Qwen 模型）
 

@@ -70,8 +70,11 @@ export interface JoinTaskContext {
 
 export interface PartnerTaskContext {
   activityType?: string;
+  scenarioType?: string;
   locationHint?: string;
+  destinationText?: string;
   timePreference?: string;
+  timeText?: string;
   source?: string;
   entry?: string;
 }
@@ -2109,9 +2112,12 @@ export async function recordPartnerTaskIntentPosted(params: {
   partnerIntentId: string;
   rawInput: string;
   activityType: string;
+  scenarioType?: string;
   sportType?: string;
   locationHint: string;
+  destinationText?: string | null;
   timePreference?: string;
+  timeText?: string | null;
   intentMatchId?: string;
 }): Promise<void> {
   const existingTask = await findLatestPartnerTaskByIntent({
@@ -2129,9 +2135,12 @@ export async function recordPartnerTaskIntentPosted(params: {
     source: 'partner_intent_created',
     slotSummary: {
       activityType: params.activityType,
+      ...(params.scenarioType ? { scenarioType: params.scenarioType } : {}),
       ...(params.sportType ? { sportType: params.sportType } : {}),
       locationHint: params.locationHint,
+      ...(params.destinationText ? { destinationText: params.destinationText } : {}),
       ...(params.timePreference ? { timePreference: params.timePreference } : {}),
+      ...(params.timeText ? { timeText: params.timeText } : {}),
     },
   });
 
@@ -2145,14 +2154,20 @@ export async function recordPartnerTaskIntentPosted(params: {
     goalText,
     slotSummary: {
       activityType: params.activityType,
+      ...(params.scenarioType ? { scenarioType: params.scenarioType } : {}),
       locationHint: params.locationHint,
+      ...(params.destinationText ? { destinationText: params.destinationText } : {}),
       ...(params.timePreference ? { timePreference: params.timePreference } : {}),
+      ...(params.timeText ? { timeText: params.timeText } : {}),
     },
     pendingAction: null,
     eventType: 'stage_changed',
     eventPayload: {
       activityType: params.activityType,
+      ...(params.scenarioType ? { scenarioType: params.scenarioType } : {}),
       locationHint: params.locationHint,
+      ...(params.destinationText ? { destinationText: params.destinationText } : {}),
+      ...(params.timeText ? { timeText: params.timeText } : {}),
     },
   });
 }
@@ -2168,7 +2183,10 @@ export async function recordPartnerTaskMatchReady(params: {
       userIds: intentMatches.userIds,
       intentIds: intentMatches.intentIds,
       activityType: intentMatches.activityType,
+      scenarioType: intentMatches.scenarioType,
       centerLocationHint: intentMatches.centerLocationHint,
+      destinationText: intentMatches.destinationText,
+      timeText: intentMatches.timeText,
     })
     .from(intentMatches)
     .where(eq(intentMatches.id, params.matchId))
@@ -2183,8 +2201,12 @@ export async function recordPartnerTaskMatchReady(params: {
     .select({
       id: partnerIntents.id,
       userId: partnerIntents.userId,
+      scenarioType: partnerIntents.scenarioType,
       locationHint: partnerIntents.locationHint,
+      destinationText: partnerIntents.destinationText,
       timePreference: partnerIntents.timePreference,
+      timeText: partnerIntents.timeText,
+      description: partnerIntents.description,
       metaData: partnerIntents.metaData,
     })
     .from(partnerIntents)
@@ -2206,7 +2228,10 @@ export async function recordPartnerTaskMatchReady(params: {
       source: 'partner_match_ready',
       slotSummary: {
         activityType: matchRow.activityType,
+        scenarioType: matchRow.scenarioType,
         locationHint: matchRow.centerLocationHint,
+        ...(matchRow.destinationText ? { destinationText: matchRow.destinationText } : {}),
+        ...(intent.timeText || matchRow.timeText ? { timeText: intent.timeText || matchRow.timeText } : {}),
         ...(intent.timePreference ? { timePreference: intent.timePreference } : {}),
       },
     });
@@ -2221,13 +2246,19 @@ export async function recordPartnerTaskMatchReady(params: {
       pendingAction: null,
       slotSummary: {
         activityType: matchRow.activityType,
+        scenarioType: matchRow.scenarioType,
         locationHint: matchRow.centerLocationHint,
+        ...(matchRow.destinationText ? { destinationText: matchRow.destinationText } : {}),
+        ...(intent.timeText || matchRow.timeText ? { timeText: intent.timeText || matchRow.timeText } : {}),
       },
       eventType: 'stage_changed',
       eventPayload: {
         matchId: matchRow.id,
         activityType: params.activityType,
         locationHint: params.locationHint,
+        scenarioType: matchRow.scenarioType,
+        ...(matchRow.destinationText ? { destinationText: matchRow.destinationText } : {}),
+        ...(matchRow.timeText ? { timeText: matchRow.timeText } : {}),
       },
     });
   }

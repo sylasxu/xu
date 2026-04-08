@@ -43,9 +43,9 @@ try {
   // 3. AI 配置提示
   console.log('');
   console.log('🤖 AI 服务配置说明：');
-  console.log('   - 当前默认：OpenAI 兼容网关（如 sub2api）主力，Qwen / DeepSeek 备选');
-  console.log('   - 推荐至少配置 OPENAI_API_KEY；如使用兼容网关，再补 OPENAI_BASE_URL');
-  console.log('   - 如需保留兜底，再配置 DASHSCOPE_API_KEY / DEEPSEEK_API_KEY');
+  console.log('   - 当前默认：Moonshot / Kimi 主链路，Qwen 仅用于 Embedding');
+  console.log('   - 推荐至少配置 MOONSHOT_API_KEY；如需 OpenAI 兼容网关，再补 OPENAI_API_KEY / OPENAI_BASE_URL');
+  console.log('   - 默认不启用 provider 级兜底，如确有需要再显式配置备用 provider');
   console.log('');
 
   // 写入 .env

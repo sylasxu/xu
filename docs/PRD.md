@@ -2580,6 +2580,10 @@ LEFT JOIN Creators c ON j.user_id = c.creator_id;
 - 当用户点击“继续帮我留意”时，才创建 `partner_intents`
 - Logged-In / Unbound 用户先补手机号绑定，再进入持续匹配
 - Registered 用户可直接入池，系统后台持续扫描并在命中后发送服务通知
+- `partner_intents` 现在统一承接三类真实表达：
+  - 本地找搭子（`local_partner`）
+  - 跟着目的地/活动找同去同行（`destination_companion`）
+  - 临时补位（`fill_seat`）
 
 **意向池（Intent Pool）**：
 
@@ -2760,8 +2764,8 @@ pending → confirmed (Temp_Organizer 确认，转为 Activity)
 
 | 表 | 说明 |
 |---|------|
-| `partner_intents` | 存储用户的找搭子意向 |
-| `intent_matches` | 存储匹配结果 |
+| `partner_intents` | 存储用户的找搭子意向，包含本地搭子 / 同去同行 / 临时补位三类场景 |
+| `intent_matches` | 存储匹配结果，并保留场景类型、目的地/时间摘要 |
 | `match_messages` | 存储匹配后的沟通消息 |
 
 **匹配算法**：

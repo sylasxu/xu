@@ -1409,41 +1409,6 @@ function runOptionalConversationCheck(logs: string[]): void {
 }
 
 function runOptionalAdminOpsChecks(logs: string[]): void {
-  const today = new Date();
-  const sevenDaysAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
-  const toDateParam = (value: Date) => value.toISOString().slice(0, 10);
-  const startDate = toDateParam(sevenDaysAgo);
-  const endDate = toDateParam(today);
-
-  const qualityResponse = requestJson({
-    method: 'GET',
-    url: `${BASE_URL}/ai/metrics/quality?startDate=${startDate}&endDate=${endDate}`,
-    authArgs: getAdminAuthArgs(),
-  });
-  assert(qualityResponse.status === 200, `ops quality metrics failed: ${qualityResponse.status}`);
-  const qualityPayload = parseJson<Record<string, unknown>>(qualityResponse.body, 'ops quality metrics');
-  const qualitySummary = isRecord(qualityPayload.summary) ? qualityPayload.summary : null;
-  assert(qualitySummary, 'ops quality metrics: summary missing');
-  assert(
-    typeof qualitySummary.intentRecognitionRate === 'number',
-    'ops quality metrics: intentRecognitionRate missing'
-  );
-  assert(typeof qualitySummary.toolSuccessRate === 'number', 'ops quality metrics: toolSuccessRate missing');
-
-  const conversionResponse = requestJson({
-    method: 'GET',
-    url: `${BASE_URL}/ai/metrics/conversion?startDate=${startDate}&endDate=${endDate}`,
-    authArgs: getAdminAuthArgs(),
-  });
-  assert(conversionResponse.status === 200, `ops conversion metrics failed: ${conversionResponse.status}`);
-  const conversionPayload = parseJson<Record<string, unknown>>(
-    conversionResponse.body,
-    'ops conversion metrics'
-  );
-  const funnel = isRecord(conversionPayload.funnel) ? conversionPayload.funnel : null;
-  assert(funnel, 'ops conversion metrics: funnel missing');
-  assert(typeof funnel.conversations === 'number', 'ops conversion metrics: funnel.conversations missing');
-
   const sessionsResponse = requestJson({
     method: 'GET',
     url: `${BASE_URL}/ai/sessions?limit=1`,
@@ -1453,7 +1418,7 @@ function runOptionalAdminOpsChecks(logs: string[]): void {
   const sessionsPayload = parseJson<Record<string, unknown>>(sessionsResponse.body, 'sessions check');
   assert(Array.isArray(sessionsPayload.items), 'sessions check: items missing');
 
-  logs.push(`admin checks OK quality+conversion+sessions (range=${startDate}..${endDate})`);
+  logs.push('admin checks OK sessions');
 }
 
 function runLongConversationFlow(logs: string[]): void {

@@ -121,7 +121,7 @@ const ChatContextSchema = t.Object({
 }, { additionalProperties: true });
 
 const ChatAiSchema = t.Object({
-  model: t.Optional(t.String({ minLength: 1, description: '本轮 AI 使用的模型 ID，如 gpt-5.4 / gpt-5 / deepseek-chat' })),
+  model: t.Optional(t.String({ minLength: 1, description: '本轮 AI 使用的模型 ID，如 moonshot/kimi-k2.5 / gpt-5.4' })),
   temperature: t.Optional(t.Number({ minimum: 0, maximum: 2, description: '采样温度，默认 0' })),
   maxTokens: t.Optional(t.Number({ minimum: 1, description: '最大输出 Token 数' })),
 }, { additionalProperties: false });
@@ -801,76 +801,6 @@ const ViolationStatsResponse = t.Object({
   })),
 });
 
-// ==========================================
-// Metrics 子 Controller Schema (v4.6)
-// 指标聚合 - AI 特有类型
-// ==========================================
-
-// 对话质量指标响应
-const QualityMetricsResponse = t.Object({
-  summary: t.Object({
-    totalConversations: t.Number(),
-    avgQualityScore: t.Number(),
-    intentRecognitionRate: t.Number(),
-    toolSuccessRate: t.Number(),
-  }),
-  daily: t.Array(t.Object({
-    date: t.String(),
-    conversations: t.Number(),
-    avgQualityScore: t.Number(),
-    intentRecognitionRate: t.Number(),
-    toolSuccessRate: t.Number(),
-  })),
-  intentDistribution: t.Array(t.Object({
-    intent: t.String(),
-    count: t.Number(),
-    percentage: t.Number(),
-  })),
-});
-
-// 转化率指标响应
-const ConversionMetricsResponse = t.Object({
-  funnel: t.Object({
-    conversations: t.Number(),
-    intentRecognized: t.Number(),
-    toolCalled: t.Number(),
-    activityCreatedOrJoined: t.Number(),
-  }),
-  conversionRates: t.Object({
-    intentToTool: t.Number(),
-    toolToActivity: t.Number(),
-    overall: t.Number(),
-  }),
-  byIntent: t.Array(t.Object({
-    intent: t.String(),
-    conversations: t.Number(),
-    converted: t.Number(),
-    conversionRate: t.Number(),
-  })),
-});
-
-// Playground 统计响应
-const PlaygroundStatsResponse = t.Object({
-  intentDistribution: t.Array(t.Object({
-    intent: t.String(),
-    count: t.Number(),
-    percentage: t.Number(),
-  })),
-  toolStats: t.Array(t.Object({
-    toolName: t.String(),
-    totalCalls: t.Number(),
-    successCount: t.Number(),
-    failureCount: t.Number(),
-    successRate: t.Number(),
-  })),
-  recentErrors: t.Array(t.Object({
-    timestamp: t.String(),
-    intent: t.String(),
-    toolName: t.String(),
-    errorMessage: t.String(),
-  })),
-});
-
 // Security 敏感词项（数据库版）
 const SecuritySensitiveWordItem = t.Object({
   id: t.String(),
@@ -994,11 +924,8 @@ export const aiModel = new Elysia({ name: 'aiModel' })
     'ai.moderationOpResponse': ModerationOpResponse,
     'ai.violationStatsResponse': ViolationStatsResponse,
     // ==========================================
-    // Metrics & Security (v4.6 - 指标与安全持久化)
+    // Security (v4.6 - 安全持久化)
     // ==========================================
-    'ai.qualityMetricsResponse': QualityMetricsResponse,
-    'ai.conversionMetricsResponse': ConversionMetricsResponse,
-    'ai.playgroundStatsResponse': PlaygroundStatsResponse,
     'ai.securitySensitiveWordsDBResponse': SecuritySensitiveWordsDBResponse,
     'ai.securityAddSensitiveWordResponse': SecurityAddSensitiveWordResponse,
     'ai.securityDeleteSensitiveWordResponse': SecurityDeleteSensitiveWordResponse,

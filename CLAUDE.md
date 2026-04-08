@@ -51,7 +51,7 @@ inclusion: always
 
 ### @juchang/db (数据源)
 - **Tech**: Drizzle ORM (PostgreSQL + PostGIS + pgvector) + `drizzle-typebox`
-- **21 张表**：13 张核心业务表 + 8 张运营/安全/配置支撑表（以 `packages/db/src/schema` 为准）
+- **Schema 以 `packages/db/src/schema` 中的 `pgTable(...)` 定义为准**，当前已包含用户、活动、搭子、通知、AI 观测、配置、安全、内容运营等多类真源表
 - **Schema 规范**:
   ```typescript
   export const users = pgTable("users", { ... });
@@ -62,11 +62,11 @@ inclusion: always
 
 ### apps/api (业务网关)
 - **Tech**: ElysiaJS + TypeBox
-- **15 个模块**：auth, users, activities, participants, chat, ai, hot-keywords, dashboard, analytics, content, growth, notifications, reports, content-security, wechat
+- **模块与对外门面以 `apps/api/src/index.ts` 当前注册结果为准**；主流程域长期收口在 `auth / ai / activities / participants / chat / notifications / content`
 - **AI 模块结构 (v4.6)**:
   - `ai.service.ts` - 核心入口
   - `processors/` - Processor 纯函数 (input-guard, user-profile, semantic-recall, token-limit, save-history, extract-preferences)
-  - `models/` - 模型路由 (Qwen3 主力 + DeepSeek 备选)
+  - `models/` - 模型路由 (Moonshot / Kimi 主力，Qwen 仅保留 embedding)
   - `rag/` - 语义检索 + Rerank
 - **文件结构**: `*.controller.ts` / `*.service.ts` (纯函数) / `*.model.ts`
 - **AI 顶层纯化规则**:
@@ -295,8 +295,7 @@ bunx <package>       # 执行包命令
 - 支持按 `activityId` 查询关联的对话历史
 
 **AI 模型配置 (v4.6)**:
-- **主力**: Moonshot / Kimi (`kimi-k2.5` 主聊天/Agent，`kimi-k2-thinking` 深度推理)
-- **备选**: DeepSeek (deepseek-chat)
+- **主力**: Moonshot / Kimi（默认统一走 `kimi-k2.5`，避免 thinking/tool-call 兼容问题）
 - **Embedding**: Qwen text-embedding-v4 (1536 维，Qwen 仅保留这一项)
 - **Rerank**: 本地轻量排序（不走外部 Qwen 模型）
 

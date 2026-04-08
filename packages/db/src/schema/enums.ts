@@ -72,6 +72,12 @@ export const partnerIntentStatusEnum = pgEnum("partner_intent_status", [
   "cancelled"   // 用户取消
 ]);
 
+export const partnerScenarioTypeEnum = pgEnum("partner_scenario_type", [
+  "local_partner",
+  "destination_companion",
+  "fill_seat",
+]);
+
 // 匹配结果状态
 export const intentMatchOutcomeEnum = pgEnum("intent_match_outcome", [
   "pending",    // 等待确认

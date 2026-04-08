@@ -46,7 +46,7 @@ const BASE_URL =
   process.env.GENUI_CHAT_API_URL ||
   process.env.GENUI_TURNS_API_URL ||
   "http://127.0.0.1:1996/ai/chat";
-const DEFAULT_TEST_MODEL = process.env.GENUI_TEST_MODEL?.trim() || "deepseek-chat";
+const DEFAULT_TEST_MODEL = process.env.GENUI_TEST_MODEL?.trim() || "moonshot/kimi-k2.5";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, "..");
 const FIXTURE_DIR = join(REPO_ROOT, "packages", "genui-contract", "fixtures", "response-snapshots");

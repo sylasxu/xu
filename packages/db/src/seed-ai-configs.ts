@@ -1,11 +1,10 @@
-import { sql } from 'drizzle-orm';
 import * as dotenv from 'dotenv';
-
-import { db } from './db';
-import { aiConfigs } from './schema';
-import { systemTemplateConfigSeed } from './ai-config-seeds/system-template';
+import { sql } from 'drizzle-orm';
 
 dotenv.config({ path: '../../.env' });
+
+import { aiConfigs } from './schema';
+import { systemTemplateConfigSeed } from './ai-config-seeds/system-template';
 
 const welcomeCopyConfig = {
   fallbackNickname: '朋友',
@@ -52,20 +51,28 @@ const welcomeUiConfig = {
 
 const modelIntentMapConfig = {
   chat: 'moonshot/kimi-k2.5',
-  reasoning: 'moonshot/kimi-k2-thinking',
+  reasoning: 'moonshot/kimi-k2.5',
   agent: 'moonshot/kimi-k2.5',
   vision: 'moonshot/kimi-k2.5',
 };
 
 const modelRouteMapConfig = {
   chat: 'moonshot/kimi-k2.5',
-  reasoning: 'moonshot/kimi-k2-thinking',
+  reasoning: 'moonshot/kimi-k2.5',
   agent: 'moonshot/kimi-k2.5',
   vision: 'moonshot/kimi-k2.5',
   content_generation: 'moonshot/kimi-k2.5',
   content_topic_suggestions: 'moonshot/kimi-k2.5',
   embedding: 'qwen/text-embedding-v4',
   rerank: 'moonshot/kimi-k2.5',
+};
+
+const modelFallbackConfig = {
+  primary: 'moonshot',
+  fallback: 'moonshot',
+  maxRetries: 2,
+  retryDelay: 1000,
+  enableFallback: false,
 };
 
 const aiConfigSeeds = [
@@ -99,9 +106,16 @@ const aiConfigSeeds = [
     category: 'model',
     description: 'AI workload 到模型路由的映射配置（推荐，显式 provider/model）',
   },
+  {
+    configKey: 'model.fallback_config',
+    configValue: modelFallbackConfig,
+    category: 'model',
+    description: 'Provider 级 fallback 配置（默认关闭，不自动切到其他提供商）',
+  },
 ];
 
 export async function seedAiConfigs() {
+  const { db } = await import('./db');
   const now = new Date();
   for (const item of aiConfigSeeds) {
     await db

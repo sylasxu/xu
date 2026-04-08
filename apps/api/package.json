@@ -27,7 +27,7 @@
     "genui:regression": "bun ../../scripts/genui-turns-regression.ts && bun ../../scripts/genui-parity-regression.ts && bun ../../scripts/genui-turns-snapshot.ts"
   },
   "dependencies": {
-    "@ai-sdk/deepseek": "^2.0.2",
+    "@ai-sdk/moonshotai": "^2.0.0",
     "@ai-sdk/openai": "^3.0.13",
     "@elysiajs/cors": "^1.1.1",
     "@elysiajs/eden": "^1.4.5",

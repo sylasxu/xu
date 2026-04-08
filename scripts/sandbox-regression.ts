@@ -224,7 +224,7 @@ const ADMIN_CODE = process.env.SMOKE_ADMIN_CODE?.trim()
   || '9999';
 const BASE_URL = 'http://localhost';
 const USER_COUNT = 5;
-const DEFAULT_TEST_MODEL = process.env.GENUI_TEST_MODEL?.trim() || 'deepseek-chat';
+const DEFAULT_TEST_MODEL = process.env.GENUI_TEST_MODEL?.trim() || 'moonshot/kimi-k2.5';
 const scenarioArgIndex = Bun.argv.indexOf('--scenario');
 const scenarioFilter = scenarioArgIndex >= 0 ? Bun.argv[scenarioArgIndex + 1] : '';
 const suiteArgIndex = Bun.argv.indexOf('--suite');

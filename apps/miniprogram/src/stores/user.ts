@@ -6,7 +6,7 @@ import { immer } from 'zustand/middleware/immer'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import type { User, LoginParams, UpdateUserParams } from '../types/global'
 // 使用生成的 API
-import { getUsersById, putUsersById } from '../api/endpoints/users/users'
+import { getUsersById, putUsersById } from '../api/endpoints/internal/internal'
 import { postAuthLogin } from '../api/endpoints/auth/auth'
 import type { AuthLoginResponse } from '../api/model'
 

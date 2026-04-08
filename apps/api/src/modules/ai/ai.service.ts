@@ -207,7 +207,6 @@ export {
   getQualityMetrics,
   getConversionMetrics,
   getPlaygroundStats,
-  getAIHealthMetrics,
 } from './observability/ai-metrics.service';
 
 export {

@@ -1,6 +1,6 @@
 // User Model - TypeBox schemas (纯 RESTful)
 import { Elysia, t, type Static } from 'elysia';
-import { ErrorResponseSchema, type ErrorResponse } from "../../common/common.model";
+import { ErrorResponseSchema } from "../../common/common.model";
 import { selectUserSchema } from '@juchang/db';
 
 /**
@@ -18,12 +18,6 @@ export const UserResponseSchema = t.Omit(selectUserSchema, ['wxOpenId']);
 const SuccessResponse = t.Object({
   success: t.Boolean(),
   msg: t.String(),
-});
-
-// 额度响应
-const QuotaResponse = t.Object({
-  aiCreateQuota: t.Number({ description: '今日剩余创建活动额度' }),
-  resetAt: t.Union([t.String(), t.Null()], { description: '额度重置时间' }),
 });
 
 // ============ 请求 Schema ============
@@ -49,36 +43,6 @@ export const UpdateUserRequestSchema = t.Object({
   avatarUrl: t.Optional(t.String({ maxLength: 500, description: '头像URL' })),
 });
 
-// ============ 统计 Schema ============
-
-// 用户统计查询参数
-export const UserStatsQuerySchema = t.Object({
-  type: t.Optional(t.Union([
-    t.Literal('overview'),    // 概览统计
-    t.Literal('growth'),      // 增长趋势
-  ], { default: 'overview', description: '统计类型' })),
-  period: t.Optional(t.Number({ minimum: 1, maximum: 365, default: 30, description: '时间范围（天）' })),
-});
-
-// 用户概览统计
-export const UserOverviewStatsSchema = t.Object({
-  totalUsers: t.Number({ description: '总用户数' }),
-  todayNewUsers: t.Number({ description: '今日新增用户' }),
-  activeUsers: t.Number({ description: '活跃用户估算' }),
-  totalCreators: t.Number({ description: '总创建者数' }),
-});
-
-// 用户增长趋势项
-export const UserGrowthItemSchema = t.Object({
-  date: t.String({ description: '日期' }),
-  totalUsers: t.Number({ description: '累计用户' }),
-  newUsers: t.Number({ description: '新增用户' }),
-  activeUsers: t.Number({ description: '活跃用户估算' }),
-});
-
-// 用户增长趋势响应
-export const UserGrowthResponseSchema = t.Array(UserGrowthItemSchema);
-
 // ============ 注册到 Elysia ============
 
 export const userModel = new Elysia({ name: 'userModel' })
@@ -86,24 +50,15 @@ export const userModel = new Elysia({ name: 'userModel' })
     'user.response': UserResponseSchema,
     'common.error': ErrorResponseSchema,
     'user.success': SuccessResponse,
-    'user.quotaResponse': QuotaResponse,
     'user.listQuery': UserListQuerySchema,
     'user.listResponse': UserListResponseSchema,
     'user.updateRequest': UpdateUserRequestSchema,
-    'user.statsQuery': UserStatsQuerySchema,
-    'user.overviewStats': UserOverviewStatsSchema,
-    'user.growthResponse': UserGrowthResponseSchema,
   });
 
 // ============ 导出 TS 类型 ============
 
 export type UserResponse = Static<typeof UserResponseSchema>;
 export type SuccessResponse = Static<typeof SuccessResponse>;
-export type QuotaResponse = Static<typeof QuotaResponse>;
 export type UserListQuery = Static<typeof UserListQuerySchema>;
 export type UserListResponse = Static<typeof UserListResponseSchema>;
 export type UpdateUserRequest = Static<typeof UpdateUserRequestSchema>;
-export type UserStatsQuery = Static<typeof UserStatsQuerySchema>;
-export type UserOverviewStats = Static<typeof UserOverviewStatsSchema>;
-export type UserGrowthItem = Static<typeof UserGrowthItemSchema>;
-export type UserGrowthResponse = Static<typeof UserGrowthResponseSchema>;

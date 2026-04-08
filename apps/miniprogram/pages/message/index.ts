@@ -334,21 +334,21 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     const deadlineText = this.formatTime(item.confirmDeadline);
     const requestMode = item.requestMode as PendingMatchRequestMode;
     const title = requestMode === 'connect'
-      ? `收到搭子邀请（${item.typeName}）`
+      ? `你刚才那条找搭子有人回应了（${item.typeName}）`
       : requestMode === 'group_up'
-        ? `收到组局邀请（${item.typeName}）`
-        : `匹配结果待确认（${item.typeName}）`;
+        ? `你刚才那条找搭子进入组局确认（${item.typeName}）`
+        : `你刚才那条找搭子有新进展（${item.typeName}）`;
     const content = requestMode === 'connect'
       ? (item.isTempOrganizer
-        ? `${scoreText}，活动区域：${item.locationHint}${tagText}。有用户向你发起搭子邀请，请于 ${deadlineText} 前处理。`
-        : `${scoreText}，活动区域：${item.locationHint}${tagText}。搭子邀请已发送，等待对方处理。`)
+        ? `${scoreText}，活动区域：${item.locationHint}${tagText}。这是你前面那条找搭子任务的继续，现在轮到你决定要不要往下接。`
+        : `${scoreText}，活动区域：${item.locationHint}${tagText}。这是你前面那条找搭子任务的继续，现在先等对方回应。`)
       : requestMode === 'group_up'
         ? (item.isTempOrganizer
-          ? `${scoreText}，活动区域：${item.locationHint}${tagText}。有用户向你发起组局邀请，请于 ${deadlineText} 前处理。`
-          : `${scoreText}，活动区域：${item.locationHint}${tagText}。组局邀请已发送，等待对方处理。`)
+          ? `${scoreText}，活动区域：${item.locationHint}${tagText}。这是你前面那条找搭子任务的继续，现在轮到你决定能不能往组局推进。`
+          : `${scoreText}，活动区域：${item.locationHint}${tagText}。这是你前面那条找搭子任务的继续，现在先等对方回应。`)
         : (item.isTempOrganizer
-          ? `${scoreText}，活动区域：${item.locationHint}${tagText}。请于 ${deadlineText} 前确认本次匹配。`
-          : `${scoreText}，活动区域：${item.locationHint}${tagText}。匹配结果已提交召集人处理。`);
+          ? `${scoreText}，活动区域：${item.locationHint}${tagText}。这是你前面那条找搭子任务的继续，请于 ${deadlineText} 前拍板。`
+          : `${scoreText}，活动区域：${item.locationHint}${tagText}。这是你前面那条找搭子任务的继续，当前在等召集人拍板。`);
 
     return {
       id: `match_${item.id}`,

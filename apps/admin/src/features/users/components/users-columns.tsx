@@ -1,6 +1,6 @@
 import { type ColumnDef } from '@tanstack/react-table'
 import { DotsHorizontalIcon } from '@radix-ui/react-icons'
-import { Trash2, Edit, Eye, Gauge } from 'lucide-react'
+import { Trash2, Edit, Eye } from 'lucide-react'
 import { useNavigate } from '@tanstack/react-router'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -18,7 +18,7 @@ import { type User } from '../data/schema'
 import { useUsersListContext } from '../list-context'
 
 // 用户弹窗类型
-export type UserDialogType = 'update' | 'delete' | 'quota' | 'import'
+export type UserDialogType = 'update' | 'delete' | 'import'
 
 // 行操作组件
 function UserRowActions({ user }: { user: User }) {
@@ -54,18 +54,6 @@ function UserRowActions({ user }: { user: User }) {
           编辑
           <DropdownMenuShortcut>
             <Edit size={16} />
-          </DropdownMenuShortcut>
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onClick={() => {
-            setCurrentRow(user)
-            setOpen('quota')
-          }}
-        >
-          创建活动额度
-          <DropdownMenuShortcut>
-            <Gauge size={16} />
           </DropdownMenuShortcut>
         </DropdownMenuItem>
         <DropdownMenuSeparator />

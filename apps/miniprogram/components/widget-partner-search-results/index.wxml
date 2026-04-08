@@ -7,6 +7,12 @@
     <text wx:if="{{renderSubtitle}}" class="subtitle">{{renderSubtitle}}</text>
   </view>
 
+  <view wx:if="{{renderSearchSummary}}" class="meta-wrap" style="margin-bottom: 20rpx;">
+    <text class="meta-chip">{{renderSearchSummary.locationHint || '附近'}}</text>
+    <text wx:if="{{renderSearchSummary.timeHint}}" class="meta-chip meta-chip--soft">{{renderSearchSummary.timeHint}}</text>
+    <text class="meta-chip meta-chip--soft">先搜到 {{renderSearchSummary.count}} 位</text>
+  </view>
+
   <view wx:if="{{renderResults.length > 0}}" class="swiper-shell">
     <swiper
       class="swiper"

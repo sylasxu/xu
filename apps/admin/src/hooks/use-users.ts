@@ -4,9 +4,6 @@ import { api, unwrap } from '@/lib/eden'
 import { queryKeys } from '@/lib/query-client'
 import { toast } from 'sonner'
 
-// 每日默认额度
-export const DAILY_QUOTA_LIMIT = 3
-
 // 从 Eden Treaty 推导类型
 type ApiResponse<T> = T extends { get: (args?: infer _A) => Promise<{ data: infer R }> } ? R : never
 type UsersResponse = ApiResponse<typeof api.users>
@@ -84,42 +81,6 @@ export function useDeleteUser() {
     },
     onError: (error: Error) => {
       toast.error(`删除失败: ${error.message}`)
-    },
-  })
-}
-
-// 设置单个用户额度
-export function useSetUserQuota() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async ({ userId, quota }: { userId: string; quota: number }) => {
-      return await unwrap(api.users({ id: userId }).quota.put({ quota }))
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.users.all })
-      toast.success('额度已更新')
-    },
-    onError: (error: Error) => {
-      toast.error(`更新失败: ${error.message}`)
-    },
-  })
-}
-
-// 批量设置用户额度
-export function useSetUserQuotaBatch() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async ({ userIds, quota }: { userIds: string[]; quota: number }) => {
-      return await unwrap(api.users.quota.batch.post({ userIds, quota }))
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.users.all })
-      toast.success(`已更新 ${data?.count || 0} 个用户的额度`)
-    },
-    onError: (error: Error) => {
-      toast.error(`批量更新失败: ${error.message}`)
     },
   })
 }

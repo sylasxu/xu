@@ -7,8 +7,6 @@ import {
   getQualityMetrics,
   getConversionMetrics,
   getPlaygroundStats,
-  // v4.6: AI 健康度
-  getAIHealthMetrics,
   getSensitiveWordsFromDB,
   addSensitiveWordToDB,
   deleteSensitiveWordFromDB,
@@ -55,7 +53,7 @@ const createAiMetricsController = (prefix = '') => new Elysia({ prefix })
     },
     {
       detail: {
-        tags: ['AI-Metrics'],
+        tags: ['Internal'],
         summary: '获取对话质量指标',
         description: '获取对话质量评分、意图识别率、Tool 成功率等指标（Admin 用）。',
       },
@@ -96,7 +94,7 @@ const createAiMetricsController = (prefix = '') => new Elysia({ prefix })
     },
     {
       detail: {
-        tags: ['AI-Metrics'],
+        tags: ['Internal'],
         summary: '获取转化率指标',
         description: '获取对话到活动创建/报名的转化漏斗数据（Admin 用）。',
       },
@@ -127,44 +125,12 @@ const createAiMetricsController = (prefix = '') => new Elysia({ prefix })
     },
     {
       detail: {
-        tags: ['AI-Metrics'],
+        tags: ['Internal'],
         summary: '获取 Playground 统计',
         description: '获取意图分布、Tool 成功率等 Playground 调试统计（Admin 用）。',
       },
       response: {
         200: 'ai.playgroundStatsResponse',
-        401: 'common.error',
-        500: 'common.error',
-      },
-    }
-  )
-
-  // v4.6: AI 健康度指标 (Dashboard)
-  .get(
-    '/metrics/health',
-    async ({ set }) => {
-      try {
-        const result = await getAIHealthMetrics();
-        return result;
-      } catch (error: any) {
-        set.status = 500;
-        return { code: 500, msg: error.message || '获取健康度指标失败' } satisfies ErrorResponse;
-      }
-    },
-    {
-      detail: {
-        tags: ['AI-Metrics'],
-        summary: '获取 AI 健康度指标',
-        description: `获取 AI 健康度指标（Dashboard 用）。
-
-返回内容：
-- badCaseRate: Bad Case 占比
-- toolErrorRate: Tool 错误率
-- badCaseTrend: 与上周对比的趋势（正数上升，负数下降）
-- toolErrorTrend: 与上周对比的趋势`,
-      },
-      response: {
-        200: 'ai.aiHealthMetricsResponse',
         401: 'common.error',
         500: 'common.error',
       },
@@ -189,7 +155,7 @@ const createAiMetricsController = (prefix = '') => new Elysia({ prefix })
     },
     {
       detail: {
-        tags: ['AI-Security'],
+        tags: ['Internal'],
         summary: '获取敏感词列表（数据库）',
         description: '从数据库获取敏感词列表，支持分页（Admin 用）。',
       },
@@ -223,7 +189,7 @@ const createAiMetricsController = (prefix = '') => new Elysia({ prefix })
     },
     {
       detail: {
-        tags: ['AI-Security'],
+        tags: ['Internal'],
         summary: '添加敏感词（数据库）',
         description: '添加敏感词到数据库（Admin 用）。',
       },
@@ -259,7 +225,7 @@ const createAiMetricsController = (prefix = '') => new Elysia({ prefix })
     },
     {
       detail: {
-        tags: ['AI-Security'],
+        tags: ['Internal'],
         summary: '删除敏感词（数据库）',
         description: '从数据库删除敏感词（Admin 用）。',
       },
@@ -298,7 +264,7 @@ const createAiMetricsController = (prefix = '') => new Elysia({ prefix })
     },
     {
       detail: {
-        tags: ['AI-Security'],
+        tags: ['Internal'],
         summary: '获取安全事件列表',
         description: '获取安全拦截事件列表（Admin 用）。',
       },
@@ -338,7 +304,7 @@ const createAiMetricsController = (prefix = '') => new Elysia({ prefix })
     },
     {
       detail: {
-        tags: ['AI-Security'],
+        tags: ['Internal'],
         summary: '获取安全统计（真实数据）',
         description: '从数据库获取真实的安全统计数据（Admin 用）。',
       },

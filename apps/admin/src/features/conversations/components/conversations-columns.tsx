@@ -1,7 +1,6 @@
 import { type ColumnDef } from '@tanstack/react-table'
 import { DotsHorizontalIcon } from '@radix-ui/react-icons'
 import { Eye, Trash2 } from 'lucide-react'
-import { useNavigate } from '@tanstack/react-router'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -23,11 +22,10 @@ export type ConversationDialogType = 'view' | 'delete' | 'batch-delete'
 // 行操作组件
 function SessionRowActions({ session }: { session: ConversationSession }) {
   const { setOpen, setCurrentRow } = useConversationsListContext()
-  const navigate = useNavigate()
 
   const handleView = () => {
-    // 导航到详情页
-    navigate({ to: `/ai-ops/conversations/${session.id}` as '/ai-ops/conversations' })
+    setCurrentRow(session)
+    setOpen('view')
   }
 
   const handleDelete = () => {

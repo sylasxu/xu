@@ -49,7 +49,7 @@ export const aiSessionsController = new Elysia({ prefix: '/sessions' })
     },
     {
       detail: {
-        tags: ['AI'],
+        tags: ['Internal'],
         summary: '获取会话列表',
         description: `获取所有会话列表（Admin 对话审计用）。每个会话代表一次完整的用户与 AI 的交互。
 
@@ -98,7 +98,7 @@ v4.6 新增筛选：
     },
     {
       detail: {
-        tags: ['AI'],
+        tags: ['Internal'],
         summary: '获取会话详情',
         description: '获取指定会话的所有消息（Admin 对话审计用）。',
       },
@@ -141,7 +141,7 @@ v4.6 新增筛选：
     },
     {
       detail: {
-        tags: ['AI'],
+        tags: ['Internal'],
         summary: '评估会话',
         description: `标记会话为 Good/Bad Case（Admin 对话审计用）。
 
@@ -187,7 +187,7 @@ Bad Case 标签可选值：
     },
     {
       detail: {
-        tags: ['AI'],
+        tags: ['Internal'],
         summary: '删除会话',
         description: '删除指定会话及其所有消息（Admin 用）。',
       },
@@ -220,7 +220,7 @@ Bad Case 标签可选值：
     },
     {
       detail: {
-        tags: ['AI'],
+        tags: ['Internal'],
         summary: '批量删除会话',
         description: '批量删除多个会话及其所有消息（Admin 用）。',
       },

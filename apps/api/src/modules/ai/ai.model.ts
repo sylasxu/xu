@@ -553,19 +553,6 @@ const MetricsUsageResponse = t.Object({
 });
 
 // ==========================================
-// Prompt 相关 Schema (v3.4 新增)
-// ==========================================
-
-// Prompt 信息响应
-const PromptInfoResponse = t.Object({
-  version: t.String(),
-  lastModified: t.String(),
-  description: t.String(),
-  features: t.Array(t.String()),
-  content: t.String({ description: '当前 System Prompt 内容' }),
-});
-
-// ==========================================
 // Sessions 子 Controller Schema (v4.6)
 // 会话管理 - Admin 对话审计
 // ==========================================
@@ -884,18 +871,6 @@ const PlaygroundStatsResponse = t.Object({
   })),
 });
 
-// AI 健康度指标响应
-const AIHealthMetricsResponse = t.Object({
-  badCaseRate: t.Number(),
-  badCaseCount: t.Number(),
-  totalEvaluated: t.Number(),
-  toolErrorRate: t.Number(),
-  errorSessionCount: t.Number(),
-  totalSessions: t.Number(),
-  badCaseTrend: t.Number(),
-  toolErrorTrend: t.Number(),
-});
-
 // Security 敏感词项（数据库版）
 const SecuritySensitiveWordItem = t.Object({
   id: t.String(),
@@ -986,8 +961,6 @@ export const aiModel = new Elysia({ name: 'aiModel' })
     // Metrics (v3.4 新增)
     'ai.metricsUsageQuery': MetricsUsageQuery,
     'ai.metricsUsageResponse': MetricsUsageResponse,
-    // Prompt (v3.4 新增)
-    'ai.promptInfoResponse': PromptInfoResponse,
     // 通用
     'common.error': ErrorResponseSchema,
     // ==========================================
@@ -1026,7 +999,6 @@ export const aiModel = new Elysia({ name: 'aiModel' })
     'ai.qualityMetricsResponse': QualityMetricsResponse,
     'ai.conversionMetricsResponse': ConversionMetricsResponse,
     'ai.playgroundStatsResponse': PlaygroundStatsResponse,
-    'ai.aiHealthMetricsResponse': AIHealthMetricsResponse,
     'ai.securitySensitiveWordsDBResponse': SecuritySensitiveWordsDBResponse,
     'ai.securityAddSensitiveWordResponse': SecurityAddSensitiveWordResponse,
     'ai.securityDeleteSensitiveWordResponse': SecurityDeleteSensitiveWordResponse,
@@ -1068,6 +1040,3 @@ export type DailyTokenUsage = Static<typeof DailyTokenUsage>;
 export type TokenUsageSummary = Static<typeof TokenUsageSummary>;
 export type ToolCallStats = Static<typeof ToolCallStats>;
 export type MetricsUsageResponse = Static<typeof MetricsUsageResponse>;
-
-// Prompt 类型导出 (v3.4 新增)
-export type PromptInfoResponse = Static<typeof PromptInfoResponse>;

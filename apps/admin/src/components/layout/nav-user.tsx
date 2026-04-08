@@ -91,7 +91,7 @@ export function NavUser({ user: _fallbackUser }: NavUserProps) {
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
                 <DropdownMenuItem asChild>
-                  <Link to='/settings/account'>
+                  <Link to='/settings' search={{ tab: 'account' }}>
                     <BadgeCheck />
                     账户设置
                   </Link>

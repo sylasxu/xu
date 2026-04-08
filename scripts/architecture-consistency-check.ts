@@ -234,18 +234,24 @@ const requiredChecks: Array<{ name: string; ok: boolean; hint: string }> = [
     hint: '通知查询参数必须强制 `userId`。',
   },
   {
-    name: 'analytics-metrics-route-exists',
-    ok: readFileSync(resolve('apps/api/src/modules/analytics/analytics.controller.ts'), 'utf8').includes(
-      "'/metrics'"
-    ),
-    hint: '业务指标必须统一暴露为 `/analytics/metrics`。',
+    name: 'legacy-analytics-routes-removed',
+    ok: !existsSync(resolve('apps/api/src/modules/analytics/analytics.controller.ts')),
+    hint: '旧 `/analytics/*` 路由已经冻结并删除，主流程统计统一收口到内容与活动领域。',
   },
   {
-    name: 'analytics-platform-overview-route-exists',
-    ok: readFileSync(resolve('apps/api/src/modules/analytics/analytics.controller.ts'), 'utf8').includes(
-      "'/platform-overview'"
-    ),
-    hint: '平台概览必须统一暴露为 `/analytics/platform-overview`。',
+    name: 'legacy-ai-rag-route-removed',
+    ok: !existsSync(resolve('apps/api/src/modules/ai/ai-rag.controller.ts')),
+    hint: '`/ai/rag/*` 已下线；RAG 保留为内部实现与脚本能力，不再对外暴露 HTTP 路由。',
+  },
+  {
+    name: 'legacy-ai-memory-route-removed',
+    ok: !existsSync(resolve('apps/api/src/modules/ai/ai-memory.controller.ts')),
+    hint: '`/ai/memory/*` 已下线；Memory 保留为内部实现，不再对外暴露运营接口。',
+  },
+  {
+    name: 'legacy-ai-anomaly-route-removed',
+    ok: !existsSync(resolve('apps/api/src/modules/ai/anomaly/anomaly.controller.ts')),
+    hint: '`/ai/anomaly/*` 已下线；异常检测保留为内部任务与检测器，不再对外暴露 HTTP 路由。',
   },
   {
     name: 'content-generate-route-exists',
@@ -283,11 +289,13 @@ const requiredChecks: Array<{ name: string; ok: boolean; hint: string }> = [
         "url: '/'",
         "url: '/content'",
         "url: '/activities'",
-        "url: '/safety/moderation'",
-        "url: '/ai-ops/playground'",
-        "url: '/ai-ops/conversations'",
-        "url: '/ai-ops/config'",
-        "url: '/ai-ops/usage'",
+        "url: '/safety'",
+        "url: '/reports'",
+        "url: '/ai-ops'",
+        "search: { view: 'playground' }",
+        "search: { view: 'conversations' }",
+        "search: { view: 'config' }",
+        "search: { view: 'usage' }",
         "url: '/users'",
         "url: '/settings'",
       ];

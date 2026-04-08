@@ -9,7 +9,7 @@
  * - 调用 POST /reports API
  */
 
-import { postReports } from '../../src/api/endpoints/reports/reports'
+import { postReports } from '../../src/api/endpoints/internal/internal'
 import type { ReportCreateRequest } from '../../src/api/model'
 
 /** 举报类型 */

@@ -1,15 +1,11 @@
 import { Zap } from 'lucide-react'
-import { getRouteApi } from '@tanstack/react-router'
 import { ListPage, DataTable } from '@/components/list-page'
 import { type NavigateFn } from '@/hooks/use-table-url-state'
 import { useHotKeywordsList } from '../hooks/use-hot-keywords'
 import { hotKeywordsColumns } from './hot-keywords-columns'
-import { HotKeywordsDialogs } from './hot-keywords-dialogs'
 import { HotKeywordsPrimaryButtons } from './hot-keywords-primary-buttons'
 import { HotKeywordsBulkActions } from './hot-keywords-bulk-actions'
 import { HotKeywordsListProvider } from './list-context'
-
-const route = getRouteApi('/_authenticated/hot-keywords/')
 
 interface HotKeywordsListViewProps {
   search: Record<string, unknown>
@@ -73,18 +69,5 @@ export function HotKeywordsListView({
     >
       {content}
     </ListPage>
-  )
-}
-
-export function HotKeywordsList() {
-  const search = route.useSearch()
-  const navigate = route.useNavigate()
-
-  return (
-    <HotKeywordsListView
-      search={search}
-      navigate={navigate}
-      dialogs={<HotKeywordsDialogs />}
-    />
   )
 }

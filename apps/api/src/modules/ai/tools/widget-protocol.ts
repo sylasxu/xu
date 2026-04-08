@@ -18,7 +18,6 @@ export type WidgetDataSource =
   | 'nearby_activities'
   | 'activity_detail'
   | 'my_activities'
-  | 'partner_intents_nearby'
   | 'activity_participants';
 
 export interface WidgetFetchConfig {
@@ -62,7 +61,6 @@ export const WidgetFetchConfigSchema = t.Object({
     t.Literal('nearby_activities'),
     t.Literal('activity_detail'),
     t.Literal('my_activities'),
-    t.Literal('partner_intents_nearby'),
     t.Literal('activity_participants'),
   ]),
   params: t.Record(t.String(), t.Unknown()),

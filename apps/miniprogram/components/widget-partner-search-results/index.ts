@@ -125,7 +125,7 @@ function normalizeResults(value: unknown): PartnerSearchResultItem[] {
 const INITIAL_DATA: ComponentData = {
   activeIndex: 0,
   renderResults: [],
-  renderSubtitle: '先看看这些已经注册过、方向也比较接近的搭子。',
+  renderSubtitle: '先按你刚才填的条件搜一轮。现在还在“先搜一下”阶段，想继续推进再点下面动作。',
 }
 
 Component({
@@ -189,7 +189,8 @@ Component({
       this.setData({
         renderResults,
         activeIndex: renderResults.length > 0 ? Math.min(this.data.activeIndex, renderResults.length - 1) : 0,
-        renderSubtitle: (props.subtitle as string | undefined) || '先看看这些已经注册过、方向也比较接近的搭子。',
+        renderSubtitle: (props.subtitle as string | undefined)
+          || '先按你刚才填的条件搜一轮。现在还在“先搜一下”阶段，想继续推进再点下面动作。',
         renderSearchSummary: (props.searchSummary as SearchSummary | undefined) || undefined,
         renderPrimaryAction: (props.primaryAction as GlobalAction | undefined) || undefined,
         renderSecondaryAction: (props.secondaryAction as GlobalAction | undefined) || undefined,

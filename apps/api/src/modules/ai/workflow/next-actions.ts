@@ -249,14 +249,14 @@ export function buildNextBestActions(params: NextBestActionInput): NextBestActio
 
       if (searchPayload) {
         items.push({
-          label: '继续帮我留意',
+          label: '这轮没有就继续帮我留意',
           action: 'opt_in_partner_pool',
           params: searchPayload,
         });
       }
 
       items.push({
-        label: '改一下偏好',
+        label: '改一下条件再搜',
         action: 'find_partner',
         params: {
           ...(searchPayload ?? {}),
@@ -283,7 +283,7 @@ export function buildNextBestActions(params: NextBestActionInput): NextBestActio
       }
 
       items.push({
-        label: '改一下偏好',
+        label: '改一下条件再搜',
         action: 'find_partner',
         params: {
           ...(isRecord(data?.searchPayload) ? data.searchPayload : {}),

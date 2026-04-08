@@ -36,7 +36,7 @@ export const reportController = new Elysia({ prefix: '/reports' })
     },
     {
       detail: {
-        tags: ['Reports'],
+        tags: ['Internal'],
         summary: '提交举报',
         description: '用户提交举报（活动/消息/用户），需要登录',
       },
@@ -64,7 +64,7 @@ export const reportController = new Elysia({ prefix: '/reports' })
     },
     {
       detail: {
-        tags: ['Reports'],
+        tags: ['Internal'],
         summary: '获取举报列表',
         description: '获取举报列表，支持按状态和类型筛选（需要管理员权限）',
       },
@@ -96,7 +96,7 @@ export const reportController = new Elysia({ prefix: '/reports' })
     },
     {
       detail: {
-        tags: ['Reports'],
+        tags: ['Internal'],
         summary: '获取举报详情',
         description: '根据 ID 获取举报详细信息（需要管理员权限）',
       },
@@ -129,7 +129,7 @@ export const reportController = new Elysia({ prefix: '/reports' })
     },
     {
       detail: {
-        tags: ['Reports'],
+        tags: ['Internal'],
         summary: '更新举报状态',
         description: '更新举报处理状态和备注（需要管理员权限）',
       },

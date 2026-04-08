@@ -8,6 +8,7 @@ import { type NavigateFn } from '@/hooks/use-table-url-state'
 import { useContentAnalytics, useContentLibrary, useDeleteNote } from '../hooks/use-content'
 import { HotKeywordsListView } from '@/features/hot-keywords/components/hot-keywords-list'
 import { HotKeywordsDialogs } from '@/features/hot-keywords/components/hot-keywords-dialogs'
+import { HotKeywordsAnalytics } from '@/features/hot-keywords/components/hot-keywords-analytics'
 import { HotKeywordsPrimaryButtons } from '@/features/hot-keywords/components/hot-keywords-primary-buttons'
 import {
   CONTENT_PLATFORM_OPTIONS,
@@ -31,6 +32,7 @@ export function ContentLibrary() {
   })
   const pageSize = search.pageSize ?? 10
   const activeTab = search.tab === 'keywords' ? 'keywords' : 'notes'
+  const keywordView = search.keywordView === 'analytics' ? 'analytics' : 'list'
   const selectedPlatforms = Array.isArray(search.platform)
     ? search.platform.filter((value): value is ContentPlatform => isContentPlatform(value))
     : []
@@ -194,12 +196,40 @@ export function ContentLibrary() {
             <HotKeywordsPrimaryButtons />
           </div>
 
-          <HotKeywordsListView
-            search={keywordSearch}
-            navigate={keywordNavigate}
-            showPageTitle={false}
-            dialogs={<HotKeywordsDialogs />}
-          />
+          {keywordView === 'analytics' ? (
+            <HotKeywordsAnalytics
+              showPageChrome={false}
+              onBack={() =>
+                navigate({
+                  search: (prev) => ({
+                    ...prev,
+                    keywordView: undefined,
+                  }),
+                })
+              }
+            />
+          ) : (
+            <HotKeywordsListView
+              search={keywordSearch}
+              navigate={keywordNavigate}
+              showPageTitle={false}
+              dialogs={
+                <HotKeywordsDialogs
+                  editorMode={search.keywordEditor}
+                  keywordId={search.keywordId}
+                  onEditorClose={() =>
+                    navigate({
+                      search: (prev) => ({
+                        ...prev,
+                        keywordEditor: undefined,
+                        keywordId: undefined,
+                      }),
+                    })
+                  }
+                />
+              }
+            />
+          )}
         </TabsContent>
       </Tabs>
     </ListPage>

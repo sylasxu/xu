@@ -343,14 +343,14 @@ export async function searchPartnerCandidates(
     // 主要下一步动作：入池等待
     const nextAction: SearchNextAction = {
       type: 'opt_in_partner_pool',
-      label: '帮我继续留意',
+      label: '这轮没有就继续帮我留意',
       description: '系统将持续为你寻找更合适的搭子，匹配成功会通知你',
     };
 
     // 次要动作：刷新搜索
     const secondaryAction: SearchNextAction = {
       type: 'search_partners',
-      label: '再看看其他人',
+      label: '换一批再看看',
     };
 
     return {

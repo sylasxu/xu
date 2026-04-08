@@ -9,12 +9,36 @@ export function HotKeywordsPrimaryButtons() {
     <div className='flex gap-2'>
       <Button
         variant='outline'
-        onClick={() => navigate({ to: '/hot-keywords/analytics' })}
+        onClick={() =>
+          navigate({
+            to: '/content',
+            search: (prev: Record<string, unknown>) => ({
+              ...prev,
+              tab: 'keywords',
+              keywordView: 'analytics',
+              keywordEditor: undefined,
+              keywordId: undefined,
+            }),
+          })
+        }
       >
         <BarChart3 className='mr-2 h-4 w-4' />
         数据分析
       </Button>
-      <Button onClick={() => navigate({ to: '/hot-keywords/create' })}>
+      <Button
+        onClick={() =>
+          navigate({
+            to: '/content',
+            search: (prev: Record<string, unknown>) => ({
+              ...prev,
+              tab: 'keywords',
+              keywordView: undefined,
+              keywordEditor: 'create',
+              keywordId: undefined,
+            }),
+          })
+        }
+      >
         <Plus className='mr-2 h-4 w-4' />
         创建热词
       </Button>

@@ -44,7 +44,7 @@ export const moderationController = new Elysia({ prefix: '/ai/moderation' })
     },
     {
       detail: {
-        tags: ['AI', 'Moderation'],
+        tags: ['Internal'],
         summary: '分析活动内容',
         description: '对指定活动进行内容审核，返回风险评分和建议操作',
       },
@@ -70,7 +70,7 @@ export const moderationController = new Elysia({ prefix: '/ai/moderation' })
     },
     {
       detail: {
-        tags: ['AI', 'Moderation'],
+        tags: ['Internal'],
         summary: '检查文本内容',
         description: '直接检查文本内容的风险等级，用于预览',
       },

@@ -1,12 +1,13 @@
 import { Link } from '@tanstack/react-router'
 import {
   ArrowRight,
-  Calendar,
   FileText,
   RefreshCw,
   TrendingUp,
   UserPlus,
   Zap,
+  BarChart3,
+  Calendar,
 } from 'lucide-react'
 import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
@@ -37,7 +38,6 @@ const platformLabelMap = Object.fromEntries(
 export function Dashboard() {
   const { data, isLoading, error, refetch } = useOperationsDashboardData()
 
-  const metrics = data?.businessMetrics
   const topContentType = [...(data?.content.byType ?? [])]
     .sort((a, b) => {
       if (b.avgViews !== a.avgViews) {
@@ -63,7 +63,8 @@ export function Dashboard() {
         ? `热词「${data.hotKeywords.needsAttention.keyword}」命中 ${data.hotKeywords.needsAttention.hitCount} 次，但转化只有 ${data.hotKeywords.needsAttention.conversionRate.toFixed(1)}%`
         : '热词需要关注',
       description: '入口有人点，但承接内容还不够强，优先优化这一条的返回内容。',
-      to: '/hot-keywords' as const,
+      to: '/content' as const,
+      search: { tab: 'keywords' as const },
       action: '去看热词',
     },
     {
@@ -81,10 +82,8 @@ export function Dashboard() {
     {
       key: 'activity-push',
       show: true,
-      title: `本周成局 ${metrics?.weeklyCompletedCount.value ?? 0} 个`,
-      description: metrics?.weeklyCompletedCount.comparison
-        ? `${metrics.weeklyCompletedCount.comparison}，继续把能成局的活动往外推。`
-        : '优先继续扩散已经有承接势能的活动和搭子结果。',
+      title: '把内容引来的真实需求接成局',
+      description: '内容只是入口，今天继续盯活动和搭子承接，把进来的人接住。',
       to: '/activities' as const,
       action: '去看活动',
     },
@@ -124,18 +123,11 @@ export function Dashboard() {
 
         <div className='mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
           <MetricCard
-            title='本周成局数'
-            icon={Calendar}
+            title='待补效果'
+            icon={BarChart3}
             isLoading={isLoading}
-            value={metrics?.weeklyCompletedCount.value ?? 0}
-            hint={metrics?.weeklyCompletedCount.comparison ?? '先看这周真实跑通了多少活动。'}
-          />
-          <MetricCard
-            title='J2C 转化率'
-            icon={TrendingUp}
-            isLoading={isLoading}
-            value={`${metrics?.j2cRate.value.toFixed(1) ?? '0.0'}%`}
-            hint={metrics?.j2cRate.comparison ?? '先参局后组局，才说明链路真的在转。'}
+            value={data?.content.pendingPerformanceCount ?? 0}
+            hint='先把浏览、点赞、收藏和评论补上，后面才知道哪些方向能继续发。'
           />
           <MetricCard
             title='热词整体转化率'
@@ -150,6 +142,13 @@ export function Dashboard() {
             isLoading={isLoading}
             value={data?.content.newFollowersTotal ?? 0}
             hint='先看内容有没有带来真实新增关注，再决定要不要继续投。'
+          />
+          <MetricCard
+            title='高表现内容'
+            icon={TrendingUp}
+            isLoading={isLoading}
+            value={data?.content.highPerformingCount ?? 0}
+            hint='有数据跑出来的内容才值得复写，不要每次都重新猜题。'
           />
         </div>
 
@@ -279,7 +278,7 @@ function PriorityRow({
 }: {
   title: string
   description: string
-  to: '/activities' | '/content' | '/hot-keywords'
+  to: '/activities' | '/content'
   action: string
 }) {
   return (

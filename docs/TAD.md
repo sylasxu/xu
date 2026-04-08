@@ -685,27 +685,37 @@ export const aiConfigHistory = pgTable("ai_config_history", {
 | 模块 | 路径前缀 | 职责 |
 |------|---------|------|
 | `auth` | `/auth` | 微信登录、手机号绑定 |
-| `users` | `/users` | 用户资料管理、**用户统计** |
+| `users` | `/users` | **Internal**：用户资料与后台查询 |
 | `activities` | `/activities` | 活动 CRUD、报名退出、**附近搜索**、**公开详情**、**活动统计** |
 | `participants` | `/participants` | 参与者管理 |
 | `chat` | `/chat` | 活动群聊消息 (activity_messages 表)，**WebSocket 讨论区** |
-| `ai` | `/ai` | AI 解析 (SSE)，**意图分类**，**对话历史管理**，**AI 内容生成** |
+| `ai` | `/ai` | AI 解析 (SSE)、任务续接、对话历史、配置与内部调试能力 |
 | `hot-keywords` | `/hot-keywords` | **P0 层热词管理** |
-| `analytics` | `/analytics` | **数据分析**：趋势洞察、内容效果、业务指标、平台概览 |
 | `content` | `/content` | **内容运营**：传单式内容生成、内容库管理、效果追踪 |
 | `notifications` | `/notifications` | 通知管理 |
-| `reports` | `/reports` | 举报管理 |
+| `reports` | `/reports` | **Internal**：举报管理 |
 | `wechat` | `/wechat` | 微信能力封装（模板消息、OpenID / 手机号相关能力） |
-| `content-security` | `/content-security` | 内容安全检测、微信 API 封装 |
+| `content-security` | `/content-security` | **Internal**：内容安全检测、微信 API 封装 |
 
-**设计原则**：API 模块按功能领域划分，而非按页面划分。运营指标、平台概览统一归入 `analytics` 领域，禁止为管理台单独设计后端模块。
+**当前主流程 API 门面只保留 7 组领域**：
+- `auth`
+- `ai`
+- `activities`
+- `participants`
+- `notifications`
+- `chat`
+- `content`
 
-**设计原则**：API 模块按功能领域划分，而非按页面划分。对话历史 (conversations) 属于 AI 功能领域，归入 `ai` 模块。
+其余接口统一视为 **Internal** 或 **Frozen**：
+- `users`
+- `reports`
+- `/ai/*` 下的 metrics / security / rag / memory / anomaly / sessions / configs / moderation
+
+这些接口暂不一定删除代码，但不再作为产品主流程 API 面继续扩张。
 
 **当前领域主路径**：
 
 - 内容生成：`/content/generate`
-- 趋势洞察：`/analytics/trends`
 - 内容效果统计：`/content/analytics`
 - 内容运营：`/content/*`
 
@@ -720,8 +730,8 @@ POST /auth/bindPhone      // 绑定手机号
 GET  /users               // 获取用户列表 (分页、搜索)
 GET  /users/:id           // 获取用户详情
 PUT  /users/:id           // 更新用户信息
-GET  /users/:id/quota     // 获取用户创建活动额度
-GET  /users/stats         // 获取用户统计 (概览/增长趋势)// Activities
+
+// Activities
 POST /activities          // 创建活动 (从 draft 变 active)
 GET  /activities/:id      // 获取活动详情
 GET  /activities/:id/public // 获取活动公开详情（无需认证，含讨论区预览）
@@ -773,7 +783,7 @@ DELETE /hot-keywords/:id        // 删除热词
 POST /hot-keywords/match        // 匹配热词 (P0 层核心接口)
 POST /hot-keywords/:id/hit      // 记录热词命中
 POST /hot-keywords/:id/convert  // 记录热词转化
-GET  /hot-keywords/analytics    // 获取热词分析数据
+GET  /hot-keywords/analytics    // 获取热词分析数据（内容工作台内联视图使用）
 
 // AI Config (AI 参数配置管理)
 GET  /ai/configs                       // 获取所有配置（按 category 分组）
@@ -781,11 +791,6 @@ GET  /ai/configs/:configKey            // 获取单个配置
 PUT  /ai/configs/:configKey            // 更新配置（自动递增版本号，保存历史）
 GET  /ai/configs/:configKey/history    // 获取配置变更历史
 POST /ai/configs/:configKey/rollback   // 回滚到指定版本
-
-// Analytics (数据分析领域)
-GET  /analytics/trends              // 趋势洞察（高频词/意图分布）
-GET  /analytics/metrics             // 业务指标（J2C、成局率、留存率等）
-GET  /analytics/platform-overview   // 平台概览（实时概览/AI 健康度/异常警报）
 
 // Content (内容运营领域)
 POST /content/generate              // 按平台（小红书 / 抖音 / 微信）与内容类型单次生成内容，并在本地做规范化清洗后落库标题/正文/标签/首图文案/首图配图提示词；响应额外返回发布检查与小红书承接脚本（评论区引导 / 私聊承接 / 转微信参考句）
@@ -1266,8 +1271,7 @@ apps/api/src/modules/ai/
 │   ├── moderation.controller.ts
 │   └── moderation.service.ts
 │
-└── anomaly/              # 异常检测模块
-    ├── anomaly.controller.ts
+└── anomaly/              # 异常检测模块（内部任务/检测器，不再对外暴露 HTTP 路由）
     └── detector.ts
 ```
 
@@ -1557,7 +1561,6 @@ export type WidgetDataSource =
   | 'nearby_activities'        // GET /activities/nearby
   | 'activity_detail'          // GET /activities/:id
   | 'my_activities'            // GET /activities/user/:userId
-  | 'partner_intents_nearby'   // GET /partner-intents/nearby
   | 'activity_participants';   // GET /activities/:id/participants
 
 // ── 数据获取配置 ──
@@ -1628,7 +1631,6 @@ export const WidgetFetchConfigSchema = t.Object({
     t.Literal('nearby_activities'),
     t.Literal('activity_detail'),
     t.Literal('my_activities'),
-    t.Literal('partner_intents_nearby'),
     t.Literal('activity_participants'),
   ]),
   params: t.Record(t.String(), t.Unknown()),
@@ -1700,7 +1702,6 @@ export interface ActionResult {
 | `nearby_activities` | `getActivitiesNearby(params)` | lat, lng, radius, type? |
 | `activity_detail` | `getActivitiesId(id)` | id |
 | `my_activities` | `getActivitiesUserByUserId()` | `userId` |
-| `partner_intents_nearby` | `getPartnerIntentsNearby(params)` | lat, lng |
 | `activity_participants` | `getActivitiesIdParticipants(id)` | id |
 
 **FetchState 状态机**：
@@ -3343,8 +3344,8 @@ AI
 **当前收口约束**：
 - Admin 只消费领域 API，不为单个页面反向设计 `admin/*` 后端模块。
 - `/activities` 是组局运营唯一主入口。
-- 风险审核统一使用 `/safety/moderation`。
-- 内容运营统一使用 `/content`，`/hot-keywords` 只保留跳转到内容工作台热词 tab 的兼容入口。
+- 风险审核与用户举报分成两个领域页面：`/safety` 与 `/reports`。
+- 内容运营统一使用 `/content`，热词创建 / 编辑 / 分析全部在内容工作台内联完成，不再保留独立 `/hot-keywords/*` 管理路由。
 - 内容生成主入口只允许 `/content/generate` 与 `/content/topic-suggestions`；旧 AI 内容路由已删除，禁止恢复兼容 alias。
 - `找搭子 / 组局 Agent` 是主产品引擎；内容工作台定位为外部分发器，不与主链路分叉成独立产品。
 
@@ -3426,7 +3427,7 @@ interface GodViewData {
 
 ### 9.5 AI Playground 执行追踪
 
-Admin 后台的 AI Playground（路由 `/_authenticated/ai-ops/playground`）采用 Mastra 风格的全屏 Flow Graph + 右侧 Drawer 架构，支持两种模式：
+Admin 后台的 AI 工作区（主路由 `/_authenticated/ai-ops/`，通过 `view` search 参数切到 Playground / 对话记录 / 模型路由 / 用量统计）采用 Mastra 风格的全屏 Flow Graph + 右侧 Drawer 架构，支持两种模式：
 
 | 模式 | API 参数 | 用途 |
 |------|---------|------|

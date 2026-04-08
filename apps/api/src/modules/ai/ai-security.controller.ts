@@ -46,7 +46,7 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
     },
     {
       detail: {
-        tags: ['AI-Security'],
+        tags: ['Internal'],
         summary: '获取安全总览',
         description: '获取今日安全指标、趋势图和护栏状态（Admin 用）。',
       },
@@ -71,7 +71,7 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
     },
     {
       detail: {
-        tags: ['AI-Security'],
+        tags: ['Internal'],
         summary: '获取敏感词列表',
         description: '获取当前敏感词库（Admin 用）。',
       },
@@ -95,7 +95,7 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
     },
     {
       detail: {
-        tags: ['AI-Security'],
+        tags: ['Internal'],
         summary: '添加敏感词',
         description: '添加单个敏感词到词库（Admin 用）。',
       },
@@ -123,7 +123,7 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
     },
     {
       detail: {
-        tags: ['AI-Security'],
+        tags: ['Internal'],
         summary: '删除敏感词',
         description: '从词库中删除指定敏感词（Admin 用）。',
       },
@@ -147,7 +147,7 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
     },
     {
       detail: {
-        tags: ['AI-Security'],
+        tags: ['Internal'],
         summary: '批量导入敏感词',
         description: '批量导入敏感词到词库（Admin 用）。',
       },
@@ -179,7 +179,7 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
     },
     {
       detail: {
-        tags: ['AI-Security'],
+        tags: ['Internal'],
         summary: '获取审核队列',
         description: '获取待审核内容列表（Admin 用）。',
       },
@@ -209,7 +209,7 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
     },
     {
       detail: {
-        tags: ['AI-Security'],
+        tags: ['Internal'],
         summary: '审核通过',
         description: '将指定内容标记为审核通过（Admin 用）。',
       },
@@ -238,7 +238,7 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
     },
     {
       detail: {
-        tags: ['AI-Security'],
+        tags: ['Internal'],
         summary: '审核拒绝',
         description: '将指定内容标记为审核拒绝（Admin 用）。',
       },
@@ -267,7 +267,7 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
     },
     {
       detail: {
-        tags: ['AI-Security'],
+        tags: ['Internal'],
         summary: '审核拒绝并封号',
         description: '将指定内容标记为审核拒绝，删除内容并封禁用户（Admin 用）。',
       },
@@ -298,7 +298,7 @@ export const aiSecurityController = new Elysia({ prefix: '/security' })
     },
     {
       detail: {
-        tags: ['AI-Security'],
+        tags: ['Internal'],
         summary: '获取违规统计',
         description: '获取违规类型分布、趋势和高频违规用户（Admin 用）。',
       },

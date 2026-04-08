@@ -41,7 +41,7 @@ export function NavGroup({ title, items }: NavGroupProps) {
       <SidebarGroupLabel>{title}</SidebarGroupLabel>
       <SidebarMenu>
         {items.map((item) => {
-          const key = `${item.title}-${item.url}`
+          const key = `${item.title}-${item.url}-${JSON.stringify(item.search ?? null)}`
 
           if (!item.items)
             return <SidebarMenuLink key={key} item={item} href={href} />
@@ -71,7 +71,11 @@ function SidebarMenuLink({ item, href }: { item: NavLink; href: string }) {
         isActive={checkIsActive(href, item)}
         tooltip={item.title}
       >
-        <Link to={item.url} onClick={() => setOpenMobile(false)}>
+        <Link
+          to={item.url}
+          search={item.search as never}
+          onClick={() => setOpenMobile(false)}
+        >
           {item.icon && <item.icon />}
           <span>{item.title}</span>
           {item.badge && <NavBadge>{item.badge}</NavBadge>}
@@ -112,7 +116,11 @@ function SidebarMenuCollapsible({
                   asChild
                   isActive={checkIsActive(href, subItem)}
                 >
-                  <Link to={subItem.url} onClick={() => setOpenMobile(false)}>
+                  <Link
+                    to={subItem.url}
+                    search={subItem.search as never}
+                    onClick={() => setOpenMobile(false)}
+                  >
                     {subItem.icon && <subItem.icon />}
                     <span>{subItem.title}</span>
                     {subItem.badge && <NavBadge>{subItem.badge}</NavBadge>}
@@ -157,6 +165,7 @@ function SidebarMenuCollapsedDropdown({
             <DropdownMenuItem key={`${sub.title}-${sub.url}`} asChild>
               <Link
                 to={sub.url}
+                search={sub.search as never}
                 className={`${checkIsActive(href, sub) ? 'bg-secondary' : ''}`}
               >
                 {sub.icon && <sub.icon />}
@@ -173,13 +182,38 @@ function SidebarMenuCollapsedDropdown({
   )
 }
 
+function matchesSearch(href: string, search?: Record<string, unknown>) {
+  if (!search || Object.keys(search).length === 0) {
+    return true
+  }
+
+  const current = new URL(href, 'https://admin.local')
+
+  return Object.entries(search).every(([key, value]) => {
+    if (value === undefined || value === null) {
+      return !current.searchParams.has(key)
+    }
+
+    const currentValues = current.searchParams.getAll(key)
+    if (Array.isArray(value)) {
+      const expected = value.map((item) => String(item)).sort()
+      return currentValues.sort().join('|') === expected.join('|')
+    }
+
+    return current.searchParams.get(key) === String(value)
+  })
+}
+
 function checkIsActive(href: string, item: NavItem, mainNav = false) {
+  const current = new URL(href, 'https://admin.local')
+  const currentPath = current.pathname
+  const itemPath = item.url
+
   return (
-    href === item.url || // /endpint?search=param
-    href.split('?')[0] === item.url || // endpoint
-    !!item?.items?.filter((i) => i.url === href).length || // if child nav is active
+    ((href === item.url || currentPath === itemPath) && matchesSearch(href, item.search)) ||
+    !!item?.items?.filter((i) => currentPath === i.url && matchesSearch(href, i.search)).length ||
     (mainNav &&
-      href.split('/')[1] !== '' &&
-      href.split('/')[1] === item?.url?.split('/')[1])
+      currentPath.split('/')[1] !== '' &&
+      currentPath.split('/')[1] === item?.url?.split('/')[1])
   )
 }

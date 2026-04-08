@@ -1246,7 +1246,7 @@ function buildPartnerSearchCardActions(params: {
 }): Array<{ label: string; action: string; params: Record<string, unknown> }> {
   return [
     {
-      label: params.userId ? '和Ta搭一下' : '登录后搭一下',
+      label: params.userId ? '发起搭子邀请' : '登录后发起搭子邀请',
       action: 'connect_partner',
       params: {
         partnerIntentId: params.partnerIntentId,
@@ -1258,7 +1258,7 @@ function buildPartnerSearchCardActions(params: {
       },
     },
     {
-      label: params.userId ? '问问能不能组局' : '登录后问问能不能组局',
+      label: params.userId ? '让小聚帮我问能不能组局' : '登录后让小聚帮我问能不能组局',
       action: 'request_partner_group_up',
       params: {
         partnerIntentId: params.partnerIntentId,
@@ -1270,7 +1270,7 @@ function buildPartnerSearchCardActions(params: {
       },
     },
     {
-      label: params.userId ? '继续帮我留意' : '登录后继续帮我留意',
+      label: params.userId ? '这轮没有就继续帮我留意' : '登录后继续帮我留意',
       action: 'opt_in_partner_pool',
       params: params.searchPayload,
     },
@@ -1403,7 +1403,7 @@ async function handleSearchPartners(
   }
 
   const partnerSearchResults = {
-    title: searchResult.items.length > 0 ? '先看看这些搭子' : '暂时还没搜到特别合适的',
+    title: searchResult.items.length > 0 ? '先搜到这几位' : '暂时还没搜到特别合适的',
     searchSummary: {
       ...searchResult.searchSummary,
       count: searchResult.total,
@@ -1455,7 +1455,7 @@ async function handleSearchPartners(
       searchPayload,
       partnerSearchResults,
       message: searchResult.items.length > 0
-        ? `先按${normalized.locationHint}附近的${getPartnerSearchTargetLabel(normalized.activityType, normalized.sportType)}帮你找了一圈，这几位可以先看看有没有眼缘。`
+        ? `先按${normalized.locationHint}附近的${getPartnerSearchTargetLabel(normalized.activityType, normalized.sportType)}帮你找了一圈。你现在还在“先搜一下”这一步，先挑一位继续，或者这轮没有就让我继续替你留意。`
         : `先按${normalized.locationHint}附近的${getPartnerSearchTargetLabel(normalized.activityType, normalized.sportType)}帮你搜了一圈，暂时还没看到特别合适的。你可以换个片区、补一句你想找的人是什么样，或者登录后让我继续替你留意。`,
     },
   };

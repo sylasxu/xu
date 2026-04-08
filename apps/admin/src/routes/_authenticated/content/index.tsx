@@ -7,6 +7,15 @@ const contentSearchSchema = Type.Object({
     Type.Literal('notes'),
     Type.Literal('keywords'),
   ])),
+  keywordView: Type.Optional(Type.Union([
+    Type.Literal('list'),
+    Type.Literal('analytics'),
+  ])),
+  keywordEditor: Type.Optional(Type.Union([
+    Type.Literal('create'),
+    Type.Literal('edit'),
+  ])),
+  keywordId: Type.Optional(Type.String()),
   page: Type.Optional(Type.Number({ minimum: 1, default: 1 })),
   pageSize: Type.Optional(Type.Number({ minimum: 1, maximum: 100, default: 10 })),
   platform: Type.Optional(Type.Array(Type.Union([
@@ -28,6 +37,12 @@ type ContentSearchParams = Static<typeof contentSearchSchema>
 export const Route = createFileRoute('/_authenticated/content/')({
   validateSearch: (search: Record<string, unknown>): ContentSearchParams => ({
     tab: search.tab === 'keywords' ? 'keywords' : undefined,
+    keywordView: search.keywordView === 'analytics' ? 'analytics' : undefined,
+    keywordEditor:
+      search.keywordEditor === 'create' || search.keywordEditor === 'edit'
+        ? search.keywordEditor
+        : undefined,
+    keywordId: typeof search.keywordId === 'string' ? search.keywordId : undefined,
     page: typeof search.page === 'number' ? search.page : 1,
     pageSize: typeof search.pageSize === 'number' ? search.pageSize : 10,
     platform: Array.isArray(search.platform)

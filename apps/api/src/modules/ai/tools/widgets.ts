@@ -261,7 +261,6 @@ function readWidgetFetchConfig(value: unknown): WidgetFetchConfig | undefined {
     case 'nearby_activities':
     case 'activity_detail':
     case 'my_activities':
-    case 'partner_intents_nearby':
     case 'activity_participants':
       return {
         source: value.source,

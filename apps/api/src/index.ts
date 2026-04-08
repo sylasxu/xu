@@ -22,13 +22,9 @@ import { chatController } from './modules/chat/chat.controller';
 import { notificationController } from './modules/notifications/notification.controller';
 import { reportController } from './modules/reports/report.controller';
 import { moderationController } from './modules/ai/moderation/moderation.controller';
-import { anomalyController } from './modules/ai/anomaly/anomaly.controller';
 import { hotKeywordsController } from './modules/hot-keywords/hot-keywords.controller';
 import { configController } from './modules/ai/config/config.controller';
-import { analyticsController } from './modules/analytics/analytics.controller';
 import { contentController } from './modules/content/content.controller';
-import { partnerIntentController } from './modules/partner-intents/partner-intent.controller';
-import { intentMatchController } from './modules/intent-matches/intent-match.controller';
 import { ensureSystemPromptConfigured } from './modules/ai/prompts';
 
 // 导入定时任务调度器
@@ -53,18 +49,14 @@ const openApiPlugin = openapi({
     },
     tags: [
       { name: 'Auth', description: '认证相关' },
-      { name: 'Users', description: '用户管理' },
+      { name: 'AI', description: '主对话链路、任务续接与会话承接' },
       { name: 'Activities', description: '活动管理' },
-      { name: 'AI', description: 'AI 功能' },
       { name: 'Participants', description: '参与者管理' },
       { name: 'Chat', description: '群聊消息' },
       { name: 'Notifications', description: '通知系统' },
-      { name: 'Reports', description: '内容审核' },
-      { name: 'Hot Keywords', description: '全局关键词' },
-      { name: 'Analytics', description: '数据分析' },
       { name: 'Content', description: '内容运营' },
-      { name: 'Partner Intents', description: '搭子意向' },
-      { name: 'Intent Matches', description: '搭子匹配' },
+      { name: 'Hot Keywords', description: '全局关键词' },
+      { name: 'Internal', description: '低频内部运维、排障与冻结接口，不属于主流程 API 门面' },
     ],
   },
   scalar: {
@@ -147,12 +139,8 @@ export const app = appWithBase
   .use(notificationController)
   .use(reportController)
   .use(moderationController)
-  .use(anomalyController)
   .use(hotKeywordsController)
   .use(configController)
-  .use(analyticsController)
-  .use(partnerIntentController)
-  .use(intentMatchController)
   .use(contentController);
 
 if (import.meta.main) {

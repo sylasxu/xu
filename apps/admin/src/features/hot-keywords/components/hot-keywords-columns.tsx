@@ -72,7 +72,18 @@ function HotKeywordRowActions({ keyword }: { keyword: GlobalKeyword }) {
           </DropdownMenuShortcut>
         </DropdownMenuItem>
         <DropdownMenuItem
-          onClick={() => navigate({ to: '/hot-keywords/$id/edit', params: { id: keyword.id } })}
+          onClick={() =>
+            navigate({
+              to: '/content',
+              search: (prev: Record<string, unknown>) => ({
+                ...prev,
+                tab: 'keywords',
+                keywordView: undefined,
+                keywordEditor: 'edit',
+                keywordId: keyword.id,
+              }),
+            })
+          }
         >
           编辑
           <DropdownMenuShortcut>

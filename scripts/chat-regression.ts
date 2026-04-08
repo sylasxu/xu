@@ -1444,52 +1444,6 @@ function runOptionalAdminOpsChecks(logs: string[]): void {
   assert(funnel, 'ops conversion metrics: funnel missing');
   assert(typeof funnel.conversations === 'number', 'ops conversion metrics: funnel.conversations missing');
 
-  const healthResponse = requestJson({
-    method: 'GET',
-    url: `${BASE_URL}/ai/metrics/health`,
-    authArgs: getAdminAuthArgs(),
-  });
-  assert(healthResponse.status === 200, `ops health metrics failed: ${healthResponse.status}`);
-  const healthPayload = parseJson<Record<string, unknown>>(healthResponse.body, 'ops health metrics');
-  assert(typeof healthPayload.badCaseRate === 'number', 'ops health metrics: badCaseRate missing');
-  assert(typeof healthPayload.toolErrorRate === 'number', 'ops health metrics: toolErrorRate missing');
-
-  const ragStatsResponse = requestJson({
-    method: 'GET',
-    url: `${BASE_URL}/ai/rag/stats`,
-    authArgs: getAdminAuthArgs(),
-  });
-  assert(ragStatsResponse.status === 200, `rag stats failed: ${ragStatsResponse.status}`);
-  const ragStats = parseJson<Record<string, unknown>>(ragStatsResponse.body, 'rag stats');
-  assert(typeof ragStats.coverageRate === 'number', 'rag stats: coverageRate missing');
-  assert(Array.isArray(ragStats.unindexedActivities), 'rag stats: unindexedActivities missing');
-
-  const memoryUsersResponse = requestJson({
-    method: 'GET',
-    url: `${BASE_URL}/ai/memory/users?q=admin&limit=1`,
-    authArgs: getAdminAuthArgs(),
-  });
-  assert(memoryUsersResponse.status === 200, `memory users failed: ${memoryUsersResponse.status}`);
-  const memoryUsersPayload = parseJson<Record<string, unknown>>(memoryUsersResponse.body, 'memory users');
-  const users = Array.isArray(memoryUsersPayload.users)
-    ? (memoryUsersPayload.users as Array<Record<string, unknown>>)
-    : [];
-
-  if (users.length > 0) {
-    const userId = typeof users[0]?.id === 'string' ? users[0]?.id : '';
-    assert(userId.length > 0, 'memory users: first user id missing');
-
-    const memoryProfileResponse = requestJson({
-      method: 'GET',
-      url: `${BASE_URL}/ai/memory/${userId}`,
-      authArgs: getAdminAuthArgs(),
-    });
-    assert(memoryProfileResponse.status === 200, `memory profile failed: ${memoryProfileResponse.status}`);
-    const memoryProfile = parseJson<Record<string, unknown>>(memoryProfileResponse.body, 'memory profile');
-    assert(Array.isArray(memoryProfile.preferences), 'memory profile: preferences missing');
-    assert(Array.isArray(memoryProfile.frequentLocations), 'memory profile: frequentLocations missing');
-  }
-
   const sessionsResponse = requestJson({
     method: 'GET',
     url: `${BASE_URL}/ai/sessions?limit=1`,
@@ -1499,9 +1453,7 @@ function runOptionalAdminOpsChecks(logs: string[]): void {
   const sessionsPayload = parseJson<Record<string, unknown>>(sessionsResponse.body, 'sessions check');
   assert(Array.isArray(sessionsPayload.items), 'sessions check: items missing');
 
-  logs.push(
-    `admin checks OK quality+conversion+health+rag+memory+sessions (memoryUsers=${users.length}, range=${startDate}..${endDate})`
-  );
+  logs.push(`admin checks OK quality+conversion+sessions (range=${startDate}..${endDate})`);
 }
 
 function runLongConversationFlow(logs: string[]): void {

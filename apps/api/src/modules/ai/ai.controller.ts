@@ -5,9 +5,6 @@ import { basePlugins, verifyAuth, verifyAdmin, AuthError } from '../../setup';
 import { aiModel, type ErrorResponse } from './ai.model';
 import {
   clearConversations,
-  getPromptTemplateConfig,
-  getPromptTemplateMetadata,
-  getSystemPrompt,
   getTokenUsageStats,
   getTokenUsageSummary,
   getToolCallStats,
@@ -23,10 +20,7 @@ import {
 import type { GenUIRequest } from '@juchang/genui-contract';
 import { db, users, activities, eq } from '@juchang/db';
 
-// 子领域 controller
 import { aiSessionsController } from './ai-sessions.controller';
-import { aiRagController } from './ai-rag.controller';
-import { aiMemoryController } from './ai-memory.controller';
 import { aiSecurityController } from './ai-security.controller';
 import { aiMetricsController } from './ai-metrics.controller';
 
@@ -533,47 +527,11 @@ export const aiController = new Elysia({ prefix: '/ai' })
         }
       )
 
-      // Prompt 查看（DB 必需配置）
-      .get(
-        '/prompts/current',
-        async () => {
-          const promptConfig = await getPromptTemplateConfig();
-          const metadata = getPromptTemplateMetadata(promptConfig);
-          const content = await getSystemPrompt({
-            currentTime: new Date(),
-            userLocation: { lat: 29.5630, lng: 106.5516, name: '观音桥' },
-            userNickname: '示例用户',
-          });
-
-          return {
-            version: metadata.version,
-            description: metadata.description,
-            lastModified: metadata.lastModified,
-            features: metadata.features,
-            content,
-          };
-        },
-        {
-          detail: {
-            tags: ['AI'],
-            summary: '获取当前 System Prompt',
-            description: `获取当前激活的 System Prompt 信息（Admin 用）。
-
-Prompt 存储于 ai_configs 中，此接口返回当前生效模板。
-缺少关键配置时服务会在启动阶段直接失败，避免静默降级。`,
-          },
-          response: {
-            200: 'ai.promptInfoResponse',
-          },
-        }
-      )
   )
 
   // ==========================================
   // 挂载子领域 controller
   // ==========================================
   .use(aiSessionsController)
-  .use(aiRagController)
-  .use(aiMemoryController)
   .use(aiSecurityController)
   .use(aiMetricsController);

@@ -191,7 +191,7 @@
                 : (selectedMatchDetail.requestMode === 'group_up' ? '待处理组局邀请' : '待确认匹配结果'))
               : '搭子详情'}}
           </text>
-          <text class="match-detail-sheet__subtitle">把当前状态、下一步和破冰建议讲清楚</text>
+          <text class="match-detail-sheet__subtitle">还是刚才那条找搭子，我把现状、下一步和破冰建议整理好了</text>
         </view>
         <view class="match-detail-sheet__close" bind:tap="closeMatchDetail">
           <t-icon name="close" size="36rpx" color="#9CA3AF" />

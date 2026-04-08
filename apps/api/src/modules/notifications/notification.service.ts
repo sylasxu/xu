@@ -333,19 +333,19 @@ export async function getPendingMatchDetail(
   const nextActionText = (() => {
     if (requestMode === 'connect') {
       return nextActionOwner === 'self'
-        ? '对方想先和你搭一下，如果你也觉得合适，点确认就能继续往成局推进。'
-        : `现在等 ${organizerNickname} 回应你的搭子邀约，确认后就会继续往成局推进。`;
+        ? '这是你刚才那条找搭子任务的新进展。对方想先和你搭一下，如果你也觉得合适，点确认就能继续往成局推进。'
+        : `这是你刚才那条找搭子任务的新进展。现在等 ${organizerNickname} 回应你的搭子邀约，确认后就会继续往成局推进。`;
     }
 
     if (requestMode === 'group_up') {
       return nextActionOwner === 'self'
-        ? '对方想问你能不能一起组局，如果你愿意，点确认就能直接继续往成局推进。'
-        : `现在等 ${organizerNickname} 回应你的组局邀约，确认后就会继续往成局推进。`;
+        ? '这是你刚才那条找搭子任务的新进展。对方想问你能不能一起组局，如果你愿意，点确认就能直接继续往成局推进。'
+        : `这是你刚才那条找搭子任务的新进展。现在等 ${organizerNickname} 回应你的组局邀约，确认后就会继续往成局推进。`;
     }
 
     return nextActionOwner === 'self'
-      ? '现在需要你来拍板。确认后会直接成局，大家就能继续去活动里协同。'
-      : `现在等 ${organizerNickname} 拍板。确认后会直接成局，你先看看信息和破冰建议就行。`;
+      ? '这是你刚才那条找搭子任务的新进展。现在需要你来拍板，确认后会直接成局，大家就能继续去活动里协同。'
+      : `这是你刚才那条找搭子任务的新进展。现在等 ${organizerNickname} 拍板，确认后会直接成局，你先看看信息和破冰建议就行。`;
   })();
   const firstSportType = memberRows
     .map((row) => row.metaData?.sportType)

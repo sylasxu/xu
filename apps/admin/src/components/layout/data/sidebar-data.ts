@@ -63,7 +63,12 @@ export const sidebarData: SidebarData = {
       items: [
         {
           title: '风险审核',
-          url: '/safety/moderation',
+          url: '/safety',
+          icon: Shield,
+        },
+        {
+          title: '用户举报',
+          url: '/reports',
           icon: Shield,
         },
       ],
@@ -73,23 +78,27 @@ export const sidebarData: SidebarData = {
       items: [
         {
           title: 'AI Playground',
-          url: '/ai-ops/playground',
+          url: '/ai-ops',
           icon: Bot,
+          search: { view: 'playground' },
         },
         {
           title: '对话记录',
-          url: '/ai-ops/conversations',
+          url: '/ai-ops',
           icon: MessageSquare,
+          search: { view: 'conversations' },
         },
         {
           title: '模型路由',
-          url: '/ai-ops/config',
+          url: '/ai-ops',
           icon: Wrench,
+          search: { view: 'config' },
         },
         {
           title: '用量统计',
-          url: '/ai-ops/usage',
+          url: '/ai-ops',
           icon: Zap,
+          search: { view: 'usage' },
         },
       ],
     },

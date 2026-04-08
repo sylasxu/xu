@@ -46,7 +46,7 @@ export const configController = new Elysia({ prefix: '/ai/configs' })
     },
     {
       detail: {
-        tags: ['AI-Config'],
+        tags: ['Internal'],
         summary: '获取所有 AI 配置',
         description: '获取所有 AI 配置项，按 category 分组返回（Admin 用）。',
       },
@@ -72,7 +72,7 @@ export const configController = new Elysia({ prefix: '/ai/configs' })
     },
     {
       detail: {
-        tags: ['AI-Config'],
+        tags: ['Internal'],
         summary: '获取单个 AI 配置',
         description: '获取指定 configKey 的配置值（Admin 用）。',
       },
@@ -101,7 +101,7 @@ export const configController = new Elysia({ prefix: '/ai/configs' })
     },
     {
       detail: {
-        tags: ['AI-Config'],
+        tags: ['Internal'],
         summary: '更新 AI 配置',
         description: '更新指定 configKey 的配置值，自动递增版本号并保存历史（Admin 用）。',
       },
@@ -128,7 +128,7 @@ export const configController = new Elysia({ prefix: '/ai/configs' })
     },
     {
       detail: {
-        tags: ['AI-Config'],
+        tags: ['Internal'],
         summary: '获取配置变更历史',
         description: '获取指定 configKey 的所有版本变更历史（Admin 用）。',
       },
@@ -161,7 +161,7 @@ export const configController = new Elysia({ prefix: '/ai/configs' })
     },
     {
       detail: {
-        tags: ['AI-Config'],
+        tags: ['Internal'],
         summary: '回滚配置到指定版本',
         description: '将指定 configKey 回滚到历史版本（Admin 用）。',
       },

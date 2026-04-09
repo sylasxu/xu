@@ -143,11 +143,9 @@ Component({
       });
     },
 
-    // 跳转到偏好设置页
+    // 跳转到设置页
     onGoToPreference() {
-      wx.navigateTo({
-        url: '/subpackages/setting/preference/index',
-      });
+      this.triggerEvent('preferencetap');
     },
   },
 });

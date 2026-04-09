@@ -13,14 +13,9 @@ Component({
     visible: false,
     sidebar: [
       {
-        title: '首页',
-        url: 'pages/home/index',
+        title: '对话',
+        url: 'pages/chat/index',
         isSidebar: true,
-      },
-      {
-        title: '搜索页',
-        url: 'pages/search/index',
-        isSidebar: false,
       },
       {
         title: '发布页',
@@ -31,11 +26,6 @@ Component({
         title: '消息列表页',
         url: 'pages/message/index',
         isSidebar: true,
-      },
-      {
-        title: '对话页',
-        url: 'pages/chat/index',
-        isSidebar: false,
       },
       {
         title: '个人中心页',
@@ -90,10 +80,5 @@ Component({
       }
     },
 
-    openSearch() {
-      wx.navigateTo({
-        url: `/pages/search/index`,
-      });
-    },
   },
 });

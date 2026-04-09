@@ -1,8 +1,8 @@
-<view class="inline-flex flex-col bg-white rounded-lg overflow-hidden" style="width: 340rpx; height: 488rpx;">
+<view class="card-shell">
   <t-image t-class="card-image" src="{{url}}" mode="aspectFill" />
-  <view class="p-4 text-sm">
-    <text class="text-gray-900">{{desc}}</text>
-    <view class="flex gap-2 mt-2">
+  <view class="card-shell__content">
+    <text class="card-shell__desc">{{desc}}</text>
+    <view class="card-shell__tags">
       <t-tag wx:for="{{tags}}" wx:key="index" size="small" variant="light" theme="{{item.theme}}">{{item.text}}</t-tag>
     </view>
   </view>

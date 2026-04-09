@@ -1,13 +1,9 @@
 /**
- * Design Token 系统 v3.2
- * 聚场小程序 - Crypto-Clean 视觉风格
- * 
- * 所有设计变量的单一来源，修改此文件即可实现全局换肤
- * 支持深色模式 (Dark Mode)
+ * Design Token 系统
  */
 
 // ==================== 间距系统 (Spacing) ====================
-// 基于 Tailwind 4px 基数，转换为 8rpx（750rpx 设计稿标准）
+// 基于 4px 基数，转换为 8rpx（750rpx 设计稿标准）
 
 @spacing-0: 0;
 @spacing-1: 8rpx;    // 4px - 最小间距
@@ -79,17 +75,16 @@
 @border-default-dark: rgba(255, 255, 255, 0.1);  // 深色模式边框
 @border-light-dark: rgba(255, 255, 255, 0.05);
 
-// ==================== Crypto-Clean 圆角系统 ====================
-// 超大圆角是 Crypto-Clean 的标志性特征
+// ==================== 圆角系统 (Radius) ====================
 
-@rounded-none: 0;
-@rounded-sm: 8rpx;      // 微圆角
-@rounded: 16rpx;        // 默认圆角
-@rounded-md: 24rpx;     // 中等圆角
-@rounded-lg: 40rpx;     // 大圆角 - 卡片标准
-@rounded-xl: 48rpx;     // 超大圆角 - AI Dock 胶囊
-@rounded-2xl: 56rpx;    // 特大圆角
-@rounded-full: 9999px;  // 完美圆形
+@radius-none: 0;
+@radius-sm: 8rpx;
+@radius-base: 16rpx;
+@radius-md: 24rpx;
+@radius-lg: 40rpx;
+@radius-xl: 48rpx;
+@radius-2xl: 56rpx;
+@radius-full: 9999px;
 
 // ==================== 阴影系统 ====================
 // 彩色弥散阴影 - Crypto-Clean 特色
@@ -118,6 +113,10 @@
 @duration-normal: 250ms;
 @duration-slow: 350ms;
 
+// ==================== 布局尺寸 (Layout Metrics) ====================
+
+@tabbar-height: 112rpx;
+
 // ==================== 灰度色阶 (Gray Scale) ====================
 
 @gray-50: #F9FAFB;
@@ -142,30 +141,3 @@
 @slate-700: #334155;
 @slate-800: #1E293B;
 @slate-900: #0F172A;
-
-// ==================== 兼容旧变量 (Legacy Support) ====================
-
-@brand-color: @color-primary;
-@brand-color-light: rgba(91, 117, 251, 0.1);
-@brand-color-dark: @color-primary-dark;
-
-@bg-color: @gray-100;
-@bg-color-white: #ffffff;
-@bg-color-page: @bg-page;
-@bg-color-container: #ffffff;
-@bg-color-secondary: @gray-100;
-
-@text-color-primary: @text-main;
-@text-color-secondary: @text-secondary;
-@text-color-placeholder: @text-placeholder;
-@text-color-disabled: @gray-300;
-
-@border-color: @gray-200;
-@border-color-light: @gray-100;
-
-@navbar-padding-top: 20px;
-@nav-bar-height: 60px;
-@tab-bar-height: 112rpx;
-@font-size-default: @text-base;
-@font-size-small: @text-sm;
-@font-size-mini: @text-xs;

@@ -8,7 +8,6 @@
  * - 引用模式：通过 fetchConfig 拉取数据，支持 Swiper、半屏详情、卡内操作
  */
 
-import { useChatStore } from '../../src/stores/chat';
 import { fetchWidgetData } from '../../src/utils/widget-fetcher';
 import type { FetchState, WidgetDataSource } from '../../src/utils/widget-fetcher';
 import type { ActionState, WidgetAction } from '../../src/utils/widget-actions';
@@ -27,6 +26,10 @@ interface ExploreResult {
   startAt: string;
   currentParticipants?: number;
   maxParticipants?: number;
+}
+
+interface ExploreRenderResult extends ExploreResult {
+  formattedDistance: string;
 }
 
 // 中心点类型
@@ -330,8 +333,9 @@ Component({
   },
 
   data: {
-    displayResults: [] as ExploreResult[],
+    displayResults: [] as ExploreRenderResult[],
     headerTitle: '',
+    centerDisplayName: DEFAULT_CENTER.name,
     // 引用模式
     fetchState: 'idle' as FetchState,
     fetchedResults: [] as ExploreResult[],
@@ -363,11 +367,17 @@ Component({
         interaction: resolvedInteraction,
         resultCount: normalizedResults.length,
       });
-      const displayResults = swiperMode ? normalizedResults : normalizedResults.slice(0, 3);
+      const displayResults = this.buildRenderResults(swiperMode ? normalizedResults : normalizedResults.slice(0, 3));
       const resolvedCenter = readCenterPoint(center);
       const headerTitle =
         readString(title) || this.generateTitle(resolvedCenter, normalizedResults.length || displayResults.length);
-      this.setData({ displayResults, headerTitle, swiperMode, activeIndex: 0 });
+      this.setData({
+        displayResults,
+        headerTitle,
+        swiperMode,
+        activeIndex: 0,
+        centerDisplayName: resolvedCenter.name || DEFAULT_CENTER.name,
+      });
     },
 
     'fetchConfig, interaction, preview': function (
@@ -393,12 +403,27 @@ Component({
           ? `为你找到附近的 ${resolvedPreview.total} 个热门活动`
           : '正在加载附近活动...');
 
-      this.setData({ swiperMode, headerTitle });
+      this.setData({ swiperMode, headerTitle, centerDisplayName: DEFAULT_CENTER.name });
       void this.loadReferenceData(resolvedFetchConfig);
     },
   },
 
   methods: {
+    formatDistance(distance: number): string {
+      if (distance >= 1000) {
+        return `${(distance / 1000).toFixed(1)}km`;
+      }
+
+      return `${distance}m`;
+    },
+
+    buildRenderResults(results: ExploreResult[]): ExploreRenderResult[] {
+      return results.map((item) => ({
+        ...item,
+        formattedDistance: this.formatDistance(item.distance),
+      }));
+    },
+
     /** 生成标题 */
     generateTitle(center: CenterPoint, count: number): string {
       if (!center?.name) {
@@ -418,7 +443,7 @@ Component({
         this.setData({
           fetchState: 'success',
           fetchedResults: items,
-          displayResults: this.data.swiperMode ? items : items.slice(0, 3),
+          displayResults: this.buildRenderResults(this.data.swiperMode ? items : items.slice(0, 3)),
         });
       } else {
         this.setData({ fetchState: 'error' });
@@ -441,10 +466,6 @@ Component({
       const center = readCenterPoint(this.properties.center);
 
       this.triggerEvent('expandmap', { results, center });
-
-      wx.navigateTo({
-        url: `/subpackages/activity/explore/index?lat=${center.lat}&lng=${center.lng}&results=${encodeURIComponent(JSON.stringify(results))}&animate=expand`,
-      });
     },
 
     /** 点击活动项 */
@@ -458,9 +479,7 @@ Component({
         // 引用模式：弹出半屏详情
         this.setData({ halfScreenVisible: true, halfScreenActivityId: id });
       } else {
-        // 自包含模式：跳转详情页
         this.triggerEvent('activitytap', { id });
-        wx.navigateTo({ url: `/subpackages/activity/detail/index?id=${id}` });
       }
     },
 
@@ -472,6 +491,28 @@ Component({
     /** 关闭半屏详情 */
     onHalfScreenClose() {
       this.setData({ halfScreenVisible: false, halfScreenActivityId: '' });
+    },
+
+    onHalfScreenActivityTap(e: WechatMiniprogram.CustomEvent<{ id: string }>) {
+      this.setData({ halfScreenVisible: false, halfScreenActivityId: '' });
+      this.triggerEvent('activitytap', e.detail);
+    },
+
+    onHalfScreenActionTap(
+      e: WechatMiniprogram.CustomEvent<{
+        action: string;
+        payload?: Record<string, unknown>;
+        source?: string;
+        originalText?: string;
+      }>
+    ) {
+      this.setData({ halfScreenVisible: false, halfScreenActivityId: '' });
+      this.triggerEvent('actiontap', e.detail);
+    },
+
+    onHalfScreenShareTap(e: WechatMiniprogram.CustomEvent<{ activityId: string; title: string }>) {
+      this.setData({ halfScreenVisible: false, halfScreenActivityId: '' });
+      this.triggerEvent('share', e.detail);
     },
 
     /** 卡内操作按钮点击 */
@@ -492,7 +533,7 @@ Component({
         source: payload.source || 'widget_explore',
       });
 
-      useChatStore.getState().sendAction({
+      this.triggerEvent('actiontap', {
         action: pendingAction.action,
         payload: pendingAction.payload,
         source: pendingAction.source,
@@ -566,9 +607,7 @@ Component({
 
       // 通用操作：统一走 chat action
       this.setData({ [`actionStates.${stateKey}`]: 'loading' });
-      const chatStore = useChatStore.getState();
-
-      chatStore.sendAction({
+      this.triggerEvent('actiontap', {
         action: this.toChatAction(actionType),
         payload,
         source: 'widget_explore',
@@ -605,7 +644,7 @@ Component({
       ];
       const prompt = promptParts.filter((item) => item).join('');
 
-      useChatStore.getState().sendAction({
+      this.triggerEvent('actiontap', {
         action: 'create_activity',
         payload: {
           description: prompt,

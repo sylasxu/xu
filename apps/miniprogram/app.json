@@ -1,13 +1,9 @@
 {
   "pages": [
-    "pages/home/index",
+    "pages/chat/index",
     "pages/profile/index",
     "pages/message/index"
   ],
-  "usingComponents": {
-    "t-toast": "tdesign-miniprogram/toast/toast",
-    "t-message": "tdesign-miniprogram/message/message"
-  },
   "subpackages": [
     {
       "root": "subpackages/activity",
@@ -32,16 +28,6 @@
       "root": "subpackages/setting",
       "name": "setting-sub",
       "pages": ["preference/index"]
-    },
-    {
-      "root": "pages/search",
-      "name": "search",
-      "pages": ["index"]
-    },
-    {
-      "root": "pages/chat",
-      "name": "chat",
-      "pages": ["index"]
     },
     {
       "root": "pages/login",

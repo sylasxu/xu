@@ -46,7 +46,7 @@
   };
 </wxs>
 
-<view class="min-h-screen bg-gray-50 pb-bottom-bar">
+<view class="activity-detail-page pb-bottom-bar">
   <!-- 自定义导航栏 -->
   <custom-navbar 
     title="活动详情" 
@@ -57,118 +57,118 @@
   />
 
   <!-- 加载状态 -->
-  <view wx:if="{{loading}}" class="flex flex-col items-center justify-center min-h-screen py-5">
+  <view wx:if="{{loading}}" class="activity-detail-page__state">
     <t-loading theme="circular" size="80rpx" />
-    <text class="mt-3 text-sm text-gray-400">加载中...</text>
+    <text class="activity-detail-page__state-text">加载中...</text>
   </view>
   
   <!-- 错误状态 -->
-  <view wx:elif="{{error}}" class="flex flex-col items-center justify-center min-h-screen py-5">
+  <view wx:elif="{{error}}" class="activity-detail-page__state">
     <t-icon name="error-circle" size="120rpx" color="#FF4D4F" />
-    <text class="mt-3 mb-4 text-sm text-gray-400">{{errorMsg || '加载失败'}}</text>
+    <text class="activity-detail-page__error-text">{{errorMsg || '加载失败'}}</text>
     <t-button theme="primary" size="small" bindtap="onRefresh">重试</t-button>
   </view>
   
   <!-- 活动内容 -->
   <view wx:else>
     <!-- 活动图片轮播 -->
-    <view class="relative w-full h-480 bg-gray-100">
+    <view class="activity-detail-page__hero">
       <swiper wx:if="{{activity.images && activity.images.length > 0}}" 
-              class="w-full h-full" 
+              class="activity-detail-page__hero-swiper" 
               indicator-dots="{{activity.images.length > 1}}"
               autoplay="{{false}}">
         <swiper-item wx:for="{{activity.images}}" wx:key="index">
-          <image src="{{item}}" mode="aspectFill" class="w-full h-full" />
+          <image src="{{item}}" mode="aspectFill" class="activity-detail-page__hero-image" />
         </swiper-item>
       </swiper>
-      <view wx:else class="flex flex-col items-center justify-center w-full h-full bg-gray-100">
+      <view wx:else class="activity-detail-page__hero-empty">
         <t-icon name="image" size="80rpx" color="#D1D5DB" />
-        <text class="mt-2 text-sm text-gray-300">暂无图片</text>
+        <text class="activity-detail-page__hero-empty-text">暂无图片</text>
       </view>
       
     </view>
     
     <!-- 活动基本信息 -->
-    <view class="bg-white p-4 mb-2">
+    <view class="activity-detail-page__card">
       <!-- 标题和类型 -->
-      <view class="flex items-start justify-between mb-3">
-        <text class="flex-1 text-xl font-semibold text-gray-900 leading-relaxed mr-2">{{activity.title}}</text>
+      <view class="activity-detail-page__header">
+        <text class="activity-detail-page__title">{{activity.title}}</text>
         <t-tag wx:if="{{activity.type}}" size="small" variant="light" theme="primary">
           {{utils.getActivityTypeText(activity.type)}}
         </t-tag>
       </view>
       
       <!-- 活动状态 -->
-      <view wx:if="{{joinState}}" class="flex items-center gap-2 mb-3">
+      <view wx:if="{{joinState}}" class="activity-detail-page__status-row">
         <t-tag size="small" variant="light" 
                theme="{{joinState === 'joined' ? 'success' : joinState === 'waitlisted' ? 'warning' : 'default'}}">
           {{utils.getStatusText(joinState)}}
         </t-tag>
-        <text wx:if="{{isCreator}}" class="text-xs text-brand bg-brand-light px-2 py-1 rounded-sm">我发起的</text>
+        <text wx:if="{{isCreator}}" class="activity-detail-page__creator-badge">我发起的</text>
       </view>
       
       <!-- 时间 -->
-      <view class="info-row flex items-start py-3">
+      <view class="info-row activity-detail-page__info-row">
         <t-icon name="time" size="36rpx" color="#FF6B35" />
-        <view class="flex-1 ml-3">
-          <text class="block text-xs text-gray-400 mb-1">活动时间</text>
-          <text class="block text-base font-medium text-gray-900">{{utils.formatTime(activity.startAt)}}</text>
-          <text wx:if="{{activity.endAt}}" class="block text-sm text-gray-600 mt-1">至 {{utils.formatTime(activity.endAt)}}</text>
+        <view class="activity-detail-page__info-content">
+          <text class="activity-detail-page__info-label">活动时间</text>
+          <text class="activity-detail-page__info-value">{{utils.formatTime(activity.startAt)}}</text>
+          <text wx:if="{{activity.endAt}}" class="activity-detail-page__info-hint">至 {{utils.formatTime(activity.endAt)}}</text>
         </view>
       </view>
       
       <!-- 地点 -->
-      <view class="info-row flex items-start py-3">
+      <view class="info-row activity-detail-page__info-row">
         <t-icon name="location" size="36rpx" color="#FF6B35" />
-        <view class="flex-1 ml-3">
-          <text class="block text-xs text-gray-400 mb-1">活动地点</text>
-          <text class="block text-base font-medium text-gray-900">{{utils.getDisplayAddress(activity)}}</text>
-          <text wx:if="{{activity.locationHint}}" class="block text-xs text-brand mt-1">{{activity.locationHint}}</text>
+        <view class="activity-detail-page__info-content">
+          <text class="activity-detail-page__info-label">活动地点</text>
+          <text class="activity-detail-page__info-value">{{utils.getDisplayAddress(activity)}}</text>
+          <text wx:if="{{activity.locationHint}}" class="activity-detail-page__info-brand">{{activity.locationHint}}</text>
         </view>
       </view>
       
       <!-- 人数 -->
-      <view class="info-row flex items-start py-3">
+      <view class="info-row activity-detail-page__info-row">
         <t-icon name="user" size="36rpx" color="#FF6B35" />
-        <view class="flex-1 ml-3">
-          <text class="block text-xs text-gray-400 mb-1">参与人数</text>
-          <text class="block text-base font-medium text-gray-900">
+        <view class="activity-detail-page__info-content">
+          <text class="activity-detail-page__info-label">参与人数</text>
+          <text class="activity-detail-page__info-value">
             {{activity.currentParticipants || 0}}/{{activity.maxParticipants}}人
-            <text wx:if="{{isHotActivity}}" class="text-xs text-error ml-2">🔥热门</text>
+            <text wx:if="{{isHotActivity}}" class="activity-detail-page__hot-tag">🔥热门</text>
           </text>
-          <text wx:if="{{activity.isFull}}" class="block text-xs text-warning mt-1">当前已满员，可先候补排队</text>
-          <text wx:elif="{{activity.remainingSeats >= 0}}" class="block text-xs text-gray-500 mt-1">还剩 {{activity.remainingSeats}} 个位置</text>
+          <text wx:if="{{activity.isFull}}" class="activity-detail-page__info-warning">当前已满员，可先候补排队</text>
+          <text wx:elif="{{activity.remainingSeats >= 0}}" class="activity-detail-page__info-muted">还剩 {{activity.remainingSeats}} 个位置</text>
         </view>
       </view>
       
     </view>
     
     <!-- 活动描述 -->
-    <view wx:if="{{activity.description}}" class="bg-white p-4 mb-2">
-      <text class="block text-lg font-semibold text-gray-900 mb-3">活动详情</text>
-      <text class="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap">{{activity.description}}</text>
+    <view wx:if="{{activity.description}}" class="activity-detail-page__card">
+      <text class="activity-detail-page__section-title">活动详情</text>
+      <text class="activity-detail-page__description">{{activity.description}}</text>
     </view>
 
     <!-- 快捷操作 -->
-    <view class="bg-white p-4 mb-2">
-      <text class="block text-lg font-semibold text-gray-900 mb-3">快捷操作</text>
-      <view class="flex gap-3">
-        <button class="flex-1 h-88 bg-gray-100 text-sm text-gray-700 rounded-full" bindtap="onCopyActivityText">
+    <view class="activity-detail-page__card">
+      <text class="activity-detail-page__section-title">快捷操作</text>
+      <view class="activity-detail-page__quick-actions">
+        <button class="activity-detail-page__quick-btn activity-detail-page__quick-btn--secondary" bindtap="onCopyActivityText">
           📋 复制文案
         </button>
-        <button class="flex-1 h-88 bg-brand-light text-sm text-brand rounded-full" bindtap="onCloneActivity">
+        <button class="activity-detail-page__quick-btn activity-detail-page__quick-btn--brand" bindtap="onCloneActivity">
           👯‍♂️ 找类似的局
         </button>
       </view>
     </view>
     
     <!-- 发起人信息 -->
-    <view class="bg-white p-4 mb-2" bindtap="onCreatorTap">
-      <text class="block text-lg font-semibold text-gray-900 mb-3">发起人</text>
-      <view class="creator-card flex items-center p-3 rounded-md">
+    <view class="activity-detail-page__card" bindtap="onCreatorTap">
+      <text class="activity-detail-page__section-title">发起人</text>
+      <view class="creator-card activity-detail-page__creator-card">
         <t-avatar image="{{activity.creator.avatarUrl}}" size="96rpx" icon="user" />
-        <view class="flex-1 ml-3 min-w-0">
-          <text class="block text-base font-medium text-gray-900 mb-1">{{activity.creator.nickname || '匿名用户'}}</text>
+        <view class="activity-detail-page__creator-main">
+          <text class="activity-detail-page__creator-name">{{activity.creator.nickname || '匿名用户'}}</text>
       </view>
         <t-icon name="chevron-right" size="32rpx" color="#D1D5DB" />
       </view>
@@ -176,13 +176,13 @@
     
     <!-- 参与者列表 -->
     <view wx:if="{{(isCreator || joinState === 'joined') && activity.participants && activity.participants.length > 0}}" 
-          class="bg-white p-4 mb-2">
-      <text class="block text-lg font-semibold text-gray-900 mb-3">参与者 ({{activity.participants.length}})</text>
-      <view class="flex flex-wrap gap-3">
-        <view wx:for="{{activity.participants}}" wx:key="id" class="participant-item flex items-center p-2 rounded-sm">
+          class="activity-detail-page__card">
+      <text class="activity-detail-page__section-title">参与者 ({{activity.participants.length}})</text>
+      <view class="activity-detail-page__participants">
+        <view wx:for="{{activity.participants}}" wx:key="id" class="participant-item activity-detail-page__participant-item">
           <t-avatar image="{{item.user.avatarUrl}}" size="64rpx" icon="user" />
-          <view class="flex-1 ml-2 min-w-0">
-            <text class="block text-sm text-gray-900 truncate mb-1">{{item.user.nickname || '匿名用户'}}</text>
+          <view class="activity-detail-page__participant-main">
+            <text class="activity-detail-page__participant-name">{{item.user.nickname || '匿名用户'}}</text>
             <t-tag size="small" variant="light"
                    theme="{{item.status === 'joined' ? 'success' : item.status === 'waitlist' ? 'warning' : 'default'}}">
               {{utils.getStatusText(item.status)}}
@@ -193,32 +193,32 @@
     </view>
     
     <!-- 讨论区预览 -->
-    <view wx:if="{{recentMessages.length > 0}}" class="bg-white p-4 mb-2">
-      <view class="flex items-center justify-between mb-3">
-        <text class="text-lg font-semibold text-gray-900">讨论区</text>
-        <view class="flex items-center" bindtap="onEnterChat">
-          <text class="text-sm text-brand">查看更多</text>
+    <view wx:if="{{recentMessages.length > 0}}" class="activity-detail-page__card">
+      <view class="activity-detail-page__discussion-header">
+        <text class="activity-detail-page__section-title activity-detail-page__section-title--tight">讨论区</text>
+        <view class="activity-detail-page__discussion-link" bindtap="onEnterChat">
+          <text class="activity-detail-page__discussion-link-text">查看更多</text>
           <t-icon name="chevron-right" size="32rpx" color="#5B75FB" />
         </view>
       </view>
-      <view wx:for="{{recentMessages}}" wx:key="index" class="discussion-msg-item flex items-start gap-2 {{index < recentMessages.length - 1 ? 'mb-3' : ''}}">
-        <image class="discussion-msg-avatar flex-shrink-0 rounded-full" src="{{item.senderAvatar}}" mode="aspectFill" />
-        <view class="flex-1 min-w-0">
-          <text class="block text-xs text-gray-400 mb-1">{{item.senderNickname}}</text>
-          <text class="block text-sm text-gray-900 line-clamp-2">{{item.content}}</text>
+      <view wx:for="{{recentMessages}}" wx:key="index" class="discussion-msg-item activity-detail-page__discussion-item {{index < recentMessages.length - 1 ? 'activity-detail-page__discussion-item--spaced' : ''}}">
+        <image class="discussion-msg-avatar activity-detail-page__discussion-avatar" src="{{item.senderAvatar}}" mode="aspectFill" />
+        <view class="activity-detail-page__discussion-main">
+          <text class="activity-detail-page__discussion-nickname">{{item.senderNickname}}</text>
+          <text class="activity-detail-page__discussion-content">{{item.content}}</text>
         </view>
       </view>
     </view>
     
     <!-- 底部操作栏 -->
-    <view class="bottom-bar flex items-center px-4 py-3">
-      <button class="share-btn flex flex-col items-center justify-center w-100 h-100 text-xs text-gray-600" open-type="share">
+    <view class="bottom-bar activity-detail-page__bottom-bar">
+      <button class="share-btn activity-detail-page__icon-action" open-type="share">
         <t-icon name="share" size="40rpx" />
         <text>分享</text>
       </button>
       
       <button wx:if="{{isCreator || joinState === 'joined'}}" 
-              class="chat-btn flex flex-col items-center justify-center w-100 h-100 text-xs text-gray-600 ml-2" 
+              class="chat-btn activity-detail-page__icon-action activity-detail-page__icon-action--spaced" 
               bindtap="onEnterChat">
         <t-icon name="chat" size="40rpx" />
         <text>讨论区</text>
@@ -226,25 +226,25 @@
       
       <!-- 举报入口（非创建者可见） -->
       <button wx:if="{{!isCreator}}" 
-              class="report-btn flex flex-col items-center justify-center w-100 h-100 text-xs text-gray-600 ml-2" 
+              class="report-btn activity-detail-page__icon-action activity-detail-page__icon-action--spaced" 
               bindtap="onReportTap">
         <t-icon name="flag" size="40rpx" />
         <text>举报</text>
       </button>
       
       <button wx:if="{{!isCreator && activity.canJoin}}" 
-              class="join-btn flex-1 h-88 ml-4 text-white text-lg font-medium rounded-full" 
+              class="join-btn activity-detail-page__primary-action" 
               bindtap="onJoinTap">
         {{activity.isFull ? '候补排队' : '我要报名'}}
       </button>
       
       <view wx:elif="{{joinState && !isCreator}}" 
-            class="flex-1 flex items-center justify-center h-88 ml-4 bg-gray-100 text-gray-400 text-lg rounded-full">
+            class="activity-detail-page__primary-action activity-detail-page__primary-action--disabled">
         <text>{{utils.getStatusText(joinState)}}</text>
       </view>
       
-      <view wx:elif="{{isCreator}}" class="flex-1 ml-4">
-        <button class="manage-btn w-full h-88 text-white text-lg font-medium rounded-full" bindtap="onManageActivity">管理活动</button>
+      <view wx:elif="{{isCreator}}" class="activity-detail-page__primary-wrapper">
+        <button class="manage-btn activity-detail-page__primary-action" bindtap="onManageActivity">管理活动</button>
       </view>
     </view>
   </view>
@@ -264,6 +264,8 @@
     bind:success="onAuthSuccess"
     bind:pendingaction="onPendingAction"
     bind:close="onAuthClose"
+    bind:viewagreement="onAuthSheetViewAgreement"
+    bind:viewpolicy="onAuthSheetViewPolicy"
   />
   
   <!-- 举报弹窗 -->

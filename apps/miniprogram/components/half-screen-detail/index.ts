@@ -6,7 +6,8 @@
  * 底部固定操作栏（报名/分享），加载失败降级跳转详情页。
  */
 
-import { useChatStore } from '../../src/stores/chat'
+export {}
+
 import { fetchWidgetData } from '../../src/utils/widget-fetcher'
 import type { ActionState } from '../../src/utils/widget-actions'
 import { buildJoinStructuredAction } from '../../src/utils/join-flow'
@@ -61,7 +62,7 @@ Component({
 
       if (result.state === 'error' || !result.data) {
         this.close()
-        wx.navigateTo({ url: `/subpackages/activity/detail/index?id=${activityId}` })
+        this.triggerEvent('activitytap', { id: activityId })
         return
       }
 
@@ -104,7 +105,7 @@ Component({
       this.setData({ joinState: 'loading' })
       this.close()
 
-      useChatStore.getState().sendAction({
+      this.triggerEvent('actiontap', {
         action: pendingAction.action,
         payload: pendingAction.payload,
         source: pendingAction.source,
@@ -126,7 +127,7 @@ Component({
       const activity = this.data.activity
       if (!activity) return
       this.close()
-      wx.navigateTo({ url: `/subpackages/activity/detail/index?id=${activity.id}` })
+      this.triggerEvent('activitytap', { id: activity.id })
     },
   },
 })

@@ -66,8 +66,8 @@
           "scene": null
         },
         {
-          "name": "home",
-          "pathName": "pages/home/index",
+          "name": "chat",
+          "pathName": "pages/chat/index",
           "query": "",
           "scene": null
         },

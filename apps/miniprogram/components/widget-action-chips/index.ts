@@ -1,4 +1,4 @@
-import { useChatStore } from '../../src/stores/chat'
+export {}
 
 interface ActionChipItem {
   label: string
@@ -77,8 +77,7 @@ Component({
 
       this.setData({ isSubmitting: true })
       wx.vibrateShort({ type: 'light' })
-
-      useChatStore.getState().sendAction({
+      this.triggerEvent('actiontap', {
         action: item.action,
         payload: item.params || {},
         source: 'widget_action_chips',

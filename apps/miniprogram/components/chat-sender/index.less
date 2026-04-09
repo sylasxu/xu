@@ -1,0 +1,173 @@
+/**
+ * Chat Sender 样式
+ * 保留渐变、动画等无法用原子类实现的样式
+ */
+@import '/styles/tokens.less';
+
+.chat-sender {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(env(safe-area-inset-bottom) + 120rpx);
+  z-index: 100;
+  transition: all 0.3s ease;
+}
+
+// 收起状态
+.chat-sender__collapsed {
+  display: flex;
+  align-items: center;
+  width: 600rpx;
+  height: 88rpx;
+  padding: 0 @spacing-3;
+  background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+  border-radius: var(--radius-full, @radius-full);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  animation: slideUp 0.3s ease;
+}
+
+// 展开状态
+.chat-sender__expanded {
+  display: flex;
+  align-items: center;
+  width: 700rpx;
+  height: 96rpx;
+  padding: 0 @spacing-3;
+  background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+  border-radius: var(--radius-xl, @radius-xl);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+// Chat 图标
+.chat-sender__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56rpx;
+  height: 56rpx;
+  margin-right: @spacing-2;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: var(--radius-full, @radius-full);
+  flex-shrink: 0;
+  font-size: @text-base;
+}
+
+.chat-sender__placeholder {
+  flex: 1;
+  min-width: 0;
+  font-size: @text-sm;
+  color: rgba(255, 255, 255, 0.6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-sender__voice-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64rpx;
+  height: 64rpx;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-full, @radius-full);
+  flex-shrink: 0;
+
+  &:active {
+    background: rgba(255, 255, 255, 0.2);
+  }
+}
+
+// 输入框容器
+.chat-sender__input-wrapper {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  height: 64rpx;
+  padding: 0 @spacing-2;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-full, @radius-full);
+  margin-right: @spacing-2;
+}
+
+.chat-sender__input {
+  flex: 1;
+  height: 100%;
+  font-size: @text-sm;
+  color: #fff;
+}
+
+.chat-sender__input-placeholder {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.chat-sender__clear-btn {
+  width: 48rpx;
+  height: 48rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+// 操作按钮
+.chat-sender__action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72rpx;
+  height: 72rpx;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: var(--radius-full, @radius-full);
+  flex-shrink: 0;
+
+  &:active {
+    transform: scale(0.95);
+  }
+}
+
+.chat-sender__recording {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-sender__recording-dot {
+  width: 16rpx;
+  height: 16rpx;
+  background: #ff4444;
+  border-radius: var(--radius-full, @radius-full);
+  animation: blink 1s infinite;
+}
+
+.chat-sender__recording-text {
+  margin-top: 4rpx;
+  font-size: @text-xs;
+  color: #fff;
+}
+
+// 动画
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(20rpx);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.chat-sender.expanded .chat-sender__expanded {
+  animation: expand 0.2s ease;
+}
+
+@keyframes expand {
+  from { width: 600rpx; }
+  to { width: 700rpx; }
+}

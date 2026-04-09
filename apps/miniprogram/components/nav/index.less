@@ -1,19 +1,24 @@
 @import '/styles/tokens.less';
 
-// 仅保留无法用原子类实现的样式
-.home-navbar {
+.app-nav {
   // TDesign Navbar 左侧间距调整
   .t-navbar__left {
     margin-left: @spacing-2;
   }
 
-  // 搜索框宽度和高度定制
-  .nav-search {
-    --td-search-height: 64rpx;
-    --td-search-font-size: @text-xs;
-    width: 375rpx;
-  }
-
   // Drawer 标题字号
   --td-drawer-title-font-size: @text-2xl;
+}
+
+.app-nav__left {
+  display: flex;
+  align-items: center;
+  padding-left: @spacing-2;
+}
+
+.app-nav__menu-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: @spacing-2;
 }

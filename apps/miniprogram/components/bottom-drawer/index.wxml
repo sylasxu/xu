@@ -9,66 +9,66 @@
 >
   <!-- 拖动条区域 -->
   <view 
-    class="flex flex-col items-center justify-center py-2"
+    class="bottom-drawer__handle-area"
     bindtouchstart="onTouchStart"
     bindtouchmove="onTouchMove"
     bindtouchend="onTouchEnd"
     bindtap="onHandleTap"
   >
     <view class="handle-bar"></view>
-    <view wx:if="{{!expanded}}" class="mt-1 text-xs text-gray-400">
+    <view wx:if="{{!expanded}}" class="bottom-drawer__hint">
       <text>上滑查看附近活动</text>
     </view>
   </view>
 
   <!-- 抽屉内容 -->
-  <view class="flex-1 flex flex-col px-3 overflow-hidden">
+  <view class="bottom-drawer__body">
     <!-- 操作栏 -->
-    <view class="flex justify-between items-center py-2">
+    <view class="bottom-drawer__toolbar">
       <!-- 筛选按钮 -->
       <view class="filter-btn" bindtap="onFilterTap">
         <t-badge wx:if="{{filterCount > 0}}" count="{{filterCount}}" offset="{{[-8, -8]}}">
-          <view class="flex items-center gap-1 px-3 py-2 bg-gray-100 rounded-full text-sm text-gray-900">
+          <view class="bottom-drawer__filter-pill">
             <t-icon name="filter" size="36rpx" />
             <text>筛选</text>
           </view>
         </t-badge>
-        <view wx:else class="flex items-center gap-1 px-3 py-2 bg-gray-100 rounded-full text-sm text-gray-900">
+        <view wx:else class="bottom-drawer__filter-pill">
           <t-icon name="filter" size="36rpx" />
           <text>筛选</text>
         </view>
       </view>
 
       <!-- 创建活动按钮 -->
-      <view class="flex items-center gap-1 px-4 py-2 bg-brand text-white rounded-full text-sm font-medium" bindtap="onCreateTap">
+      <view class="bottom-drawer__create-pill" bindtap="onCreateTap">
         <t-icon name="add" size="36rpx" color="#ffffff" />
         <text>发起活动</text>
       </view>
     </view>
 
     <!-- 展开后显示的内容 -->
-    <view wx:if="{{expanded}}" class="flex-1 flex flex-col overflow-hidden">
+    <view wx:if="{{expanded}}" class="bottom-drawer__expanded">
       <!-- 附近活动列表标题 -->
-      <view class="flex justify-between items-center py-2 border-b mb-2">
-        <view class="flex items-center gap-2 text-base font-medium text-gray-900">
+      <view class="bottom-drawer__section-header">
+        <view class="bottom-drawer__section-title">
           <text>附近活动</text>
-          <text wx:if="{{activityCount > 0}}" class="text-xs font-normal text-gray-400 bg-gray-100 px-2 py-1 rounded-full">{{activityCount}}个</text>
+          <text wx:if="{{activityCount > 0}}" class="bottom-drawer__count">{{activityCount}}个</text>
         </view>
-        <view class="flex items-center gap-1 text-xs text-gray-400 px-2 py-1 rounded-full" bindtap="onHandleTap">
+        <view class="bottom-drawer__collapse" bindtap="onHandleTap">
           <t-icon name="chevron-down" size="32rpx" />
           <text>收起</text>
         </view>
       </view>
       
       <!-- 加载状态 -->
-      <view wx:if="{{loading}}" class="flex justify-center items-center py-8">
+      <view wx:if="{{loading}}" class="bottom-drawer__loading">
         <t-loading theme="circular" size="48rpx" text="加载中..." />
       </view>
       
       <!-- 活动列表插槽 -->
       <scroll-view 
         wx:elif="{{activityCount > 0}}" 
-        class="flex-1 overflow-hidden" 
+        class="bottom-drawer__scroll" 
         scroll-y
         enhanced
         show-scrollbar="{{false}}"
@@ -77,11 +77,11 @@
       </scroll-view>
       
       <!-- 空状态 -->
-      <view wx:else class="flex flex-col items-center justify-center py-8 text-gray-400">
+      <view wx:else class="bottom-drawer__empty">
         <t-icon name="map" size="96rpx" color="#cccccc" />
-        <text class="text-base text-gray-600 mt-2">附近暂无活动</text>
-        <text class="text-xs mt-1">快来发起第一个活动吧</text>
-        <view class="flex items-center gap-1 mt-3 px-4 py-2 border border-brand rounded-full text-brand text-sm" bindtap="onCreateTap">
+        <text class="bottom-drawer__empty-title">附近暂无活动</text>
+        <text class="bottom-drawer__empty-hint">快来发起第一个活动吧</text>
+        <view class="bottom-drawer__empty-action" bindtap="onCreateTap">
           <t-icon name="add" size="32rpx" color="#FF6B35" />
           <text>发起活动</text>
         </view>

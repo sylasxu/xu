@@ -10,17 +10,11 @@
 
 @import '../../styles/tokens.less';
 
-// 骨架屏基础颜色
-@skeleton-bg: @gray-200;
-@skeleton-bg-dark: @gray-700;
-@skeleton-shimmer-color: rgba(255, 255, 255, 0.5);
-@skeleton-shimmer-color-dark: rgba(255, 255, 255, 0.1);
-
 // 流光动画 Mixin
 .skeleton-shimmer {
   position: relative;
   overflow: hidden;
-  background: var(--skeleton-bg, @skeleton-bg);
+  background: var(--skeleton-bg, @gray-200);
   
   &::after {
     content: '';
@@ -32,7 +26,7 @@
     background: linear-gradient(
       90deg,
       transparent 0%,
-      @skeleton-shimmer-color 50%,
+      rgba(255, 255, 255, 0.5) 50%,
       transparent 100%
     );
     animation: skeleton-shimmer 1.5s infinite;
@@ -51,7 +45,7 @@
 
 .widget-skeleton {
   background: var(--bg-card, @bg-card);
-  border-radius: @rounded-lg;
+  border-radius: @radius-lg;
   padding: @spacing-4;
   box-shadow: @shadow-card;
   border: 1rpx solid var(--border-default, @border-default);
@@ -67,12 +61,12 @@
   &__icon {
     width: 64rpx;
     height: 64rpx;
-    border-radius: @rounded-md;
+    border-radius: @radius-md;
   }
   
   &__title {
     height: 36rpx;
-    border-radius: @rounded-sm;
+    border-radius: @radius-sm;
     flex: 1;
     max-width: 50%;
   }
@@ -81,7 +75,7 @@
   &__map {
     width: 100%;
     height: 300rpx;
-    border-radius: @rounded-md;
+    border-radius: @radius-md;
     margin-bottom: @spacing-4;
   }
   
@@ -102,12 +96,12 @@
   &__label {
     width: 80rpx;
     height: 28rpx;
-    border-radius: @rounded-sm;
+    border-radius: @radius-sm;
   }
   
   &__value {
     height: 28rpx;
-    border-radius: @rounded-sm;
+    border-radius: @radius-sm;
     flex: 1;
     max-width: 80%;
   }
@@ -130,7 +124,7 @@
   &__list-icon {
     width: 48rpx;
     height: 48rpx;
-    border-radius: @rounded-full;
+    border-radius: @radius-full;
     flex-shrink: 0;
   }
   
@@ -143,20 +137,20 @@
   
   &__list-title {
     height: 28rpx;
-    border-radius: @rounded-sm;
+    border-radius: @radius-sm;
     width: 70%;
   }
   
   &__list-meta {
     height: 24rpx;
-    border-radius: @rounded-sm;
+    border-radius: @radius-sm;
     width: 50%;
   }
   
   // Card Preview (Share)
   &__card-preview {
     background: var(--bg-input, @bg-input);
-    border-radius: @rounded-md;
+    border-radius: @radius-md;
     overflow: hidden;
     margin-bottom: @spacing-4;
   }
@@ -175,13 +169,13 @@
   
   &__card-title {
     height: 32rpx;
-    border-radius: @rounded-sm;
+    border-radius: @radius-sm;
     width: 60%;
   }
   
   &__card-desc {
     height: 24rpx;
-    border-radius: @rounded-sm;
+    border-radius: @radius-sm;
     width: 40%;
   }
   
@@ -189,7 +183,7 @@
   &__body {
     width: 100%;
     height: 200rpx;
-    border-radius: @rounded-md;
+    border-radius: @radius-md;
     margin-bottom: @spacing-4;
   }
   
@@ -201,7 +195,7 @@
   
   &__btn {
     height: 80rpx;
-    border-radius: @rounded-xl;
+    border-radius: @radius-xl;
     flex: 1;
     
     &--primary {
@@ -217,13 +211,13 @@
 // 深色模式适配
 @media (prefers-color-scheme: dark) {
   .skeleton-shimmer {
-    background: var(--skeleton-bg-dark, @skeleton-bg-dark);
+    background: var(--skeleton-bg-dark, @gray-700);
     
     &::after {
       background: linear-gradient(
         90deg,
         transparent 0%,
-        @skeleton-shimmer-color-dark 50%,
+        rgba(255, 255, 255, 0.1) 50%,
         transparent 100%
       );
     }

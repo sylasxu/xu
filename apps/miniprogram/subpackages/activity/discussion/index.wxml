@@ -33,6 +33,23 @@
       <text>{{taskStageTitle}}</text>
     </view>
     <text class="task-stage-banner__hint">{{taskStageHint}}</text>
+    <view class="task-stage-banner__chips">
+      <view class="task-stage-chip task-stage-chip--primary">
+        <text>{{statusChipPrimary}}</text>
+      </view>
+      <view class="task-stage-chip">
+        <text>{{statusChipSecondary}}</text>
+      </view>
+    </view>
+    <text class="task-stage-banner__action-hint">{{statusActionHint}}</text>
+    <view class="task-stage-banner__actions">
+      <view class="task-stage-banner__action task-stage-banner__action--secondary" bindtap="onOpenActivityDetail">
+        <text>{{stagePrimaryActionLabel}}</text>
+      </view>
+      <view class="task-stage-banner__action" bindtap="onBackToFlowHub">
+        <text>{{stageSecondaryActionLabel}}</text>
+      </view>
+    </view>
   </view>
 
   <!-- 消息列表 -->

@@ -6,7 +6,7 @@
   left: 0;
   right: 0;
   background-color: #ffffff;
-  border-radius: @rounded-xl @rounded-xl 0 0;
+  border-radius: @radius-xl @radius-xl 0 0;
   box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
   z-index: 200;
   transition: height 0.3s ease-out;
@@ -24,6 +24,14 @@
   }
 }
 
+.bottom-drawer__handle-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: @spacing-2 0;
+}
+
 // 拖动条
 .handle-bar {
   width: 80rpx;
@@ -31,6 +39,138 @@
   background-color: @gray-200;
   border-radius: 4rpx;
   transition: background-color 0.2s;
+}
+
+.bottom-drawer__hint {
+  margin-top: @spacing-1;
+  font-size: @text-xs;
+  color: @gray-400;
+}
+
+.bottom-drawer__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 0 @spacing-3;
+  overflow: hidden;
+}
+
+.bottom-drawer__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: @spacing-2 0;
+}
+
+.bottom-drawer__filter-pill {
+  display: flex;
+  align-items: center;
+  gap: @spacing-1;
+  padding: @spacing-2 @spacing-3;
+  background: @gray-100;
+  border-radius: @radius-full;
+  font-size: @text-sm;
+  color: @gray-900;
+}
+
+.bottom-drawer__create-pill {
+  display: flex;
+  align-items: center;
+  gap: @spacing-1;
+  padding: @spacing-2 @spacing-4;
+  background: @color-primary;
+  border-radius: @radius-full;
+  font-size: @text-sm;
+  font-weight: 500;
+  color: #ffffff;
+}
+
+.bottom-drawer__expanded {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.bottom-drawer__section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: @spacing-2 0;
+  margin-bottom: @spacing-2;
+  border-bottom: 1rpx solid @border-default;
+}
+
+.bottom-drawer__section-title {
+  display: flex;
+  align-items: center;
+  gap: @spacing-2;
+  font-size: @text-base;
+  font-weight: 500;
+  color: @gray-900;
+}
+
+.bottom-drawer__count {
+  padding: @spacing-1 @spacing-2;
+  background: @gray-100;
+  border-radius: @radius-full;
+  font-size: @text-xs;
+  font-weight: 400;
+  color: @gray-400;
+}
+
+.bottom-drawer__collapse {
+  display: flex;
+  align-items: center;
+  gap: @spacing-1;
+  padding: @spacing-1 @spacing-2;
+  border-radius: @radius-full;
+  font-size: @text-xs;
+  color: @gray-400;
+}
+
+.bottom-drawer__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: @spacing-8 0;
+}
+
+.bottom-drawer__scroll {
+  flex: 1;
+  overflow: hidden;
+}
+
+.bottom-drawer__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: @spacing-8 0;
+  color: @gray-400;
+}
+
+.bottom-drawer__empty-title {
+  margin-top: @spacing-2;
+  font-size: @text-base;
+  color: @gray-600;
+}
+
+.bottom-drawer__empty-hint {
+  margin-top: @spacing-1;
+  font-size: @text-xs;
+}
+
+.bottom-drawer__empty-action {
+  display: flex;
+  align-items: center;
+  gap: @spacing-1;
+  margin-top: @spacing-3;
+  padding: @spacing-2 @spacing-4;
+  border: 1rpx solid @color-primary;
+  border-radius: @radius-full;
+  font-size: @text-sm;
+  color: @color-primary;
 }
 
 // 筛选按钮点击态

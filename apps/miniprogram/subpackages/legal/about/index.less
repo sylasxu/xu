@@ -1,11 +1,34 @@
 @import '/styles/tokens.less';
 
+.about-page {
+  min-height: 100vh;
+  background: @gray-50;
+}
+
 .page {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
 .content {
   padding-top: calc(88rpx + env(safe-area-inset-top));
+}
+
+.about-page__content {
+  padding: @spacing-4 @spacing-4 0;
+}
+
+.about-page__card {
+  margin-bottom: @spacing-4;
+  padding: @spacing-4;
+  background: #ffffff;
+  border-radius: @radius-lg;
+}
+
+.about-page__card--hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: @spacing-6;
 }
 
 .logo-section {
@@ -18,9 +41,47 @@
   border-radius: @radius-lg;
 }
 
+.about-page__brand {
+  margin-top: @spacing-3;
+  font-size: @text-lg;
+  font-weight: 700;
+  color: @gray-900;
+}
+
+.about-page__version {
+  margin-top: @spacing-1;
+  font-size: @text-sm;
+  color: @gray-500;
+}
+
+.about-page__slogan {
+  margin-top: @spacing-2;
+  font-size: @text-xs;
+  color: @gray-400;
+}
+
+.about-page__section-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: @spacing-3;
+}
+
+.about-page__section-title {
+  font-size: @text-base;
+  font-weight: 500;
+  color: @gray-900;
+}
+
 .qr-container {
-  background-color: @color-gray-50;
+  background-color: @gray-50;
   border-radius: @radius-md;
+}
+
+.about-page__qr-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: @spacing-4 0;
 }
 
 .qr-image {
@@ -29,6 +90,26 @@
   border-radius: @radius-sm;
 }
 
+.about-page__qr-hint {
+  margin-top: @spacing-3;
+  font-size: @text-xs;
+  color: @gray-400;
+}
+
+.about-page__cell-group {
+  margin-bottom: @spacing-4;
+}
+
 .copyright {
   opacity: 0.6;
+}
+
+.about-page__copyright {
+  padding: @spacing-6 0;
+  text-align: center;
+}
+
+.about-page__copyright-text {
+  font-size: @text-xs;
+  color: @gray-400;
 }

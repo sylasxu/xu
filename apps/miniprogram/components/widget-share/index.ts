@@ -280,11 +280,6 @@ Component({
       
       // 触发事件
       this.triggerEvent('viewdetail', { activity });
-      
-      // 跳转到活动详情页
-      wx.navigateTo({
-        url: `/subpackages/activity/detail/index?id=${activity.id}`,
-      });
     },
   },
 });

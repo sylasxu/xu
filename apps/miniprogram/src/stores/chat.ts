@@ -529,7 +529,7 @@ function readCurrentRoute(): string {
 }
 
 function isHomeRoute(route: string): boolean {
-  return route === 'pages/home/index' || route === '/pages/home/index'
+  return route === 'pages/chat/index' || route === '/pages/chat/index'
 }
 
 function isLoginRoute(route: string): boolean {
@@ -1398,6 +1398,8 @@ interface ChatState {
   messages: UIMessage[]
   /** 当前会话 ID（通过 /ai/chat 的 GenUI 模式返回） */
   conversationId: string | null
+  /** 当前输入框内容 */
+  input: string
   /** 当前状态：idle | submitted | streaming */
   status: ChatStatus
   /** 错误信息 */
@@ -1410,8 +1412,14 @@ interface ChatState {
   // ========== Actions ==========
   /** 发送消息 */
   sendMessage: (text: string, contextOverrides?: ChatPromptContext) => void
+  /** 设置当前输入框内容 */
+  setInput: (input: string) => void
+  /** 提交当前输入框内容 */
+  submitInput: (contextOverrides?: ChatPromptContext) => void
   /** 停止生成 */
   stop: () => void
+  /** 重试上一轮用户输入 */
+  retryLastTurn: () => void
   /** 清空消息 */
   clearMessages: () => void
   /** 设置消息列表 */
@@ -1754,6 +1762,7 @@ export const useChatStore = create<ChatState>()(
       // ========== 初始状态 ==========
       messages: [],
       conversationId: null,
+      input: '',
       status: 'idle',
       error: null,
       streamingMessageId: null,
@@ -1803,6 +1812,7 @@ export const useChatStore = create<ChatState>()(
         set((draft) => {
           draft.messages.push(userMessage)
           draft.messages.push(aiMessage)
+          draft.input = ''
           draft.status = 'submitted'
           draft.error = null
           draft.streamingMessageId = aiMessageId
@@ -1836,6 +1846,30 @@ export const useChatStore = create<ChatState>()(
           }),
         })
       },
+
+      /**
+       * 设置当前输入框内容
+       * 对齐 useChat 的 input / setInput 心智
+       */
+      setInput: (input) => {
+        set((draft) => {
+          draft.input = input
+        })
+      },
+
+      /**
+       * 提交当前输入框内容
+       * 对齐 useChat 的 submit 能力
+       */
+      submitInput: (contextOverrides) => {
+        const state = get()
+        const text = state.input.trim()
+        if (!text) {
+          return
+        }
+
+        state.sendMessage(text, contextOverrides)
+      },
       
       /**
        * 停止生成
@@ -1851,6 +1885,34 @@ export const useChatStore = create<ChatState>()(
           draft._controller = null
         })
       },
+
+      /**
+       * 重试上一轮用户输入
+       * 不额外引入新状态机，只复用最近一条用户消息
+       */
+      retryLastTurn: () => {
+        const state = get()
+        const lastUserMessage = [...state.messages].reverse().find((message) => message.role === 'user')
+        if (!lastUserMessage) {
+          return
+        }
+
+        if (lastUserMessage.structuredAction) {
+          state.sendAction({
+            action: lastUserMessage.structuredAction.action,
+            payload: lastUserMessage.structuredAction.payload,
+            source: lastUserMessage.structuredAction.source,
+            originalText:
+              lastUserMessage.structuredAction.displayText || lastUserMessage.structuredAction.originalText,
+          })
+          return
+        }
+
+        const text = getTextContent(lastUserMessage).trim()
+        if (text) {
+          state.sendMessage(text)
+        }
+      },
       
       /**
        * 清空消息
@@ -1863,6 +1925,7 @@ export const useChatStore = create<ChatState>()(
         set((draft) => {
           draft.messages = []
           draft.conversationId = null
+          draft.input = ''
           draft.error = null
         })
       },
@@ -1953,6 +2016,7 @@ export const useChatStore = create<ChatState>()(
         set((draft) => {
           draft.messages.push(userMessage)
           draft.messages.push(aiMessage)
+          draft.input = ''
           draft.status = 'submitted'
           draft.error = null
           draft.streamingMessageId = aiMessageId

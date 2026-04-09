@@ -1,351 +1,169 @@
 /**
- * 活动群聊页面样式 (Lite_Chat)
- * Requirements: 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8
+ * 对话主场样式 (Chat-First 架构)
+ * Requirements: 1.1, 1.2, 1.3, 1.4, 15.16
  * 
- * Crypto-Clean 视觉风格
+ * - 空气感渐变背景
+ * - 消息列表布局
+ * - 入场动画效果
+ * - 深色模式支持
  */
 @import '/styles/tokens.less';
 
-// 页面容器
 .chat-page {
+  position: relative;
+  width: 100%;
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  background-color: var(--bg-page);
+  background: var(--bg-page, @bg-page);
 }
 
-// ==================== 活动信息头部 ====================
-.activity-header {
-  display: flex;
-  align-items: center;
-  padding: 24rpx 32rpx;
-  background-color: var(--bg-card);
-  border-bottom: 1rpx solid var(--border-default);
-  
-  &:active {
-    background-color: var(--bg-page);
-  }
-  
-  .activity-info {
-    flex: 1;
-    min-width: 0;
-    
-    .activity-title {
-      font-size: 32rpx;
-      font-weight: 600;
-      color: var(--text-main);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      margin-bottom: 8rpx;
-    }
-    
-    .activity-meta {
-      display: flex;
-      align-items: center;
-      font-size: 24rpx;
-      color: var(--text-secondary);
-      
-      .meta-item {
-        display: flex;
-        align-items: center;
-        gap: 4rpx;
-      }
-      
-      .meta-divider {
-        margin: 0 12rpx;
-      }
-    }
-  }
-  
-  .activity-status {
-    padding: 8rpx 16rpx;
-    border-radius: 8rpx;
-    font-size: 22rpx;
-    font-weight: 500;
-    margin-right: 16rpx;
-    
-    &.active {
-      background-color: rgba(110, 231, 183, 0.15);
-      color: #059669;
-    }
-    
-    &.archived {
-      background-color: var(--bg-page);
-      color: var(--text-secondary);
-    }
-  }
-  
-  .chevron-icon {
-    color: var(--text-secondary);
-    font-size: 32rpx;
-  }
+// ==================== 空气感渐变背景 ====================
+// Requirements: 1.3
+
+.atmospheric-bg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 400rpx;
+  background: linear-gradient(
+    180deg,
+    var(--bg-atmospheric-top, rgba(91, 117, 251, 0.08)) 0%,
+    var(--bg-atmospheric-bottom, rgba(91, 117, 251, 0)) 100%
+  );
+  pointer-events: none;
+  z-index: 0;
 }
 
-// ==================== 归档提示条 ====================
-.archive-banner {
+.chat-task-panel {
+  padding: @spacing-4 @spacing-4 @spacing-2;
+}
+
+// ==================== 加载更多指示器 ====================
+
+.loading-more {
   display: flex;
-  align-items: center;
   justify-content: center;
-  gap: 8rpx;
-  padding: 16rpx 32rpx;
-  background-color: rgba(251, 191, 36, 0.1);
-  color: #D97706;
-  font-size: 24rpx;
-  
-  .icon-info {
-    font-size: 28rpx;
+  padding: @spacing-4 0;
+}
+
+.loading-dots {
+  display: flex;
+  gap: @spacing-2;
+}
+
+.loading-dot {
+  width: 16rpx;
+  height: 16rpx;
+  border-radius: var(--radius-full, @radius-full);
+  background-color: var(--color-primary, @color-primary);
+  opacity: 0.6;
+  animation: loading-bounce 1.4s infinite ease-in-out both;
+
+  &:nth-child(1) {
+    animation-delay: -0.32s;
+  }
+
+  &:nth-child(2) {
+    animation-delay: -0.16s;
+  }
+
+  &:nth-child(3) {
+    animation-delay: 0s;
+  }
+}
+
+@keyframes loading-bounce {
+  0%, 80%, 100% {
+    transform: scale(0.6);
+  }
+  40% {
+    transform: scale(1);
   }
 }
 
 // ==================== 消息列表 ====================
-.message-list {
-  flex: 1;
-  padding: 24rpx 32rpx;
-  overflow-y: auto;
-}
 
-// 加载状态
-.loading-container {
+.message-list {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 48rpx 0;
-  
-  .loading-text {
-    margin-top: 16rpx;
-    font-size: 24rpx;
-    color: var(--text-secondary);
-  }
-}
-
-// 系统消息
-.system-message {
-  display: flex;
-  justify-content: center;
-  padding: 16rpx 0;
-  
-  .system-text {
-    padding: 8rpx 24rpx;
-    background-color: rgba(0, 0, 0, 0.04);
-    border-radius: 16rpx;
-    font-size: 22rpx;
-    color: var(--text-secondary);
-  }
+  gap: @spacing-4;
+  padding-top: @spacing-4;
 }
 
 // 消息项
 .message-item {
   display: flex;
-  margin-bottom: 32rpx;
-  
-  &.self {
-    flex-direction: row-reverse;
-    
-    .message-content {
-      align-items: flex-end;
-    }
+  width: 100%;
+  padding: 0 @spacing-4;
+
+  // 用户消息：右对齐
+  &--user {
+    justify-content: flex-end;
   }
-  
-  &.other {
-    .message-content {
-      align-items: flex-start;
-    }
-  }
-  
-  .avatar {
-    width: 80rpx;
-    height: 80rpx;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-  
-  .message-content {
-    display: flex;
-    flex-direction: column;
-    margin: 0 16rpx;
-    max-width: 70%;
-    
-    .sender-name {
-      font-size: 22rpx;
-      color: var(--text-secondary);
-      margin-bottom: 8rpx;
-    }
-    
-    .message-bubble {
-      padding: 20rpx 28rpx;
-      word-break: break-all;
-      
-      .message-text {
-        font-size: 28rpx;
-        line-height: 1.5;
-      }
-    }
-    
-    .message-time {
-      font-size: 20rpx;
-      color: var(--text-tertiary);
-      margin-top: 8rpx;
-    }
+
+  // AI 消息：左对齐
+  &--assistant {
+    justify-content: flex-start;
   }
 }
 
-// 自己的消息气泡
-.self-bubble {
-  background: linear-gradient(135deg, @brand-color 0%, #708DFD 100%);
-  color: #FFFFFF;
-  border-radius: 24rpx 8rpx 24rpx 24rpx;
-}
+// ==================== Widget 错误卡片 ====================
 
-// 他人的消息气泡
-.other-bubble {
-  background-color: var(--bg-card);
-  color: var(--text-main);
-  border-radius: 8rpx 24rpx 24rpx 24rpx;
-  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.04);
-}
-
-// 空状态
-.empty-state {
+.widget-error {
   display: flex;
   flex-direction: column;
   align-items: center;
+  padding: @spacing-6;
+  gap: @spacing-3;
+  background: var(--bg-card, @bg-card);
+  border-radius: var(--radius-lg, @radius-lg);
+  box-shadow: var(--shadow-card, @shadow-card);
+}
+
+.error-icon {
+  width: 80rpx;
+  height: 80rpx;
+  display: flex;
+  align-items: center;
   justify-content: center;
-  padding: 96rpx 0;
-  
-  .empty-icon {
-    font-size: 96rpx;
-    margin-bottom: 24rpx;
-  }
-  
-  .empty-title {
-    font-size: 28rpx;
-    color: var(--text-main);
-    margin-bottom: 8rpx;
-  }
-  
-  .empty-desc {
-    font-size: 24rpx;
-    color: var(--text-secondary);
-  }
+  background: rgba(245, 158, 11, 0.1);
+  border-radius: var(--radius-full, @radius-full);
 }
 
-// ==================== 输入区域 ====================
-.input-area {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: var(--bg-card);
-  border-top: 1rpx solid var(--border-default);
-  transition: bottom 0.2s ease;
-  
-  &.disabled {
-    opacity: 0.6;
-  }
-  
-  .input-container {
-    display: flex;
-    align-items: center;
-    padding: 16rpx 24rpx;
-    gap: 16rpx;
-  }
-  
-  .message-input {
-    flex: 1;
-    height: 80rpx;
-    padding: 0 32rpx;
-    background-color: var(--bg-page);
-    border-radius: 40rpx;
-    font-size: 28rpx;
-    color: var(--text-main);
-  }
-  
-  .input-placeholder {
-    color: var(--text-placeholder);
-  }
-  
-  .send-btn {
-    width: 80rpx;
-    height: 80rpx;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 50%;
-    background-color: var(--bg-page);
-    color: var(--text-secondary);
-    transition: all 0.2s var(--ease-out-back);
-    
-    &.active {
-      background-color: @brand-color;
-      color: #FFFFFF;
-    }
-    
-    &:active {
-      transform: scale(0.95);
-    }
-    
-    .icon-send {
-      font-size: 40rpx;
-    }
-  }
-  
-  .safe-area-bottom {
-    padding-bottom: constant(safe-area-inset-bottom);
-    padding-bottom: env(safe-area-inset-bottom);
-  }
-}
-
-// ==================== 图标样式 ====================
-.icon-location::before {
-  content: '📍';
-  font-size: 24rpx;
-}
-
-.icon-users::before {
-  content: '👥';
-  font-size: 24rpx;
-}
-
-.icon-chevron-right::before {
-  content: '›';
-  font-size: 40rpx;
-}
-
-.icon-info::before {
-  content: 'ℹ️';
-}
-
-.icon-send::before {
-  content: '➤';
-  font-size: 36rpx;
+.error-text {
+  font-size: @text-sm;
+  color: var(--text-secondary, @text-secondary);
+  text-align: center;
 }
 
 // ==================== 深色模式适配 ====================
+
 @media (prefers-color-scheme: dark) {
-  .activity-header {
-    &:active {
-      background-color: rgba(255, 255, 255, 0.05);
-    }
+  .chat-page {
+    background: var(--bg-page, @bg-page-dark);
   }
-  
-  .activity-status {
-    &.active {
-      background-color: rgba(110, 231, 183, 0.2);
-    }
+
+  .atmospheric-bg {
+    background: linear-gradient(
+      180deg,
+      var(--bg-atmospheric-top, rgba(91, 117, 251, 0.15)) 0%,
+      var(--bg-atmospheric-bottom, rgba(91, 117, 251, 0)) 100%
+    );
   }
-  
-  .archive-banner {
-    background-color: rgba(251, 191, 36, 0.15);
+
+  .loading-dot {
+    background-color: var(--color-primary-light, @color-primary-light);
   }
-  
-  .system-message .system-text {
-    background-color: rgba(255, 255, 255, 0.08);
-  }
-  
-  .other-bubble {
+
+  .widget-error {
+    background: var(--bg-card, @bg-card-dark);
     box-shadow: none;
-    border: 1rpx solid var(--border-default);
+    border: 1rpx solid var(--border-default, @border-default-dark);
+  }
+
+  .error-text {
+    color: var(--text-secondary, @text-secondary-dark);
   }
 }

@@ -1,0 +1,124 @@
+<block wx:if="{{part && part.type === 'widget'}}">
+  <block wx:if="{{part.widgetType === 'dashboard'}}">
+    <widget-dashboard
+      nickname="{{dashboardNickname}}"
+      activities="{{part.data.activities}}"
+      greeting="{{part.data.greeting}}"
+      subGreeting="{{part.data.subGreeting}}"
+      sections="{{part.data.sections}}"
+      socialProfile="{{part.data.socialProfile}}"
+      quickPrompts="{{part.data.quickPrompts}}"
+      ui="{{part.data.ui}}"
+      bind:activitytap="onDashboardActivityTap"
+      bind:prompttap="onDashboardPromptTap"
+      bind:quickitemtap="onDashboardQuickItemTap"
+      bind:preferencetap="onDashboardPreferenceTap"
+      bind:viewall="onDashboardViewAll"
+    />
+  </block>
+
+  <block wx:elif="{{part.widgetType === 'draft'}}">
+    <widget-draft
+      draft="{{part.data}}"
+      bind:actiontap="onWidgetActionTap"
+    />
+  </block>
+
+  <block wx:elif="{{part.widgetType === 'share'}}">
+    <widget-share
+      activity="{{part.data}}"
+      bind:share="onWidgetShareTap"
+      bind:viewdetail="onWidgetShareViewDetail"
+    />
+  </block>
+
+  <block wx:elif="{{part.widgetType === 'explore'}}">
+    <widget-explore
+      results="{{part.data.results}}"
+      center="{{part.data.center}}"
+      title="{{part.data.title}}"
+      presentation="{{part.data.presentation}}"
+      showHeader="{{part.data.showHeader}}"
+      fetchConfig="{{part.data.fetchConfig}}"
+      interaction="{{part.data.interaction}}"
+      preview="{{part.data.preview}}"
+      bind:activitytap="onExploreActivityTap"
+      bind:actiontap="onExploreActionTap"
+      bind:expandmap="onExploreExpandMap"
+    />
+  </block>
+
+  <block wx:elif="{{part.widgetType === 'partner_search_results'}}">
+    <widget-partner-search-results
+      title="{{part.data.title}}"
+      presentation="{{part.data.presentation}}"
+      showHeader="{{part.data.showHeader}}"
+      results="{{part.data.results}}"
+      bind:actiontap="onPartnerSearchActionTap"
+    />
+  </block>
+
+  <block wx:elif="{{part.widgetType === 'ask_preference'}}">
+    <widget-ask-preference
+      questionType="{{part.data.questionType}}"
+      inputMode="{{part.data.inputMode}}"
+      question="{{part.data.question}}"
+      options="{{part.data.options}}"
+      allowSkip="{{part.data.allowSkip}}"
+      collectedInfo="{{part.data.collectedInfo}}"
+      disabled="{{askPreferenceDisabled}}"
+      bind:select="onAskPreferenceSelect"
+      bind:skip="onAskPreferenceSkip"
+      bind:actiontap="onWidgetActionTap"
+    />
+  </block>
+
+  <block wx:elif="{{part.widgetType === 'action_chips'}}">
+    <widget-action-chips
+      items="{{part.data.items}}"
+      disabled="{{actionChipsDisabled}}"
+      bind:actiontap="onActionChipTap"
+    />
+  </block>
+
+  <block wx:elif="{{part.widgetType === 'partner_intent_form'}}">
+    <widget-partner-intent-form
+      title="{{part.data.title}}"
+      schema="{{part.data.schema}}"
+      initialValues="{{part.data.initialValues}}"
+      showHeader="{{part.data.showHeader}}"
+      disabled="{{partnerIntentFormDisabled}}"
+      bind:submit="onPartnerIntentFormSubmit"
+      bind:actiontap="onWidgetActionTap"
+    />
+  </block>
+
+  <block wx:elif="{{part.widgetType === 'draft_settings_form'}}">
+    <widget-draft-settings-form
+      title="{{part.data.title}}"
+      schema="{{part.data.schema}}"
+      initialValues="{{part.data.initialValues}}"
+      disabled="{{draftSettingsDisabled}}"
+      bind:submit="onDraftSettingsFormSubmit"
+      bind:actiontap="onWidgetActionTap"
+    />
+  </block>
+
+  <block wx:elif="{{part.widgetType === 'auth_required'}}">
+    <widget-auth-required
+      message="{{part.data.message}}"
+      mode="{{part.data.mode}}"
+      pendingAction="{{part.data.pendingAction}}"
+      bind:continue="onAuthRequiredContinue"
+    />
+  </block>
+
+  <block wx:elif="{{part.widgetType === 'error'}}">
+    <widget-error
+      message="{{errorMessage}}"
+      showRetry="{{errorShowRetry}}"
+      data-original-text="{{part.data.originalText}}"
+      bind:retry="onWidgetErrorRetry"
+    />
+  </block>
+</block>

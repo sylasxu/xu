@@ -1,11 +1,11 @@
 <!--
   设置页面
-  TDesign + Atomic Less 重构
+  TDesign + 语义样式
 -->
-<view class="min-h-screen bg-gray-50 pb-12">
+<view class="setting-page">
   <!-- 设置分组 -->
-  <view wx:for="{{menuData}}" wx:key="title" class="mb-3">
-    <view class="px-4 pt-3 pb-2 text-sm text-gray-400">{{item.title}}</view>
+  <view wx:for="{{menuData}}" wx:key="title" class="setting-page__group">
+    <view class="setting-page__group-title">{{item.title}}</view>
     <t-cell-group theme="card">
       <block wx:for="{{item.items}}" wx:for-item="subItem" wx:for-index="subIndex" wx:key="key">
         <!-- 开关类型 -->
@@ -39,7 +39,7 @@
   </view>
 
   <!-- 退出登录按钮 -->
-  <view wx:if="{{isLoggedIn}}" class="px-4 py-5">
+  <view wx:if="{{isLoggedIn}}" class="setting-page__logout">
     <t-button 
       theme="danger" 
       variant="outline" 
@@ -51,7 +51,7 @@
   </view>
 
   <!-- 版本信息 -->
-  <view class="text-center py-5 text-xs text-gray-400">
+  <view class="setting-page__version">
     <text>聚场 v1.0.0</text>
   </view>
 </view>

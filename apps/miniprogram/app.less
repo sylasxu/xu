@@ -4,15 +4,15 @@
  * 
  * 加载顺序：
  * 1. tokens.less - Design Token 变量定义
- * 2. utilities.less - Tailwind 风格原子类
+ * 2. foundation.less - 主场基础壳
  * 3. tdesign-theme.less - TDesign 主题覆盖
  */
 
 // 1. Design Token 系统
 @import './styles/tokens.less';
 
-// 2. 原子类系统
-@import './styles/utilities.less';
+// 2. 主场基础壳
+@import './styles/foundation.less';
 
 // 3. TDesign 主题覆盖
 @import './styles/tdesign-theme.less';
@@ -67,12 +67,12 @@
   --shadow-xl: @shadow-xl;                // 特大阴影
   
   // ========== 圆角 (Squircle - 超圆角) ==========
-  --radius-sm: @rounded-sm;               // 8rpx 微圆角
-  --radius-md: @rounded-md;               // 24rpx 中等圆角
-  --radius-lg: @rounded-lg;               // 40rpx 大圆角 - 卡片标准
-  --radius-xl: @rounded-xl;               // 48rpx 超大圆角 - AI Dock 胶囊
-  --radius-2xl: @rounded-2xl;             // 56rpx 特大圆角
-  --radius-full: @rounded-full;           // 9999px 完美圆形
+  --radius-sm: @radius-sm;               // 8rpx 微圆角
+  --radius-md: @radius-md;               // 24rpx 中等圆角
+  --radius-lg: @radius-lg;               // 40rpx 大圆角 - 卡片标准
+  --radius-xl: @radius-xl;               // 48rpx 超大圆角 - AI Dock 胶囊
+  --radius-2xl: @radius-2xl;             // 56rpx 特大圆角
+  --radius-full: @radius-full;           // 9999px 完美圆形
   
   // ========== 渐变 ==========
   --gradient-primary: @gradient-primary;  // 主色渐变
@@ -153,203 +153,6 @@ page {
 .page {
   min-height: 100vh;
   background-color: var(--bg-page, @bg-page);
-}
-
-// ==================== Crypto-Clean 组件样式 ====================
-
-// Halo Card - 渐变边框卡片 (使用 background-origin/clip 技术)
-// 核心视觉元素：超大圆角 + 彩色弥散阴影 + 渐变细边框
-.halo-card {
-  position: relative;
-  background: var(--bg-card, @bg-card);
-  border-radius: var(--radius-lg, @rounded-lg);  // 40rpx 超大圆角
-  box-shadow: var(--shadow-card, @shadow-card);  // 彩色弥散阴影
-  overflow: hidden;
-  
-  // 渐变边框效果 (使用 -webkit-mask 实现)
-  &::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    padding: 2rpx;  // 边框宽度
-    background: var(--gradient-halo, @gradient-card);
-    border-radius: inherit;
-    // 使用 mask 技术实现渐变边框
-    -webkit-mask: 
-      linear-gradient(#fff 0 0) content-box, 
-      linear-gradient(#fff 0 0);
-    mask: 
-      linear-gradient(#fff 0 0) content-box, 
-      linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-    pointer-events: none;
-  }
-}
-
-// Halo Card Mini - 紧凑版渐变边框 (用于小型组件)
-.halo-card-mini {
-  position: relative;
-  background: var(--bg-card, @bg-card);
-  border-radius: var(--radius-md, @rounded-md);  // 24rpx 中等圆角
-  box-shadow: var(--shadow-sm, @shadow-sm);
-  overflow: hidden;
-  
-  &::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    padding: 1rpx;  // 更细的边框
-    background: var(--gradient-halo, @gradient-card);
-    border-radius: inherit;
-    -webkit-mask: 
-      linear-gradient(#fff 0 0) content-box, 
-      linear-gradient(#fff 0 0);
-    mask: 
-      linear-gradient(#fff 0 0) content-box, 
-      linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-    pointer-events: none;
-  }
-}
-
-// Soft Card - 无渐变边框的柔和卡片
-.soft-card {
-  background: var(--bg-card, @bg-card);
-  border-radius: var(--radius-lg, @rounded-lg);
-  box-shadow: var(--shadow-card, @shadow-card);
-  border: var(--border-card, 1rpx solid rgba(0, 0, 0, 0.04));
-}
-
-// 深色模式 Halo Card
-@media (prefers-color-scheme: dark) {
-  .halo-card {
-    background: var(--bg-card, @bg-card-dark);
-    box-shadow: none;  // 深色模式无阴影
-    border: 1rpx solid var(--border-default, @border-default-dark);  // 用边框代替阴影
-    
-    &::before {
-      background: var(--gradient-halo, linear-gradient(135deg, 
-        rgba(91, 117, 251, 0.25) 0%, 
-        rgba(196, 181, 253, 0.25) 100%
-      ));
-    }
-  }
-  
-  .halo-card-mini {
-    background: var(--bg-card, @bg-card-dark);
-    box-shadow: none;
-    border: 1rpx solid var(--border-default, @border-default-dark);
-    
-    &::before {
-      background: var(--gradient-halo, linear-gradient(135deg, 
-        rgba(91, 117, 251, 0.25) 0%, 
-        rgba(196, 181, 253, 0.25) 100%
-      ));
-    }
-  }
-  
-  .soft-card {
-    background: var(--bg-card, @bg-card-dark);
-    box-shadow: none;
-    border: 1rpx solid var(--border-default, @border-default-dark);
-  }
-}
-
-// ==================== 图标圆形底色 (Colorful Icons) ====================
-
-.icon-circle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 72rpx;
-  height: 72rpx;
-  border-radius: var(--radius-full, @rounded-full);
-  
-  &--blue {
-    background: var(--icon-bg-blue, rgba(91, 117, 251, 0.1));
-    color: var(--color-primary, @color-primary);
-  }
-  
-  &--purple {
-    background: var(--icon-bg-purple, rgba(139, 92, 246, 0.1));
-    color: var(--color-secondary, @color-secondary);
-  }
-  
-  &--mint {
-    background: var(--icon-bg-mint, rgba(110, 231, 183, 0.1));
-    color: @success-color;
-  }
-  
-  &--amber {
-    background: var(--icon-bg-amber, rgba(245, 158, 11, 0.1));
-    color: @warning-color;
-  }
-}
-
-// 小号图标圆形
-.icon-circle-sm {
-  width: 56rpx;
-  height: 56rpx;
-}
-
-// 按钮回弹效果 (Scale Down Feedback)
-.btn-pressable {
-  transition: transform var(--duration-fast, @duration-fast) var(--ease-out-back, @ease-out-back);
-  
-  &:active {
-    transform: scale(0.95);
-  }
-}
-
-// ==================== Floating Capsule (悬浮胶囊 - AI Dock 样式) ====================
-// 距离底部和左右都有间距，像 iOS 灵动岛
-
-.floating-capsule {
-  position: fixed;
-  left: 32rpx;
-  right: 32rpx;
-  bottom: calc(32rpx + env(safe-area-inset-bottom));
-  background: var(--bg-card, @bg-card);
-  border-radius: var(--radius-xl, @rounded-xl);  // 48rpx 胶囊形
-  box-shadow: var(--shadow-lg, @shadow-lg);
-  z-index: 100;
-  
-  // 渐变边框效果
-  &::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    padding: 2rpx;
-    background: var(--gradient-halo, @gradient-card);
-    border-radius: inherit;
-    -webkit-mask: 
-      linear-gradient(#fff 0 0) content-box, 
-      linear-gradient(#fff 0 0);
-    mask: 
-      linear-gradient(#fff 0 0) content-box, 
-      linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-    pointer-events: none;
-  }
-}
-
-// 深色模式 Floating Capsule
-@media (prefers-color-scheme: dark) {
-  .floating-capsule {
-    background: var(--bg-card, @bg-card-dark);
-    box-shadow: none;
-    border: 1rpx solid var(--border-default, @border-default-dark);
-    
-    &::before {
-      background: var(--gradient-halo, linear-gradient(135deg, 
-        rgba(91, 117, 251, 0.25) 0%, 
-        rgba(196, 181, 253, 0.25) 100%
-      ));
-    }
-  }
 }
 
 // 主按钮样式 (Cornflower Blue 渐变)
@@ -453,7 +256,7 @@ page {
 .bubble-user {
   background: @gradient-primary;
   color: #FFFFFF;
-  border-radius: @rounded-lg @rounded-lg 8rpx @rounded-lg;
+  border-radius: @radius-lg @radius-lg 8rpx @radius-lg;
   padding: 24rpx 32rpx;
   max-width: 70%;
   word-break: break-word;
@@ -481,22 +284,6 @@ page {
   }
   to {
     opacity: 1;
-  }
-}
-
-// 上浮淡入动画
-.slide-up-fade-in {
-  animation: slideUpFadeIn @duration-normal @ease-out-expo;
-}
-
-@keyframes slideUpFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(32rpx);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
   }
 }
 
@@ -599,9 +386,4 @@ page {
   line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
-}
-
-// 安全区域底部
-.safe-area-bottom {
-  padding-bottom: env(safe-area-inset-bottom);
 }

@@ -15,7 +15,7 @@
   module.exports = { getTypeLabel: getTypeLabel };
 </wxs>
 
-<view class="min-h-screen bg-gray-50">
+<view class="draft-edit-page">
   <!-- 自定义导航栏 -->
   <custom-navbar 
     title="确认发布" 
@@ -25,26 +25,26 @@
   />
 
   <!-- 加载状态 -->
-  <view wx:if="{{loading}}" class="flex flex-col items-center justify-center py-12">
+  <view wx:if="{{loading}}" class="draft-edit-page__loading">
     <t-loading theme="circular" size="80rpx" />
-    <text class="mt-3 text-sm text-gray-400">加载中...</text>
+    <text class="draft-edit-page__loading-text">加载中...</text>
   </view>
 
   <!-- 编辑表单 -->
-  <view wx:else class="p-4">
+  <view wx:else class="draft-edit-page__content">
     <!-- 活动类型标签 -->
-    <view class="flex items-center gap-2 mb-4">
-      <view class="type-tag px-3 py-1 rounded-full text-sm text-white bg-brand">
+    <view class="draft-edit-page__type-row">
+      <view class="type-tag draft-edit-page__type-tag">
         {{utils.getTypeLabel(draft.type)}}
       </view>
-      <text class="text-xs text-gray-400">活动类型</text>
+      <text class="draft-edit-page__type-label">活动类型</text>
     </view>
 
     <!-- 标题编辑 -->
-    <view class="form-card bg-white rounded-lg p-4 mb-3">
-      <view class="flex items-center gap-2 mb-2">
+    <view class="form-card draft-edit-page__card">
+      <view class="draft-edit-page__field-header">
         <t-icon name="edit" size="36rpx" color="#FF6B35" />
-        <text class="text-sm font-medium text-gray-900">活动标题</text>
+        <text class="draft-edit-page__field-title">活动标题</text>
       </view>
       <t-input
         placeholder="请输入活动标题"
@@ -55,38 +55,38 @@
     </view>
 
     <!-- 时间编辑 -->
-    <view class="form-card bg-white rounded-lg p-4 mb-3" bindtap="showTimePicker">
-      <view class="flex items-center gap-2 mb-2">
+    <view class="form-card draft-edit-page__card" bindtap="showTimePicker">
+      <view class="draft-edit-page__field-header">
         <t-icon name="time" size="36rpx" color="#FF6B35" />
-        <text class="text-sm font-medium text-gray-900">活动时间</text>
-        <view wx:if="{{isExpired}}" class="expired-tag px-2 py-1 rounded-sm text-xs text-white bg-error">
+        <text class="draft-edit-page__field-title">活动时间</text>
+        <view wx:if="{{isExpired}}" class="expired-tag draft-edit-page__expired-tag">
           已过期
         </view>
       </view>
-      <view class="flex items-center justify-between">
-        <text class="text-base {{isExpired ? 'text-error' : 'text-gray-900'}}">{{formattedTime}}</text>
+      <view class="draft-edit-page__field-row">
+        <text class="draft-edit-page__field-value {{isExpired ? 'draft-edit-page__field-value--error' : ''}}">{{formattedTime}}</text>
         <t-icon name="chevron-right" size="40rpx" color="#D1D5DB" />
       </view>
     </view>
 
     <!-- 地点信息 -->
-    <view class="form-card bg-white rounded-lg p-4 mb-3">
-      <view class="flex items-center gap-2 mb-2">
+    <view class="form-card draft-edit-page__card">
+      <view class="draft-edit-page__field-header">
         <t-icon name="location" size="36rpx" color="#FF6B35" />
-        <text class="text-sm font-medium text-gray-900">活动地点</text>
+        <text class="draft-edit-page__field-title">活动地点</text>
       </view>
-      <view class="flex items-center justify-between mb-3" bindtap="onAdjustLocation">
-        <text class="text-base text-gray-900 flex-1 truncate">{{draft.locationName || '请选择地点'}}</text>
-        <view class="adjust-btn flex items-center gap-1 px-3 py-1 rounded-full text-xs text-brand">
+      <view class="draft-edit-page__field-row draft-edit-page__field-row--spaced" bindtap="onAdjustLocation">
+        <text class="draft-edit-page__field-value draft-edit-page__field-value--truncate">{{draft.locationName || '请选择地点'}}</text>
+        <view class="adjust-btn draft-edit-page__adjust-btn">
           <t-icon name="location" size="28rpx" />
           <text>调整位置</text>
         </view>
       </view>
-      <view wx:if="{{draft.address}}" class="text-xs text-gray-400 mb-3">{{draft.address}}</view>
+      <view wx:if="{{draft.address}}" class="draft-edit-page__address">{{draft.address}}</view>
       
       <!-- 位置备注 -->
-      <view class="border-t border-gray-100 pt-3">
-        <text class="block text-xs text-gray-400 mb-2">位置备注（帮助参与者找到你）</text>
+      <view class="draft-edit-page__hint-section">
+        <text class="draft-edit-page__hint-label">位置备注（帮助参与者找到你）</text>
         <t-input
           placeholder="如：4楼平台入口、星巴克门口"
           value="{{draft.locationHint}}"
@@ -97,16 +97,16 @@
     </view>
 
     <!-- 人数信息 -->
-    <view class="form-card bg-white rounded-lg p-4 mb-3">
-      <view class="flex items-center gap-2">
+    <view class="form-card draft-edit-page__card">
+      <view class="draft-edit-page__field-header">
         <t-icon name="user" size="36rpx" color="#FF6B35" />
-        <text class="text-sm font-medium text-gray-900">参与人数</text>
-        <text class="text-base text-gray-600 ml-auto">{{draft.maxParticipants}}人</text>
+        <text class="draft-edit-page__field-title">参与人数</text>
+        <text class="draft-edit-page__participants">{{draft.maxParticipants}}人</text>
       </view>
     </view>
 
     <!-- 发布按钮 -->
-    <view class="mt-6">
+    <view class="draft-edit-page__footer">
       <t-button
         theme="primary"
         size="large"
@@ -117,7 +117,7 @@
       >
         {{isExpired ? '时间已过期，请修改' : '确认发布'}}
       </t-button>
-      <view class="text-center text-xs text-gray-400 mt-3">
+      <view class="draft-edit-page__footer-hint">
         发布后将消耗 1 次创建活动额度
       </view>
     </view>

@@ -332,7 +332,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
       activityMode: 'rebook',
       entry: 'confirm_fulfillment',
     });
-    wx.switchTab({ url: '/pages/home/index' });
+    wx.switchTab({ url: '/pages/chat/index' });
   },
 
   goBackToActivityDetail() {
@@ -342,7 +342,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
       return;
     }
 
-    wx.switchTab({ url: '/pages/home/index' });
+    wx.switchTab({ url: '/pages/chat/index' });
   },
 
   buildFulfillmentSummary(attendedCount: number, noShowCount: number): string {

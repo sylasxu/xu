@@ -4,9 +4,91 @@
  */
 @import '/styles/tokens.less';
 
+.activity-create-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: @gray-50;
+}
+
 // 表单滚动区域高度
 .form-scroll {
   height: calc(100vh - 140rpx);
+}
+
+.activity-create-page__scroll {
+  flex: 1;
+}
+
+.activity-create-page__section {
+  margin-bottom: @spacing-3;
+  padding: @spacing-4;
+  background: #ffffff;
+}
+
+.activity-create-page__section-title {
+  margin-bottom: @spacing-3;
+  padding-bottom: @spacing-2;
+  border-bottom: 1rpx solid @gray-100;
+  font-size: @text-lg;
+  font-weight: 600;
+  color: @gray-900;
+}
+
+.activity-create-page__field {
+  margin-bottom: @spacing-3;
+}
+
+.activity-create-page__label {
+  display: block;
+  margin-bottom: @spacing-2;
+  font-size: @text-sm;
+  font-weight: 500;
+  color: @gray-900;
+}
+
+.activity-create-page__picker {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: @spacing-3;
+  background: @gray-100;
+  border-radius: @radius-md;
+  font-size: @text-sm;
+}
+
+.activity-create-page__picker-text {
+  color: @gray-900;
+}
+
+.activity-create-page__address {
+  display: flex;
+  align-items: flex-start;
+  gap: @spacing-1;
+  margin: -@spacing-2 0 @spacing-3;
+  padding: @spacing-2 @spacing-3;
+  background: @gray-100;
+  border-radius: @radius-sm;
+}
+
+.activity-create-page__address-text {
+  flex: 1;
+  font-size: @text-xs;
+  line-height: 1.5;
+  color: @gray-600;
+}
+
+.activity-create-page__helper {
+  margin-top: @spacing-1;
+  font-size: @text-xs;
+  color: @gray-400;
+}
+
+.activity-create-page__participants {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: @spacing-3;
 }
 
 // 必填标记
@@ -33,6 +115,10 @@
   padding-bottom: calc(20rpx + env(safe-area-inset-bottom));
 }
 
+.activity-create-page__footer {
+  padding: @spacing-3 @spacing-4;
+}
+
 // 底部占位
 .bottom-placeholder {
   height: 160rpx;
@@ -41,22 +127,22 @@
 // TDesign 组件样式覆盖
 .t-input {
   --td-input-bg-color: @gray-100;
-  --td-input-border-radius: @rounded-md;
+  --td-input-border-radius: @radius-md;
   --td-input-vertical-padding: 20rpx;
 }
 
 .t-textarea {
   --td-textarea-bg-color: @gray-100;
-  --td-textarea-border-radius: @rounded-md;
+  --td-textarea-border-radius: @radius-md;
   --td-textarea-padding: 20rpx 24rpx;
   min-height: 160rpx;
 }
 
 .t-button--primary {
-  --td-button-primary-bg-color: @brand-color;
-  --td-button-primary-border-color: @brand-color;
+  --td-button-primary-bg-color: @color-primary;
+  --td-button-primary-border-color: @color-primary;
   --td-button-border-radius: 44rpx;
-  background: linear-gradient(135deg, @brand-color, @brand-color-dark) !important;
+  background: linear-gradient(135deg, @color-primary, @color-primary-dark) !important;
   border: none !important;
 }
 
@@ -66,9 +152,9 @@
 }
 
 .t-picker {
-  --td-picker-confirm-color: @brand-color;
+  --td-picker-confirm-color: @color-primary;
 }
 
 .t-date-time-picker {
-  --td-date-time-picker-confirm-color: @brand-color;
+  --td-date-time-picker-confirm-color: @color-primary;
 }

@@ -1,551 +1,1087 @@
 /**
- * 活动群聊页面 (Lite_Chat)
- * Requirements: 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8
+ * 对话主场 (Chat-First 架构)
+ * Requirements: 1.1, 1.2, 1.3, 1.4, 3.2
+ * v3.7 重构: 使用 useChatStore 统一 AI 对话管理
  * 
- * - 显示活动信息头部
- * - 实现消息发送和显示
- * - 实现轮询机制（5-10 秒）
- * - 实现 onHide 停止轮询、onShow 恢复轮询
- * - 实现归档状态（只读 + 提示）
+ * 三层结构：Custom_Navbar + Chat_Stream + AI_Dock
+ * - 首次进入显示 Widget_Dashboard（调用 /ai/welcome API）
+ * - 集成 useChatStore（类似 @ai-sdk/react 的 useChat）
+ * - 实现空气感渐变背景
  */
-import { getChatByActivityIdMessages, postChatByActivityIdMessages } from '../../src/api/endpoints/chat/chat';
-import { getActivitiesById } from '../../src/api/endpoints/activities/activities';
-import type { GetChatByActivityIdMessagesParams } from '../../src/api/model';
+import { useChatStore, type UIMessage } from '../../src/stores/chat'
+import { useChatHomeStore } from '../../src/stores/chat-home'
+import {
+  useAppStore,
+  type PendingActionAuthMode,
+  type StructuredPendingAction,
+} from '../../src/stores/app'
+import { useUserStore } from '../../src/stores/user'
+import { getWelcomeCard, getUserLocation, type QuickItem } from '../../src/services/welcome'
+import { getAiTasksCurrent } from '../../src/api/endpoints/ai/ai'
+import type {
+  ActivityData,
+  ActivityStatus,
+  ActivityType,
+  ShareActivityData,
+} from '../../src/types/global'
+import { getHotKeywords } from '../../src/api/endpoints/hot-keywords/hot-keywords'
+import type {
+  AiCurrentTasksResponseItemsItem,
+  AiCurrentTasksResponseItemsItemPrimaryAction,
+  AiCurrentTasksResponseItemsItemSecondaryAction,
+  HotKeywordsListResponseItemsItem,
+} from '../../src/api/model'
 
-// ==================== 类型定义 ====================
+const DEFAULT_COMPOSER_PLACEHOLDER = '你想找什么活动？'
 
-/** 消息类型 */
-interface ChatMessage {
-  id: string;
-  content: string;
-  senderId: string | null;
-  senderNickname: string | null;
-  senderAvatarUrl: string | null;
-  type: string;
-  createdAt: string;
-  /** 是否是自己发送的 */
-  isSelf: boolean;
-  /** 是否是系统消息 */
-  isSystem: boolean;
-  /** 格式化后的时间 */
-  formattedTime: string;
-}
-
-/** 活动信息 */
-interface ActivityInfo {
-  id: string;
-  title: string;
-  type: string;
-  startAt: string;
-  locationName: string;
-  status: string;
-  isArchived: boolean;
-  currentParticipants: number;
-  maxParticipants: number;
-}
-
-/** 页面数据 */
+// 页面数据类型
 interface PageData {
-  /** 活动 ID */
-  activityId: string;
-  /** 活动信息 */
-  activity: ActivityInfo | null;
-  /** 消息列表 */
-  messages: ChatMessage[];
-  /** 输入框内容 */
-  inputValue: string;
-  /** 滚动锚点 */
-  scrollToMessage: string;
-  /** 键盘高度 */
-  keyboardHeight: number;
-  /** 加载状态 */
-  loading: boolean;
-  /** 是否正在发送 */
-  sending: boolean;
-  /** 当前用户 ID */
-  currentUserId: string;
-  /** 是否已归档 */
-  isArchived: boolean;
-  /** 最后一条消息 ID（用于增量轮询） */
-  lastMessageId: string;
-  /** 是否正在轮询 */
-  isPolling: boolean;
-  /** 举报弹窗 */
-  showReportSheet: boolean;
-  /** 当前举报的消息 ID */
-  reportMessageId: string;
+  // 从 useChatStore 同步
+  messages: UIMessage[]
+  status: 'idle' | 'submitted' | 'streaming'
+  streamingMessageId: string | null
+  
+  // 页面 UI 状态
+  userNickname: string
+  inputValue: string
+  isAuthSheetVisible: boolean
+  isShareGuideVisible: boolean
+  shareGuideData: { activityId?: string; title?: string; mapUrl?: string } | null
+  
+  // 欢迎卡片 (v3.10 新结构)
+  composerPlaceholder: string
+  currentTasks: ChatTaskItem[]
+  
+  // 热词列表 (v4.7 全局关键词系统)
+  hotKeywords: HotKeywordsListResponseItemsItem[]
+  showHotKeywords: boolean
 }
 
-/** 页面参数 */
-interface PageOptions {
-  activityId?: string;
+type ChatTaskAction = {
+  kind: 'structured_action' | 'navigate' | 'switch_tab'
+  label: string
+  action?: string
+  payload?: Record<string, unknown>
+  source?: string
+  originalText?: string
+  url?: string
 }
 
-const INITIAL_POLL_TIMER: number | null = null;
-
-function readStorageString(key: string, fallback = ''): string {
-  const value = wx.getStorageSync(key);
-  return typeof value === 'string' && value.length > 0 ? value : fallback;
+type ChatTaskItem = {
+  id: string
+  taskTypeLabel: string
+  stageLabel: string
+  headline: string
+  summary: string
+  activityTitle?: string
+  primaryAction?: ChatTaskAction
+  secondaryAction?: ChatTaskAction
 }
 
-function readResponseMessage(value: unknown): string | null {
-  if (typeof value !== 'object' || value === null) {
+interface ChatPageOptions {
+  prefill?: string;
+}
+
+interface AiDockComponent {
+  setValue: (value: string) => void;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function readNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function readAiDockComponent(value: unknown): AiDockComponent | null {
+  if (!isRecord(value)) {
     return null;
   }
 
-  if ('msg' in value && typeof value.msg === 'string' && value.msg.trim()) {
-    return value.msg.trim();
+  const setValue = value.setValue;
+  if (typeof setValue !== 'function') {
+    return null;
   }
 
-  if ('message' in value && typeof value.message === 'string' && value.message.trim()) {
-    return value.message.trim();
-  }
-
-  return null;
+  return {
+    setValue: (nextValue: string) => {
+      setValue.call(value, nextValue);
+    },
+  };
 }
 
-// 轮询间隔（毫秒）
-const POLL_INTERVAL = 5000; // 5 秒
+function readActivityType(value: unknown): ActivityType | null {
+  switch (value) {
+    case 'food':
+    case 'entertainment':
+    case 'sports':
+    case 'boardgame':
+    case 'other':
+      return value;
+    default:
+      return null;
+  }
+}
+
+function readActivityIdFromQuickItemContext(context: unknown): string | null {
+  if (!isRecord(context)) {
+    return null
+  }
+
+  return readString(context.activityId)
+}
+
+function readActivityStatus(value: unknown): ActivityStatus | null {
+  switch (value) {
+    case 'draft':
+    case 'active':
+    case 'completed':
+    case 'cancelled':
+      return value;
+    default:
+      return null;
+  }
+}
+
+function readPendingActionAuthMode(value: unknown): PendingActionAuthMode | null {
+  return value === 'login' || value === 'bind_phone' ? value : null
+}
+
+function readTaskAction(
+  value: AiCurrentTasksResponseItemsItemPrimaryAction | AiCurrentTasksResponseItemsItemSecondaryAction | undefined
+): ChatTaskAction | null {
+  if (!value || typeof value.kind !== 'string' || typeof value.label !== 'string') {
+    return null
+  }
+
+  if (value.kind !== 'structured_action' && value.kind !== 'navigate' && value.kind !== 'switch_tab') {
+    return null
+  }
+
+  return {
+    kind: value.kind,
+    label: value.label,
+    ...(typeof value.action === 'string' ? { action: value.action } : {}),
+    ...(isRecord(value.payload) ? { payload: value.payload } : {}),
+    ...(typeof value.source === 'string' ? { source: value.source } : {}),
+    ...(typeof value.originalText === 'string' ? { originalText: value.originalText } : {}),
+    ...(typeof value.url === 'string' ? { url: value.url } : {}),
+  }
+}
+
+function readCurrentTask(value: AiCurrentTasksResponseItemsItem): ChatTaskItem | null {
+  if (
+    !value ||
+    typeof value.id !== 'string' ||
+    typeof value.taskTypeLabel !== 'string' ||
+    typeof value.stageLabel !== 'string' ||
+    typeof value.headline !== 'string' ||
+    typeof value.summary !== 'string'
+  ) {
+    return null
+  }
+
+  const primaryAction = readTaskAction(value.primaryAction)
+  const secondaryAction = readTaskAction(value.secondaryAction)
+
+  return {
+    id: value.id,
+    taskTypeLabel: value.taskTypeLabel,
+    stageLabel: value.stageLabel,
+    headline: value.headline,
+    summary: value.summary,
+    ...(typeof value.activityTitle === 'string' ? { activityTitle: value.activityTitle } : {}),
+    ...(primaryAction ? { primaryAction } : {}),
+    ...(secondaryAction ? { secondaryAction } : {}),
+  }
+}
+
+function readStructuredPendingAction(value: unknown): StructuredPendingAction | null {
+  if (!isRecord(value) || value.type !== 'structured_action' || typeof value.action !== 'string' || !isRecord(value.payload)) {
+    return null
+  }
+
+  const authMode = readPendingActionAuthMode(value.authMode)
+
+  return {
+    type: 'structured_action',
+    action: value.action,
+    payload: value.payload,
+    ...(typeof value.source === 'string' ? { source: value.source } : {}),
+    ...(typeof value.originalText === 'string' ? { originalText: value.originalText } : {}),
+    ...(authMode ? { authMode } : {}),
+  }
+}
+
+function readLocationPair(value: unknown): [number, number] | null {
+  if (!Array.isArray(value) || value.length < 2) {
+    return null;
+  }
+
+  const lng = readNumber(value[0]);
+  const lat = readNumber(value[1]);
+  if (lng === null || lat === null) {
+    return null;
+  }
+
+  return [lng, lat];
+}
+
+function readShareActivityData(value: unknown): ActivityData | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const id = readString(value.id);
+  const creatorId = readString(value.creatorId);
+  const title = readString(value.title);
+  const locationName = readString(value.locationName);
+  const locationHint = readString(value.locationHint);
+  const startAt = readString(value.startAt);
+  const type = readString(value.type);
+  const status = readString(value.status);
+  const createdAt = readString(value.createdAt);
+  const updatedAt = readString(value.updatedAt);
+  const maxParticipants = readNumber(value.maxParticipants);
+  const currentParticipants = readNumber(value.currentParticipants);
+  const location = readLocationPair(value.location);
+
+  if (
+    !id ||
+    !creatorId ||
+    !title ||
+    !location ||
+    !locationName ||
+    !locationHint ||
+    !startAt ||
+    !type ||
+    !status ||
+    !createdAt ||
+    !updatedAt ||
+    maxParticipants === null ||
+    currentParticipants === null
+  ) {
+    return null;
+  }
+
+  return {
+    id,
+    creatorId,
+    title,
+    description: readString(value.description) ?? undefined,
+    location,
+    locationName,
+    address: readString(value.address) ?? undefined,
+    locationHint,
+    startAt,
+    type: readActivityType(type) || 'other',
+    maxParticipants,
+    currentParticipants,
+    status: readActivityStatus(status) || 'active',
+    createdAt,
+    updatedAt,
+    isArchived: typeof value.isArchived === 'boolean' ? value.isArchived : undefined,
+    creator: null,
+  };
+}
+
+function isDashboardOnlyMessage(message: UIMessage | undefined): boolean {
+  if (!message || message.role !== 'assistant' || message.parts.length !== 1) {
+    return false
+  }
+
+  const [part] = message.parts
+  return part.type === 'widget' && part.widgetType === 'dashboard'
+}
+
+function shouldShowWelcomeHotKeywords(messages: UIMessage[]): boolean {
+  if (messages.length === 0) {
+    return true
+  }
+
+  return messages.length === 1 && isDashboardOnlyMessage(messages[0])
+}
+
+const INITIAL_UNSUBSCRIBE: (() => void) | null = null;
+const INITIAL_USER_LOCATION: { lat: number; lng: number } | null = null;
+const INITIAL_SHARE_ACTIVITY_DATA: ShareActivityData | null = null;
 
 Page<PageData, WechatMiniprogram.Page.CustomOption>({
   data: {
-    activityId: '',
-    activity: null,
     messages: [],
+    status: 'idle',
+    streamingMessageId: null,
+    userNickname: '搭子',
     inputValue: '',
-    scrollToMessage: '',
-    keyboardHeight: 0,
-    loading: true,
-    sending: false,
-    currentUserId: '',
-    isArchived: false,
-    lastMessageId: '',
-    isPolling: false,
-    showReportSheet: false,
-    reportMessageId: '',
+    isAuthSheetVisible: false,
+    isShareGuideVisible: false,
+    shareGuideData: null,
+    composerPlaceholder: DEFAULT_COMPOSER_PLACEHOLDER,
+    currentTasks: [],
+    hotKeywords: [],
+    showHotKeywords: true,
   },
 
-  // 轮询定时器
-  _pollTimer: INITIAL_POLL_TIMER,
+  unsubscribeChat: INITIAL_UNSUBSCRIBE,
+  unsubscribeApp: INITIAL_UNSUBSCRIBE,
+  unsubscribeUser: INITIAL_UNSUBSCRIBE,
+  userLocation: INITIAL_USER_LOCATION,
+  lastChatStatus: 'idle' as PageData['status'],
+  lastUserId: '',
 
-  onLoad(options: PageOptions) {
-    const { activityId } = options;
-    if (!activityId) {
-      wx.showToast({ title: '参数错误', icon: 'none' });
-      wx.navigateBack();
-      return;
-    }
-
-    // 获取当前用户 ID
-    const currentUserId = readStorageString('userId');
-
-    this.setData({
-      activityId,
-      currentUserId,
-    });
-
-    // 加载数据
-    this.loadActivityInfo();
-    this.loadMessages();
+  onLoad(options: ChatPageOptions) {
+    this.subscribeChatStore()
+    this.subscribeAppStore()
+    this.subscribeUserStore()
+    this.initChat()
+    this.loadUserInfo()
+    this.loadCurrentTasks()
+    this.loadHotKeywords()
+    this.applyPrefillPrompt(options.prefill)
   },
 
-  /**
-   * 页面显示时恢复轮询
-   * Requirements: 11.6 - onShow 恢复轮询
-   */
   onShow() {
-    if (this.data.activityId && !this.data.isArchived) {
-      this.startPolling();
-    }
-  },
-
-  /**
-   * 页面隐藏时停止轮询
-   * Requirements: 11.5 - onHide 停止轮询
-   */
-  onHide() {
-    this.stopPolling();
+    this.loadUserInfo()
+    this.loadCurrentTasks()
+    this.resumePendingActionIfReady()
   },
 
   onUnload() {
-    this.stopPolling();
+    this.unsubscribeChat?.()
+    this.unsubscribeApp?.()
+    this.unsubscribeUser?.()
+    // 停止正在进行的流式输出
+    useChatStore.getState().stop()
   },
 
-  // ==================== 数据加载 ====================
-
-  /**
-   * 加载活动信息
-   * Requirements: 11.2 - 显示活动信息头部
-   */
-  async loadActivityInfo() {
-    try {
-      const response = await getActivitiesById(this.data.activityId);
-      if (response.status === 200 && response.data) {
-        const data = response.data;
-
-        const activity: ActivityInfo = {
-          id: data.id,
-          title: data.title,
-          type: data.type,
-          startAt: data.startAt,
-          locationName: data.locationName,
-          status: data.status,
-          isArchived: data.isArchived || false,
-          currentParticipants: data.currentParticipants || 0,
-          maxParticipants: data.maxParticipants || 0,
-        };
-
-        this.setData({ 
-          activity,
-          isArchived: activity.isArchived,
-        });
-
-        // 设置导航栏标题
-        wx.setNavigationBarTitle({ title: activity.title });
-      }
-    } catch (error) {
-      console.error('加载活动信息失败', error);
-      wx.showToast({ title: '加载活动信息失败', icon: 'none' });
-    }
+  onHide() {
+    // 页面隐藏时停止流式输出
+    useChatStore.getState().stop()
   },
 
   /**
-   * 加载消息列表
-   * Requirements: 11.2 - 显示消息列表
+   * 订阅 useChatStore 状态变化
    */
-  async loadMessages(isPolling = false) {
-    if (!isPolling) {
-      this.setData({ loading: true });
-    }
-
-    try {
-      const params: GetChatByActivityIdMessagesParams = {
-        limit: 50,
-      };
-
-      // 增量获取：使用 since 参数
-      if (isPolling && this.data.lastMessageId) {
-        params.since = this.data.lastMessageId;
-      }
-
-      const response = await getChatByActivityIdMessages(this.data.activityId, params);
-
-      if (response.status === 200 && response.data) {
-        const { messages: rawMessages, isArchived } = response.data;
-
-        // 更新归档状态
-        if (isArchived !== this.data.isArchived) {
-          this.setData({ isArchived });
-          
-          // 如果变为归档状态，停止轮询
-          if (isArchived) {
-            this.stopPolling();
-          }
-        }
-
-        // 格式化消息
-        const newMessages: ChatMessage[] = (rawMessages || []).map((msg) => ({
-          id: msg.id,
-          content: msg.content,
-          senderId: msg.senderId,
-          senderNickname: msg.senderNickname,
-          senderAvatarUrl: msg.senderAvatarUrl,
-          type: msg.type,
-          createdAt: msg.createdAt,
-          isSelf: msg.senderId === this.data.currentUserId,
-          isSystem: msg.type === 'system' || !msg.senderId,
-          formattedTime: this.formatTime(msg.createdAt),
-        }));
-
-        if (isPolling && newMessages.length > 0) {
-          // 增量更新：追加新消息
-          const messages = [...this.data.messages, ...newMessages];
-          const lastMessageId = newMessages[newMessages.length - 1].id;
-          
-          this.setData({
-            messages,
-            lastMessageId,
-            loading: false,
-          });
-          
-          // 滚动到底部
-          this.scrollToBottom();
-        } else if (!isPolling) {
-          // 首次加载
-          const lastMessageId = newMessages.length > 0 
-            ? newMessages[newMessages.length - 1].id 
-            : '';
-          
-          this.setData({
-            messages: newMessages,
-            lastMessageId,
-            loading: false,
-          });
-          
-          // 滚动到底部
-          this.scrollToBottom();
-          
-          // 开始轮询（如果未归档）
-          if (!isArchived) {
-            this.startPolling();
-          }
-        }
-      }
-    } catch (error) {
-      console.error('加载消息失败', error);
-      if (!isPolling) {
-        this.setData({ loading: false });
-        wx.showToast({ title: '加载消息失败', icon: 'none' });
-      }
-    }
-  },
-
-  // ==================== 轮询机制 ====================
-
-  /**
-   * 开始轮询
-   * Requirements: 11.4 - 每 5-10 秒轮询新消息
-   */
-  startPolling() {
-    if (this.data.isPolling || this.data.isArchived) {
-      return;
-    }
-
-    this.setData({ isPolling: true });
+  subscribeChatStore() {
+    const chatStore = useChatStore.getState()
+    this.lastChatStatus = chatStore.status
+    this.setData({
+      messages: chatStore.messages,
+      status: chatStore.status,
+      streamingMessageId: chatStore.streamingMessageId,
+      inputValue: chatStore.input,
+      showHotKeywords: shouldShowWelcomeHotKeywords(chatStore.messages),
+    })
     
-    this._pollTimer = Number(setInterval(() => {
-      this.loadMessages(true);
-    }, POLL_INTERVAL));
+    this.unsubscribeChat = useChatStore.subscribe((state) => {
+      this.setData({
+        messages: state.messages,
+        status: state.status,
+        streamingMessageId: state.streamingMessageId,
+        inputValue: state.input,
+        showHotKeywords: shouldShowWelcomeHotKeywords(state.messages),
+      })
+      this.lastChatStatus = state.status
+    })
   },
 
-  /**
-   * 停止轮询
-   * Requirements: 11.5 - onHide 停止轮询
-   */
-  stopPolling() {
-    if (this._pollTimer) {
-      clearInterval(this._pollTimer);
-      this._pollTimer = null;
+  subscribeAppStore() {
+    const appStore = useAppStore.getState()
+    this.setData({
+      isAuthSheetVisible: appStore.isAuthSheetVisible,
+      isShareGuideVisible: appStore.isShareGuideVisible,
+      shareGuideData: appStore.shareGuideData,
+    })
+    this.unsubscribeApp = useAppStore.subscribe((state) => {
+      this.setData({
+        isAuthSheetVisible: state.isAuthSheetVisible,
+        isShareGuideVisible: state.isShareGuideVisible,
+        shareGuideData: state.shareGuideData,
+      })
+    })
+  },
+
+  subscribeUserStore() {
+    const userStore = useUserStore.getState()
+    this.lastUserId = userStore.user?.id || ''
+    if (userStore.user) {
+      this.setData({ userNickname: userStore.user.nickname || '搭子' })
     }
-    this.setData({ isPolling: false });
+    this.unsubscribeUser = useUserStore.subscribe((state) => {
+      if (state.user) {
+        this.setData({ userNickname: state.user.nickname || '搭子' })
+      }
+
+      const nextUserId = state.user?.id || ''
+      if (this.lastUserId !== nextUserId) {
+        this.lastUserId = nextUserId
+      }
+    })
   },
 
-  // ==================== 事件处理 ====================
-
   /**
-   * 输入框内容变化
+   * 初始化对话
    */
-  onInputChange(e: WechatMiniprogram.Input) {
-    this.setData({ inputValue: e.detail.value });
+  async initChat() {
+    const chatStore = useChatStore.getState()
+    
+    // 如果没有消息，显示欢迎卡片
+    if (chatStore.messages.length === 0) {
+      await this.showWelcomeDashboard()
+    }
+    
+    // 获取用户位置并设置到 store
+    if (!this.userLocation) {
+      this.userLocation = await getUserLocation()
+      if (this.userLocation) {
+        chatStore.setLocation(this.userLocation)
+      }
+    }
   },
 
-  /**
-   * 键盘高度变化
-   */
-  onKeyboardHeightChange(e: WechatMiniprogram.CustomEvent<{ height: number }>) {
-    const { height } = e.detail;
-    this.setData({ keyboardHeight: height });
+  async loadUserInfo() {
+    const userStore = useUserStore.getState()
+    if (userStore.user) {
+      this.setData({ userNickname: userStore.user.nickname || '搭子' })
+    }
+  },
 
-    if (height > 0) {
-      this.scrollToBottom();
+  async loadCurrentTasks() {
+    const userStore = useUserStore.getState()
+    if (!userStore.token || !userStore.user) {
+      this.setData({ currentTasks: [] })
+      return
+    }
+
+    try {
+      const response = await getAiTasksCurrent()
+      if (response.status !== 200) {
+        this.setData({ currentTasks: [] })
+        return
+      }
+
+      const currentTasks = (response.data.items || [])
+        .map((item) => readCurrentTask(item))
+        .filter((item): item is ChatTaskItem => item !== null)
+        .slice(0, 2)
+
+      this.setData({ currentTasks })
+    } catch (error) {
+      console.error('[Chat] Failed to load current tasks:', error)
+      this.setData({ currentTasks: [] })
     }
   },
 
   /**
-   * 输入框失焦
+   * 加载热词列表 - Requirements: 3.7, 3.8, 3.9
    */
-  onInputBlur() {
-    this.setData({ keyboardHeight: 0 });
+  async loadHotKeywords() {
+    try {
+      const response = await getHotKeywords({ limit: 5 })
+      
+      if (response.status === 200) {
+        this.setData({ hotKeywords: response.data.items })
+        
+        // 埋点：记录热词曝光事件 - Requirements: 3.9
+        if (response.data.items.length > 0) {
+          wx.reportEvent('hot_chip_show', {
+            keyword_count: response.data.items.length,
+            keywords: response.data.items
+              .map((k: HotKeywordsListResponseItemsItem) => k.keyword)
+              .join(','),
+          })
+        }
+      }
+    } catch (error) {
+      console.error('[Chat] Failed to load hot keywords:', error)
+      // 静默失败，不影响主流程
+    }
+  },
+
+  /**
+   * 显示欢迎卡片
+   * v4.4: 增加社交档案和快捷入口
+   */
+  async showWelcomeDashboard() {
+    const chatStore = useChatStore.getState()
+    
+    try {
+      if (!this.userLocation) {
+        this.userLocation = await getUserLocation()
+      }
+      
+      const welcomeData = await getWelcomeCard(
+        this.userLocation ? { lat: this.userLocation.lat, lng: this.userLocation.lng } : undefined
+      )
+
+      const composerPlaceholder =
+        typeof welcomeData.ui?.composerPlaceholder === 'string' && welcomeData.ui.composerPlaceholder.trim()
+          ? welcomeData.ui.composerPlaceholder.trim()
+          : DEFAULT_COMPOSER_PLACEHOLDER
+      
+      this.setData({ composerPlaceholder })
+      
+      // 使用 useChatStore 添加 Dashboard Widget (v4.4 新结构)
+      chatStore.addWidgetMessage('dashboard', {
+        nickname: this.data.userNickname,
+        greeting: welcomeData.greeting,
+        subGreeting: welcomeData.subGreeting,
+        activities: welcomeData.pendingActivities || [],
+        sections: welcomeData.sections,
+        socialProfile: welcomeData.socialProfile,
+        quickPrompts: welcomeData.quickPrompts,
+        ui: welcomeData.ui,
+      })
+    } catch (error) {
+      console.error('[Chat] Failed to load welcome card:', error)
+      
+      // 降级：使用本地欢迎卡片
+      chatStore.addWidgetMessage('dashboard', {
+        nickname: this.data.userNickname,
+      })
+    }
+  },
+
+  /**
+   * 新对话
+   */
+  async onNewChat() {
+    const chatStore = useChatStore.getState()
+    chatStore.clearMessages()
+    
+    // 同时清空服务端历史
+    try {
+      await useChatHomeStore.getState().clearConversations()
+    } catch (e) {
+      console.error('[Chat] Failed to clear server messages:', e)
+    }
+    
+    await this.showWelcomeDashboard()
   },
 
   /**
    * 发送消息
-   * Requirements: 11.3 - 发送文本消息
    */
-  async onSendMessage() {
-    const { inputValue, activityId, sending, isArchived } = this.data;
+  onSend(e: WechatMiniprogram.CustomEvent<{ text: string }>) {
+    const text = typeof e.detail?.text === 'string' ? e.detail.text : ''
+    this.runPrompt(text)
+  },
 
-    if (!inputValue.trim() || sending) return;
+  onInputChange(e: WechatMiniprogram.CustomEvent<{ value: string }>) {
+    const value = typeof e.detail?.value === 'string' ? e.detail.value : ''
+    useChatStore.getState().setInput(value)
+  },
 
-    // 检查是否已归档
-    // Requirements: 11.7, 11.8 - 归档状态禁用发送
-    if (isArchived) {
-      wx.showToast({ title: '群聊已归档，无法发送消息', icon: 'none' });
-      return;
-    }
+  onDashboardActivityTap(e: WechatMiniprogram.CustomEvent<{ id: string }>) {
+    const { id } = e.detail
+    this.openActivityDetail(id)
+  },
 
-    this.setData({ sending: true });
+  onDashboardPromptTap(e: WechatMiniprogram.CustomEvent<{ prompt: string }>) {
+    const { prompt } = e.detail
+    this.runPrompt(prompt)
+  },
 
+  applyPrefillPrompt(prefill?: string) {
+    if (!prefill) return
+
+    let prompt = prefill
     try {
-      const response = await postChatByActivityIdMessages(activityId, {
-        content: inputValue.trim(),
-      });
+      prompt = decodeURIComponent(prefill)
+    } catch {
+      prompt = prefill
+    }
+    prompt = prompt.trim()
+    if (!prompt) return
 
-      if (response.status === 200) {
-        // 清空输入框
-        this.setData({ inputValue: '' });
+    wx.nextTick(() => this.prefillComposer(prompt))
+  },
 
-        // 本地添加消息（乐观更新）
-        const userInfo = {
-          nickname: readStorageString('userNickname', '我'),
-          avatarUrl: readStorageString('userAvatarUrl'),
-        };
-        
-        const localMessage: ChatMessage = {
-          id: response.data.id || `local_${Date.now()}`,
-          content: inputValue.trim(),
-          senderId: this.data.currentUserId,
-          senderNickname: userInfo.nickname,
-          senderAvatarUrl: userInfo.avatarUrl,
-          type: 'text',
-          createdAt: new Date().toISOString(),
-          isSelf: true,
-          isSystem: false,
-          formattedTime: this.formatTime(new Date().toISOString()),
-        };
+  /**
+   * 处理快捷项点击 (v3.10 新结构)
+   */
+  onDashboardQuickItemTap(e: WechatMiniprogram.CustomEvent<{ item: QuickItem }>) {
+    const { item } = e.detail
+    if (!item) {
+      return
+    }
 
-        const messages = [...this.data.messages, localMessage];
-        this.setData({ 
-          messages,
-          lastMessageId: localMessage.id,
-        });
-        this.scrollToBottom();
-      } else {
-        throw new Error(readResponseMessage(response.data) || '发送失败');
+    if (item.type === 'draft') {
+      const activityId = readActivityIdFromQuickItemContext(item.context)
+      if (activityId) {
+        this.openDraftConfirm(activityId)
+        return
       }
-    } catch (error) {
-      console.error('发送消息失败', error);
-      wx.showToast({
-        title: error instanceof Error ? error.message : '发送失败',
-        icon: 'none',
-      });
-    } finally {
-      this.setData({ sending: false });
     }
+
+    this.runPrompt(item.prompt)
   },
 
   /**
-   * 点击活动头部，跳转到活动详情
+   * 查看全部活动 (v4.4 新增)
    */
-  onActivityTap() {
+  onDashboardViewAll() {
+    this.openJoinedActivities()
+  },
+
+  onDashboardPreferenceTap() {
+    this.openSetting()
+  },
+
+  onNavbarMenuTap() {
+    wx.navigateTo({ url: '/pages/profile/index' })
+  },
+
+  onNavbarItemTap(e: WechatMiniprogram.CustomEvent<{ action?: string }>) {
+    if (e.detail?.action === 'message') {
+      this.focusMessageCenter(null)
+    }
+  },
+
+  openActivityDetail(activityId: string) {
+    if (!activityId) {
+      return
+    }
+
+    wx.navigateTo({ url: `/subpackages/activity/detail/index?id=${activityId}` })
+  },
+
+  openDraftConfirm(activityId: string) {
+    if (!activityId) {
+      return
+    }
+
     wx.navigateTo({
-      url: `/subpackages/activity/detail/index?id=${this.data.activityId}`,
-    });
+      url: `/subpackages/activity/confirm/index?activityId=${activityId}`,
+    })
   },
 
-  /**
-   * 返回上一页
-   */
-  onBackTap() {
-    const pages = getCurrentPages();
-    if (pages.length > 1) {
-      wx.navigateBack();
-    } else {
-      wx.reLaunch({ url: '/pages/home/index' });
+  openJoinedActivities() {
+    wx.navigateTo({ url: '/subpackages/activity/list/index?type=joined' })
+  },
+
+  openSetting() {
+    wx.navigateTo({ url: '/pages/setting/index' })
+  },
+
+  openLogin() {
+    wx.navigateTo({
+      url: '/pages/login/login',
+    })
+  },
+
+  openExploreMap(lat: number, lng: number, results: unknown[]) {
+    const encodedResults = encodeURIComponent(JSON.stringify(results))
+    wx.navigateTo({
+      url: `/subpackages/activity/explore/index?lat=${lat}&lng=${lng}&results=${encodedResults}&animate=expand`,
+    })
+  },
+
+  focusMessageCenter(payload: Record<string, unknown> | null) {
+    if (payload) {
+      useAppStore.getState().setMessageCenterFocus({
+        ...(typeof payload.taskId === 'string' ? { taskId: payload.taskId } : {}),
+        ...(typeof payload.matchId === 'string' ? { matchId: payload.matchId } : {}),
+      })
+    }
+
+    wx.switchTab({ url: '/pages/message/index' })
+  },
+
+  openTaskAction(action: ChatTaskAction) {
+    if (action.kind === 'structured_action' && action.action) {
+      this.runStructuredAction({
+        action: action.action,
+        payload: action.payload || {},
+        source: action.source,
+        originalText: action.originalText || action.label,
+      })
+      return
+    }
+
+    if ((action.kind === 'navigate' || action.kind === 'switch_tab') && action.url) {
+      const focusPayload = isRecord(action.payload) ? action.payload : null
+      if (action.url === '/pages/message/index') {
+        this.focusMessageCenter(focusPayload)
+      }
+
+      if (action.kind === 'switch_tab') {
+        wx.switchTab({ url: action.url })
+        return
+      }
+
+      wx.navigateTo({ url: action.url })
     }
   },
 
-  /**
-   * 长按消息举报
-   */
-  onMessageLongPress(e: WechatMiniprogram.CustomEvent<{}, {}, { id: string; isSelf: boolean }>) {
-    const { id, isSelf } = e.currentTarget.dataset;
-    
-    // 不能举报自己的消息
-    if (isSelf) return;
-    
-    const token = readStorageString('token');
-    if (!token) {
-      wx.showToast({ title: '请先登录', icon: 'none' });
-      return;
+  resolveSlotFromStartAt(startAt: string): string {
+    if (!startAt) {
+      return 'fri_20_00'
     }
 
-    // 触感反馈
-    wx.vibrateShort({ type: 'light' });
+    const date = new Date(startAt)
+    if (Number.isNaN(date.getTime())) {
+      return 'fri_20_00'
+    }
 
-    this.setData({
-      reportMessageId: id,
-      showReportSheet: true,
-    });
+    const hour = date.getHours()
+    if (hour <= 19) {
+      return 'fri_19_00'
+    }
+
+    if (hour >= 21) {
+      return 'fri_21_00'
+    }
+
+    return 'fri_20_00'
   },
 
-  /**
-   * 关闭举报弹窗
-   */
-  onReportClose() {
-    this.setData({
-      showReportSheet: false,
-      reportMessageId: '',
-    });
-  },
+  buildPublishPayloadFromDraft(draft: unknown): Record<string, unknown> {
+    const draftRecord = isRecord(draft) ? draft : null
+    const location = readLocationPair(draftRecord?.location) ?? [106.52988, 29.58567]
+    const [lng, lat] = location
+    const title = readString(draftRecord?.title) || '周五活动局'
+    const type = readString(draftRecord?.type) || 'other'
+    const startAt = readString(draftRecord?.startAt) || '2026-03-06T20:00:00+08:00'
+    const locationName = readString(draftRecord?.locationName) || '观音桥'
+    const locationHint =
+      readString(draftRecord?.locationHint) || `${locationName}商圈`
+    const maxParticipants = readNumber(draftRecord?.maxParticipants) || 6
+    const currentParticipants = readNumber(draftRecord?.currentParticipants) || 1
+    const activityId = readString(draftRecord?.activityId) || ''
 
-  /**
-   * 举报成功回调
-   */
-  onReportSuccess() {
-    this.setData({
-      showReportSheet: false,
-      reportMessageId: '',
-    });
-  },
-
-  // ==================== 辅助方法 ====================
-
-  /**
-   * 滚动到底部
-   */
-  scrollToBottom() {
-    const { messages } = this.data;
-    if (messages.length > 0) {
-      setTimeout(() => {
-        this.setData({
-          scrollToMessage: `msg-${messages[messages.length - 1].id}`,
-        });
-      }, 100);
+    return {
+      activityId,
+      title,
+      type,
+      activityType: type,
+      startAt,
+      locationName,
+      locationHint,
+      maxParticipants,
+      currentParticipants,
+      lat: Number(lat) || 29.58567,
+      lng: Number(lng) || 106.52988,
+      slot: this.resolveSlotFromStartAt(startAt),
     }
   },
 
-  /**
-   * 格式化时间
-   */
-  formatTime(dateStr: string): string {
-    if (!dateStr) return '';
+  onExploreExpandMap(e: WechatMiniprogram.CustomEvent<{ results: unknown[]; center: unknown }>) {
+    const { results, center } = e.detail || {}
+    const centerRecord = isRecord(center) ? center : null
+    const lat = readNumber(centerRecord?.lat) ?? 29.58567
+    const lng = readNumber(centerRecord?.lng) ?? 106.52988
+    this.openExploreMap(lat, lng, Array.isArray(results) ? results : [])
+  },
 
-    const date = new Date(dateStr);
-    const now = new Date();
-    const hours = date.getHours().toString().padStart(2, '0');
-    const minutes = date.getMinutes().toString().padStart(2, '0');
-    const timeStr = `${hours}:${minutes}`;
+  onExploreActivityTap(e: WechatMiniprogram.CustomEvent<{ id: string }>) {
+    const { id } = e.detail || {}
+    this.openActivityDetail(id)
+  },
 
-    // 今天只显示时间
-    if (date.toDateString() === now.toDateString()) {
-      return timeStr;
+  onExploreActionTap(
+    e: WechatMiniprogram.CustomEvent<{
+      action: string
+      payload?: Record<string, unknown>
+      source?: string
+      originalText?: string
+    }>
+  ) {
+    this.runStructuredActionEvent(e.detail)
+  },
+
+  onPartnerSearchActionTap(
+    e: WechatMiniprogram.CustomEvent<{
+      action: string
+      payload?: Record<string, unknown>
+      source?: string
+      originalText?: string
+    }>
+  ) {
+    this.runStructuredActionEvent(e.detail)
+  },
+
+  onAuthSuccess(_e: WechatMiniprogram.CustomEvent<{ phoneNumber: string }>) {
+    this.loadUserInfo()
+  },
+
+  continueStructuredPendingAction(pendingAction: StructuredPendingAction) {
+    this.runStructuredAction({
+      action: pendingAction.action,
+      payload: pendingAction.payload,
+      source: pendingAction.source,
+      originalText: pendingAction.originalText,
+    })
+  },
+
+  resumePendingActionIfReady() {
+    const appStore = useAppStore.getState()
+    const pendingAction = appStore.pendingAction
+    const token = wx.getStorageSync('token')
+    if (!pendingAction || pendingAction.authMode !== 'login' || !token) {
+      return
     }
 
-    // 昨天
-    const yesterday = new Date(now);
-    yesterday.setDate(yesterday.getDate() - 1);
-    if (date.toDateString() === yesterday.toDateString()) {
-      return `昨天 ${timeStr}`;
+    appStore.clearPendingAction()
+    this.continueStructuredPendingAction({
+      ...pendingAction,
+      authMode: undefined,
+    })
+  },
+
+  onAuthRequiredContinue(e: WechatMiniprogram.CustomEvent<{ pendingAction?: StructuredPendingAction }>) {
+    const pendingAction = readStructuredPendingAction(e.detail?.pendingAction)
+    if (!pendingAction) {
+      return
     }
 
-    // 其他日期
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const day = date.getDate().toString().padStart(2, '0');
-    return `${month}/${day} ${timeStr}`;
+    const appStore = useAppStore.getState()
+    if (pendingAction.authMode === 'bind_phone') {
+      appStore.showAuthSheet(pendingAction)
+      return
+    }
+
+    appStore.setPendingAction({
+      ...pendingAction,
+      authMode: 'login',
+    })
+
+    this.openLogin()
+  },
+
+  onPendingAction(e: WechatMiniprogram.CustomEvent<StructuredPendingAction>) {
+    const pendingAction = readStructuredPendingAction(e.detail)
+    if (!pendingAction) {
+      return
+    }
+
+    useAppStore.getState().clearPendingAction()
+    this.continueStructuredPendingAction({
+      ...pendingAction,
+      authMode: undefined,
+    })
+  },
+
+  openLegalDocument(type: 'user-agreement' | 'privacy-policy') {
+    wx.navigateTo({
+      url: `/subpackages/legal/index?type=${type}`,
+    })
+  },
+
+  onAuthSheetViewAgreement() {
+    this.openLegalDocument('user-agreement')
+  },
+
+  onAuthSheetViewPolicy() {
+    this.openLegalDocument('privacy-policy')
+  },
+
+  shareActivityData: INITIAL_SHARE_ACTIVITY_DATA,
+
+  onWidgetShareTap(e: WechatMiniprogram.CustomEvent<{ activity: unknown; shareTitle: string }>) {
+    const { activity, shareTitle } = e.detail
+    const resolvedActivity = readShareActivityData(activity)
+    if (!resolvedActivity) {
+      return
+    }
+
+    this.shareActivityData = { ...resolvedActivity, shareTitle }
+  },
+
+  onWidgetShareViewDetail(e: WechatMiniprogram.CustomEvent<{ activity: unknown }>) {
+    const resolvedActivity = readShareActivityData(e.detail?.activity)
+    if (!resolvedActivity) {
+      return
+    }
+
+    this.openActivityDetail(resolvedActivity.id)
+  },
+
+  onShareAppMessage(): WechatMiniprogram.Page.ICustomShareContent {
+    if (this.shareActivityData) {
+      const activity = this.shareActivityData
+      const shareTitle = activity.shareTitle || `🔥 ${activity.title}，快来！`
+      const result = {
+        title: shareTitle,
+        path: `/subpackages/activity/detail/index?id=${activity.id}&share=1`,
+        imageUrl: '',
+      }
+      this.shareActivityData = null
+      return result
+    }
+    return {
+      title: '聚场 - 想怎么玩？跟小聚说说',
+      path: '/pages/chat/index',
+    }
+  },
+
+  onShareTimeline() {
+    return {
+      title: '聚场 - 你的 AI 活动助理',
+    }
+  },
+
+  onAgentTaskActionTap(
+    e: WechatMiniprogram.CustomEvent<{ taskId: string; action: ChatTaskAction }>
+  ) {
+    const action = e.detail?.action
+    if (!action) {
+      return
+    }
+    this.openTaskAction(action)
   },
 
   /**
-   * 获取活动类型图标
+   * 错误重试
    */
-  getTypeIcon(type: string): string {
-    const iconMap: Record<string, string> = {
-      food: 'restaurant',
-      sports: 'sports',
-      boardgame: 'extension',
-      entertainment: 'movie',
-      other: 'more',
-    };
-    return iconMap[type] || 'more';
+  onWidgetErrorRetry(e: WechatMiniprogram.CustomEvent) {
+    const originalText = e.currentTarget.dataset.originalText
+    if (typeof originalText === 'string' && originalText.trim()) {
+      this.runPrompt(originalText)
+      return
+    }
+
+    useChatStore.getState().retryLastTurn()
   },
-});
+
+  /**
+   * 处理 Widget_Ask_Preference 选项选择
+   */
+  onAskPreferenceSelect(e: WechatMiniprogram.CustomEvent<{
+    questionType: 'location' | 'type';
+    selectedOption: { label: string; value: string };
+    collectedInfo?: { location?: string; type?: string };
+  }>) {
+    // Widget 内部已通过 sendAction 发送结构化请求，这里仅保留事件用于埋点/扩展。
+    const { selectedOption, questionType } = e.detail
+    wx.reportEvent('ask_preference_select', {
+      question_type: questionType,
+      option_label: selectedOption?.label || '',
+      option_value: selectedOption?.value || '',
+    })
+  },
+
+  /**
+   * 处理 Widget_Ask_Preference 跳过按钮
+   */
+  onAskPreferenceSkip(_e: WechatMiniprogram.CustomEvent<{
+    questionType: 'location' | 'type';
+    collectedInfo?: { location?: string; type?: string };
+  }>) {
+    // Widget 内部已通过 sendAction 发送结构化请求，这里仅保留埋点。
+    wx.reportEvent('ask_preference_skip', {
+      source: 'widget_ask_preference',
+    })
+  },
+
+  onPartnerIntentFormSubmit(e: WechatMiniprogram.CustomEvent<{ values: Record<string, unknown> }>) {
+    wx.reportEvent('partner_intent_form_submit', {
+      activity_type: typeof e.detail?.values?.activityType === 'string' ? e.detail.values.activityType : '',
+      time_range: typeof e.detail?.values?.timeRange === 'string' ? e.detail.values.timeRange : '',
+      location: typeof e.detail?.values?.location === 'string' ? e.detail.values.location : '',
+    })
+  },
+
+  onDraftSettingsFormSubmit(e: WechatMiniprogram.CustomEvent<{ values: Record<string, unknown> }>) {
+    wx.reportEvent('draft_settings_form_submit', {
+      field: typeof e.detail?.values?.field === 'string' ? e.detail.values.field : '',
+      location_name: typeof e.detail?.values?.locationName === 'string' ? e.detail.values.locationName : '',
+      slot: typeof e.detail?.values?.slot === 'string' ? e.detail.values.slot : '',
+      max_participants: typeof e.detail?.values?.maxParticipants === 'string' ? e.detail.values.maxParticipants : '',
+    })
+  },
+
+  onActionChipTap(
+    e: WechatMiniprogram.CustomEvent<{
+      action: string
+      payload?: Record<string, unknown>
+      source?: string
+      originalText?: string
+    }>
+  ) {
+    this.runStructuredActionEvent(e.detail)
+  },
+
+  onWidgetStructuredActionTap(
+    e: WechatMiniprogram.CustomEvent<{
+      action: string
+      payload?: Record<string, unknown>
+      source?: string
+      originalText?: string
+    }>
+  ) {
+    this.runStructuredActionEvent(e.detail)
+  },
+
+  onNetworkRetry() {
+    this.initChat()
+  },
+
+  /**
+   * 处理热词点击 - Requirements: 3.5, 3.6, 3.11
+   */
+  onHotChipClick(e: WechatMiniprogram.CustomEvent<{ id: string; keyword: string }>) {
+    const { keyword } = e.detail
+    this.runPrompt(keyword)
+  },
+
+  runPrompt(text: string) {
+    const normalizedText = typeof text === 'string' ? text.trim() : ''
+    if (!normalizedText) {
+      return
+    }
+
+    const chatStore = useChatStore.getState()
+    if (chatStore.input !== normalizedText) {
+      chatStore.setInput(normalizedText)
+    }
+    chatStore.submitInput()
+  },
+
+  runStructuredAction(action: {
+    action: string
+    payload: Record<string, unknown>
+    source?: string
+    originalText?: string
+  }) {
+    useChatStore.getState().sendAction(action)
+  },
+
+  runStructuredActionEvent(detail: {
+    action?: string
+    payload?: Record<string, unknown>
+    source?: string
+    originalText?: string
+  } | undefined) {
+    const action = typeof detail?.action === 'string' ? detail.action : ''
+    if (!action) {
+      return
+    }
+
+    this.runStructuredAction({
+      action,
+      payload: isRecord(detail?.payload) ? detail.payload : {},
+      source: typeof detail?.source === 'string' ? detail.source : undefined,
+      originalText: typeof detail?.originalText === 'string' ? detail.originalText : undefined,
+    })
+  },
+
+  prefillComposer(text: string) {
+    const normalizedText = text.trim()
+    if (!normalizedText) {
+      return
+    }
+
+    const aiDock = readAiDockComponent(this.selectComponent('#aiDock'))
+    if (aiDock) {
+      aiDock.setValue(normalizedText)
+    }
+
+    useChatStore.getState().setInput(normalizedText)
+  },
+})

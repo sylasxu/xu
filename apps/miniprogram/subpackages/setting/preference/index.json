@@ -1,7 +1,0 @@
-{
-  "usingComponents": {
-    "custom-navbar": "../../../components/custom-navbar/index",
-    "t-icon": "tdesign-miniprogram/icon/icon",
-    "t-loading": "tdesign-miniprogram/loading/loading"
-  }
-}

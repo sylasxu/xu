@@ -82,7 +82,7 @@
                 </view>
                 <view class="info-item">
                   <t-icon name="location" size="28rpx" color="#9CA3AF" />
-                  <text>{{item.distance >= 1000 ? (item.distance / 1000).toFixed(1) + 'km' : item.distance + 'm'}}</text>
+                  <text>{{item.formattedDistance}}</text>
                 </view>
               </view>
             </view>
@@ -126,7 +126,7 @@
         <t-icon name="map" size="48rpx" color="#5B75FB" />
       </view>
       <view class="location-card__content">
-        <text class="location-card__name">{{center.name || '附近'}}周边</text>
+        <text class="location-card__name">{{centerDisplayName}}周边</text>
         <text class="location-card__hint">点击展开完整地图</text>
       </view>
       <view class="location-card__arrow">
@@ -172,5 +172,8 @@
     visible="{{halfScreenVisible}}"
     activityId="{{halfScreenActivityId}}"
     bind:close="onHalfScreenClose"
+    bind:activitytap="onHalfScreenActivityTap"
+    bind:actiontap="onHalfScreenActionTap"
+    bind:share="onHalfScreenShareTap"
   />
 </view>

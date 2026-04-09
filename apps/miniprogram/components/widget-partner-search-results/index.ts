@@ -1,4 +1,4 @@
-import { useChatStore } from '../../src/stores/chat'
+export {}
 
 interface ActionItem {
   label: string
@@ -212,7 +212,7 @@ Component({
         return
       }
 
-      useChatStore.getState().sendAction({
+      this.triggerEvent('actiontap', {
         action,
         payload: params,
         source: 'widget_partner_search_results',

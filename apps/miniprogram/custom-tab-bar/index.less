@@ -5,7 +5,7 @@
 @import '/styles/tokens.less';
 
 :host {
-  --td-tab-bar-height: @tab-bar-height;
-  --td-tab-bar-bg-color: #ffffff;
-  --td-tab-bar-active-color: @brand-color;
+  --td-tab-bar-height: @tabbar-height;
+  --td-tab-bar-bg-color: var(--bg-card, #ffffff);
+  --td-tab-bar-active-color: var(--color-primary, @color-primary);
 }

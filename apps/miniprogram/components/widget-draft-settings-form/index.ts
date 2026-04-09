@@ -1,4 +1,4 @@
-import { useChatStore } from '../../src/stores/chat'
+export {}
 
 type FieldType = 'single-select' | 'textarea'
 
@@ -392,8 +392,7 @@ Component({
 
       this.triggerEvent('submit', { values: payload })
 
-      const chatStore = useChatStore.getState()
-      chatStore.sendAction({
+      this.triggerEvent('actiontap', {
         action: typeof schema.submitAction === 'string' && schema.submitAction.trim()
           ? schema.submitAction.trim()
           : 'save_draft_settings',

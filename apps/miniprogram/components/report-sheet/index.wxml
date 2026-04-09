@@ -9,21 +9,21 @@
 >
   <view class="report-sheet" catchtouchmove="noop">
     <!-- 标题栏 -->
-    <view class="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-      <text class="text-lg font-bold text-gray-900">{{type === 'activity' ? '举报活动' : type === 'message' ? '举报消息' : '举报用户'}}</text>
+    <view class="report-sheet__header">
+      <text class="report-sheet__title">{{type === 'activity' ? '举报活动' : type === 'message' ? '举报消息' : '举报用户'}}</text>
       <view class="close-btn" bindtap="onClose">
-        <text class="text-gray-400">✕</text>
+        <text class="report-sheet__close-icon">✕</text>
       </view>
     </view>
 
     <!-- 举报原因选择 -->
-    <view class="px-4 py-4">
-      <text class="text-sm text-gray-600 mb-3 block">请选择举报原因</text>
+    <view class="report-sheet__section">
+      <text class="report-sheet__label">请选择举报原因</text>
       <t-radio-group
         value="{{selectedReason}}"
         bind:change="onReasonChange"
       >
-        <view class="flex flex-col gap-2">
+        <view class="report-sheet__options">
           <t-radio
             wx:for="{{reasonOptions}}"
             wx:key="value"
@@ -36,8 +36,8 @@
     </view>
 
     <!-- 举报说明 -->
-    <view class="px-4 pb-4">
-      <text class="text-sm text-gray-600 mb-2 block">补充说明（可选）</text>
+    <view class="report-sheet__section report-sheet__section--compact">
+      <text class="report-sheet__label report-sheet__label--compact">补充说明（可选）</text>
       <t-textarea
         value="{{description}}"
         placeholder="请描述具体问题..."
@@ -48,7 +48,7 @@
     </view>
 
     <!-- 提交按钮 -->
-    <view class="px-4 pb-4 safe-bottom">
+    <view class="report-sheet__footer safe-bottom">
       <t-button
         theme="primary"
         block

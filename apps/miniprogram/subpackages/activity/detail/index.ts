@@ -303,6 +303,20 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     useAppStore.getState().hideAuthSheet();
     useAppStore.getState().clearPendingAction();
   },
+
+  openLegalDocument(type: 'user-agreement' | 'privacy-policy') {
+    wx.navigateTo({
+      url: `/subpackages/legal/index?type=${type}`,
+    });
+  },
+
+  onAuthSheetViewAgreement() {
+    this.openLegalDocument('user-agreement');
+  },
+
+  onAuthSheetViewPolicy() {
+    this.openLegalDocument('privacy-policy');
+  },
   
   /** 打开活动管理面板 - Requirements: 16.1-16.6 */
   onManageActivity() {
@@ -464,7 +478,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
                 if (pages.length > 1) {
                   wx.navigateBack();
                 } else {
-                  wx.reLaunch({ url: '/pages/home/index' });
+                  wx.reLaunch({ url: '/pages/chat/index' });
                 }
               }, 1500);
             } else {
@@ -524,7 +538,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     }
 
     wx.navigateTo({
-      url: `/subpackages/activity/discussion/index?id=${activityId}`,
+      url: `/subpackages/activity/discussion/index?id=${activityId}&entry=activity_detail`,
     });
   },
 
@@ -632,10 +646,10 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
 
     const prompt = this.buildClonePrompt(activity);
     wx.reLaunch({
-      url: `/pages/home/index?prefill=${encodeURIComponent(prompt)}`,
+      url: `/pages/chat/index?prefill=${encodeURIComponent(prompt)}`,
       fail: () => {
         wx.navigateTo({
-          url: `/pages/home/index?prefill=${encodeURIComponent(prompt)}`,
+          url: `/pages/chat/index?prefill=${encodeURIComponent(prompt)}`,
         });
       },
     });

@@ -304,9 +304,6 @@ Component({
       if (!id) return;
       
       this.triggerEvent('activitytap', { id });
-      wx.navigateTo({
-        url: `/subpackages/activity/detail/index?id=${id}`,
-      });
     },
 
     /**
@@ -317,34 +314,7 @@ Component({
       const item = readQuickItem(e.currentTarget.dataset.item);
       if (!item) return;
 
-      // 触发通用事件
       this.triggerEvent('quickitemtap', { item });
-
-      // 根据类型执行不同操作
-      switch (item.type) {
-        case 'draft': {
-          // 继续草稿 → 发送 prompt 或跳转
-          const activityId = readActivityIdFromContext(item.context);
-          if (activityId) {
-            wx.navigateTo({
-              url: `/subpackages/activity/confirm/index?activityId=${activityId}`,
-            });
-          } else {
-            this.triggerEvent('prompttap', { prompt: item.prompt });
-          }
-          break;
-        }
-        case 'suggestion': {
-          // 快速组局建议 → 发送 prompt
-          this.triggerEvent('prompttap', { prompt: item.prompt });
-          break;
-        }
-        case 'explore': {
-          // 探索附近 → 发送 prompt
-          this.triggerEvent('prompttap', { prompt: item.prompt });
-          break;
-        }
-      }
     },
 
     /**
@@ -352,9 +322,6 @@ Component({
      */
     onViewAllTap() {
       this.triggerEvent('viewall');
-      wx.navigateTo({
-        url: '/subpackages/activity/list/index?type=joined',
-      });
     },
 
     /**
@@ -362,6 +329,10 @@ Component({
      */
     onQuickPromptTap(e: WechatMiniprogram.CustomEvent<{ prompt: string; text: string }>) {
       this.triggerEvent('prompttap', { prompt: e.detail.prompt });
+    },
+
+    onPreferenceTap() {
+      this.triggerEvent('preferencetap');
     },
   },
 });

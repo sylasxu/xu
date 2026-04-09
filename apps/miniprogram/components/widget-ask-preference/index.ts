@@ -1,3 +1,5 @@
+export {}
+
 /**
  * Widget Ask Preference 组件
  * Requirements: 13.1, 13.2, 13.3, 13.4, 13.5
@@ -12,8 +14,6 @@
  * - 点击选项发送 select_preference action
  * - 点击跳过发送 skip_preference action
  */
-
-import { useChatStore } from '../../src/stores/chat';
 
 /** 选项结构 */
 interface PreferenceOption {
@@ -170,8 +170,7 @@ Component({
       }
       
       // 发送结构化动作
-      const chatStore = useChatStore.getState();
-      chatStore.sendAction({
+      this.triggerEvent('actiontap', {
         action: option.action || 'select_preference',
         payload: actionPayload,
         source: 'widget_ask_preference',
@@ -198,8 +197,7 @@ Component({
       });
       
       // 发送结构化动作
-      const chatStore = useChatStore.getState();
-      chatStore.sendAction({
+      this.triggerEvent('actiontap', {
         action: 'skip_preference',
         payload: {
           questionType: this.properties.questionType,
@@ -236,8 +234,7 @@ Component({
         collectedInfo: this.properties.collectedInfo,
       });
 
-      const chatStore = useChatStore.getState();
-      chatStore.sendAction({
+      this.triggerEvent('actiontap', {
         action: 'select_preference',
         payload: {
           questionType: 'location',

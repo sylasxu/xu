@@ -95,18 +95,14 @@ Component({
      * 查看用户协议
      */
     onViewUserAgreement() {
-      wx.navigateTo({
-        url: '/subpackages/legal/index?type=user-agreement',
-      })
+      this.triggerEvent('viewagreement', { type: 'user-agreement' })
     },
 
     /**
      * 查看隐私政策
      */
     onViewPrivacyPolicy() {
-      wx.navigateTo({
-        url: '/subpackages/legal/index?type=privacy-policy',
-      })
+      this.triggerEvent('viewpolicy', { type: 'privacy-policy' })
     },
 
     /**

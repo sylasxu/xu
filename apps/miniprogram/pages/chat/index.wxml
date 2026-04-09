@@ -1,156 +1,139 @@
 <!--
-  活动群聊页面 (Lite_Chat)
-  Requirements: 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8
+  对话主场 (Chat-First 架构)
+  Requirements: 1.1, 1.2, 1.3, 1.4, 3.2
+  v3.7 重构: 使用 useChatStore，支持 UIMessage.parts 渲染
+  
+  三层结构：Custom_Navbar + Chat_Stream + AI_Dock
+  - 首次进入显示 Widget_Dashboard
+  - 空气感渐变背景
 -->
 <view class="chat-page">
+  <!-- 网络状态通知条 -->
+  <network-status bind:retry="onNetworkRetry" />
+  
+  <!-- 空气感渐变背景 -->
+  <view class="atmospheric-bg"></view>
+  
   <!-- 自定义导航栏 -->
   <custom-navbar 
-    title="{{activity.title || '群聊'}}" 
-    showBack="{{true}}"
-    showMenu="{{false}}"
-    showMore="{{false}}"
-    bind:back="onBackTap"
+    showMenu="{{true}}"
+    showMore="{{true}}"
+    bind:menutap="onNavbarMenuTap"
+    bind:newchat="onNewChat"
+    bind:itemtap="onNavbarItemTap"
   />
-
-  <!-- 活动信息头部 -->
-  <view 
-    class="activity-header" 
-    bind:tap="onActivityTap" 
-    wx:if="{{activity}}"
-  >
-    <view class="activity-info">
-      <view class="activity-title">{{activity.title}}</view>
-      <view class="activity-meta">
-        <text class="meta-item">
-          <text class="icon-location"></text>
-          {{activity.locationName}}
-        </text>
-        <text class="meta-divider">·</text>
-        <text class="meta-item">
-          <text class="icon-users"></text>
-          {{activity.currentParticipants}}/{{activity.maxParticipants}}人
-        </text>
-      </view>
-    </view>
-    <view class="activity-status {{isArchived ? 'archived' : 'active'}}">
-      {{isArchived ? '已归档' : '进行中'}}
-    </view>
-    <view class="chevron-icon">
-      <text class="icon-chevron-right"></text>
-    </view>
-  </view>
-
-  <!-- 归档提示条 -->
-  <view class="archive-banner" wx:if="{{isArchived}}">
-    <text class="icon-info"></text>
-    <text>群聊已归档，无法发送新消息</text>
-  </view>
-
-  <!-- 消息列表 -->
-  <scroll-view
-    class="message-list"
-    scroll-y
-    enhanced
-    show-scrollbar="{{false}}"
-    scroll-into-view="{{scrollToMessage}}"
-    scroll-with-animation
-    style="padding-bottom: {{keyboardHeight > 0 ? (keyboardHeight + 120) + 'px' : '140rpx'}}"
-  >
-    <!-- 加载状态 -->
-    <view class="loading-container" wx:if="{{loading}}">
-      <t-loading theme="circular" size="48rpx" />
-      <text class="loading-text">加载中...</text>
-    </view>
-
-    <!-- 消息列表 -->
-    <block wx:for="{{messages}}" wx:key="id">
-      <!-- 系统消息 -->
-      <view 
-        wx:if="{{item.isSystem}}"
-        id="msg-{{item.id}}"
-        class="system-message"
-      >
-        <text class="system-text">{{item.content}}</text>
-      </view>
-
-      <!-- 普通消息 -->
-      <view
-        wx:else
-        id="msg-{{item.id}}"
-        class="message-item {{item.isSelf ? 'self' : 'other'}}"
-        data-id="{{item.id}}"
-        data-is-self="{{item.isSelf}}"
-        bindlongpress="onMessageLongPress"
-      >
-        <!-- 头像 -->
-        <image
-          class="avatar"
-          src="{{item.senderAvatarUrl || '/static/images/default-avatar.png'}}"
-          mode="aspectFill"
-        />
-        
-        <!-- 消息内容 -->
-        <view class="message-content">
-          <!-- 发送者昵称（非自己的消息显示） -->
-          <view class="sender-name" wx:if="{{!item.isSelf}}">
-            {{item.senderNickname || '用户'}}
-          </view>
-          
-          <!-- 消息气泡 -->
-          <view class="message-bubble {{item.isSelf ? 'self-bubble' : 'other-bubble'}}">
-            <text class="message-text">{{item.content}}</text>
-          </view>
-          
-          <!-- 时间 -->
-          <view class="message-time">{{item.formattedTime}}</view>
-        </view>
-      </view>
-    </block>
-
-    <!-- 空状态 -->
-    <view class="empty-state" wx:if="{{!loading && messages.length === 0}}">
-      <view class="empty-icon">💬</view>
-      <text class="empty-title">暂无消息</text>
-      <text class="empty-desc">发送第一条消息开始聊天吧</text>
-    </view>
-  </scroll-view>
-
-  <!-- 输入区域 -->
-  <view 
-    class="input-area {{isArchived ? 'disabled' : ''}}" 
-    style="bottom: {{keyboardHeight > 0 ? keyboardHeight + 'px' : '0'}}"
-  >
-    <view class="input-container">
-      <input
-        class="message-input"
-        type="text"
-        placeholder="{{isArchived ? '群聊已归档' : '输入消息...'}}"
-        placeholder-class="input-placeholder"
-        value="{{inputValue}}"
-        disabled="{{isArchived}}"
-        confirm-type="send"
-        adjust-position="{{false}}"
-        bindinput="onInputChange"
-        bindconfirm="onSendMessage"
-        bindkeyboardheightchange="onKeyboardHeightChange"
-        bindblur="onInputBlur"
-      />
-      <view
-        class="send-btn {{inputValue.trim() && !isArchived ? 'active' : ''}}"
-        bind:tap="onSendMessage"
-      >
-        <text class="icon-send"></text>
-      </view>
-    </view>
-    <view class="safe-area-bottom"></view>
-  </view>
   
-  <!-- 举报弹窗 -->
-  <report-sheet
-    visible="{{showReportSheet}}"
-    type="message"
-    targetId="{{reportMessageId}}"
-    bind:close="onReportClose"
-    bind:success="onReportSuccess"
+  <!-- 对话流容器 -->
+  <chat-list
+    messages="{{messages}}"
+    loading="{{false}}"
+  >
+    <!-- Hot Chips 热词快捷入口 (v4.7) -->
+    <hot-chips
+      wx:if="{{showHotKeywords}}"
+      keywords="{{hotKeywords}}"
+      bind:chipclick="onHotChipClick"
+    />
+
+    <agent-task-panel
+      wx:if="{{currentTasks.length > 0}}"
+      tasks="{{currentTasks}}"
+      bind:actiontap="onAgentTaskActionTap"
+    />
+    
+    <!-- 消息列表 -->
+    <view class="message-list">
+      <block wx:for="{{messages}}" wx:key="id">
+        <view 
+          id="msg-{{item.id}}"
+          class="message-item message-item--{{item.role}} {{index >= messages.length - 3 ? 'slide-up-fade-in' : ''}}"
+          style="animation-delay: {{(index - (messages.length - 3)) * 50}}ms;"
+        >
+          <!-- 用户消息 -->
+          <block wx:if="{{item.role === 'user'}}">
+            <block wx:for="{{item.parts}}" wx:for-item="part" wx:key="index">
+              <block wx:if="{{part.type === 'text'}}">
+                <chat-message-shell 
+                  role="user" 
+                  content="{{part.text}}"
+                />
+              </block>
+            </block>
+          </block>
+          
+          <!-- AI 消息 - 遍历 parts 渲染 -->
+          <block wx:else>
+            <block wx:for="{{item.parts}}" wx:for-item="part" wx:for-index="partIndex" wx:key="partIndex">
+              <!-- 文本消息 -->
+              <block wx:if="{{part.type === 'text'}}">
+                <chat-message-shell 
+                  role="assistant" 
+                  content="{{part.text}}"
+                  isStreaming="{{streamingMessageId === item.id}}"
+                />
+              </block>
+              
+              <!-- Widget 消息 -->
+              <block wx:elif="{{part.type === 'widget'}}">
+                <chat-widget-part
+                  part="{{part}}"
+                  userNickname="{{userNickname}}"
+                  isHistorical="{{index < messages.length - 1}}"
+                  bind:dashboardactivitytap="onDashboardActivityTap"
+                  bind:dashboardprompttap="onDashboardPromptTap"
+                  bind:dashboardquickitemtap="onDashboardQuickItemTap"
+                  bind:dashboardpreferencetap="onDashboardPreferenceTap"
+                  bind:dashboardviewall="onDashboardViewAll"
+                  bind:widgetactiontap="onWidgetStructuredActionTap"
+                  bind:widgetsharetap="onWidgetShareTap"
+                  bind:widgetshareviewdetail="onWidgetShareViewDetail"
+                  bind:exploreactivitytap="onExploreActivityTap"
+                  bind:exploreactiontap="onExploreActionTap"
+                  bind:exploreexpandmap="onExploreExpandMap"
+                  bind:partnersearchactiontap="onPartnerSearchActionTap"
+                  bind:askpreferenceselect="onAskPreferenceSelect"
+                  bind:askpreferenceskip="onAskPreferenceSkip"
+                  bind:actionchiptap="onActionChipTap"
+                  bind:partnerintentformsubmit="onPartnerIntentFormSubmit"
+                  bind:draftsettingsformsubmit="onDraftSettingsFormSubmit"
+                  bind:authrequiredcontinue="onAuthRequiredContinue"
+                  bind:widgeterrorretry="onWidgetErrorRetry"
+                />
+              </block>
+            </block>
+          </block>
+        </view>
+      </block>
+    </view>
+    
+    <!-- AI 思考态 - 当 status 为 submitted 时显示 -->
+    <view wx:if="{{status === 'submitted'}}" class="message-item message-item--assistant slide-up-fade-in">
+      <chat-thinking text="稍等，我帮你看看..." />
+    </view>
+  </chat-list>
+  
+  <!-- AI Dock (超级输入坞) -->
+  <chat-sender 
+    id="aiDock"
+    placeholder="{{composerPlaceholder}}"
+    value="{{inputValue}}"
+    bind:inputchange="onInputChange"
+    bind:send="onSend"
+  />
+  
+  <!-- 手机号绑定半屏 -->
+  <auth-sheet 
+    show="{{isAuthSheetVisible}}"
+    bind:success="onAuthSuccess"
+    bind:pendingaction="onPendingAction"
+    bind:viewagreement="onAuthSheetViewAgreement"
+    bind:viewpolicy="onAuthSheetViewPolicy"
+  />
+  
+  <!-- 分享引导蒙层 -->
+  <share-guide 
+    show="{{isShareGuideVisible}}"
+    title="{{shareGuideData.title}}"
+    mapUrl="{{shareGuideData.mapUrl}}"
   />
 </view>

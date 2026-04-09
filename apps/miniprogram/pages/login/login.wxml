@@ -3,9 +3,9 @@
   TDesign + Atomic Less 重构
 -->
 <t-navbar left-arrow />
-<view class="min-h-screen bg-white px-4">
+<view class="login-page">
   <!-- 标题 -->
-  <view class="text-2xl font-semibold text-gray-900 pt-2 pb-5">欢迎登录聚场</view>
+  <view class="login-page__title">欢迎登录聚场</view>
 
   <!-- 输入区域 -->
   <view class="login-input">
@@ -33,15 +33,15 @@
       type="number" 
       bindchange="onPhoneInput"
     >
-      <view slot="label" class="flex items-center pr-4 border-r border-gray-200">
+      <view slot="label" class="login-page__phone-label">
         <text>+86</text>
-        <t-icon name="caret-down-small" size="40rpx" class="ml-1" />
+        <t-icon name="caret-down-small" size="40rpx" class="login-page__phone-caret" />
       </view>
     </t-input>
   </view>
 
   <!-- 提示文字 -->
-  <view class="text-xs text-gray-400 my-3">未注册的手机号验证通过后将自动注册</view>
+  <view class="login-page__hint">未注册的手机号验证通过后将自动注册</view>
 
   <!-- 协议勾选 -->
   <t-radio-group allow-uncheck borderless value="{{radioValue}}" bind:change="onCheckChange">
@@ -55,7 +55,7 @@
   </t-radio-group>
 
   <!-- 登录按钮 -->
-  <view class="mt-4">
+  <view class="login-page__submit">
     <t-button 
       theme="primary" 
       size="large" 
@@ -69,15 +69,15 @@
   </view>
 
   <!-- 忘记密码 -->
-  <view class="flex items-center text-xs mt-4" wx:if="{{isPasswordLogin}}">
-    <text class="text-gray-600">忘记密码？</text>
+  <view class="login-page__forgot" wx:if="{{isPasswordLogin}}">
+    <text class="login-page__forgot-text">忘记密码？</text>
     <t-link theme="primary" size="small">找回密码</t-link>
   </view>
 
   <!-- 其他登录方式 -->
-  <view class="flex items-center justify-between mt-8">
-    <text class="text-xs text-gray-600">其他方式</text>
-    <view class="flex items-center gap-4">
+  <view class="login-page__other">
+    <text class="login-page__other-label">其他方式</text>
+    <view class="login-page__other-actions">
       <t-button variant="outline" theme="default" size="medium" shape="round" bindtap="changeLogin">
         {{isPasswordLogin ? '验证码登录' : '密码登录' }}
       </t-button>

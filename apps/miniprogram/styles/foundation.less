@@ -1,0 +1,199 @@
+/**
+ * 全局基础壳层
+ *
+ * 只保留主链仍在复用的少量全局样式：
+ * - halo card 系列
+ * - icon circle 系列
+ * - pressable 反馈
+ * - shared animation / safe area
+ */
+
+@import './tokens.less';
+
+.halo-card {
+  position: relative;
+  background: var(--bg-card, @bg-card);
+  border-radius: var(--radius-lg, @radius-lg);
+  box-shadow: var(--shadow-card, @shadow-card);
+  overflow: hidden;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    padding: 2rpx;
+    background: var(--gradient-halo, @gradient-card);
+    border-radius: inherit;
+    -webkit-mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+}
+
+.halo-card-mini {
+  position: relative;
+  background: var(--bg-card, @bg-card);
+  border-radius: var(--radius-md, @radius-md);
+  box-shadow: var(--shadow-sm, @shadow-sm);
+  overflow: hidden;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    padding: 1rpx;
+    background: var(--gradient-halo, @gradient-card);
+    border-radius: inherit;
+    -webkit-mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+}
+
+.soft-card {
+  background: var(--bg-card, @bg-card);
+  border-radius: var(--radius-lg, @radius-lg);
+  box-shadow: var(--shadow-card, @shadow-card);
+  border: var(--border-card, 1rpx solid rgba(0, 0, 0, 0.04));
+}
+
+.icon-circle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: var(--radius-full, @radius-full);
+
+  &--blue {
+    background: var(--icon-bg-blue, rgba(91, 117, 251, 0.1));
+    color: var(--color-primary, @color-primary);
+  }
+
+  &--purple {
+    background: var(--icon-bg-purple, rgba(139, 92, 246, 0.1));
+    color: var(--color-secondary, @color-secondary);
+  }
+
+  &--mint {
+    background: var(--icon-bg-mint, rgba(110, 231, 183, 0.1));
+    color: var(--color-success, @success-color);
+  }
+
+  &--amber {
+    background: var(--icon-bg-amber, rgba(245, 158, 11, 0.1));
+    color: var(--color-warning, @warning-color);
+  }
+}
+
+.icon-circle-sm {
+  width: 56rpx;
+  height: 56rpx;
+}
+
+.btn-pressable {
+  transition: transform var(--duration-fast, @duration-fast) var(--ease-out-back, @ease-out-back);
+
+  &:active {
+    transform: scale(0.95);
+  }
+}
+
+.floating-capsule {
+  position: fixed;
+  left: 32rpx;
+  right: 32rpx;
+  bottom: calc(32rpx + env(safe-area-inset-bottom));
+  background: var(--bg-card, @bg-card);
+  border-radius: var(--radius-xl, @radius-xl);
+  box-shadow: var(--shadow-lg, @shadow-lg);
+  z-index: 100;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    padding: 2rpx;
+    background: var(--gradient-halo, @gradient-card);
+    border-radius: inherit;
+    -webkit-mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+}
+
+.slide-up-fade-in {
+  animation: slideUpFadeIn 0.3s var(--ease-out-expo, @ease-out-expo) forwards;
+  opacity: 0;
+}
+
+@keyframes slideUpFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20rpx);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.safe-area-bottom {
+  height: calc(env(safe-area-inset-bottom) + 24rpx);
+}
+
+@media (prefers-color-scheme: dark) {
+  .halo-card {
+    background: var(--bg-card, @bg-card-dark);
+    box-shadow: none;
+    border: 1rpx solid var(--border-default, @border-default-dark);
+
+    &::before {
+      background: var(--gradient-halo, linear-gradient(135deg, rgba(91, 117, 251, 0.25) 0%, rgba(196, 181, 253, 0.25) 100%));
+    }
+  }
+
+  .halo-card-mini {
+    background: var(--bg-card, @bg-card-dark);
+    box-shadow: none;
+    border: 1rpx solid var(--border-default, @border-default-dark);
+
+    &::before {
+      background: var(--gradient-halo, linear-gradient(135deg, rgba(91, 117, 251, 0.25) 0%, rgba(196, 181, 253, 0.25) 100%));
+    }
+  }
+
+  .soft-card {
+    background: var(--bg-card, @bg-card-dark);
+    box-shadow: none;
+    border: 1rpx solid var(--border-default, @border-default-dark);
+  }
+
+  .floating-capsule {
+    background: var(--bg-card, @bg-card-dark);
+    box-shadow: none;
+    border: 1rpx solid var(--border-default, @border-default-dark);
+
+    &::before {
+      background: var(--gradient-halo, linear-gradient(135deg, rgba(91, 117, 251, 0.25) 0%, rgba(196, 181, 253, 0.25) 100%));
+    }
+  }
+}

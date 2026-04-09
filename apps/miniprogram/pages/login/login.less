@@ -4,6 +4,70 @@
  */
 @import '/styles/tokens.less';
 
+.login-page {
+  min-height: 100vh;
+  padding: 0 @spacing-4;
+  background: #ffffff;
+}
+
+.login-page__title {
+  padding-top: @spacing-2;
+  padding-bottom: @spacing-5;
+  font-size: @text-2xl;
+  font-weight: 600;
+  color: @gray-900;
+}
+
+.login-page__phone-label {
+  display: flex;
+  align-items: center;
+  padding-right: @spacing-4;
+  border-right: 1rpx solid @gray-200;
+}
+
+.login-page__phone-caret {
+  margin-left: @spacing-1;
+}
+
+.login-page__hint {
+  margin: @spacing-3 0;
+  font-size: @text-xs;
+  color: @gray-400;
+}
+
+.login-page__submit {
+  margin-top: @spacing-4;
+}
+
+.login-page__forgot {
+  display: flex;
+  align-items: center;
+  margin-top: @spacing-4;
+  font-size: @text-xs;
+}
+
+.login-page__forgot-text {
+  color: @gray-600;
+}
+
+.login-page__other {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: @spacing-8;
+}
+
+.login-page__other-label {
+  font-size: @text-xs;
+  color: @gray-600;
+}
+
+.login-page__other-actions {
+  display: flex;
+  align-items: center;
+  gap: @spacing-4;
+}
+
 // 覆盖 TDesign Radio 组件样式
 .radio-class {
   --td-radio-icon-size: 32rpx;

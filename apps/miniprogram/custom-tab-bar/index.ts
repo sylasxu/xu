@@ -40,8 +40,8 @@ Component({
     list: [
       {
         icon: 'home',
-        value: 'home',
-        label: '首页',
+        value: 'chat',
+        label: '对话',
       },
       {
         icon: 'chat',
@@ -50,7 +50,7 @@ Component({
       },
       {
         icon: 'user',
-        value: 'my',
+        value: 'profile',
         label: '我的',
       },
     ] as TabItem[],

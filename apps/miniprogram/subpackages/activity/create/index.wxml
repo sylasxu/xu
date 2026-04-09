@@ -29,17 +29,17 @@
   };
 </wxs>
 
-<view class="min-h-screen bg-gray-50 flex flex-col">
-  <scroll-view scroll-y class="form-scroll flex-1">
+<view class="activity-create-page">
+  <scroll-view scroll-y class="form-scroll activity-create-page__scroll">
     <!-- 基本信息 -->
-    <view class="bg-white mb-3 p-4">
-      <view class="flex items-center gap-2 text-lg font-semibold text-gray-900 mb-3 pb-2 border-b border-gray-100">
+    <view class="activity-create-page__section">
+      <view class="activity-create-page__section-title">
         基本信息
       </view>
       
       <!-- 活动标题 -->
-      <view class="mb-3">
-        <view class="block text-sm font-medium text-gray-900 mb-2 required">活动标题</view>
+      <view class="activity-create-page__field">
+        <view class="activity-create-page__label required">活动标题</view>
         <t-input
           placeholder="请输入活动标题（最多100字）"
           value="{{form.title}}"
@@ -49,10 +49,10 @@
       </view>
       
       <!-- 活动类型 -->
-      <view class="mb-3" bindtap="showTypePicker">
-        <view class="block text-sm font-medium text-gray-900 mb-2 required">活动类型</view>
-        <view class="flex items-center justify-between p-3 bg-gray-100 rounded-md text-sm">
-          <text class="{{form.type ? 'text-gray-900' : 'placeholder'}}">
+      <view class="activity-create-page__field" bindtap="showTypePicker">
+        <view class="activity-create-page__label required">活动类型</view>
+        <view class="activity-create-page__picker">
+          <text class="{{form.type ? 'activity-create-page__picker-text' : 'placeholder'}}">
             {{utils.getTypeLabel(form.type, activityTypes)}}
           </text>
           <t-icon name="chevron-right" size="40rpx" color="#D1D5DB" />
@@ -60,8 +60,8 @@
       </view>
       
       <!-- 活动描述 -->
-      <view class="mb-3">
-        <view class="block text-sm font-medium text-gray-900 mb-2">活动描述</view>
+      <view class="activity-create-page__field">
+        <view class="activity-create-page__label">活动描述</view>
         <t-textarea
           placeholder="介绍一下你的活动吧~"
           value="{{form.description}}"
@@ -73,7 +73,7 @@
       
       <!-- 活动图片 -->
       <view>
-        <view class="block text-sm font-medium text-gray-900 mb-2">活动图片</view>
+        <view class="activity-create-page__label">活动图片</view>
         <t-upload
           media-type="{{['image']}}"
           max="{{maxImageCount}}"
@@ -85,16 +85,16 @@
     </view>
     
     <!-- 时间地点 -->
-    <view class="bg-white mb-3 p-4">
-      <view class="flex items-center gap-2 text-lg font-semibold text-gray-900 mb-3 pb-2 border-b border-gray-100">
+    <view class="activity-create-page__section">
+      <view class="activity-create-page__section-title">
         时间地点
       </view>
       
       <!-- 开始时间 -->
-      <view class="mb-3" bindtap="showStartTimePicker">
-        <view class="block text-sm font-medium text-gray-900 mb-2 required">开始时间</view>
-        <view class="flex items-center justify-between p-3 bg-gray-100 rounded-md text-sm">
-          <text class="{{form.startAt ? 'text-gray-900' : 'placeholder'}}">
+      <view class="activity-create-page__field" bindtap="showStartTimePicker">
+        <view class="activity-create-page__label required">开始时间</view>
+        <view class="activity-create-page__picker">
+          <text class="{{form.startAt ? 'activity-create-page__picker-text' : 'placeholder'}}">
             {{utils.formatDateTime(form.startAt)}}
           </text>
           <t-icon name="chevron-right" size="40rpx" color="#D1D5DB" />
@@ -102,10 +102,10 @@
       </view>
       
       <!-- 结束时间 -->
-      <view class="mb-3" bindtap="showEndTimePicker">
-        <view class="block text-sm font-medium text-gray-900 mb-2">结束时间</view>
-        <view class="flex items-center justify-between p-3 bg-gray-100 rounded-md text-sm">
-          <text class="{{form.endAt ? 'text-gray-900' : 'placeholder'}}">
+      <view class="activity-create-page__field" bindtap="showEndTimePicker">
+        <view class="activity-create-page__label">结束时间</view>
+        <view class="activity-create-page__picker">
+          <text class="{{form.endAt ? 'activity-create-page__picker-text' : 'placeholder'}}">
             {{utils.formatDateTime(form.endAt)}}
           </text>
           <t-icon name="chevron-right" size="40rpx" color="#D1D5DB" />
@@ -113,10 +113,10 @@
       </view>
       
       <!-- 活动地点 -->
-      <view class="mb-3" bindtap="onChooseLocation">
-        <view class="block text-sm font-medium text-gray-900 mb-2 required">活动地点</view>
-        <view class="flex items-center justify-between p-3 bg-gray-100 rounded-md text-sm">
-          <text class="{{form.locationName ? 'text-gray-900' : 'placeholder'}}">
+      <view class="activity-create-page__field" bindtap="onChooseLocation">
+        <view class="activity-create-page__label required">活动地点</view>
+        <view class="activity-create-page__picker">
+          <text class="{{form.locationName ? 'activity-create-page__picker-text' : 'placeholder'}}">
             {{form.locationName || '请选择地点'}}
           </text>
           <t-icon name="location" size="40rpx" color="#FF6B35" />
@@ -124,34 +124,34 @@
       </view>
       
       <!-- 详细地址显示 -->
-      <view wx:if="{{form.address}}" class="flex items-start gap-1 px-3 py-2 bg-gray-100 rounded-sm -mt-2 mb-3">
+      <view wx:if="{{form.address}}" class="activity-create-page__address">
         <t-icon name="location" size="32rpx" color="#9CA3AF" />
-        <text class="flex-1 text-xs text-gray-600 leading-normal">{{form.address}}</text>
+        <text class="activity-create-page__address-text">{{form.address}}</text>
       </view>
       
       <!-- 位置备注 -->
-      <view wx:if="{{form.latitude}}" class="mb-3">
-        <view class="block text-sm font-medium text-gray-900 mb-2 required">位置备注</view>
+      <view wx:if="{{form.latitude}}" class="activity-create-page__field">
+        <view class="activity-create-page__label required">位置备注</view>
         <t-input
           placeholder="如：4楼平台入口、星巴克门口"
           value="{{form.locationHint}}"
           maxlength="{{50}}"
           bindinput="onLocationHintInput"
         />
-        <view class="text-xs text-gray-400 mt-1">帮助参与者更容易找到你</view>
+        <view class="activity-create-page__helper">帮助参与者更容易找到你</view>
       </view>
       
     </view>
     
     <!-- 活动设置 -->
-    <view class="bg-white mb-3 p-4">
-      <view class="flex items-center gap-2 text-lg font-semibold text-gray-900 mb-3 pb-2 border-b border-gray-100">
+    <view class="activity-create-page__section">
+      <view class="activity-create-page__section-title">
         活动设置
       </view>
       
       <!-- 参与人数 -->
-      <view class="flex items-center justify-between mb-3">
-        <view class="text-sm font-medium text-gray-900 required">参与人数</view>
+      <view class="activity-create-page__participants">
+        <view class="activity-create-page__label required">参与人数</view>
         <t-stepper
           value="{{form.maxParticipants}}"
           min="{{2}}"
@@ -167,7 +167,7 @@
   </scroll-view>
   
   <!-- 底部提交栏 -->
-  <view class="bottom-bar px-4 py-3">
+  <view class="bottom-bar activity-create-page__footer">
     <t-button
       theme="primary"
       size="large"

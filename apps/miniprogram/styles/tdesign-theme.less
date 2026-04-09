@@ -1,6 +1,5 @@
 /**
  * TDesign 主题覆盖
- * 聚场小程序 - Atomic Less Architecture
  * 
  * 将 Design Token 映射到 TDesign CSS 变量
  */
@@ -9,11 +8,11 @@
 
 page {
   // ==================== 品牌色 ====================
-  --td-brand-color: @brand-color;
-  --td-brand-color-light: @brand-color-light;
-  --td-brand-color-focus: fade(@brand-color, 20%);
-  --td-brand-color-active: @brand-color-dark;
-  --td-brand-color-disabled: fade(@brand-color, 40%);
+  --td-brand-color: @color-primary;
+  --td-brand-color-light: rgba(91, 117, 251, 0.1);
+  --td-brand-color-focus: fade(@color-primary, 20%);
+  --td-brand-color-active: @color-primary-dark;
+  --td-brand-color-disabled: fade(@color-primary, 40%);
 
   // ==================== 功能色 ====================
   --td-success-color: @success-color;
@@ -25,7 +24,7 @@ page {
   --td-text-color-secondary: @gray-600;
   --td-text-color-placeholder: @gray-400;
   --td-text-color-disabled: @gray-300;
-  --td-text-color-brand: @brand-color;
+  --td-text-color-brand: @color-primary;
 
   // ==================== 背景色 ====================
   --td-bg-color-page: @gray-50;
@@ -42,23 +41,23 @@ page {
   --td-component-stroke: @gray-200;
 
   // ==================== 按钮主题 ====================
-  --td-button-primary-bg-color: @brand-color;
-  --td-button-primary-border-color: @brand-color;
-  --td-button-primary-active-bg-color: @brand-color-dark;
-  --td-button-primary-active-border-color: @brand-color-dark;
-  --td-button-primary-disabled-bg: fade(@brand-color, 40%);
-  --td-button-primary-disabled-border-color: fade(@brand-color, 40%);
+  --td-button-primary-bg-color: @color-primary;
+  --td-button-primary-border-color: @color-primary;
+  --td-button-primary-active-bg-color: @color-primary-dark;
+  --td-button-primary-active-border-color: @color-primary-dark;
+  --td-button-primary-disabled-bg: fade(@color-primary, 40%);
+  --td-button-primary-disabled-border-color: fade(@color-primary, 40%);
 
   // ==================== 开关主题 ====================
-  --td-switch-on-bg-color: @brand-color;
+  --td-switch-on-bg-color: @color-primary;
 
   // ==================== 复选框主题 ====================
-  --td-checkbox-icon-checked-color: @brand-color;
-  --td-checkbox-bg-color: @brand-color;
+  --td-checkbox-icon-checked-color: @color-primary;
+  --td-checkbox-bg-color: @color-primary;
 
   // ==================== 单选框主题 ====================
-  --td-radio-icon-checked-color: @brand-color;
-  --td-radio-bg-color: @brand-color;
+  --td-radio-icon-checked-color: @color-primary;
+  --td-radio-bg-color: @color-primary;
 
   // ==================== 输入框主题 ====================
   --td-input-border-color: @gray-100;
@@ -66,30 +65,30 @@ page {
   --td-input-placeholder-color: @gray-400;
 
   // ==================== 标签主题 ====================
-  --td-tag-primary-color: @brand-color;
-  --td-tag-primary-light-color: @brand-color-light;
+  --td-tag-primary-color: @color-primary;
+  --td-tag-primary-light-color: rgba(91, 117, 251, 0.1);
 
   // ==================== 导航栏主题 ====================
   --td-navbar-bg-color: #ffffff;
   --td-navbar-color: @gray-900;
 
   // ==================== Tab 主题 ====================
-  --td-tab-bar-active-color: @brand-color;
-  --td-tabs-active-color: @brand-color;
+  --td-tab-bar-active-color: @color-primary;
+  --td-tabs-active-color: @color-primary;
 
   // ==================== 链接主题 ====================
-  --td-link-color: @brand-color;
+  --td-link-color: @color-primary;
 
   // ==================== 加载主题 ====================
-  --td-loading-color: @brand-color;
+  --td-loading-color: @color-primary;
 
   // ==================== 进度条主题 ====================
-  --td-progress-color: @brand-color;
+  --td-progress-color: @color-primary;
 
   // ==================== 滑块主题 ====================
-  --td-slider-active-color: @brand-color;
+  --td-slider-active-color: @color-primary;
 
   // ==================== 步骤条主题 ====================
-  --td-steps-item-finish-icon-color: @brand-color;
-  --td-steps-item-process-icon-color: @brand-color;
+  --td-steps-item-finish-icon-color: @color-primary;
+  --td-steps-item-process-icon-color: @color-primary;
 }

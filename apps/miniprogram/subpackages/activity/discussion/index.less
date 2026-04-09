@@ -5,7 +5,7 @@
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: @color-bg-layout;
+  background: @bg-page;
 }
 
 /* 导航栏右侧 */
@@ -20,7 +20,7 @@
   align-items: center;
   gap: 8rpx;
   font-size: 24rpx;
-  color: @color-text-secondary;
+  color: @text-secondary;
 }
 
 .online-dot {
@@ -38,17 +38,17 @@
   gap: 12rpx;
   padding: 16rpx 24rpx;
   font-size: 24rpx;
-  color: @color-text-secondary;
-  background: @color-bg-container;
-  border-bottom: 1rpx solid @color-border;
+  color: @text-secondary;
+  background: @bg-card;
+  border-bottom: 1rpx solid @border-default;
 
   &.connecting,
   &.reconnecting {
-    color: @color-brand;
+    color: @color-primary;
   }
 
   &.disconnected {
-    color: @color-error;
+    color: @error-color;
   }
 }
 
@@ -60,8 +60,8 @@
   gap: 12rpx;
   padding: 20rpx 24rpx;
   font-size: 26rpx;
-  color: @color-warning;
-  background: fade(@color-warning, 10%);
+  color: @warning-color;
+  background: fade(@warning-color, 10%);
 }
 
 .task-stage-banner {
@@ -69,20 +69,72 @@
   flex-direction: column;
   gap: 8rpx;
   padding: 20rpx 24rpx 16rpx;
-  background: linear-gradient(180deg, fade(@color-brand, 10%), fade(@color-brand, 4%));
-  border-bottom: 1rpx solid fade(@color-brand, 12%);
+  background: linear-gradient(180deg, fade(@color-primary, 10%), fade(@color-primary, 4%));
+  border-bottom: 1rpx solid fade(@color-primary, 12%);
 }
 
 .task-stage-banner__eyebrow {
   font-size: 24rpx;
   font-weight: 600;
-  color: @color-brand;
+  color: @color-primary;
 }
 
 .task-stage-banner__hint {
   font-size: 24rpx;
   line-height: 1.6;
-  color: @color-text-secondary;
+  color: @text-secondary;
+}
+
+.task-stage-banner__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+}
+
+.task-stage-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 10rpx 18rpx;
+  font-size: 22rpx;
+  color: @text-secondary;
+  background: fade(@text-secondary, 8%);
+  border-radius: 999rpx;
+}
+
+.task-stage-chip--primary {
+  color: #fff;
+  background: @color-primary;
+}
+
+.task-stage-banner__action-hint {
+  font-size: 24rpx;
+  line-height: 1.6;
+  color: @text-main;
+}
+
+.task-stage-banner__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-top: 4rpx;
+}
+
+.task-stage-banner__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60rpx;
+  padding: 0 24rpx;
+  font-size: 24rpx;
+  font-weight: 500;
+  color: #fff;
+  background: @color-primary;
+  border-radius: @radius-full;
+
+  &--secondary {
+    color: @color-primary;
+    background: fade(@color-primary, 10%);
+  }
 }
 
 /* 消息列表 */
@@ -100,18 +152,18 @@
   gap: 12rpx;
   padding: 24rpx 0;
   font-size: 24rpx;
-  color: @color-text-placeholder;
+  color: @text-placeholder;
 
   .no-more {
-    color: @color-text-placeholder;
+    color: @text-placeholder;
   }
 }
 
 .join-guide {
   margin-bottom: 24rpx;
   padding: 24rpx;
-  background: linear-gradient(180deg, fade(@color-brand, 12%), #fff);
-  border: 1rpx solid fade(@color-brand, 18%);
+  background: linear-gradient(180deg, fade(@color-primary, 12%), #fff);
+  border: 1rpx solid fade(@color-primary, 18%);
   border-radius: 24rpx;
 }
 
@@ -124,12 +176,12 @@
 .join-guide__title {
   font-size: 30rpx;
   font-weight: 600;
-  color: @color-text;
+  color: @text-main;
 }
 
 .join-guide__hint {
   font-size: 24rpx;
-  color: @color-text-secondary;
+  color: @text-secondary;
 }
 
 .join-guide__chips {
@@ -143,8 +195,8 @@
   padding: 20rpx 24rpx;
   font-size: 26rpx;
   line-height: 1.5;
-  color: @color-text;
-  background: @color-bg-container;
+  color: @text-main;
+  background: @bg-card;
   border-radius: 20rpx;
   box-shadow: 0 6rpx 18rpx rgba(0, 0, 0, 0.04);
 }
@@ -176,7 +228,7 @@
     }
 
     .bubble {
-      background: @color-brand;
+      background: @color-primary;
       color: #fff;
       border-radius: 24rpx 4rpx 24rpx 24rpx;
     }
@@ -212,14 +264,14 @@
 /* 昵称 */
 .nickname {
   font-size: 24rpx;
-  color: @color-text-secondary;
+  color: @text-secondary;
   margin-bottom: 8rpx;
 }
 
 /* 气泡 */
 .bubble {
   padding: 20rpx 24rpx;
-  background: @color-bg-container;
+  background: @bg-card;
   border-radius: 4rpx 24rpx 24rpx 24rpx;
   box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.04);
 }
@@ -233,7 +285,7 @@
 /* 时间 */
 .time {
   font-size: 22rpx;
-  color: @color-text-placeholder;
+  color: @text-placeholder;
   margin-top: 8rpx;
 }
 
@@ -241,15 +293,15 @@
 .system-message {
   padding: 8rpx 24rpx;
   font-size: 24rpx;
-  color: @color-text-placeholder;
-  background: fade(@color-text-placeholder, 10%);
+  color: @text-placeholder;
+  background: fade(@text-placeholder, 10%);
   border-radius: 24rpx;
 }
 
 /* 输入区域 */
 .input-area {
-  background: @color-bg-container;
-  border-top: 1rpx solid @color-border;
+  background: @bg-card;
+  border-top: 1rpx solid @border-default;
   padding: 16rpx 24rpx;
 }
 
@@ -264,12 +316,12 @@
   height: 72rpx;
   padding: 0 24rpx;
   font-size: 28rpx;
-  background: @color-bg-layout;
+  background: @bg-page;
   border-radius: 36rpx;
 }
 
 .input-placeholder {
-  color: @color-text-placeholder;
+  color: @text-placeholder;
 }
 
 .send-btn {
@@ -279,12 +331,12 @@
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: @color-bg-layout;
-  color: @color-text-placeholder;
+  background: @bg-page;
+  color: @text-placeholder;
   transition: all 0.2s;
 
   &.active {
-    background: @color-brand;
+    background: @color-primary;
     color: #fff;
   }
 }

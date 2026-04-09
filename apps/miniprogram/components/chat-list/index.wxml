@@ -1,0 +1,34 @@
+<!--
+  Chat List 组件
+  Requirements: 1.4, 3.1, 15.16
+  
+  Chat-First 架构的对话流容器
+  - 无限滚动容器
+  - 用户消息（右侧对齐）和 AI 消息（左侧对齐）
+  - 新消息自动滚动到底部
+-->
+<scroll-view
+  class="chat-list"
+  scroll-y
+  scroll-with-animation
+  scroll-into-view="{{scrollToView}}"
+  upper-threshold="100"
+  bindscroll="onScroll"
+  bindscrolltoupper="onScrollToUpper"
+  enhanced
+  show-scrollbar="{{false}}"
+>
+  <!-- 加载更多指示器 -->
+  <view wx:if="{{loading}}" class="loading-indicator">
+    <view class="loading-dots">
+      <view class="loading-dot"></view>
+      <view class="loading-dot"></view>
+      <view class="loading-dot"></view>
+    </view>
+  </view>
+  
+  <slot></slot>
+  
+  <!-- 底部占位（为输入区和安全区留空间） -->
+  <view class="bottom-spacer"></view>
+</scroll-view>

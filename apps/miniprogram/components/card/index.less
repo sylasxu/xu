@@ -1,6 +1,30 @@
 @import '/styles/tokens.less';
 
-// 仅保留图片尺寸定制
+.card-shell {
+  display: inline-flex;
+  flex-direction: column;
+  width: 340rpx;
+  height: 488rpx;
+  overflow: hidden;
+  background: #ffffff;
+  border-radius: @radius-lg;
+}
+
+.card-shell__content {
+  padding: @spacing-4;
+  font-size: @text-sm;
+}
+
+.card-shell__desc {
+  color: @gray-900;
+}
+
+.card-shell__tags {
+  display: flex;
+  gap: @spacing-2;
+  margin-top: @spacing-2;
+}
+
 .card-image {
   width: 340rpx;
   height: 340rpx;

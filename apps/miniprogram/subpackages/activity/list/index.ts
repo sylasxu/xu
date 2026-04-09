@@ -179,14 +179,14 @@ Page({
   },
 
   /**
-   * 返回 - CP-12: 页面栈长度为 1 时，返回按钮跳转首页
+   * 返回 - CP-12: 页面栈长度为 1 时，返回按钮跳转对话主场
    */
   goBack() {
     const pages = getCurrentPages();
     if (pages.length > 1) {
       wx.navigateBack();
     } else {
-      wx.reLaunch({ url: '/pages/home/index' });
+      wx.reLaunch({ url: '/pages/chat/index' });
     }
   },
 });

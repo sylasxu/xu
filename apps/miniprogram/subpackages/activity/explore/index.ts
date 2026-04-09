@@ -398,6 +398,20 @@ Page({
     })
   },
 
+  openLegalDocument(type: 'user-agreement' | 'privacy-policy') {
+    wx.navigateTo({
+      url: `/subpackages/legal/index?type=${type}`,
+    })
+  },
+
+  onAuthSheetViewAgreement() {
+    this.openLegalDocument('user-agreement')
+  },
+
+  onAuthSheetViewPolicy() {
+    this.openLegalDocument('privacy-policy')
+  },
+
   /**
    * 切换 Sheet 展开状态
    * Requirements: 18.7
@@ -433,7 +447,7 @@ Page({
       if (pages.length > 1) {
         wx.navigateBack()
       } else {
-        wx.reLaunch({ url: '/pages/home/index' })
+        wx.reLaunch({ url: '/pages/chat/index' })
       }
     }, 200) // 动画持续时间
   },

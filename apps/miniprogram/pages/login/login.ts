@@ -37,7 +37,7 @@ Page<LoginPageData, WechatMiniprogram.Page.CustomOption>({
     const token = wx.getStorageSync('token') || ''
     if (token) {
       wx.switchTab({
-        url: '/pages/home/index'
+        url: '/pages/chat/index'
       })
     }
   },
@@ -178,7 +178,7 @@ Page<LoginPageData, WechatMiniprogram.Page.CustomOption>({
       // 5. 跳转到首页
       setTimeout(() => {
         wx.switchTab({
-          url: '/pages/home/index'
+          url: '/pages/chat/index'
         })
       }, 1500)
 

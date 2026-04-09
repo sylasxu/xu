@@ -164,11 +164,6 @@ Component({
       // 触感反馈
       wx.vibrateShort({ type: 'light' })
       
-      // 跳转到活动详情页
-      wx.navigateTo({
-        url: `/subpackages/activity/detail/index?id=${activity.id}`,
-      })
-      
       // 触发事件
       this.triggerEvent('viewdetail', { activityId: activity.id })
     },

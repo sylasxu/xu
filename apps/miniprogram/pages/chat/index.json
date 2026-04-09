@@ -1,10 +1,18 @@
 {
-  "usingComponents": {
-    "custom-navbar": "/components/custom-navbar/index",
-    "report-sheet": "/components/report-sheet/index",
-    "t-loading": "tdesign-miniprogram/loading/loading"
-  },
   "navigationStyle": "custom",
-  "navigationBarTitleText": "群聊",
-  "disableScroll": true
+  "usingComponents": {
+    "t-icon": "tdesign-miniprogram/icon/icon",
+    "custom-navbar": "/components/custom-navbar/index",
+    "chat-list": "/components/chat-list/index",
+    "chat-sender": "/components/chat-sender/index",
+    "hot-chips": "/components/hot-chips/index",
+    "chat-message-shell": "/components/chat-message-shell/index",
+    "chat-widget-part": "/components/chat-widget-part/index",
+    "chat-thinking": "/components/chat-thinking/index",
+    "widget-skeleton": "/components/widget-skeleton/index",
+    "agent-task-panel": "/components/agent-task-panel/index",
+    "auth-sheet": "/components/auth-sheet/index",
+    "share-guide": "/components/share-guide/index",
+    "network-status": "/components/network-status/index"
+  }
 }

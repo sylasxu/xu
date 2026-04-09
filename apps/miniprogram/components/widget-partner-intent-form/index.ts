@@ -1,4 +1,4 @@
-import { useChatStore } from '../../src/stores/chat'
+export {}
 
 type FieldType = 'single-select' | 'multi-select' | 'textarea' | 'text'
 
@@ -565,8 +565,7 @@ Component({
 
       this.triggerEvent('submit', { values: payload })
 
-      const chatStore = useChatStore.getState()
-      chatStore.sendAction({
+      this.triggerEvent('actiontap', {
         action: typeof schema.submitAction === 'string' && schema.submitAction.trim()
           ? schema.submitAction.trim()
           : 'search_partners',

@@ -4,6 +4,172 @@
  */
 @import '/styles/tokens.less';
 
+.activity-confirm-page {
+  min-height: 100vh;
+  background: @gray-50;
+}
+
+.activity-confirm-page__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: @spacing-3;
+  padding: @spacing-12 0;
+  font-size: @text-sm;
+  color: @gray-400;
+}
+
+.activity-confirm-page__card {
+  margin-bottom: @spacing-3;
+  padding: @spacing-4;
+  background: #ffffff;
+}
+
+.activity-confirm-page__title {
+  margin-bottom: @spacing-2;
+  font-size: @text-xl;
+  font-weight: 600;
+  color: @gray-900;
+}
+
+.activity-confirm-page__meta {
+  display: flex;
+  flex-direction: column;
+  gap: @spacing-2;
+}
+
+.activity-confirm-page__meta-row {
+  display: flex;
+  align-items: center;
+  gap: @spacing-2;
+  font-size: @text-sm;
+  color: @gray-600;
+}
+
+.activity-confirm-page__tips {
+  display: flex;
+  align-items: flex-start;
+  margin: 0 @spacing-3 @spacing-3;
+  padding: @spacing-3;
+  border-radius: @radius-md;
+}
+
+.activity-confirm-page__tips-icon {
+  flex-shrink: 0;
+  margin-right: @spacing-2;
+}
+
+.activity-confirm-page__tips-content {
+  display: flex;
+  flex-direction: column;
+  gap: @spacing-1;
+}
+
+.activity-confirm-page__tips-title {
+  font-size: @text-sm;
+  font-weight: 500;
+  color: @gray-900;
+}
+
+.activity-confirm-page__tips-hint {
+  font-size: @text-xs;
+  color: @gray-600;
+}
+
+.activity-confirm-page__panel {
+  margin: 0 @spacing-3;
+  overflow: hidden;
+  background: #ffffff;
+  border-radius: @radius-lg;
+}
+
+.activity-confirm-page__panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: @spacing-3 @spacing-4;
+  border-bottom: 1rpx solid @gray-100;
+}
+
+.activity-confirm-page__panel-title {
+  font-size: @text-base;
+  font-weight: 500;
+  color: @gray-900;
+}
+
+.activity-confirm-page__select-all {
+  padding: @spacing-1 @spacing-2;
+  font-size: @text-sm;
+  color: @color-primary;
+}
+
+.activity-confirm-page__participant {
+  display: flex;
+  align-items: center;
+  padding: @spacing-3 @spacing-4;
+  border-bottom: 1rpx solid @gray-100;
+}
+
+.activity-confirm-page__participant-check {
+  margin-right: @spacing-2;
+}
+
+.activity-confirm-page__participant-avatar {
+  width: 88rpx;
+  height: 88rpx;
+  margin-right: @spacing-3;
+  border-radius: @radius-full;
+  flex-shrink: 0;
+}
+
+.activity-confirm-page__participant-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.activity-confirm-page__participant-name {
+  display: flex;
+  align-items: center;
+  gap: @spacing-2;
+  font-size: @text-base;
+  font-weight: 500;
+  color: @gray-900;
+}
+
+.activity-confirm-page__participant-status {
+  flex-shrink: 0;
+  padding: @spacing-1 @spacing-3;
+  border-radius: @radius-sm;
+  font-size: @text-sm;
+}
+
+.activity-confirm-page__summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: @spacing-2;
+  margin: @spacing-3 @spacing-3 0;
+  padding: @spacing-3;
+  border-radius: @radius-md;
+  font-size: @text-sm;
+  color: @error-color;
+}
+
+.activity-confirm-page__footer {
+  padding: @spacing-3 @spacing-4;
+}
+
+.activity-confirm-page__warning {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: @spacing-1;
+  margin-bottom: @spacing-2;
+  font-size: @text-xs;
+  color: @warning-color;
+}
+
 // 底部操作栏高度预留
 .pb-bottom-bar {
   padding-bottom: 200rpx;

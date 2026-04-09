@@ -1,3 +1,5 @@
+export {}
+
 /**
  * Widget Draft 组件
  * Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8, 6.9
@@ -13,7 +15,6 @@
  */
 
 import { chooseLocation, openMapNavigation } from '../../src/config/index';
-import { useChatStore } from '../../src/stores/chat';
 
 // 活动类型映射
 const TYPE_CONFIG: Record<string, { icon: string; label: string; colorClass: string }> = {
@@ -294,8 +295,7 @@ Component({
     },
 
     dispatchDraftAction(action: string, payload: Record<string, unknown>, originalText: string): void {
-      const chatStore = useChatStore.getState();
-      chatStore.sendAction({
+      this.triggerEvent('actiontap', {
         action,
         payload,
         source: 'widget_draft',

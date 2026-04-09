@@ -1,0 +1,17 @@
+{
+  "component": true,
+  "styleIsolation": "apply-shared",
+  "usingComponents": {
+    "widget-dashboard": "/components/widget-dashboard/index",
+    "widget-draft": "/components/widget-draft/index",
+    "widget-share": "/components/widget-share/index",
+    "widget-explore": "/components/widget-explore/index",
+    "widget-partner-search-results": "/components/widget-partner-search-results/index",
+    "widget-ask-preference": "/components/widget-ask-preference/index",
+    "widget-action-chips": "/components/widget-action-chips/index",
+    "widget-partner-intent-form": "/components/widget-partner-intent-form/index",
+    "widget-draft-settings-form": "/components/widget-draft-settings-form/index",
+    "widget-auth-required": "/components/widget-auth-required/index",
+    "widget-error": "/components/widget-error/index"
+  }
+}

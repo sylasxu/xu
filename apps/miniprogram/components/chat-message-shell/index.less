@@ -1,0 +1,137 @@
+/**
+ * Chat Message Shell 样式
+ * Requirements: 15.6, 15.7
+ * 
+ * Crypto-Clean 视觉风格
+ * - 用户气泡：矢车菊蓝渐变 + 白色文字
+ * - AI 气泡：透明背景 + 深灰文字
+ */
+@import '/styles/tokens.less';
+
+.chat-message-shell {
+  max-width: 70%;
+  word-break: break-word;
+  
+  // 用户消息气泡
+  // Requirements: 15.6 - 矢车菊蓝渐变 + 白色文字
+  // 右上角无圆角，指向用户头像
+  &--user {
+    .chat-message-shell__content {
+      background: var(--gradient-primary, @gradient-primary);
+      color: #FFFFFF;
+      border-radius: var(--radius-lg, @radius-lg) 0 var(--radius-lg, @radius-lg) var(--radius-lg, @radius-lg);
+      padding: @spacing-3 @spacing-4;
+      box-shadow: var(--shadow-sm, @shadow-sm);
+    }
+    
+    .chat-message-shell__text {
+      color: #FFFFFF;
+      font-size: @text-base;
+      line-height: 1.6;
+    }
+    
+    .chat-message-shell__timestamp {
+      text-align: right;
+      margin-top: @spacing-1;
+      color: var(--text-tertiary, @text-tertiary);
+    }
+  }
+  
+  // AI 消息气泡
+  // Requirements: 15.7 - 透明背景 + 深灰文字
+  // 左上角无圆角，指向 AI 头像
+  &--assistant {
+    max-width: 85%;
+    
+    .chat-message-shell__content {
+      background: transparent;
+      padding: @spacing-3 0;
+      border-radius: 0 var(--radius-lg, @radius-lg) var(--radius-lg, @radius-lg) var(--radius-lg, @radius-lg);
+    }
+    
+    .chat-message-shell__text {
+      color: var(--text-main, @text-main);
+      font-size: @text-base;
+      line-height: 1.7;
+    }
+    
+    .chat-message-shell__timestamp {
+      text-align: left;
+      margin-top: @spacing-1;
+      color: var(--text-tertiary, @text-tertiary);
+    }
+  }
+}
+
+.chat-message-shell__content {
+  position: relative;
+}
+
+.chat-message-shell__text {
+  display: block;
+}
+
+.chat-message-shell__timestamp {
+  font-size: @text-xs;
+  padding: 0 @spacing-1;
+}
+
+// 链接样式
+.link {
+  color: var(--color-primary, @color-primary);
+  text-decoration: underline;
+}
+
+// 深色模式
+@media (prefers-color-scheme: dark) {
+  .chat-message-shell {
+    &--user {
+      .chat-message-shell__content {
+        box-shadow: none;
+      }
+    }
+    
+    &--assistant {
+      .chat-message-shell__text {
+        color: var(--text-main, @text-main-dark);
+      }
+    }
+  }
+  
+  .chat-message-shell__timestamp {
+    color: var(--text-tertiary, @text-tertiary-dark);
+  }
+}
+
+// 消息入场动画
+.chat-message-shell {
+  animation: bubbleIn var(--duration-normal, @duration-normal) var(--ease-out-back, @ease-out-back);
+}
+
+@keyframes bubbleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+// 流式打字光标
+.chat-message-shell__cursor {
+  display: inline;
+  margin-left: 4rpx;
+  color: var(--text-main, @text-main);
+  animation: cursorBlink 1s step-end infinite;
+}
+
+@keyframes cursorBlink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}

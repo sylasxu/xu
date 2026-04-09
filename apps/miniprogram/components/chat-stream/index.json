@@ -1,7 +1,0 @@
-{
-  "component": true,
-  "usingComponents": {
-    "message-bubble": "/components/message-bubble/index",
-    "widget-ask-preference": "/components/widget-ask-preference/index"
-  }
-}

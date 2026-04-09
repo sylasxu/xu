@@ -1,0 +1,24 @@
+<!--
+  Chat Message Shell 组件
+  Requirements: 15.6, 15.7
+  
+  消息气泡组件
+  - 用户气泡样式（矢车菊蓝渐变 + 白色文字）
+  - AI 气泡样式（透明背景 + 深灰文字）
+  - 流式打字光标效果
+-->
+<view 
+  class="chat-message-shell chat-message-shell--{{role}}"
+  bindlongpress="onLongPress"
+>
+  <!-- 消息内容 -->
+  <view class="chat-message-shell__content">
+    <text class="chat-message-shell__text" user-select>{{content}}</text>
+    <text wx:if="{{isStreaming && role === 'assistant'}}" class="chat-message-shell__cursor">▊</text>
+  </view>
+  
+  <!-- 时间戳 -->
+  <view wx:if="{{showTimestamp && timestamp}}" class="chat-message-shell__timestamp">
+    <text>{{timestamp}}</text>
+  </view>
+</view>

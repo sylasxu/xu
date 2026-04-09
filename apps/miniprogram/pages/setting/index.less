@@ -1,7 +1,32 @@
 /**
  * 设置页面样式
- * 仅保留原子类无法实现的特殊样式
+ * 使用语义 class + token，停止继续扩 utility 依赖
  */
 @import '/styles/tokens.less';
 
-// 此页面完全使用原子类，无需额外样式
+.setting-page {
+  min-height: 100vh;
+  padding-bottom: calc(env(safe-area-inset-bottom) + 48rpx);
+  background: var(--bg-page, @bg-page);
+}
+
+.setting-page__group {
+  margin-bottom: @spacing-3;
+}
+
+.setting-page__group-title {
+  padding: @spacing-3 @spacing-4 @spacing-2;
+  font-size: @text-sm;
+  color: var(--text-tertiary, @text-tertiary);
+}
+
+.setting-page__logout {
+  padding: @spacing-4 @spacing-4 @spacing-5;
+}
+
+.setting-page__version {
+  padding: @spacing-5 0;
+  text-align: center;
+  font-size: @text-xs;
+  color: var(--text-tertiary, @text-tertiary);
+}

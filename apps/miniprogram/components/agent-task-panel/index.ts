@@ -1,3 +1,5 @@
+export {}
+
 interface TaskAction {
   kind: 'structured_action' | 'navigate' | 'switch_tab'
   label: string

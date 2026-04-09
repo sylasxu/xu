@@ -1,7 +1,7 @@
 /**
- * 消息中心页面（结果导向版）
+ * 续办中心页面（结果导向版）
  * - 接入真实通知 API
- * - 增加待确认匹配卡（确认/取消）
+ * - 承接待确认匹配和继续中的活动
  * - post_activity 点击后分流到复盘 / 再约
  */
 
@@ -35,6 +35,11 @@ interface SystemNotification {
   source: 'system' | 'match';
   matchId?: string;
   isTempOrganizer?: boolean;
+  iconName: string;
+  unreadClassName: string;
+  pendingPrimaryLabel: string;
+  pendingSecondaryLabel: string;
+  pendingWaitLabel: string;
 }
 
 interface ChatItem {
@@ -85,11 +90,23 @@ interface PendingMatchDetailView {
   } | null;
 }
 
+interface FocusCardView {
+  kind: 'match_pending' | 'chat' | 'notification' | 'empty';
+  title: string;
+  hint: string;
+  actionLabel: string;
+  matchId?: string;
+  activityId?: string;
+}
+
 interface MessagePageData {
   notifications: SystemNotification[];
   chatList: ChatItem[];
   loading: boolean;
   notificationExpanded: boolean;
+  summaryTitle: string;
+  summaryHint: string;
+  focusCard: FocusCardView | null;
   unreadNotificationCount: number;
   totalUnreadCount: number;
   pendingMatchActionId: string;
@@ -200,6 +217,9 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     chatList: [],
     loading: true,
     notificationExpanded: true,
+    summaryTitle: '你现在还没有待续办的事情',
+    summaryHint: '一旦有人回应你的找搭子，或者某场活动继续推进，这里会第一时间接住。',
+    focusCard: null,
     unreadNotificationCount: 0,
     totalUnreadCount: 0,
     pendingMatchActionId: '',
@@ -246,6 +266,9 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
       this.setData({
         notifications: messageCenterData.notifications,
         chatList: messageCenterData.chatList,
+        summaryTitle: this.buildSummaryTitle(messageCenterData.notifications, messageCenterData.chatList),
+        summaryHint: this.buildSummaryHint(messageCenterData.notifications, messageCenterData.chatList),
+        focusCard: this.buildFocusCard(messageCenterData.notifications, messageCenterData.chatList),
         unreadNotificationCount: messageCenterData.unreadNotificationCount,
         totalUnreadCount: messageCenterData.totalUnreadCount,
         loading: false,
@@ -301,6 +324,11 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
         read: !!item.isRead,
         createdAt: this.formatTime(createdAtRaw),
         source: 'system' as const,
+        iconName: this.getNotificationIconName(item.type),
+        unreadClassName: item.isRead ? '' : 'notification-item--unread',
+        pendingPrimaryLabel: '',
+        pendingSecondaryLabel: '',
+        pendingWaitLabel: '',
       };
     });
     const pendingMatches = response.data.pendingMatches.map((item) => this.mapPendingMatchToNotification(item));
@@ -362,7 +390,60 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
       source: 'match',
       matchId: item.id,
       isTempOrganizer: item.isTempOrganizer,
+      iconName: this.getNotificationIconName('match_pending'),
+      unreadClassName: 'notification-item--unread',
+      pendingPrimaryLabel: this.getPendingPrimaryLabel(requestMode),
+      pendingSecondaryLabel: this.getPendingSecondaryLabel(requestMode),
+      pendingWaitLabel: this.getPendingWaitLabel(requestMode),
     };
+  },
+
+  getNotificationIconName(type: NotificationType): string {
+    switch (type) {
+      case 'join':
+      case 'new_participant':
+      case 'match_pending':
+        return 'user-add';
+      case 'completed':
+        return 'check-circle';
+      case 'cancelled':
+        return 'close-circle';
+      case 'post_activity':
+        return 'chat';
+      case 'activity_start':
+      case 'activity_reminder':
+        return 'time';
+      case 'quit':
+        return 'error-circle';
+      default:
+        return 'notification';
+    }
+  },
+
+  getPendingPrimaryLabel(requestMode: PendingMatchRequestMode): string {
+    switch (requestMode) {
+      case 'connect':
+        return '同意搭一下';
+      case 'group_up':
+        return '同意一起组局';
+      default:
+        return '确认成局';
+    }
+  },
+
+  getPendingSecondaryLabel(requestMode: PendingMatchRequestMode): string {
+    switch (requestMode) {
+      case 'connect':
+        return '这次先不搭';
+      case 'group_up':
+        return '这次先不组';
+      default:
+        return '暂不成局';
+    }
+  },
+
+  getPendingWaitLabel(requestMode: PendingMatchRequestMode): string {
+    return requestMode === 'auto_match' ? '等召集人确认' : '等对方回应';
   },
 
   getNotificationFallbackContent(type: NotificationMessageCenterResponseSystemNotificationsItemsItemType): string {
@@ -377,6 +458,87 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
       activity_reminder: '活动提醒已送达',
     };
     return map[type] || '你有一条新通知';
+  },
+
+  buildSummaryTitle(notifications: SystemNotification[], chatList: ChatItem[]): string {
+    const pendingMatches = notifications.filter((item) => item.type === 'match_pending').length;
+    const unreadNotifications = notifications.filter((item) => !item.read).length;
+    const activeChats = chatList.filter((item) => !item.isArchived).length;
+
+    if (pendingMatches > 0) {
+      return `现在最值得先处理的是 ${pendingMatches} 条找搭子进展`;
+    }
+
+    if (activeChats > 0 && unreadNotifications > 0) {
+      return `有 ${activeChats} 场活动还在继续，另外还有 ${unreadNotifications} 条结果更新`;
+    }
+
+    if (activeChats > 0) {
+      return `有 ${activeChats} 场活动还在继续聊`;
+    }
+
+    if (unreadNotifications > 0) {
+      return `你有 ${unreadNotifications} 条结果更新待查看`;
+    }
+
+    return '你现在还没有待续办的事情';
+  },
+
+  buildSummaryHint(notifications: SystemNotification[], chatList: ChatItem[]): string {
+    const pendingOrganizer = notifications.some((item) => item.type === 'match_pending' && item.isTempOrganizer);
+    const pendingResponse = notifications.some((item) => item.type === 'match_pending' && !item.isTempOrganizer);
+    const activeChats = chatList.filter((item) => !item.isArchived).length;
+
+    if (pendingOrganizer) {
+      return '先把待确认匹配拍板，这样最容易把“聊一聊”真正推进成局。';
+    }
+
+    if (pendingResponse) {
+      return '有人已经接上你的那件事了，先看看现状，再决定继续留意还是往下约。';
+    }
+
+    if (activeChats > 0) {
+      return '继续中的活动和讨论都在这里，点进去就能顺着上次那件事接着办。';
+    }
+
+    return '一旦有人回应你的找搭子，或者某场活动继续推进，这里会第一时间接住。';
+  },
+
+  buildFocusCard(notifications: SystemNotification[], chatList: ChatItem[]): FocusCardView | null {
+    const matchNotification = notifications.find((item) => item.type === 'match_pending' && !!item.matchId);
+    if (matchNotification?.matchId) {
+      return {
+        kind: 'match_pending',
+        title: matchNotification.isTempOrganizer ? '这条找搭子现在轮到你拍板' : '这条找搭子已经有人接上了',
+        hint: matchNotification.content,
+        actionLabel: matchNotification.isTempOrganizer ? '先看匹配详情' : '看看现在进展',
+        matchId: matchNotification.matchId,
+      };
+    }
+
+    const activeChat = chatList.find((item) => !item.isArchived);
+    if (activeChat?.activityId) {
+      return {
+        kind: 'chat',
+        title: `先接着推进「${activeChat.activityTitle}」`,
+        hint: activeChat.lastMessage || '这场活动还在继续聊，进去就能顺着上次那件事往下接。',
+        actionLabel: '进入讨论区',
+        activityId: activeChat.activityId,
+      };
+    }
+
+    const unreadNotification = notifications.find((item) => !item.read);
+    if (unreadNotification) {
+      return {
+        kind: 'notification',
+        title: unreadNotification.title,
+        hint: unreadNotification.content,
+        actionLabel: '先看结果更新',
+        activityId: unreadNotification.activityId || undefined,
+      };
+    }
+
+    return null;
   },
 
 
@@ -529,15 +691,40 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     this.setData({ notificationExpanded: !this.data.notificationExpanded });
   },
 
-  async onNotificationTap(e: WechatMiniprogram.TouchEvent) {
-    const { id, type, activityId, source, isTempOrganizer, matchId } = e.currentTarget.dataset as {
-      id: string;
-      type: NotificationType;
-      activityId?: string;
-      source: 'system' | 'match';
-      isTempOrganizer?: boolean | string;
-      matchId?: string;
-    };
+  openFocusCard(focusCard: FocusCardView) {
+    if (focusCard.kind === 'match_pending' && focusCard.matchId) {
+      return this.openPendingMatchDetail(focusCard.matchId);
+    }
+
+    if (focusCard.kind === 'chat' && focusCard.activityId) {
+      this.openDiscussion(focusCard.activityId, 'message_center_focus');
+      return Promise.resolve();
+    }
+
+    if (focusCard.kind === 'notification') {
+      this.setData({ notificationExpanded: true });
+    }
+
+    return Promise.resolve();
+  },
+
+  async onFocusCardTap() {
+    const { focusCard } = this.data;
+    if (!focusCard) {
+      return;
+    }
+    await this.openFocusCard(focusCard);
+  },
+
+  async openNotificationContinuation(notification: {
+    id: string;
+    type: NotificationType;
+    activityId?: string;
+    source: 'system' | 'match';
+    isTempOrganizer?: boolean | string;
+    matchId?: string;
+  }) {
+    const { id, type, activityId, source, isTempOrganizer, matchId } = notification;
     const canConfirm = isTempOrganizer === true || isTempOrganizer === 'true';
 
     if (source === 'system' && id) {
@@ -564,10 +751,28 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     }
 
     if (activityId) {
-      wx.navigateTo({
-        url: `/subpackages/activity/detail/index?id=${activityId}`,
-      });
+      this.openActivityDetail(activityId);
     }
+  },
+
+  async onNotificationTap(e: WechatMiniprogram.TouchEvent) {
+    const { id, type, activityId, source, isTempOrganizer, matchId } = e.currentTarget.dataset as {
+      id: string;
+      type: NotificationType;
+      activityId?: string;
+      source: 'system' | 'match';
+      isTempOrganizer?: boolean | string;
+      matchId?: string;
+    };
+
+    await this.openNotificationContinuation({
+      id,
+      type,
+      activityId,
+      source,
+      isTempOrganizer,
+      matchId,
+    });
   },
 
   async markNotificationRead(notificationId: string, shouldReload = true) {
@@ -603,9 +808,7 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
       await this.loadData();
 
       if (response.data.activityId) {
-        wx.navigateTo({
-          url: `/subpackages/activity/detail/index?id=${response.data.activityId}`,
-        });
+        this.openActivityDetail(response.data.activityId);
       }
     } catch (error) {
       console.error('确认待处理匹配失败', error);
@@ -667,7 +870,7 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     const activityRef = activityId ? `（activityId: ${activityId}）` : '';
     const prompt = `我刚结束${activityHint}${activityRef}，帮我先做一份复盘：亮点、槽点、下次优化和一句可直接发群里的总结。`;
 
-    this.openHomeWithPrompt(prompt, {
+    this.openChatWithPrompt(prompt, {
       ...(activityId ? { activityId } : {}),
       activityMode: 'review',
       entry: 'message_center_post_activity',
@@ -682,22 +885,40 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     const activityRef = activityId ? `（activityId: ${activityId}）` : '';
     const prompt = `基于我刚结束的${activityHint}${activityRef}，帮我快速再约一场：延续合适的人、给个新时间建议，并直接生成一段可发送的招呼文案。`;
 
-    this.openHomeWithPrompt(prompt, {
+    this.openChatWithPrompt(prompt, {
       ...(activityId ? { activityId } : {}),
       activityMode: 'rebook',
       entry: 'message_center_post_activity',
     });
   },
 
-  openHomeWithPrompt(prompt: string, contextOverrides?: PromptContextOverrides) {
+  openChatWithPrompt(prompt: string, contextOverrides?: PromptContextOverrides) {
     useChatStore.getState().sendMessage(prompt, contextOverrides);
-    wx.switchTab({ url: '/pages/home/index' });
+    wx.switchTab({ url: '/pages/chat/index' });
   },
 
   onChatTap(e: WechatMiniprogram.TouchEvent) {
     const { activityId } = e.currentTarget.dataset as { activityId: string };
+    this.openDiscussion(activityId, 'message_center');
+  },
+
+  openDiscussion(activityId: string, entry: string) {
+    if (!activityId) {
+      return;
+    }
+
     wx.navigateTo({
-      url: `/pages/chat/index?activityId=${activityId}`,
+      url: `/subpackages/activity/discussion/index?id=${activityId}&entry=${entry}`,
+    });
+  },
+
+  openActivityDetail(activityId: string) {
+    if (!activityId) {
+      return;
+    }
+
+    wx.navigateTo({
+      url: `/subpackages/activity/detail/index?id=${activityId}`,
     });
   },
 
@@ -706,7 +927,7 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     if (pages.length > 1) {
       wx.navigateBack();
     } else {
-      wx.switchTab({ url: '/pages/home/index' });
+      wx.switchTab({ url: '/pages/chat/index' });
     }
   },
 

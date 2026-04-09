@@ -103,5 +103,7 @@
   <auth-sheet
     bind:success="onAuthSuccess"
     bind:pendingaction="onPendingAction"
+    bind:viewagreement="onAuthSheetViewAgreement"
+    bind:viewpolicy="onAuthSheetViewPolicy"
   />
 </view>

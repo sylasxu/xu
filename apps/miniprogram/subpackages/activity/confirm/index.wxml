@@ -2,26 +2,26 @@
   履约确认页面
   TDesign + Atomic Less 重构
 -->
-<view class="min-h-screen bg-gray-50 pb-bottom-bar">
+<view class="activity-confirm-page pb-bottom-bar">
   <!-- 导航栏 -->
   <t-navbar title="履约确认" left-arrow />
 
   <!-- 加载状态 -->
-  <view class="flex flex-col items-center justify-center py-12 text-gray-400 text-sm gap-3" wx:if="{{loading}}">
+  <view class="activity-confirm-page__loading" wx:if="{{loading}}">
     <t-loading theme="circular" size="80rpx" />
     <text>加载中...</text>
   </view>
 
   <block wx:else>
     <!-- 活动信息头部 -->
-    <view class="bg-white p-4 mb-3" wx:if="{{activity}}">
-      <view class="text-xl font-semibold text-gray-900 mb-2">{{activity.title}}</view>
-      <view class="flex flex-col gap-2">
-        <view class="flex items-center gap-2 text-sm text-gray-600">
+    <view class="activity-confirm-page__card" wx:if="{{activity}}">
+      <view class="activity-confirm-page__title">{{activity.title}}</view>
+      <view class="activity-confirm-page__meta">
+        <view class="activity-confirm-page__meta-row">
           <t-icon name="time" size="32rpx" />
           <text>{{activity.startAt}}</text>
         </view>
-        <view class="flex items-center gap-2 text-sm text-gray-600">
+        <view class="activity-confirm-page__meta-row">
           <t-icon name="location" size="32rpx" />
           <text>{{activity.locationName}}</text>
         </view>
@@ -29,19 +29,19 @@
     </view>
 
     <!-- 提示信息 -->
-    <view class="tips-section flex items-start p-3 mx-3 mb-3 rounded-md">
-      <t-icon name="info-circle-filled" size="40rpx" color="#FF9500" class="flex-shrink-0 mr-2" />
-      <view class="flex flex-col gap-1">
-        <text class="text-sm font-medium text-gray-900">请确认参与者的到场情况</text>
-        <text class="text-xs text-gray-600">默认全部已到场，如有未到场请取消勾选</text>
+    <view class="tips-section activity-confirm-page__tips">
+      <t-icon name="info-circle-filled" size="40rpx" color="#FF9500" class="activity-confirm-page__tips-icon" />
+      <view class="activity-confirm-page__tips-content">
+        <text class="activity-confirm-page__tips-title">请确认参与者的到场情况</text>
+        <text class="activity-confirm-page__tips-hint">默认全部已到场，如有未到场请取消勾选</text>
       </view>
     </view>
 
     <!-- 参与者列表 -->
-    <view class="bg-white mx-3 rounded-lg overflow-hidden">
-      <view class="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-        <text class="text-base font-medium text-gray-900">参与者列表 ({{participants.length}}人)</text>
-        <view class="select-all-btn text-sm text-brand px-2 py-1" bind:tap="onSelectAll">
+    <view class="activity-confirm-page__panel">
+      <view class="activity-confirm-page__panel-header">
+        <text class="activity-confirm-page__panel-title">参与者列表 ({{participants.length}}人)</text>
+        <view class="select-all-btn activity-confirm-page__select-all" bind:tap="onSelectAll">
           <text>全选已到场</text>
         </view>
       </view>
@@ -50,24 +50,24 @@
         <view
           wx:for="{{participants}}"
           wx:key="id"
-          class="participant-item flex items-center px-4 py-3 border-b border-gray-100 {{item.fulfilled ? '' : 'no-show'}}"
+          class="participant-item activity-confirm-page__participant {{item.fulfilled ? '' : 'no-show'}}"
           data-index="{{index}}"
           bind:tap="onToggleFulfilled"
         >
-          <view class="mr-2">
+          <view class="activity-confirm-page__participant-check">
             <t-checkbox checked="{{item.fulfilled}}" icon="circle" borderless />
           </view>
           <image
-            class="w-88 h-88 rounded-full flex-shrink-0 mr-3"
+            class="activity-confirm-page__participant-avatar"
             src="{{item.avatarUrl || '/static/images/default-avatar.png'}}"
             mode="aspectFill"
           />
-          <view class="flex-1 min-w-0">
-            <view class="flex items-center gap-2 text-base font-medium text-gray-900">
+          <view class="activity-confirm-page__participant-main">
+            <view class="activity-confirm-page__participant-name">
               <text>{{item.nickname}}</text>
             </view>
           </view>
-          <view class="text-sm px-3 py-1 rounded-sm flex-shrink-0 {{item.fulfilled ? 'status-fulfilled' : 'status-no-show'}}">
+          <view class="activity-confirm-page__participant-status {{item.fulfilled ? 'status-fulfilled' : 'status-no-show'}}">
             <text>{{item.fulfilled ? '已到场' : '未到场'}}</text>
           </view>
         </view>
@@ -75,14 +75,14 @@
     </view>
 
     <!-- 未到场统计 -->
-    <view class="no-show-summary flex items-center justify-center gap-2 p-3 mx-3 mt-3 rounded-md text-sm text-error" wx:if="{{noShowCount > 0}}">
+    <view class="no-show-summary activity-confirm-page__summary" wx:if="{{noShowCount > 0}}">
       <t-icon name="error-circle" size="40rpx" color="#FF4D4F" />
       <text>您标记了 {{noShowCount}} 人未到场</text>
     </view>
 
     <!-- 底部操作栏 -->
-    <view class="bottom-bar px-4 py-3">
-      <view class="flex items-center justify-center gap-1 text-xs text-warning mb-2" wx:if="{{noShowCount > 0}}">
+    <view class="bottom-bar activity-confirm-page__footer">
+      <view class="activity-confirm-page__warning" wx:if="{{noShowCount > 0}}">
         <t-icon name="info-circle" size="28rpx" />
         <text>请确认未到场名单后再提交</text>
       </view>

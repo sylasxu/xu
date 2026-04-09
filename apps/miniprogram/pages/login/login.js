@@ -20,7 +20,7 @@ Page({
     const token = wx.getStorageSync('token')
     if (token) {
       wx.switchTab({
-        url: '/pages/home/index'
+        url: '/pages/chat/index'
       })
     }
   },
@@ -132,7 +132,7 @@ Page({
       // 5. 跳转到首页
       setTimeout(() => {
         wx.switchTab({
-          url: '/pages/home/index'
+          url: '/pages/chat/index'
         })
       }, 1500)
 

@@ -108,17 +108,7 @@ Component({
     onMenuTap() {
       // 触感反馈
       wx.vibrateShort({ type: 'light' });
-      
-      wx.navigateTo({
-        url: '/pages/profile/index',
-        fail: () => {
-          // 如果 navigateTo 失败，尝试 switchTab
-          wx.switchTab({
-            url: '/pages/profile/index',
-          });
-        },
-      });
-      
+
       this.triggerEvent('menutap');
     },
 
@@ -136,9 +126,9 @@ Component({
         // 页面栈长度大于 1，正常返回
         wx.navigateBack();
       } else {
-        // 页面栈长度为 1（单点进入），跳转首页
+        // 页面栈长度为 1（单点进入），跳转对话主场
         wx.reLaunch({
-          url: '/pages/home/index',
+          url: '/pages/chat/index',
         });
       }
       
@@ -180,16 +170,13 @@ Component({
       wx.vibrateShort({ type: 'light' });
       
       this.closeDropmenu();
-      
-      if (action === 'message') {
-        // Requirements: 2.7 - 跳转消息中心
-        wx.navigateTo({
-          url: '/pages/message/index',
-        });
-      } else if (action === 'newchat') {
+
+      if (action === 'newchat') {
         // Requirements: 2.8 - 新对话
         this.triggerEvent('newchat');
       }
+
+      this.triggerEvent('itemtap', { action });
     },
 
     /**

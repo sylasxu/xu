@@ -1,0 +1,84 @@
+/**
+ * Chat Thinking 组件样式 - AI 思考态
+ * Requirements: 响应感
+ * 
+ * 视觉效果：
+ * - 三个圆点 (8rpx) 横向排列，间距 12rpx
+ * - 颜色：主色 #5B75FB，透明度 0.6
+ * - 动画：依次上下跳动 (translateY)
+ * - 外层容器：淡蓝背景，圆角 24rpx
+ */
+
+@import '../../styles/tokens.less';
+
+.chat-thinking {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: @spacing-2;
+  
+  &__container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12rpx;
+    padding: @spacing-3 @spacing-4;
+    background: rgba(91, 117, 251, 0.08);
+    border-radius: var(--radius-md, @radius-md);
+    min-width: 100rpx;
+  }
+  
+  &__dot {
+    width: 16rpx;
+    height: 16rpx;
+    border-radius: var(--radius-full, @radius-full);
+    background: @color-primary;
+    opacity: 0.6;
+    animation: thinking-bounce 1.4s ease-in-out infinite;
+    
+    &--1 {
+      animation-delay: 0s;
+    }
+    
+    &--2 {
+      animation-delay: 0.2s;
+    }
+    
+    &--3 {
+      animation-delay: 0.4s;
+    }
+  }
+  
+  &__text {
+    font-size: @text-sm;
+    color: var(--text-secondary, @text-secondary);
+    padding-left: @spacing-1;
+  }
+}
+
+// 圆点跳动动画
+@keyframes thinking-bounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+  }
+  30% {
+    transform: translateY(-12rpx);
+  }
+}
+
+// 深色模式适配
+@media (prefers-color-scheme: dark) {
+  .chat-thinking {
+    &__container {
+      background: rgba(91, 117, 251, 0.15);
+    }
+    
+    &__dot {
+      opacity: 0.8;
+    }
+    
+    &__text {
+      color: var(--text-secondary-dark, @text-secondary-dark);
+    }
+  }
+}

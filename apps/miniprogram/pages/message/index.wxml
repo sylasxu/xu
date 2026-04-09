@@ -1,15 +1,15 @@
 <!--
-  消息中心页面
+  续办中心页面
   Requirements: 9.1, 9.2, 9.3, 9.4, 9.5
   
-  - 显示所有参与的活动群聊列表
+  - 承接结果更新、待确认事项和继续中的活动
   - 显示活动标题、最后一条消息、未读数量
-  - 点击跳转到 Lite_Chat 页面
+  - 点击进入正式讨论页继续推进
 -->
 <view class="message-page">
   <!-- 自定义导航栏 -->
   <custom-navbar 
-    title="消息中心" 
+    title="继续中的事情" 
     showMenu="{{false}}" 
     showMore="{{false}}"
     showBack="{{true}}"
@@ -26,17 +26,37 @@
     refresher-triggered="{{loading}}"
     bindrefresherrefresh="loadData"
   >
+    <view class="overview-card">
+      <text class="overview-card__title">{{summaryTitle}}</text>
+      <text class="overview-card__hint">{{summaryHint}}</text>
+    </view>
+
+    <view wx:if="{{focusCard}}" class="focus-card" bind:tap="onFocusCardTap">
+      <view class="focus-card__meta">
+        <text class="focus-card__eyebrow">现在先处理这个</text>
+        <text class="focus-card__title">{{focusCard.title}}</text>
+        <text class="focus-card__hint">{{focusCard.hint}}</text>
+      </view>
+      <view class="focus-card__action">
+        <text>{{focusCard.actionLabel}}</text>
+        <t-icon name="chevron-right" size="30rpx" color="#5B75FB" />
+      </view>
+    </view>
+
     <!-- 系统通知区域 -->
     <view class="section-card">
       <view 
         class="section-header"
         bind:tap="toggleNotificationExpand"
       >
-        <view class="section-title">
-          <view class="section-icon section-icon--amber">
-            <t-icon name="notification" size="36rpx" />
+          <view class="section-title">
+            <view class="section-icon section-icon--amber">
+              <t-icon name="notification" size="36rpx" />
+            </view>
+          <view class="section-title__copy">
+            <text>结果更新</text>
+            <text class="section-title__desc">谁回应了、谁在等你拍板，都先在这里处理</text>
           </view>
-          <text>结果更新</text>
           <t-badge
             wx:if="{{unreadNotificationCount > 0}}"
             count="{{unreadNotificationCount}}"
@@ -54,7 +74,7 @@
           <view
             wx:for="{{notifications}}"
             wx:key="id"
-            class="notification-item {{item.read ? '' : 'notification-item--unread'}}"
+            class="notification-item {{item.unreadClassName}}"
             data-id="{{item.id}}"
             data-type="{{item.type}}"
             data-activity-id="{{item.activityId}}"
@@ -66,7 +86,7 @@
             <!-- 图标 -->
             <view class="notification-icon notification-icon--{{item.type}}">
               <t-icon
-                name="{{item.type === 'join' || item.type === 'new_participant' || item.type === 'match_pending' ? 'user-add' : item.type === 'completed' ? 'check-circle' : item.type === 'cancelled' ? 'close-circle' : item.type === 'post_activity' ? 'chat' : item.type === 'activity_start' || item.type === 'activity_reminder' ? 'time' : item.type === 'quit' ? 'error-circle' : 'notification'}}"
+                name="{{item.iconName}}"
                 size="40rpx"
               />
             </view>
@@ -88,7 +108,7 @@
                 data-match-id="{{item.matchId}}"
                 catch:tap="onMatchConfirmTap"
               >
-                {{item.requestMode === 'connect' ? '同意搭一下' : (item.requestMode === 'group_up' ? '同意一起组局' : '确认成局')}}
+                {{item.pendingPrimaryLabel}}
               </t-button>
               <t-button
                 size="small"
@@ -97,14 +117,14 @@
                 data-match-id="{{item.matchId}}"
                 catch:tap="onMatchCancelTap"
               >
-                {{item.requestMode === 'connect' ? '这次先不搭' : (item.requestMode === 'group_up' ? '这次先不组' : '暂不成局')}}
+                {{item.pendingSecondaryLabel}}
               </t-button>
             </view>
             <view wx:elif="{{item.type === 'post_activity'}}" class="notification-tag">
               复盘 / 再约
             </view>
             <view wx:elif="{{item.type === 'match_pending' && !item.isTempOrganizer}}" class="notification-tag">
-              {{item.requestMode === 'auto_match' ? '等召集人确认' : '等对方回应'}}
+              {{item.pendingWaitLabel}}
             </view>
             <view wx:else class="notification-arrow">
               <t-icon name="chevron-right" size="36rpx" color="#9CA3AF" />
@@ -124,7 +144,10 @@
           <view class="section-icon section-icon--blue">
             <t-icon name="chat" size="36rpx" />
           </view>
-          <text>活动群聊</text>
+          <view class="section-title__copy">
+            <text>继续聊的活动</text>
+            <text class="section-title__desc">需要继续协调、确认或破冰的活动都在这里</text>
+          </view>
         </view>
       </view>
 
@@ -170,8 +193,8 @@
         </block>
         <view wx:else class="empty-state empty-state--large">
           <t-icon name="chat" size="96rpx" color="#E5E7EB" />
-          <text class="empty-title">暂无群聊</text>
-          <text class="empty-desc">参与活动后即可加入群聊</text>
+          <text class="empty-title">还没有继续中的活动</text>
+          <text class="empty-desc">报上局之后，这里会继续承接聊天和确认</text>
         </view>
       </view>
     </view>

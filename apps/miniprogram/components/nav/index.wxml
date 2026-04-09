@@ -1,14 +1,9 @@
-<view class="home-navbar">
-  <t-navbar title="{{ navType === 'search' ? '' : titleText }}">
-    <view slot="left" class="flex items-center pl-2">
-      <t-icon bind:tap="openDrawer" name="view-list" size="48rpx" class="p-2" />
-      <t-search
-        wx:if="{{navType === 'search'}}"
-        shape="round"
-        placeholder="请搜索你想要的内容"
-        bindtap="openSearch"
-        class="nav-search"
-      />
+<view class="app-nav">
+  <t-navbar title="{{titleText}}">
+    <view slot="left" class="app-nav__left">
+      <view class="app-nav__menu-btn" bind:tap="openDrawer">
+        <t-icon name="view-list" size="48rpx" />
+      </view>
     </view>
   </t-navbar>
   <t-drawer

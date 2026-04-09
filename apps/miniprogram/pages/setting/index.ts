@@ -57,6 +57,16 @@ Page({
         ],
       },
       {
+        title: '偏好线索',
+        items: [
+          {
+            title: '我的偏好整理',
+            key: 'preferenceInsight',
+            type: 'action',
+          },
+        ],
+      },
+      {
         title: '其他',
         items: [
           {
@@ -146,6 +156,9 @@ Page({
     if (type === 'switch') return;
 
     switch (key) {
+      case 'preferenceInsight':
+        this.showPreferenceInsight();
+        break;
       case 'clearCache':
         this.clearCache();
         break;
@@ -153,6 +166,17 @@ Page({
         this.showAbout();
         break;
     }
+  },
+
+  /**
+   * 偏好线索说明
+   */
+  showPreferenceInsight() {
+    wx.showModal({
+      title: '偏好线索',
+      content: '你的活动偏好、常去地点和常用表达，会在对话和真实参与结果里慢慢被小聚学会，不用单独填一大张表。',
+      showCancel: false,
+    });
   },
 
   /**
@@ -206,7 +230,7 @@ Page({
 
           // 返回首页
           setTimeout(() => {
-            wx.switchTab({ url: '/pages/home/index' });
+            wx.switchTab({ url: '/pages/chat/index' });
           }, 1500);
         }
       },

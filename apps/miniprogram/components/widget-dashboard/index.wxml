@@ -27,6 +27,7 @@
       profile="{{displaySocialProfile}}"
       collapsed="{{hasActivities}}"
       profileHints="{{displayUi.profileHints}}"
+      bind:preferencetap="onPreferenceTap"
     />
   </block>
   

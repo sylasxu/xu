@@ -1,0 +1,22 @@
+<!--
+  Chat Thinking 组件 - AI 思考态
+  Requirements: 响应感
+  
+  视觉效果：
+  - 三个圆点横向排列，依次上下跳动
+  - 淡蓝背景容器
+  
+  使用场景：
+  - AI 解析时插入到 Chat Stream 底部
+  - 收到 AI 响应后移除
+-->
+<view class="chat-thinking">
+  <view class="chat-thinking__container">
+    <view class="chat-thinking__dot chat-thinking__dot--1"></view>
+    <view class="chat-thinking__dot chat-thinking__dot--2"></view>
+    <view class="chat-thinking__dot chat-thinking__dot--3"></view>
+  </view>
+  <view class="chat-thinking__text" wx:if="{{text}}">
+    <text>{{text}}</text>
+  </view>
+</view>

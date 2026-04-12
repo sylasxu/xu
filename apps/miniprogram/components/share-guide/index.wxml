@@ -48,7 +48,7 @@
       <!-- 活动信息 -->
       <view class="share-guide__card-info">
         <text class="share-guide__card-title ellipsis">{{activityTitle}}</text>
-        <text wx:if="{{locationName}}" class="share-guide__card-location ellipsis">{{locationName}}</text>
+        <text wx:if="{{shareLocationName}}" class="share-guide__card-location ellipsis">{{shareLocationName}}</text>
         <text class="share-guide__card-desc">点击分享到群聊</text>
       </view>
     </view>

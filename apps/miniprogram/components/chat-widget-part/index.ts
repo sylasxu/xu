@@ -2,6 +2,13 @@ export {}
 
 interface WidgetPartDataState {
   dashboardNickname: string;
+  dashboardGreeting: string;
+  dashboardSubGreeting: string;
+  dashboardSections: Record<string, unknown>[];
+  dashboardActivities: Record<string, unknown>[];
+  dashboardSocialProfile: Record<string, unknown>;
+  dashboardQuickPrompts: Record<string, unknown>[];
+  dashboardUi: Record<string, unknown>;
   askPreferenceDisabled: boolean;
   actionChipsDisabled: boolean;
   partnerIntentFormDisabled: boolean;
@@ -32,6 +39,13 @@ Component({
 
   data: {
     dashboardNickname: '搭子',
+    dashboardGreeting: '',
+    dashboardSubGreeting: '',
+    dashboardSections: [],
+    dashboardActivities: [],
+    dashboardSocialProfile: {},
+    dashboardQuickPrompts: [],
+    dashboardUi: {},
     askPreferenceDisabled: false,
     actionChipsDisabled: false,
     partnerIntentFormDisabled: false,
@@ -54,9 +68,27 @@ Component({
         ? partData.message
         : '出了点问题'
       const errorShowRetry = partData.showRetry !== false
+      const dashboardGreeting = typeof partData.greeting === 'string' ? partData.greeting : ''
+      const dashboardSubGreeting = typeof partData.subGreeting === 'string' ? partData.subGreeting : ''
+      const dashboardSections = Array.isArray(partData.sections) ? partData.sections as Record<string, unknown>[] : []
+      const dashboardActivities = Array.isArray(partData.activities) ? partData.activities as Record<string, unknown>[] : []
+      const dashboardSocialProfile = partData.socialProfile && typeof partData.socialProfile === 'object'
+        ? partData.socialProfile as Record<string, unknown>
+        : {}
+      const dashboardQuickPrompts = Array.isArray(partData.quickPrompts) ? partData.quickPrompts as Record<string, unknown>[] : []
+      const dashboardUi = partData.ui && typeof partData.ui === 'object'
+        ? partData.ui as Record<string, unknown>
+        : {}
 
       this.setData({
         dashboardNickname,
+        dashboardGreeting,
+        dashboardSubGreeting,
+        dashboardSections,
+        dashboardActivities,
+        dashboardSocialProfile,
+        dashboardQuickPrompts,
+        dashboardUi,
         askPreferenceDisabled: disabled,
         actionChipsDisabled: disabled,
         partnerIntentFormDisabled: disabled,

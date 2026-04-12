@@ -25,6 +25,7 @@ export const STRUCTURED_ACTION_TYPES = [
   'view_activity',           // 查看活动详情
   'cancel_join',             // 取消报名
   'share_activity',          // 分享活动
+  'record_activity_feedback', // 记录活动后真实反馈
   // 创建相关
   'create_activity',         // 创建活动（从 widget_draft 确认）
   'edit_draft',              // 编辑草稿

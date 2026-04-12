@@ -9,6 +9,7 @@ import { createLogger } from '../observability/logger';
 
 // 复用现有 Service 函数
 import { joinActivity, quitActivity, getActivityById, getNearbyActivities } from '../../activities/activity.service';
+import { recordActivitySelfFeedback, type ActivityFeedbackValue } from '../../participants/participant.service';
 import { search } from '../rag';
 import { confirmMatch, cancelMatch, createManualPartnerMatch } from '../tools/partner-match';
 import { buildCreateDraftParamsFromActionPayload, createActivityDraftRecord, publishActivityRecord, updateActivityDraftRecord } from '../tools/activity-tools';
@@ -168,6 +169,11 @@ const STRUCTURED_ACTION_HANDLERS: Record<StructuredActionType, {
     handler: handleShareActivity,
     requiresAuth: false,
     description: '分享活动',
+  },
+  record_activity_feedback: {
+    handler: handleRecordActivityFeedback,
+    requiresAuth: true,
+    description: '记录活动后真实反馈',
   },
   
   // 创建相关
@@ -839,6 +845,52 @@ async function handleShareActivity(
       title: toTextValue(payload.title),
     },
   };
+}
+
+function readActivityFeedbackValue(value: unknown): ActivityFeedbackValue | null {
+  if (value === 'positive' || value === 'neutral' || value === 'failed') {
+    return value;
+  }
+
+  return null;
+}
+
+async function handleRecordActivityFeedback(
+  payload: Record<string, unknown>,
+  userId: string | null
+): Promise<StructuredActionResult> {
+  if (!userId) {
+    return { success: false, error: '请先登录', data: { requiresAuth: true } };
+  }
+
+  const activityId = toTextValue(payload.activityId);
+  const feedback = readActivityFeedbackValue(payload.feedback);
+  if (!activityId) {
+    return { success: false, error: '缺少活动 ID' };
+  }
+  if (!feedback) {
+    return { success: false, error: '缺少活动反馈结果' };
+  }
+
+  try {
+    const result = await recordActivitySelfFeedback({
+      userId,
+      activityId,
+      feedback,
+      reviewSummary: toTextValue(payload.reviewSummary),
+    });
+
+    return {
+      success: true,
+      data: {
+        activityId,
+        feedback,
+        message: result.msg,
+      },
+    };
+  } catch (error) {
+    return { success: false, error: getErrorMessage(error) };
+  }
 }
 
 async function handleCreateActivity(

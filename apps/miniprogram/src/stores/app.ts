@@ -2,8 +2,8 @@
  * 应用全局状态管理
  * 包含系统信息、网络状态、UI 状态控制
  */
-import { create } from 'zustand'
-import { immer } from 'zustand/middleware/immer'
+import { createStore } from 'zustand/vanilla.js'
+import { immer } from 'zustand/middleware/immer.js'
 
 // AI 思考状态类型
 type AIThinkingState = 'idle' | 'thinking' | 'rendering_widget'
@@ -73,7 +73,7 @@ interface AppState {
   clearMessageCenterFocus: () => void
 }
 
-export const useAppStore = create<AppState>()(
+export const useAppStore = createStore<AppState>()(
   immer((set) => ({
     // 初始状态
     systemInfo: null,

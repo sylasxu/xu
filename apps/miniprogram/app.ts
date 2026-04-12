@@ -31,6 +31,25 @@ interface LaunchOptions {
   };
 }
 
+function readActivityIdFromScene(rawScene: string): string | null {
+  const pairs = decodeURIComponent(rawScene)
+    .split('&')
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+
+  for (const pair of pairs) {
+    const [rawKey, ...rawValueParts] = pair.split('=')
+    const key = rawKey ? rawKey.trim() : ''
+    const value = rawValueParts.join('=').trim()
+
+    if ((key === 'id' || key === 'activityId') && value) {
+      return value
+    }
+  }
+
+  return null
+}
+
 App<AppInstance>({
   onLaunch(options: LaunchOptions) {
     // 版本更新检查
@@ -98,9 +117,7 @@ App<AppInstance>({
     // 处理分享场景
     if (query.scene) {
       try {
-        const sceneParams = decodeURIComponent(query.scene);
-        const params = new URLSearchParams(sceneParams);
-        const activityId = params.get('id') || params.get('activityId');
+        const activityId = readActivityIdFromScene(query.scene);
 
         if (activityId) {
           setTimeout(() => {

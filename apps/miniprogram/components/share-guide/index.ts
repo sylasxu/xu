@@ -14,7 +14,7 @@ import { useAppStore } from '../../src/stores/app'
 interface ShareGuideData {
   visible: boolean
   activityTitle: string
-  locationName: string
+  shareLocationName: string
   autoCloseTimer: number | null
 }
 
@@ -43,7 +43,7 @@ function readNumber(value: unknown, fallback: number): number {
 const SHARE_GUIDE_DATA: ShareGuideData = {
   visible: false,
   activityTitle: '',
-  locationName: '',
+  shareLocationName: '',
   autoCloseTimer: null,
 }
 
@@ -95,10 +95,10 @@ Component({
       }
     },
     'title': function(title: string) {
-      this.setData({ activityTitle: title })
+      this.setData({ activityTitle: typeof title === 'string' ? title : '' })
     },
     'locationName': function(name: string) {
-      this.setData({ locationName: name })
+      this.setData({ shareLocationName: typeof name === 'string' ? name : '' })
     },
   },
 
@@ -130,8 +130,8 @@ Component({
       if (this.data.visible !== shouldShow) {
         this.setData({ 
           visible: shouldShow,
-          activityTitle: data?.title || '',
-          locationName: data?.locationName || '',
+          activityTitle: typeof data?.title === 'string' ? data.title : '',
+          shareLocationName: typeof data?.locationName === 'string' ? data.locationName : '',
         })
         
         if (shouldShow) {

@@ -7,41 +7,52 @@
   - 首次进入显示 Widget_Dashboard
   - 空气感渐变背景
 -->
-<view class="chat-page">
+<view class="chat-page {{isWelcomeState ? 'chat-page--welcome' : 'chat-page--conversation'}}">
   <!-- 网络状态通知条 -->
   <network-status bind:retry="onNetworkRetry" />
   
-  <!-- 空气感渐变背景 -->
-  <view class="atmospheric-bg"></view>
+  <view wx:if="{{isWelcomeState}}" class="atmospheric-bg"></view>
   
   <!-- 自定义导航栏 -->
   <custom-navbar 
     showMenu="{{true}}"
     showMore="{{true}}"
+    transparent="{{isWelcomeState}}"
     bind:menutap="onNavbarMenuTap"
     bind:newchat="onNewChat"
     bind:itemtap="onNavbarItemTap"
   />
-  
-  <!-- 对话流容器 -->
+
+  <scroll-view wx:if="{{isWelcomeState}}" scroll-y class="welcome-layout">
+    <view class="welcome-layout__inner">
+      <view class="welcome-hero">
+        <view class="welcome-hero__copy">
+          <text class="welcome-hero__title">{{welcomeGreeting}}</text>
+          <text class="welcome-hero__subtitle">{{welcomeSubGreeting}}</text>
+        </view>
+        <view class="welcome-hero__spark"></view>
+      </view>
+
+      <quick-prompts
+        prompts="{{welcomeQuickPrompts}}"
+        bind:prompttap="onWelcomePromptTap"
+      />
+
+      <view class="welcome-layout__spacer"></view>
+    </view>
+  </scroll-view>
+
   <chat-list
+    wx:else
     messages="{{messages}}"
     loading="{{false}}"
   >
-    <!-- Hot Chips 热词快捷入口 (v4.7) -->
-    <hot-chips
-      wx:if="{{showHotKeywords}}"
-      keywords="{{hotKeywords}}"
-      bind:chipclick="onHotChipClick"
-    />
-
     <agent-task-panel
       wx:if="{{currentTasks.length > 0}}"
       tasks="{{currentTasks}}"
       bind:actiontap="onAgentTaskActionTap"
     />
     
-    <!-- 消息列表 -->
     <view class="message-list">
       <block wx:for="{{messages}}" wx:key="id">
         <view 
@@ -49,7 +60,6 @@
           class="message-item message-item--{{item.role}} {{index >= messages.length - 3 ? 'slide-up-fade-in' : ''}}"
           style="animation-delay: {{(index - (messages.length - 3)) * 50}}ms;"
         >
-          <!-- 用户消息 -->
           <block wx:if="{{item.role === 'user'}}">
             <block wx:for="{{item.parts}}" wx:for-item="part" wx:key="index">
               <block wx:if="{{part.type === 'text'}}">
@@ -61,10 +71,8 @@
             </block>
           </block>
           
-          <!-- AI 消息 - 遍历 parts 渲染 -->
           <block wx:else>
             <block wx:for="{{item.parts}}" wx:for-item="part" wx:for-index="partIndex" wx:key="partIndex">
-              <!-- 文本消息 -->
               <block wx:if="{{part.type === 'text'}}">
                 <chat-message-shell 
                   role="assistant" 
@@ -73,7 +81,6 @@
                 />
               </block>
               
-              <!-- Widget 消息 -->
               <block wx:elif="{{part.type === 'widget'}}">
                 <chat-widget-part
                   part="{{part}}"
@@ -106,7 +113,6 @@
       </block>
     </view>
     
-    <!-- AI 思考态 - 当 status 为 submitted 时显示 -->
     <view wx:if="{{status === 'submitted'}}" class="message-item message-item--assistant slide-up-fade-in">
       <chat-thinking text="稍等，我帮你看看..." />
     </view>
@@ -117,6 +123,7 @@
     id="aiDock"
     placeholder="{{composerPlaceholder}}"
     value="{{inputValue}}"
+    welcome="{{isWelcomeState}}"
     bind:inputchange="onInputChange"
     bind:send="onSend"
   />
@@ -133,7 +140,7 @@
   <!-- 分享引导蒙层 -->
   <share-guide 
     show="{{isShareGuideVisible}}"
-    title="{{shareGuideData.title}}"
-    mapUrl="{{shareGuideData.mapUrl}}"
+    title="{{shareGuideTitle}}"
+    locationName="{{shareGuideLocationName}}"
   />
 </view>

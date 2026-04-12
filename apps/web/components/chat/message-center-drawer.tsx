@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import {
   BellRing,
   Check,
@@ -157,6 +157,7 @@ type MessageCenterDrawerProps = {
   isDarkMode?: boolean;
   openSignal?: number;
   focusPendingMatchId?: string | null;
+  trigger?: ReactNode;
   onSendPrompt: (
     prompt: string,
     displayText?: string,
@@ -339,6 +340,7 @@ export function MessageCenterDrawer({
   isDarkMode = false,
   openSignal = 0,
   focusPendingMatchId = null,
+  trigger,
   onSendPrompt,
 }: MessageCenterDrawerProps) {
   const [open, setOpen] = useState(false);
@@ -661,36 +663,40 @@ export function MessageCenterDrawer({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <button
-          type="button"
-          className={cn(
-            "relative inline-flex h-9 w-9 items-center justify-center rounded-full transition-colors",
-            isDarkMode ? "text-[#dde2ff] hover:bg-white/8" : "text-[#1d2151] hover:bg-white/60"
+      {trigger === null ? null : (
+        <DialogTrigger asChild>
+          {trigger ?? (
+            <button
+              type="button"
+              className={cn(
+                "relative inline-flex h-9 w-9 items-center justify-center rounded-full transition-colors",
+                isDarkMode ? "text-white/88 hover:bg-white/[0.06]" : "text-[#1d2151] hover:bg-white/60"
+              )}
+              aria-label="打开消息中心"
+            >
+              <Menu className="h-5 w-5" />
+              {unreadCount > 0 ? (
+                <span className="absolute -right-0.5 -top-0.5 inline-flex min-w-[18px] items-center justify-center rounded-full bg-white px-1 text-[10px] font-semibold leading-5 text-black shadow-[0_10px_16px_-10px_rgba(255,255,255,0.22)]">
+                  {unreadCount > 99 ? "99+" : unreadCount}
+                </span>
+              ) : null}
+            </button>
           )}
-          aria-label="打开消息中心"
-        >
-          <Menu className="h-5 w-5" />
-          {unreadCount > 0 ? (
-            <span className="absolute -right-0.5 -top-0.5 inline-flex min-w-[18px] items-center justify-center rounded-full bg-[#ff6a5c] px-1 text-[10px] font-semibold leading-5 text-white shadow-[0_10px_16px_-10px_rgba(255,106,92,0.72)]">
-              {unreadCount > 99 ? "99+" : unreadCount}
-            </span>
-          ) : null}
-        </button>
-      </DialogTrigger>
+        </DialogTrigger>
+      )}
 
       <DialogContent
         className={cn(
-          "left-auto right-0 top-0 flex h-[100dvh] w-full max-w-[420px] translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-l p-0 shadow-[0_24px_60px_-32px_rgba(15,23,42,0.55)] data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right",
-          isDarkMode ? "border-[#32407f] bg-[#101737] text-[#eef2ff]" : "border-[#dfe4ff] bg-[#f6f8ff] text-[#17204a]"
+          "left-auto right-0 top-0 flex h-[100dvh] w-full max-w-[420px] translate-x-0 translate-y-0 flex-col gap-0 rounded-none border-l p-0 shadow-[0_24px_72px_-36px_rgba(0,0,0,0.84)] data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right",
+          isDarkMode ? "border-white/10 bg-black text-white/92" : "border-black/8 bg-white text-black/88"
         )}
       >
-        <DialogHeader className={cn("border-b px-5 pb-4 pt-5 text-left", isDarkMode ? "border-[#283463]" : "border-[#dde3ff]")}>
+        <DialogHeader className={cn("border-b px-5 pb-4 pt-5 text-left", isDarkMode ? "border-white/8" : "border-black/8")}>
           <DialogTitle className="flex items-center gap-2 text-[18px] font-semibold tracking-tight">
             <BellRing className="h-5 w-5" />
             消息中心
           </DialogTitle>
-          <DialogDescription className={cn("text-sm", isDarkMode ? "text-[#aeb7e7]" : "text-[#5b648c]")}>
+          <DialogDescription className={cn("text-sm", isDarkMode ? "text-white/54" : "text-black/52")}>
             待确认搭子、活动后跟进、群聊摘要都在这里处理。
           </DialogDescription>
         </DialogHeader>
@@ -702,11 +708,11 @@ export function MessageCenterDrawer({
                 "mb-4 rounded-2xl border px-4 py-3 text-sm",
                 notice.kind === "success"
                   ? isDarkMode
-                    ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-100"
-                    : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    ? "border-white/10 bg-white/[0.04] text-white/86"
+                    : "border-black/8 bg-black/[0.03] text-black/78"
                   : isDarkMode
-                    ? "border-rose-400/30 bg-rose-400/10 text-rose-100"
-                    : "border-rose-200 bg-rose-50 text-rose-700"
+                    ? "border-white/10 bg-white/[0.04] text-white/86"
+                    : "border-black/8 bg-black/[0.03] text-black/78"
               )}
             >
               <div className="flex items-start justify-between gap-3">
@@ -746,7 +752,7 @@ export function MessageCenterDrawer({
                         }
                         className={cn(
                           "mt-3 inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-medium transition",
-                          isDarkMode ? "bg-white/10 text-white hover:bg-white/15" : "bg-white text-[#24315f] hover:bg-[#eef2ff]"
+                          isDarkMode ? "border border-white/8 bg-white/[0.05] text-white/82 hover:bg-white/[0.08]" : "border border-black/8 bg-white text-black/78 hover:bg-black/[0.03]"
                         )}
                       >
                         <Sparkles className="h-3.5 w-3.5" />
@@ -761,24 +767,24 @@ export function MessageCenterDrawer({
           {!authToken || !userId ? (
             <div
               className={cn(
-                "rounded-[28px] border px-5 py-5 shadow-[0_16px_40px_-28px_rgba(31,41,55,0.45)]",
-                isDarkMode ? "border-[#283463] bg-[#151d44]" : "border-[#dde3ff] bg-white"
+                "rounded-[28px] border px-5 py-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]",
+                isDarkMode ? "border-white/10 bg-white/[0.035]" : "border-black/8 bg-white"
               )}
             >
               <p className="text-base font-semibold">未登录也能先和 AI 聊</p>
-              <p className={cn("mt-2 text-sm leading-6", isDarkMode ? "text-[#aeb7e7]" : "text-[#5b648c]")}>
+              <p className={cn("mt-2 text-sm leading-6", isDarkMode ? "text-white/54" : "text-black/52")}>
                 登录后，这里才会展示待确认搭子、活动后跟进和群聊未读。
               </p>
             </div>
           ) : loading && !messageCenter ? (
             <div className="flex h-40 items-center justify-center">
-              <Loader2 className="h-6 w-6 animate-spin text-[#5b67f4]" />
+              <Loader2 className="h-6 w-6 animate-spin text-white/78" />
             </div>
           ) : error ? (
             <div
               className={cn(
                 "rounded-[24px] border px-4 py-4 text-sm",
-                isDarkMode ? "border-rose-400/30 bg-rose-400/10 text-rose-100" : "border-rose-200 bg-rose-50 text-rose-700"
+                isDarkMode ? "border-white/10 bg-white/[0.04] text-white/82" : "border-black/8 bg-black/[0.03] text-black/78"
               )}
             >
               <p>{error}</p>
@@ -787,7 +793,7 @@ export function MessageCenterDrawer({
                 onClick={() => void refreshMessageCenter()}
                 className={cn(
                   "mt-3 inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-medium",
-                  isDarkMode ? "bg-white/10 text-white" : "bg-white text-[#24315f]"
+                  isDarkMode ? "border border-white/8 bg-white/[0.05] text-white/82" : "border border-black/8 bg-white text-black/78"
                 )}
               >
                 <RefreshCw className="h-3.5 w-3.5" />
@@ -799,7 +805,7 @@ export function MessageCenterDrawer({
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold">未读总数</p>
-                  <p className={cn("mt-1 text-xs", isDarkMode ? "text-[#aeb7e7]" : "text-[#5b648c]")}>
+                  <p className={cn("mt-1 text-xs", isDarkMode ? "text-white/54" : "text-black/52")}>
                     通知 {messageCenter?.unreadNotificationCount || 0} 条，群聊 {messageCenter?.chatActivities.totalUnread || 0} 条
                   </p>
                 </div>
@@ -809,7 +815,7 @@ export function MessageCenterDrawer({
                   disabled={refreshing || loading}
                   className={cn(
                     "inline-flex h-9 w-9 items-center justify-center rounded-full border transition",
-                    isDarkMode ? "border-[#2f3d77] bg-[#151d44] text-white" : "border-[#dbe2ff] bg-white text-[#24315f]"
+                    isDarkMode ? "border-white/10 bg-white/[0.035] text-white/82 hover:bg-white/[0.06]" : "border-black/8 bg-white text-black/76 hover:bg-black/[0.03]"
                   )}
                   aria-label="刷新消息中心"
                 >
@@ -819,14 +825,14 @@ export function MessageCenterDrawer({
 
               <section
                 className={cn(
-                  "rounded-[28px] border px-4 py-4 shadow-[0_16px_40px_-28px_rgba(31,41,55,0.45)]",
-                  isDarkMode ? "border-[#283463] bg-[#151d44]" : "border-[#dde3ff] bg-white"
+                  "rounded-[28px] border px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035),0_18px_42px_-32px_rgba(0,0,0,0.78)]",
+                  isDarkMode ? "border-white/10 bg-white/[0.035]" : "border-black/8 bg-white"
                 )}
               >
                 <div className="mb-3 flex items-center gap-2">
-                  <Users className="h-4 w-4 text-[#5b67f4]" />
+                  <Users className="h-4 w-4 text-white/62" />
                   <p className="text-sm font-semibold">待确认搭子</p>
-                  <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", isDarkMode ? "bg-white/10 text-[#dce1ff]" : "bg-[#eef2ff] text-[#3e4ba2]")}>
+                  <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", isDarkMode ? "border border-white/8 bg-white/[0.04] text-white/70" : "border border-black/8 bg-black/[0.03] text-black/70")}>
                     {pendingMatches.length}
                   </span>
                 </div>
@@ -838,7 +844,7 @@ export function MessageCenterDrawer({
                       onClick={closePendingMatchDetail}
                       className={cn(
                         "inline-flex items-center gap-1 rounded-full px-3 py-2 text-xs font-medium transition",
-                        isDarkMode ? "bg-white/10 text-white hover:bg-white/15" : "bg-[#edf1ff] text-[#34407c] hover:bg-[#e4eaff]"
+                          isDarkMode ? "border border-white/8 bg-white/[0.05] text-white/80 hover:bg-white/[0.08]" : "border border-black/8 bg-black/[0.03] text-black/76 hover:bg-black/[0.05]"
                       )}
                     >
                       <ChevronRight className="h-3.5 w-3.5 rotate-180" />
@@ -849,7 +855,7 @@ export function MessageCenterDrawer({
                       <div
                         className={cn(
                           "rounded-2xl border px-4 py-8 text-center text-sm",
-                          isDarkMode ? "border-[#2b386f] bg-[#11193d] text-[#dce1ff]" : "border-[#e5e9ff] bg-[#fbfcff] text-[#3e4ba2]"
+                          isDarkMode ? "border-white/8 bg-white/[0.03] text-white/72" : "border-black/8 bg-black/[0.03] text-black/72"
                         )}
                       >
                         <div className="flex items-center justify-center gap-2">
@@ -861,7 +867,7 @@ export function MessageCenterDrawer({
                       <div
                         className={cn(
                           "rounded-2xl border px-4 py-5 text-sm leading-6",
-                          isDarkMode ? "border-[#5b3350] bg-[#2d1730] text-[#ffd9e6]" : "border-[#ffd9e6] bg-[#fff7fa] text-[#a23e68]"
+                          isDarkMode ? "border-white/10 bg-white/[0.04] text-white/78" : "border-black/8 bg-black/[0.03] text-black/78"
                         )}
                       >
                         {pendingMatchDetailError}
@@ -871,22 +877,22 @@ export function MessageCenterDrawer({
                         <div
                           className={cn(
                             "rounded-2xl border px-4 py-4",
-                            isDarkMode ? "border-[#2b386f] bg-[#11193d]" : "border-[#e5e9ff] bg-[#fbfcff]"
+                            isDarkMode ? "border-white/8 bg-white/[0.03]" : "border-black/8 bg-black/[0.02]"
                           )}
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div>
                               <p className="text-sm font-semibold">{getPendingMatchHeadline(pendingMatchDetail)}</p>
-                              <p className={cn("mt-1 text-xs leading-5", isDarkMode ? "text-[#aeb7e7]" : "text-[#5b648c]")}>
+                              <p className={cn("mt-1 text-xs leading-5", isDarkMode ? "text-white/54" : "text-black/52")}>
                                 匹配度 {pendingMatchDetail.matchScore}% · {pendingMatchDetail.locationHint}
                                 {pendingMatchDetail.commonTags.length > 0 ? ` · ${pendingMatchDetail.commonTags.join("、")}` : ""}
                               </p>
                             </div>
-                            <span className={cn("rounded-full px-2 py-1 text-[11px] font-medium", pendingMatchDetail.isTempOrganizer ? "bg-[#5b67f4] text-white" : isDarkMode ? "bg-white/10 text-[#dce1ff]" : "bg-[#eef2ff] text-[#3e4ba2]")}>
+                            <span className={cn("rounded-full px-2 py-1 text-[11px] font-medium", pendingMatchDetail.isTempOrganizer ? "bg-white text-black" : isDarkMode ? "border border-white/8 bg-white/[0.04] text-white/70" : "border border-black/8 bg-black/[0.03] text-black/70")}>
                               {getPendingMatchDetailStatusLabel(pendingMatchDetail)}
                             </span>
                           </div>
-                          <div className={cn("mt-3 flex flex-wrap items-center gap-3 text-xs", isDarkMode ? "text-[#9eabd8]" : "text-[#7380ad]")}>
+                          <div className={cn("mt-3 flex flex-wrap items-center gap-3 text-xs", isDarkMode ? "text-white/42" : "text-black/42")}>
                             <span className="inline-flex items-center gap-1">
                               <Clock3 className="h-3.5 w-3.5" />
                               {formatRelativeTime(pendingMatchDetail.confirmDeadline)} 前确认
@@ -901,32 +907,32 @@ export function MessageCenterDrawer({
                         <div
                           className={cn(
                             "rounded-2xl border px-4 py-4",
-                            isDarkMode ? "border-[#2b386f] bg-[#11193d]" : "border-[#e5e9ff] bg-[#fbfcff]"
+                            isDarkMode ? "border-white/8 bg-white/[0.03]" : "border-black/8 bg-black/[0.02]"
                           )}
                         >
                           <p className="text-sm font-semibold">当前该谁推进</p>
-                          <p className={cn("mt-2 text-xs leading-6", isDarkMode ? "text-[#aeb7e7]" : "text-[#5b648c]")}>{pendingMatchDetail.nextActionText}</p>
+                          <p className={cn("mt-2 text-xs leading-6", isDarkMode ? "text-white/54" : "text-black/52")}>{pendingMatchDetail.nextActionText}</p>
                         </div>
 
                         {pendingMatchDetail.icebreaker ? (
                           <div
                             className={cn(
                               "rounded-2xl border px-4 py-4",
-                              isDarkMode ? "border-[#2b386f] bg-[#11193d]" : "border-[#e5e9ff] bg-[#fbfcff]"
+                              isDarkMode ? "border-white/8 bg-white/[0.03]" : "border-black/8 bg-black/[0.02]"
                             )}
                           >
                             <div className="flex items-center justify-between gap-3">
                               <p className="text-sm font-semibold">系统破冰建议</p>
-                              <span className={cn("text-[11px]", isDarkMode ? "text-[#9eabd8]" : "text-[#7380ad]")}>{formatRelativeTime(pendingMatchDetail.icebreaker.createdAt)}</span>
+                              <span className={cn("text-[11px]", isDarkMode ? "text-white/42" : "text-black/42")}>{formatRelativeTime(pendingMatchDetail.icebreaker.createdAt)}</span>
                             </div>
-                            <p className={cn("mt-2 text-xs leading-6", isDarkMode ? "text-[#dce1ff]" : "text-[#34407c]")}>{pendingMatchDetail.icebreaker.content}</p>
+                            <p className={cn("mt-2 text-xs leading-6", isDarkMode ? "text-white/72" : "text-black/76")}>{pendingMatchDetail.icebreaker.content}</p>
                           </div>
                         ) : null}
 
                         <div
                           className={cn(
                             "rounded-2xl border px-4 py-4",
-                            isDarkMode ? "border-[#2b386f] bg-[#11193d]" : "border-[#e5e9ff] bg-[#fbfcff]"
+                            isDarkMode ? "border-white/8 bg-white/[0.03]" : "border-black/8 bg-black/[0.02]"
                           )}
                         >
                           <p className="text-sm font-semibold">匹配成员</p>
@@ -936,28 +942,28 @@ export function MessageCenterDrawer({
                                 key={member.userId}
                                 className={cn(
                                   "rounded-2xl border px-3 py-3",
-                                  isDarkMode ? "border-[#33427d] bg-[#0f1738]" : "border-[#edf1ff] bg-white"
+                                  isDarkMode ? "border-white/8 bg-white/[0.025]" : "border-black/8 bg-white"
                                 )}
                               >
                                 <div className="flex items-start gap-3">
                                   {member.avatarUrl ? (
                                     <img src={member.avatarUrl} alt={member.nickname || "成员头像"} className="h-10 w-10 rounded-full object-cover" />
                                   ) : (
-                                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#e8edff] text-sm font-semibold text-[#4252b8]">
+                                    <div className="flex h-10 w-10 items-center justify-center rounded-full border border-white/8 bg-white/[0.06] text-sm font-semibold text-white/78">
                                       {(member.nickname || "搭").slice(0, 1)}
                                     </div>
                                   )}
                                   <div className="min-w-0 flex-1">
                                     <div className="flex flex-wrap items-center gap-2">
                                       <p className="text-sm font-semibold">{member.nickname || "匹配成员"}</p>
-                                      {member.isTempOrganizer ? <span className="rounded-full bg-[#5b67f4] px-2 py-0.5 text-[10px] font-medium text-white">召集人</span> : null}
+                                      {member.isTempOrganizer ? <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-black">召集人</span> : null}
                                     </div>
-                                    <p className={cn("mt-1 text-xs leading-5", isDarkMode ? "text-[#9eabd8]" : "text-[#7380ad]")}>{member.locationHint} · {member.timePreference || "时间待沟通"}</p>
-                                    <p className={cn("mt-2 text-xs leading-6", isDarkMode ? "text-[#dce1ff]" : "text-[#34407c]")}>{member.intentSummary}</p>
+                                    <p className={cn("mt-1 text-xs leading-5", isDarkMode ? "text-white/42" : "text-black/42")}>{member.locationHint} · {member.timePreference || "时间待沟通"}</p>
+                                    <p className={cn("mt-2 text-xs leading-6", isDarkMode ? "text-white/72" : "text-black/76")}>{member.intentSummary}</p>
                                     {member.tags.length > 0 ? (
                                       <div className="mt-2 flex flex-wrap gap-2">
                                         {member.tags.map((tag) => (
-                                          <span key={`${member.userId}:${tag}`} className={cn("rounded-full px-2 py-1 text-[11px] font-medium", isDarkMode ? "bg-white/10 text-[#dce1ff]" : "bg-[#eef2ff] text-[#3e4ba2]")}>{tag}</span>
+                                          <span key={`${member.userId}:${tag}`} className={cn("rounded-full px-2 py-1 text-[11px] font-medium", isDarkMode ? "border border-white/8 bg-white/[0.04] text-white/70" : "border border-black/8 bg-black/[0.03] text-black/70")}>{tag}</span>
                                         ))}
                                       </div>
                                     ) : null}
@@ -974,7 +980,7 @@ export function MessageCenterDrawer({
                               type="button"
                               disabled={disabled || Boolean(pendingActionKey)}
                               onClick={() => void handlePendingMatchAction(pendingMatchDetail.id, "confirm")}
-                              className="inline-flex items-center gap-1 rounded-full bg-[#5b67f4] px-3 py-2 text-xs font-medium text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
+                              className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-2 text-xs font-medium text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               {pendingActionKey === `confirm:${pendingMatchDetail.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
                               {getPendingMatchPrimaryActionLabel(pendingMatchDetail.requestMode)}
@@ -985,7 +991,7 @@ export function MessageCenterDrawer({
                               onClick={() => void handlePendingMatchAction(pendingMatchDetail.id, "cancel")}
                               className={cn(
                                 "inline-flex items-center gap-1 rounded-full px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
-                                isDarkMode ? "bg-white/10 text-white hover:bg-white/15" : "bg-[#edf1ff] text-[#34407c] hover:bg-[#e4eaff]"
+                                isDarkMode ? "border border-white/8 bg-white/[0.05] text-white/80 hover:bg-white/[0.08]" : "border border-black/8 bg-black/[0.03] text-black/76 hover:bg-black/[0.05]"
                               )}
                             >
                               {pendingActionKey === `cancel:${pendingMatchDetail.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
@@ -997,7 +1003,7 @@ export function MessageCenterDrawer({
                     ) : null}
                   </div>
                 ) : pendingMatches.length === 0 ? (
-                  <p className={cn("text-sm leading-6", isDarkMode ? "text-[#aeb7e7]" : "text-[#5b648c]")}>
+                  <p className={cn("text-sm leading-6", isDarkMode ? "text-white/54" : "text-black/52")}>
                     当前没有待确认匹配，新的搭子撮合到了会先出现在这里。
                   </p>
                 ) : (
@@ -1020,26 +1026,26 @@ export function MessageCenterDrawer({
                           }}
                           className={cn(
                             "cursor-pointer rounded-2xl border px-4 py-4 transition",
-                            isDarkMode ? "border-[#2b386f] bg-[#11193d] hover:border-[#4252b8]" : "border-[#e5e9ff] bg-[#fbfcff] hover:border-[#becbff]"
+                            isDarkMode ? "border-white/8 bg-white/[0.03] hover:border-white/16 hover:bg-white/[0.045]" : "border-black/8 bg-black/[0.02] hover:border-black/12 hover:bg-black/[0.035]"
                           )}
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div>
                               <p className="text-sm font-semibold">{getPendingMatchListTitle(match)}</p>
-                              <p className={cn("mt-1 text-xs leading-5", isDarkMode ? "text-[#aeb7e7]" : "text-[#5b648c]")}>
+                              <p className={cn("mt-1 text-xs leading-5", isDarkMode ? "text-white/54" : "text-black/52")}>
                                 匹配度 {match.matchScore}% · {match.locationHint}
                                 {tags ? ` · ${tags}` : ""}
                               </p>
                             </div>
-                            <span className={cn("rounded-full px-2 py-1 text-[11px] font-medium", match.isTempOrganizer ? "bg-[#5b67f4] text-white" : isDarkMode ? "bg-white/10 text-[#dce1ff]" : "bg-[#eef2ff] text-[#3e4ba2]")}>
+                            <span className={cn("rounded-full px-2 py-1 text-[11px] font-medium", match.isTempOrganizer ? "bg-white text-black" : isDarkMode ? "border border-white/8 bg-white/[0.04] text-white/70" : "border border-black/8 bg-black/[0.03] text-black/70")}>
                               {getPendingMatchStatusLabel(match)}
                             </span>
                           </div>
-                          <div className={cn("mt-3 flex items-center gap-2 text-xs", isDarkMode ? "text-[#9eabd8]" : "text-[#7380ad]")}>
+                          <div className={cn("mt-3 flex items-center gap-2 text-xs", isDarkMode ? "text-white/42" : "text-black/42")}>
                             <Clock3 className="h-3.5 w-3.5" />
                             {formatRelativeTime(match.confirmDeadline)} 前确认
                           </div>
-                          <div className={cn("mt-2 text-[11px]", isDarkMode ? "text-[#9eabd8]" : "text-[#7380ad]")}>{getPendingMatchListHint(match)}</div>
+                          <div className={cn("mt-2 text-[11px]", isDarkMode ? "text-white/42" : "text-black/42")}>{getPendingMatchListHint(match)}</div>
                           {match.isTempOrganizer ? (
                             <div className="mt-3 flex gap-2">
                               <button
@@ -1049,7 +1055,7 @@ export function MessageCenterDrawer({
                                   event.stopPropagation();
                                   void handlePendingMatchAction(match.id, "confirm");
                                 }}
-                                className="inline-flex items-center gap-1 rounded-full bg-[#5b67f4] px-3 py-2 text-xs font-medium text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-2 text-xs font-medium text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 {pendingActionKey === confirmKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
                                 {getPendingMatchPrimaryActionLabel(match.requestMode)}
@@ -1063,7 +1069,7 @@ export function MessageCenterDrawer({
                                 }}
                                 className={cn(
                                   "inline-flex items-center gap-1 rounded-full px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
-                                  isDarkMode ? "bg-white/10 text-white hover:bg-white/15" : "bg-[#edf1ff] text-[#34407c] hover:bg-[#e4eaff]"
+                                  isDarkMode ? "border border-white/8 bg-white/[0.05] text-white/80 hover:bg-white/[0.08]" : "border border-black/8 bg-black/[0.03] text-black/76 hover:bg-black/[0.05]"
                                 )}
                               >
                                 {pendingActionKey === cancelKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
@@ -1080,20 +1086,20 @@ export function MessageCenterDrawer({
 
               <section
                 className={cn(
-                  "rounded-[28px] border px-4 py-4 shadow-[0_16px_40px_-28px_rgba(31,41,55,0.45)]",
-                  isDarkMode ? "border-[#283463] bg-[#151d44]" : "border-[#dde3ff] bg-white"
+                  "rounded-[28px] border px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035),0_18px_42px_-32px_rgba(0,0,0,0.78)]",
+                  isDarkMode ? "border-white/10 bg-white/[0.035]" : "border-black/8 bg-white"
                 )}
               >
                 <div className="mb-3 flex items-center gap-2">
-                  <BellRing className="h-4 w-4 text-[#f59e0b]" />
+                  <BellRing className="h-4 w-4 text-white/62" />
                   <p className="text-sm font-semibold">系统跟进</p>
-                  <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", isDarkMode ? "bg-white/10 text-[#dce1ff]" : "bg-[#eef2ff] text-[#3e4ba2]")}>
+                  <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", isDarkMode ? "border border-white/8 bg-white/[0.04] text-white/70" : "border border-black/8 bg-black/[0.03] text-black/70")}>
                     {systemNotifications.length}
                   </span>
                 </div>
 
                 {systemNotifications.length === 0 ? (
-                  <p className={cn("text-sm leading-6", isDarkMode ? "text-[#aeb7e7]" : "text-[#5b648c]")}>
+                  <p className={cn("text-sm leading-6", isDarkMode ? "text-white/54" : "text-black/52")}>
                     暂无系统通知，活动进度有变化会第一时间出现在这里。
                   </p>
                 ) : (
@@ -1113,25 +1119,25 @@ export function MessageCenterDrawer({
                             "rounded-2xl border px-4 py-4",
                             notification.isRead
                               ? isDarkMode
-                                ? "border-[#2b386f] bg-[#11193d]"
-                                : "border-[#e5e9ff] bg-[#fbfcff]"
+                                ? "border-white/8 bg-white/[0.03]"
+                                : "border-black/8 bg-black/[0.02]"
                               : isDarkMode
-                                ? "border-[#3a4ca0] bg-[#132052]"
-                                : "border-[#ccd6ff] bg-[#f5f7ff]"
+                                ? "border-white/12 bg-white/[0.055]"
+                                : "border-black/10 bg-black/[0.045]"
                           )}
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div>
                               <p className="text-sm font-semibold">{notification.title}</p>
-                              <p className={cn("mt-1 text-xs leading-5", isDarkMode ? "text-[#aeb7e7]" : "text-[#5b648c]")}>
+                              <p className={cn("mt-1 text-xs leading-5", isDarkMode ? "text-white/54" : "text-black/52")}>
                                 {notification.content || getNotificationFallbackContent(notification.type)}
                               </p>
                             </div>
                             {!notification.isRead ? (
-                              <span className="mt-1 h-2.5 w-2.5 rounded-full bg-[#5b67f4]" />
+                              <span className="mt-1 h-2.5 w-2.5 rounded-full bg-white/72" />
                             ) : null}
                           </div>
-                          <div className={cn("mt-3 flex items-center gap-2 text-xs", isDarkMode ? "text-[#9eabd8]" : "text-[#7380ad]")}>
+                          <div className={cn("mt-3 flex items-center gap-2 text-xs", isDarkMode ? "text-white/42" : "text-black/42")}>
                             <Clock3 className="h-3.5 w-3.5" />
                             {formatRelativeTime(notification.createdAt)}
                           </div>
@@ -1142,7 +1148,7 @@ export function MessageCenterDrawer({
                                 type="button"
                                 disabled={disabled || Boolean(pendingActionKey)}
                                 onClick={() => void handleFollowUpPrompt(notification, "review")}
-                                className="inline-flex items-center gap-1 rounded-full bg-[#5b67f4] px-3 py-2 text-xs font-medium text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-2 text-xs font-medium text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 {pendingActionKey === reviewKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
                                 去复盘
@@ -1153,7 +1159,7 @@ export function MessageCenterDrawer({
                                 onClick={() => void handleFollowUpPrompt(notification, "rebook")}
                                 className={cn(
                                   "inline-flex items-center gap-1 rounded-full px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
-                                  isDarkMode ? "bg-white/10 text-white hover:bg-white/15" : "bg-[#edf1ff] text-[#34407c] hover:bg-[#e4eaff]"
+                                  isDarkMode ? "border border-white/8 bg-white/[0.05] text-white/80 hover:bg-white/[0.08]" : "border border-black/8 bg-black/[0.03] text-black/76 hover:bg-black/[0.05]"
                                 )}
                               >
                                 {pendingActionKey === rebookKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ChevronRight className="h-3.5 w-3.5" />}
@@ -1166,7 +1172,7 @@ export function MessageCenterDrawer({
                                 type="button"
                                 disabled={disabled || Boolean(pendingActionKey)}
                                 onClick={() => void handleFollowUpPrompt(notification, "kickoff")}
-                                className="inline-flex items-center gap-1 rounded-full bg-[#5b67f4] px-3 py-2 text-xs font-medium text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
+                                className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-2 text-xs font-medium text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 {pendingActionKey === kickoffKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
                                 让 AI 帮我写开场白
@@ -1179,7 +1185,7 @@ export function MessageCenterDrawer({
                               onClick={() => void handleNotificationRead(notification.id)}
                               className={cn(
                                 "mt-3 inline-flex items-center gap-1 rounded-full px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
-                                isDarkMode ? "bg-white/10 text-white hover:bg-white/15" : "bg-[#edf1ff] text-[#34407c] hover:bg-[#e4eaff]"
+                                isDarkMode ? "border border-white/8 bg-white/[0.05] text-white/80 hover:bg-white/[0.08]" : "border border-black/8 bg-black/[0.03] text-black/76 hover:bg-black/[0.05]"
                               )}
                             >
                               {pendingActionKey === readKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
@@ -1195,23 +1201,23 @@ export function MessageCenterDrawer({
 
               <section
                 className={cn(
-                  "rounded-[28px] border px-4 py-4 shadow-[0_16px_40px_-28px_rgba(31,41,55,0.45)]",
-                  isDarkMode ? "border-[#283463] bg-[#151d44]" : "border-[#dde3ff] bg-white"
+                  "rounded-[28px] border px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035),0_18px_42px_-32px_rgba(0,0,0,0.78)]",
+                  isDarkMode ? "border-white/10 bg-white/[0.035]" : "border-black/8 bg-white"
                 )}
               >
                 <div className="mb-3 flex items-center gap-2">
-                  <MessageSquareText className="h-4 w-4 text-[#5b67f4]" />
+                  <MessageSquareText className="h-4 w-4 text-white/62" />
                   <p className="text-sm font-semibold">活动群聊摘要</p>
-                  <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", isDarkMode ? "bg-white/10 text-[#dce1ff]" : "bg-[#eef2ff] text-[#3e4ba2]")}>
+                  <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", isDarkMode ? "border border-white/8 bg-white/[0.04] text-white/70" : "border border-black/8 bg-black/[0.03] text-black/70")}>
                     {messageCenter?.chatActivities.totalUnread || 0} 条未读
                   </span>
                 </div>
-                <p className={cn("mb-3 text-xs leading-5", isDarkMode ? "text-[#9eabd8]" : "text-[#7380ad]")}>
+                <p className={cn("mb-3 text-xs leading-5", isDarkMode ? "text-white/42" : "text-black/42")}>
                   H5 先提供摘要和跟进入口，完整活动群聊体验目前仍以小程序为主。
                 </p>
 
                 {chatActivities.length === 0 ? (
-                  <p className={cn("text-sm leading-6", isDarkMode ? "text-[#aeb7e7]" : "text-[#5b648c]")}>
+                  <p className={cn("text-sm leading-6", isDarkMode ? "text-white/54" : "text-black/52")}>
                     暂无活动群聊记录，参与活动后这里会同步显示最近动态。
                   </p>
                 ) : (
@@ -1221,23 +1227,23 @@ export function MessageCenterDrawer({
                         key={chat.activityId}
                         className={cn(
                           "rounded-2xl border px-4 py-4",
-                          isDarkMode ? "border-[#2b386f] bg-[#11193d]" : "border-[#e5e9ff] bg-[#fbfcff]"
+                          isDarkMode ? "border-white/8 bg-white/[0.03]" : "border-black/8 bg-black/[0.02]"
                         )}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <p className="text-sm font-semibold">{chat.activityTitle}</p>
-                            <p className={cn("mt-1 text-xs leading-5", isDarkMode ? "text-[#aeb7e7]" : "text-[#5b648c]")}>
+                            <p className={cn("mt-1 text-xs leading-5", isDarkMode ? "text-white/54" : "text-black/52")}>
                               {chat.lastMessage || "还没人说话，发句开场吧"}
                             </p>
                           </div>
                           {chat.unreadCount > 0 ? (
-                            <span className="rounded-full bg-[#ff6a5c] px-2 py-0.5 text-[11px] font-medium text-white">
+                            <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-black">
                               {chat.unreadCount}
                             </span>
                           ) : null}
                         </div>
-                        <div className={cn("mt-3 flex items-center gap-3 text-xs", isDarkMode ? "text-[#9eabd8]" : "text-[#7380ad]")}>
+                        <div className={cn("mt-3 flex items-center gap-3 text-xs", isDarkMode ? "text-white/42" : "text-black/42")}>
                           <span className="inline-flex items-center gap-1">
                             <Clock3 className="h-3.5 w-3.5" />
                             {formatRelativeTime(chat.lastMessageTime)}
@@ -1272,7 +1278,7 @@ export function MessageCenterDrawer({
                               }
                               className={cn(
                                 "inline-flex items-center gap-1 rounded-full px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
-                                isDarkMode ? "bg-white/10 text-white hover:bg-white/15" : "bg-[#edf1ff] text-[#34407c] hover:bg-[#e4eaff]"
+                                isDarkMode ? "border border-white/8 bg-white/[0.05] text-white/80 hover:bg-white/[0.08]" : "border border-black/8 bg-black/[0.03] text-black/76 hover:bg-black/[0.05]"
                               )}
                             >
                               <Sparkles className="h-3.5 w-3.5" />

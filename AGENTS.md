@@ -135,6 +135,19 @@ myProcessor.processorName = 'my-processor';
 - **信息架构优先按领域组织**: Admin 默认按 `概览 / 内容 / 组局 / 风控 / AI / 设置` 分组，而不是按角色或临时工作流拆菜单
 - **瘦身方式**: 通过稳定分组、明确命名、页内 tabs 收口复杂度；`热词` 收到 `内容工作台` 内部，`AI 配置` 收到 `AI Playground` 工作区内；不要靠隐藏真实能力或额外造一套“开发后台 / 运营后台”
 
+### apps/web (H5)
+- **Tech**: Next.js App Router + Tailwind + shadcn/ui + AI SDK Elements
+- **聊天主轴规则**:
+  - 对话消息流、输入框主逻辑、消息容器必须继续基于 `apps/web/components/ai-elements/*`
+  - 禁止为 welcome/chat 主流程手搓新的聊天主轴组件，禁止重写 transcript / message list / prompt input 协议
+- **React Bits 使用边界**:
+  - 只允许作为视觉包装层使用，例如 welcome 背景、输入框 wrapper、轻量装饰层
+  - 禁止用 React Bits 替换聊天主列表、消息协议、SSE 承接逻辑
+- **视觉方向**:
+  - Welcome Stage 可以有克制的暗色氛围与包装
+  - Conversation Stage 必须收敛到纯黑/近纯黑内容舞台，让 GenUI cards 成为主角
+  - 高级感优先通过排版、间距、字号、黑白灰层级完成，不靠大面积蓝紫渐变或玻璃态
+
 ### apps/miniprogram (小程序)
 - **Tech**: Native WeChat + TypeScript + Zustand Vanilla + LESS
 - **禁止**: `wx.request` (使用 Orval SDK)

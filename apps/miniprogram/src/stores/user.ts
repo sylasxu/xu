@@ -1,9 +1,9 @@
 /**
  * 用户状态管理 - 基于 Zustand
  */
-import { create } from 'zustand'
-import { immer } from 'zustand/middleware/immer'
-import { persist, createJSONStorage } from 'zustand/middleware'
+import { createStore } from 'zustand/vanilla.js'
+import { createJSONStorage, persist } from 'zustand/middleware.js'
+import { immer } from 'zustand/middleware/immer.js'
 import type { User, LoginParams, UpdateUserParams } from '../types/global'
 // 使用生成的 API
 import { getUsersById, putUsersById } from '../api/endpoints/internal/internal'
@@ -41,7 +41,7 @@ const wechatStorage = {
   },
 }
 
-export const useUserStore = create<UserState>()(
+export const useUserStore = createStore<UserState>()(
   persist(
     immer((set, get) => ({
       // 初始状态

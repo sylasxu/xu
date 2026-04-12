@@ -473,16 +473,31 @@ const WelcomePendingActivity = t.Object({
   status: t.String({ description: '活动状态' }),
 });
 
+const WelcomeFocus = t.Object({
+  type: t.Union([
+    t.Literal('post_activity_feedback'),
+    t.Literal('recruiting_result'),
+    t.Literal('unfinished_intent'),
+  ], { description: '首页焦点类型' }),
+  label: t.String({ description: '焦点入口短文案' }),
+  prompt: t.String({ description: '点击后发送的 prompt' }),
+  priority: t.Number({ description: '展示优先级，数值越小越优先' }),
+  context: t.Optional(t.Any({ description: '附加上下文数据' })),
+});
+
 const WelcomeResponse = t.Object({
   greeting: t.String({ description: '问候语' }),
   subGreeting: t.Optional(t.String({ description: '副标题' })),
   sections: t.Array(WelcomeSection, { description: '分组列表' }),
   socialProfile: t.Optional(SocialProfile),
   pendingActivities: t.Optional(t.Array(WelcomePendingActivity, { description: '待参加活动列表（最多 3 个）' })),
+  welcomeFocus: t.Optional(WelcomeFocus),
   quickPrompts: t.Array(t.Object({
     icon: t.String({ description: '展示用图标' }),
     text: t.String(),
     prompt: t.String(),
+    action: t.Optional(t.String({ minLength: 1, description: '可选结构化动作' })),
+    params: t.Optional(GenericObjectSchema),
   }), { description: '快捷入口' }),
   ui: t.Optional(t.Object({
     composerPlaceholder: t.String({ description: '输入框占位文案' }),

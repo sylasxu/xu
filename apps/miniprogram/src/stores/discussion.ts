@@ -17,8 +17,8 @@
  * discussionStore.disconnect()
  * ```
  */
-import { create } from 'zustand'
-import { immer } from 'zustand/middleware/immer'
+import { createStore } from 'zustand/vanilla.js'
+import { immer } from 'zustand/middleware/immer.js'
 import { getChatByActivityIdMessages } from '../api/endpoints/chat/chat'
 import { API_CONFIG } from '../config/index'
 
@@ -249,7 +249,7 @@ const MAX_RECONNECT_COUNT = 5
 // 重连间隔基数（毫秒）
 const RECONNECT_BASE_INTERVAL = 1000
 
-export const useDiscussionStore = create<DiscussionState>()(
+export const useDiscussionStore = createStore<DiscussionState>()(
   immer((set, get) => ({
     // ========== 初始状态 ==========
     activityId: null,

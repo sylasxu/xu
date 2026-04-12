@@ -11,6 +11,8 @@ import {
   eq,
   inArray,
   intentMatches,
+  sql,
+  userMemories,
 } from '@juchang/db';
 import { app } from '../../../index';
 import {
@@ -20,9 +22,9 @@ import {
   recordCreateTaskPublished,
   recordJoinTaskFulfillmentOutcome,
   recordJoinTaskReviewOutcome,
-  syncCreateTaskFromChatTurn,
-  syncJoinTaskFromChatTurn,
-  syncPartnerTaskFromChatTurn,
+  syncCreateTaskFromChatResponse,
+  syncJoinTaskFromChatResponse,
+  syncPartnerTaskFromChatResponse,
 } from '../task-runtime/agent-task.service';
 import type { GenUIBlock, GenUIRequest } from '@juchang/genui-contract';
 
@@ -44,6 +46,13 @@ interface BootstrappedUser {
 
 interface BootstrapResponse {
   users: BootstrappedUser[];
+}
+
+interface ChatTurnResponse {
+  conversationId: string;
+  turn: {
+    blocks: GenUIBlock[];
+  };
 }
 
 const ADMIN_PHONE = process.env.SMOKE_ADMIN_PHONE?.trim()
@@ -304,6 +313,9 @@ describe('Agent Task Runtime Integration', () => {
     createdActivityIds.clear();
     if (activityIds.length > 0) {
       await db
+        .delete(userMemories)
+        .where(inArray(sql<string>`${userMemories.metadata}->>'activityId'`, activityIds));
+      await db
         .delete(agentTaskEvents)
         .where(inArray(agentTaskEvents.activityId, activityIds));
       await db
@@ -454,7 +466,7 @@ describe('Agent Task Runtime Integration', () => {
     });
     createdTaskIds.add(taskId);
 
-    await syncJoinTaskFromChatTurn({
+    await syncJoinTaskFromChatResponse({
       userId: testUser!.user.id,
       conversationId,
       request: buildFollowUpRequest(activityId),
@@ -530,7 +542,7 @@ describe('Agent Task Runtime Integration', () => {
     });
     createdTaskIds.add(taskId);
 
-    await syncJoinTaskFromChatTurn({
+    await syncJoinTaskFromChatResponse({
       userId: testUser!.user.id,
       conversationId,
       request: buildFollowUpRequest(activityId),
@@ -610,7 +622,7 @@ describe('Agent Task Runtime Integration', () => {
     });
     createdTaskIds.add(taskId);
 
-    await syncJoinTaskFromChatTurn({
+    await syncJoinTaskFromChatResponse({
       userId: testUser!.user.id,
       conversationId,
       request: buildFollowUpRequest(activityId),
@@ -673,7 +685,7 @@ describe('Agent Task Runtime Integration', () => {
       },
     };
 
-    await syncJoinTaskFromChatTurn({
+    await syncJoinTaskFromChatResponse({
       userId: testUser!.user.id,
       conversationId,
       request,
@@ -696,7 +708,7 @@ describe('Agent Task Runtime Integration', () => {
       action: 'join_activity',
     });
 
-    await syncJoinTaskFromChatTurn({
+    await syncJoinTaskFromChatResponse({
       userId: testUser!.user.id,
       conversationId,
       request,
@@ -786,6 +798,77 @@ describe('Agent Task Runtime Integration', () => {
     expect(events.filter((event) => event.eventType === 'outcome_recorded')).toHaveLength(2);
   });
 
+  it('records welcome post-activity feedback through /ai/chat structured action', async () => {
+    expect(testUser).toBeDefined();
+
+    const activityId = '97979797-9797-4979-8979-979797979797';
+
+    await db.insert(activities).values({
+      id: activityId,
+      creatorId: testUser!.user.id,
+      title: '首页反馈闭环测试局',
+      description: '验证 welcome feedback action 写回真实结果',
+      location: { x: 106.52988, y: 29.58567 },
+      locationName: '观音桥',
+      address: '观音桥步行街',
+      locationHint: '地铁站附近',
+      startAt: new Date('2026-03-16T20:00:00+08:00'),
+      type: 'food',
+      maxParticipants: 4,
+      currentParticipants: 1,
+      status: 'completed',
+    });
+    createdActivityIds.add(activityId);
+
+    const response = await requestJson<ChatTurnResponse>({
+      method: 'POST',
+      path: '/ai/chat',
+      token: testUser!.token,
+      payload: {
+        input: {
+          type: 'action',
+          action: 'record_activity_feedback',
+          actionId: randomUUID(),
+          displayText: '这次挺顺利',
+          params: {
+            activityId,
+            feedback: 'positive',
+            reviewSummary: '这次氛围很好，下次可以再约。',
+          },
+        },
+        context: {
+          client: 'web',
+          locale: 'zh-CN',
+          timezone: 'Asia/Shanghai',
+          entry: 'welcome_post_activity_feedback',
+        },
+      },
+    });
+    createdConversationIds.add(response.conversationId);
+
+    const [task] = await db
+      .select()
+      .from(agentTasks)
+      .where(eq(agentTasks.activityId, activityId))
+      .orderBy(desc(agentTasks.updatedAt))
+      .limit(1);
+    expect(task).toBeDefined();
+    createdTaskIds.add(task!.id);
+
+    const events = await db
+      .select()
+      .from(agentTaskEvents)
+      .where(eq(agentTaskEvents.activityId, activityId));
+
+    expect(task?.status).toBe('completed');
+    expect(task?.currentStage).toBe('done');
+    expect(task?.resultOutcome).toBe('fulfilled');
+    expect(task?.resultSummary).toContain('这次氛围很好');
+    expect(events.filter((event) => event.eventType === 'outcome_recorded')).toHaveLength(1);
+    expect(events.filter((event) => event.eventType === 'task_completed')).toHaveLength(1);
+    expect(response.turn.blocks.some((block) => block.type === 'cta-group')).toBe(true);
+  });
+
   it('resumes the same create task after auth gate and promotes it to draft_ready', async () => {
     expect(testUser).toBeDefined();
 
@@ -819,7 +902,7 @@ describe('Agent Task Runtime Integration', () => {
       },
     };
 
-    await syncCreateTaskFromChatTurn({
+    await syncCreateTaskFromChatResponse({
       userId: testUser!.user.id,
       conversationId,
       request,
@@ -859,7 +942,7 @@ describe('Agent Task Runtime Integration', () => {
     });
     createdActivityIds.add(activityId);
 
-    await syncCreateTaskFromChatTurn({
+    await syncCreateTaskFromChatResponse({
       userId: testUser!.user.id,
       conversationId,
       request: {
@@ -931,7 +1014,7 @@ describe('Agent Task Runtime Integration', () => {
       },
     };
 
-    await syncCreateTaskFromChatTurn({
+    await syncCreateTaskFromChatResponse({
       userId: testUser!.user.id,
       conversationId,
       request: createRequest,
@@ -968,7 +1051,7 @@ describe('Agent Task Runtime Integration', () => {
     });
     createdActivityIds.add(activityId);
 
-    await syncCreateTaskFromChatTurn({
+    await syncCreateTaskFromChatResponse({
       userId: testUser!.user.id,
       conversationId,
       request: {
@@ -1125,7 +1208,7 @@ describe('Agent Task Runtime Integration', () => {
       },
     };
 
-    await syncPartnerTaskFromChatTurn({
+    await syncPartnerTaskFromChatResponse({
       userId: testUser!.user.id,
       conversationId,
       request,

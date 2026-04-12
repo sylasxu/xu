@@ -1,7 +1,7 @@
 # 聚场 (JuChang) 技术架构文档
 
-> **版本**：v5.3 (Result Workflow + Structured Action Flow + Real Social Loop)
-> **更新日期**：2026-03-30
+> **版本**：v5.4 (Editorial Dark Welcome + Structured Action Flow + Real Social Loop)
+> **更新日期**：2026-04-11
 > **架构**：原生小程序 + Zustand Vanilla + Elysia API + Drizzle ORM + Next.js Web
 
 ---
@@ -36,8 +36,8 @@
 | **小程序状态** | Zustand (Vanilla) | 极简状态管理，~2KB |
 | **Admin 后台** | Vite + React + TanStack | Eden Treaty 调用 API |
 | **Web 应用** | Next.js 15 (App Router) | SSR + React 19 + Tailwind CSS 4 |
-| **Web Chat UI** | AI SDK Elements | Copy-paste 模式安装，20+ 组件开箱即用 |
-| **Web 主题背景** | ThemeBackground (CSS) | 根据主题参数渲染轻量背景，无额外运行时动效依赖 |
+| **Web Chat UI** | AI SDK Elements | 对话主轴、消息流与输入框继续使用 Vercel AI Elements |
+| **Web 视觉包装** | React Bits + Tailwind | 只做 welcome 态的背景/边界包装，禁止替换对话主轴组件 |
 | **Web API 客户端** | Fetch + AI SDK Transport | 当前使用最小依赖调用 Elysia API；Eden 保留为后续可选路径 |
 | **API 网关** | Elysia | Bun 原生高性能框架 |
 | **数据库** | PostgreSQL + PostGIS | LBS 地理查询 |
@@ -850,7 +850,7 @@ GET  /content/analytics             // 内容效果统计（主路径，支持 c
 | W1-2 | `POST /participants/confirm-fulfillment` | 新增履约确认请求体：`activityId + participants[{userId, fulfilled}]`；要求“登录 + 发起人权限” | `apps/api/src/modules/participants/participant.controller.ts`、`participant.model.ts`、`participant.service.ts`、`apps/miniprogram/subpackages/activity/confirm/index.ts` |
 | W1-3 | Temp_Organizer 重分配通知 | `intent-jobs` 重分配成功后，触发通知落库并回传可读文案 | `apps/api/src/jobs/intent-jobs.ts`、`apps/api/src/modules/notifications/notification.service.ts` |
 | W2-1 | 活动详情复制文案 | 复用详情接口，前端生成标准文案并调用复制能力 | `apps/miniprogram/subpackages/activity/detail/index.ts`、`index.wxml` |
-| W2-2 | 活动克隆（我也组一个） | 详情页触发“克隆”活动文本，回跳首页并预填 AI 输入（action/text） | `apps/miniprogram/subpackages/activity/detail/index.ts`、`apps/miniprogram/pages/home/index.ts` |
+| W2-2 | 活动克隆（我也组一个） | 详情页触发“克隆”活动文本，回跳 AI 主场并预填 AI 输入（action/text） | `apps/miniprogram/subpackages/activity/detail/index.ts`、`apps/miniprogram/pages/chat/index.ts` |
 | W2-3 | `service_notification` 发送链路 | 在通知策略之外补齐发送执行器与失败降级（失败时至少保证站内通知可达） | `apps/api/src/modules/notifications/notification.service.ts`、`apps/api/src/jobs/*` |
 
 **约束**：
@@ -2993,6 +2993,14 @@ Next.js SSR
 - 支持在同一 assistant 气泡内渲染文本 + 结构化 block
 - 作为小程序的降级方案，在小程序不可用时承接用户
 - 当前为游客模式：不依赖登录态，不提供消息中心和账号状态
+- 页面视觉采用 **双态结构**：
+  - **Welcome Stage**：暗色舞台 + Hero + 3 条快捷入口 + 底部输入框
+  - **Conversation Stage**：纯黑或近纯黑背景 + transcript + GenUI card 主导
+- Welcome Stage 的视觉包装只能包在现有组件外层：
+  - 对话主轴继续使用 AI SDK Elements
+  - 允许用 React Bits 包装 welcome 输入框边界或轻背景层
+  - 禁止自定义重写消息主列表、消息协议或输入框主逻辑
+- Conversation Stage 禁止保留大面积欢迎背景，避免与消息和 GenUI card 抢占注意力
 
 **组件映射**：
 
@@ -3002,6 +3010,13 @@ Next.js SSR
 | `Message` | 消息气泡，区分用户/AI |
 | `Reasoning` | AI 思考过程展示（可折叠） |
 | `PromptInput` | 输入框 + 发送按钮 |
+
+**视觉包装组件**：
+
+| 组件 | 用途 |
+|------|------|
+| `BorderGlow` (React Bits) | Welcome Stage 输入框外层的轻边界呼吸包装 |
+| Transcript Scroll Shell | 对 `ConversationContent` 外层增加上下渐隐与细滚动条，不替换消息列表逻辑 |
 
 ### 6.19.7 当前交付范围（v5.2）
 
@@ -3129,7 +3144,7 @@ export const useChatStore = create<ChatState & ChatActions>()(
 ### 7.2 页面绑定模式
 
 ```typescript
-// pages/home/index.ts
+// pages/chat/index.ts
 import { useChatStore } from '../../src/stores/chat'
 
 Page({
@@ -3168,10 +3183,10 @@ Page({
 })
 ```
 
-### 7.3 群聊轮询策略
+### 7.3 讨论区轮询策略
 
 ```typescript
-// pages/chat/index.ts
+// subpackages/activity/discussion/index.ts
 Page({
   timer: null as number | null,
 
@@ -3224,7 +3239,7 @@ Component({
       if (pages.length > 1) {
         wx.navigateBack();
       } else {
-        wx.reLaunch({ url: '/pages/home/index' });
+        wx.reLaunch({ url: '/pages/chat/index' });
       }
     }
   }
@@ -3280,10 +3295,10 @@ Component({
 
 **实现要点**：
 - 分享卡片进入时，页面栈长度为 1
-- 点击返回时，调用 `wx.reLaunch('/pages/home/index')` 跳转首页
-- 首页 Chat_Stream 为空，显示 Widget_Dashboard
+- 点击返回时，调用 `wx.reLaunch('/pages/chat/index')` 跳转主场
+- 返回主场后进入 `Welcome Stage`，以 Hero + 3 条建议入口 + Composer 承接，不再依赖 `Widget_Dashboard`
 - **MVP**：使用默认问候语即可
-- **优化（可选）**：通过 URL 参数 `?from=share&activityId=xxx` 识别来源，显示定制问候语："看完活动了？要不你也来组一个？"
+- **优化（可选）**：通过 URL 参数 `?from=share&activityId=xxx` 识别来源，定制副文案，例如“看完活动了？要不你也来组一个？”
 
 ### 8.6 草稿过期处理
 
@@ -3730,62 +3745,91 @@ bun run gen:api         # 生成 Orval SDK
 
 ---
 
-## 13. 视觉设计系统：Soft Tech
+## 13. 视觉设计系统：Editorial Dark
 
-### 13.1 CSS Variables
+### 13.1 总体原则
 
-```less
-/* app.less - 语义化变量，自动适配深色模式 */
-page {
-  /* 主色 (Brand) - 矢车菊蓝 */
-  --color-primary: #5B75FB;
-  --color-primary-light: #708DFD;
-  
-  /* 辅助色 (同色系淡色) */
-  --color-blue-light: #93C5FD;
-  --color-purple-light: #C4B5FD;
-  --color-mint-light: #6EE7B7;
-  
-  /* 语义化背景色 */
-  --bg-page: #F5F7FA;
-  --bg-card: #FFFFFF;
-  --bg-gradient-top: #E6EFFF;
-  
-  /* 语义化文字色 */
-  --text-main: #1F2937;
-  --text-sub: #6B7280;
-  
-  /* 卡片样式 */
-  --shadow-card: 0 8rpx 24rpx rgba(91, 117, 251, 0.06);
-  --radius-lg: 32rpx;
-}
+- 首页默认采用 **暗色基底 + 黑白灰排版**
+- 高级感优先通过 **留白、字号、字重、行高、模块间距、对齐关系** 建立，不依赖蓝紫渐变和大面积玻璃态
+- `Welcome Stage` 允许保留极轻的情绪背景（如 orb / 柔和背景层），但只能作为舞台气氛，不能抢 Hero 文案
+- `Conversation Stage` 进入后背景必须收敛到 **纯黑或近纯黑**，让消息和 GenUI cards 成为主角
+- React Bits 仅作为欢迎态的 **wrapper / 背景包装层** 使用；聊天主轴继续使用 AI SDK Elements 与现有 GenUI block 渲染
 
-/* 深色模式 */
-@media (prefers-color-scheme: dark) {
-  page {
-    --color-primary: #6380FF;
-    --bg-page: #0F172A;
-    --bg-card: #1E293B;
-    --bg-gradient-top: #1E1B4B;
-    --text-main: #F1F5F9;
-    --text-sub: #94A3B8;
-    --border-card: 1px solid rgba(255, 255, 255, 0.1);
-    --shadow-card: none;
-  }
-}
-```
+### 13.2 页面级双态结构
 
-### 13.2 卡片样式
+#### Welcome Stage
 
-```less
-.soft-card {
-  background: var(--bg-card);
-  color: var(--text-main);
-  border: var(--border-card);
-  box-shadow: var(--shadow-card);
-  border-radius: var(--radius-lg);
-}
-```
+- 顶部导航
+- Welcome Focus 小入口（可选）
+- Hero 文案
+- 3 条建议入口
+- Composer 输入框
+
+要求：
+- 不再把欢迎内容塞成 `Widget_Dashboard` 消息
+- 不再在首屏展示社交状态卡、统计信息、热词胶囊等高信息密度区块
+- `Welcome Focus` 只能由 `GET /ai/welcome` 后端基于登录态任务选择，前端不得自行推断任务优先级
+- Welcome 首屏的视觉中心是 **Hero + 留白 + 输入框**
+
+`Welcome Focus` 的当前优先级：
+
+1. `post_activity_feedback`：用户参加活动后的结果反馈
+2. `recruiting_result`：用户发起活动后的招人进展
+3. `unfinished_intent`：仍处于 active / waiting_auth / waiting_async_result 的未完成任务
+
+`post_activity_feedback` 对应的快捷入口必须发送 `record_activity_feedback` 结构化动作，后端写入 `activity_outcome` memory，并通过 Agent Task Runtime 更新 `agent_tasks.resultOutcome/resultSummary`。
+
+#### Conversation Stage
+
+- 顶部导航
+- 当前任务承接条（如有）
+- 消息流
+- Composer 输入框
+
+要求：
+- 进入聊天后 Hero 与建议入口收起
+- 背景切纯黑/近纯黑
+- transcript、消息、GenUI cards 为唯一主角
+
+### 13.3 Web 落地约束
+
+- H5 聊天主轴必须继续使用 **AI SDK Elements**：
+  - `Conversation`
+  - `ConversationContent`
+  - `Message`
+  - `PromptInput`
+- 禁止为欢迎态或聊天态重写消息主列表组件
+- React Bits 允许用于：
+  - welcome 背景气氛层
+  - welcome 输入框边界 wrapper（例如 `BorderGlow`）
+- 禁止用 React Bits 取代：
+  - 聊天 transcript
+  - SSE 流式消息容器
+  - 用户/助手消息气泡协议
+
+### 13.4 视觉层级规则
+
+- **第一层：排版**
+  - Hero 站住
+  - 建议入口像被排过的句子，不像按钮菜单
+  - 输入框像页面的一部分，而不是外挂工具栏
+- **第二层：灰度**
+  - 深底
+  - 柔白主文案
+  - 灰色辅助文案
+  - 轻边界与轻分隔
+- **第三层：效果**
+  - 只允许极轻背景气氛和边界呼吸
+  - 不允许高饱和霓虹、强渐变、过重玻璃态
+
+### 13.5 小程序对齐规则
+
+- 小程序欢迎态与 H5 保持相同信息架构：
+  - Hero
+  - 3 条建议入口
+  - Composer
+- 小程序聊天态同样切到纯黑/近纯黑内容舞台
+- 小程序不复用 H5 的 React Bits 运行时，但要复用同一套页面层级与视觉判断标准
 
 ---
 

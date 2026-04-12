@@ -318,6 +318,109 @@ export async function markActivityRebookFollowUp(
   };
 }
 
+export type ActivityFeedbackValue = 'positive' | 'neutral' | 'failed';
+
+function buildActivityFeedbackSummary(activityTitle: string, feedback: ActivityFeedbackValue, reviewSummary?: string): string {
+  const normalizedReview = reviewSummary?.trim();
+  if (normalizedReview) {
+    return normalizedReview;
+  }
+
+  switch (feedback) {
+    case 'positive':
+      return `用户反馈：这次「${activityTitle}」挺顺利。`;
+    case 'neutral':
+      return `用户反馈：这次「${activityTitle}」一般，需要后续再优化。`;
+    case 'failed':
+      return `用户反馈：这次「${activityTitle}」没成局。`;
+  }
+}
+
+export async function recordActivitySelfFeedback(params: {
+  userId: string;
+  activityId: string;
+  feedback: ActivityFeedbackValue;
+  reviewSummary?: string;
+}): Promise<ActionResponse> {
+  const [activity] = await db
+    .select({
+      id: activities.id,
+      creatorId: activities.creatorId,
+      title: activities.title,
+      type: activities.type,
+      locationName: activities.locationName,
+      startAt: activities.startAt,
+      status: activities.status,
+      embedding: activities.embedding,
+    })
+    .from(activities)
+    .where(eq(activities.id, params.activityId))
+    .limit(1);
+
+  if (!activity) {
+    throw new Error('活动不存在');
+  }
+
+  const [participantRecord] = await db
+    .select({ id: participants.id })
+    .from(participants)
+    .where(and(
+      eq(participants.activityId, params.activityId),
+      eq(participants.userId, params.userId),
+      eq(participants.status, 'joined'),
+    ))
+    .limit(1);
+
+  if (activity.creatorId !== params.userId && !participantRecord) {
+    throw new Error('只有活动发起人或参与成员可以记录这次反馈');
+  }
+
+  if (activity.status !== 'completed' && activity.startAt > new Date()) {
+    throw new Error('活动还没开始，结束后再来记录反馈吧');
+  }
+
+  const summary = buildActivityFeedbackSummary(activity.title, params.feedback, params.reviewSummary);
+  const attended = params.feedback === 'failed' ? false : true;
+  const now = new Date();
+
+  await upsertActivityOutcomeMemory(params.userId, {
+    activityId: params.activityId,
+    activityTitle: activity.title,
+    activityType: activity.type,
+    locationName: activity.locationName,
+    attended,
+    rebookTriggered: false,
+    reviewSummary: summary,
+    happenedAt: activity.startAt,
+    updatedAt: now,
+  });
+
+  if (params.feedback === 'positive' && activity.embedding) {
+    await addInterestVector(params.userId, {
+      activityId: params.activityId,
+      embedding: activity.embedding,
+      participatedAt: activity.startAt,
+      feedback: 'positive',
+    });
+  }
+
+  await recordJoinTaskFulfillmentOutcome({
+    userId: params.userId,
+    activityId: params.activityId,
+    attended,
+    summary,
+  });
+
+  return {
+    code: 200,
+    msg: params.feedback === 'positive'
+      ? '已记下这次顺利成局，后面会按这个方向推荐'
+      : params.feedback === 'neutral'
+        ? '已记下这次体验一般，后面会帮你避开类似问题'
+        : '已记下这次没成局，后面会帮你换个推进方式',
+  };
+}
+
 export async function saveActivityReviewSummary(
   userId: string,
   activityId: string,

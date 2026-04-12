@@ -14,13 +14,15 @@ declare const __wxConfig: { envVersion?: string } | undefined
 const isDev = typeof __wxConfig !== 'undefined' && 
   (__wxConfig?.envVersion === 'develop' || __wxConfig?.envVersion === 'trial')
 
+const DEV_HOST = '192.168.50.155'
+
 /**
  * API 配置
  */
 export const API_CONFIG = {
-  // 开发环境使用局域网 IP，生产环境使用正式域名
+  // 开发环境使用局域网 IP + 本地 API 端口，生产环境使用正式域名
   BASE_URL: isDev 
-    ? 'http://192.168.1.100:3000'  // TODO: 替换为你的局域网 IP
+    ? `http://${DEV_HOST}:1996`
     : 'https://api.juchang.app',   // TODO: 替换为正式域名
 }
 
@@ -29,7 +31,7 @@ export const API_CONFIG = {
  */
 export const ADMIN_CONFIG = {
   BASE_URL: isDev
-    ? 'http://192.168.1.100:5173'  // TODO: 替换为你的局域网 IP
+    ? `http://${DEV_HOST}:5173`
     : 'https://admin.juchang.app', // TODO: 替换为正式域名
 }
 

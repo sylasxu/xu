@@ -81,6 +81,10 @@ Component({
       type: Boolean,
       value: false,
     },
+    collapsible: {
+      type: Boolean,
+      value: true,
+    },
     profileHints: {
       type: Object,
       value: {},
@@ -138,6 +142,9 @@ Component({
   methods: {
     // 切换展开/收起
     onToggle() {
+      if (!this.properties.collapsible) {
+        return;
+      }
       this.setData({
         isExpanded: !this.data.isExpanded,
       });

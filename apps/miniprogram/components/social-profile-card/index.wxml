@@ -5,13 +5,12 @@
   展示用户社交统计数据，引导完善偏好
 -->
 <view class="social-profile-card" wx:if="{{hasProfile}}">
-  <!-- 卡片头部（可点击展开/收起） -->
-  <view class="card-header btn-pressable" bindtap="onToggle">
+  <view class="card-header {{collapsible ? 'btn-pressable' : ''}}" bindtap="onToggle">
     <view class="header-left">
-      <text class="header-icon">📊</text>
+      <text class="header-icon"></text>
       <text class="header-title">我的社交状态</text>
     </view>
-    <view class="header-right">
+    <view wx:if="{{collapsible}}" class="header-right">
       <t-icon 
         name="{{isExpanded ? 'chevron-up' : 'chevron-down'}}" 
         size="32rpx" 
@@ -20,39 +19,32 @@
     </view>
   </view>
   
-  <!-- 卡片内容（可展开/收起） -->
-  <view class="card-content {{isExpanded ? 'expanded' : 'collapsed'}}">
-    <!-- 统计数据 -->
+  <view class="card-content {{isExpanded ? 'expanded' : 'collapsed'}} {{!collapsible ? 'card-content--static' : ''}}">
     <view class="stats-row">
       <view class="stat-item">
-        <text class="stat-icon">🎯</text>
         <text class="stat-label">参与</text>
         <text class="stat-value">{{displayProfile.joinedActivities}}</text>
         <text class="stat-unit">场</text>
       </view>
       <view class="stat-divider"></view>
       <view class="stat-item">
-        <text class="stat-icon">📍</text>
         <text class="stat-label">发起</text>
         <text class="stat-value">{{displayProfile.hostedActivities}}</text>
         <text class="stat-unit">场</text>
       </view>
       <view class="stat-divider"></view>
       <view class="stat-item">
-        <text class="stat-icon">✨</text>
-        <text class="stat-label">偏好</text>
+        <text class="stat-label">偏好完善</text>
         <text class="stat-value">{{displayProfile.preferenceCompleteness}}</text>
         <text class="stat-unit">%</text>
       </view>
     </view>
     
-    <!-- 偏好完善引导 -->
     <view class="preference-guide">
       <view class="guide-content">
-        <text class="guide-icon">✨</text>
         <text class="guide-text">{{completenessText}}</text>
       </view>
-      <view class="guide-action btn-pressable" bindtap="onGoToPreference">
+      <view wx:if="{{collapsible}}" class="guide-action btn-pressable" bindtap="onGoToPreference">
         <text class="action-text">去完善</text>
         <t-icon name="chevron-right" size="28rpx" color="#5B75FB" />
       </view>

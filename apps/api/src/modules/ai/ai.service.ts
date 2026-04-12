@@ -17,6 +17,7 @@ import {
   conversationMessages,
   activities,
   participants,
+  agentTasks,
   eq,
   desc,
   sql,
@@ -589,7 +590,7 @@ function buildStructuredActionReplyText(params: {
     return `${trimmedDefaultMessage || '我先把这场局替你整理好了。'}${actionGuidance}也可以直接告诉我还想改哪里，我继续帮你调。`;
   }
 
-  if (actionType === 'join_activity' || actionType === 'confirm_match' || actionType === 'cancel_match' || actionType === 'cancel_join') {
+  if (actionType === 'join_activity' || actionType === 'confirm_match' || actionType === 'cancel_match' || actionType === 'cancel_join' || actionType === 'record_activity_feedback') {
     const actionGuidance = actionLabels
       ? `你可以先试试${actionLabels}，`
       : '';
@@ -655,6 +656,7 @@ function inferIntentFromStructuredAction(actionType: StructuredAction['action'] 
     || actionType === 'view_activity'
     || actionType === 'cancel_join'
     || actionType === 'share_activity'
+    || actionType === 'record_activity_feedback'
   ) {
     return 'manage';
   }
@@ -2337,6 +2339,18 @@ export interface QuickPrompt {
   icon: string;
   text: string;
   prompt: string;
+  action?: string;
+  params?: Record<string, unknown>;
+}
+
+export type WelcomeFocusType = 'post_activity_feedback' | 'recruiting_result' | 'unfinished_intent';
+
+export interface WelcomeFocus {
+  type: WelcomeFocusType;
+  label: string;
+  prompt: string;
+  priority: number;
+  context?: unknown;
 }
 
 export interface WelcomeResponse {
@@ -2345,6 +2359,7 @@ export interface WelcomeResponse {
   sections: WelcomeSection[];
   socialProfile?: SocialProfile | undefined;
   pendingActivities?: WelcomePendingActivity[] | undefined;
+  welcomeFocus?: WelcomeFocus | undefined;
   quickPrompts: QuickPrompt[];
   ui?: {
     composerPlaceholder: string;
@@ -2626,6 +2641,169 @@ function clampWelcomeTitle(title: string, maxLength = 12): string {
   return `${normalized.slice(0, Math.max(maxLength - 1, 1))}…`;
 }
 
+const OPEN_WELCOME_TASK_STATUSES = ['active', 'waiting_auth', 'waiting_async_result'] as const;
+
+function buildPostActivityFeedbackPrompts(activityTitle: string, activityId: string): QuickPrompt[] {
+  const title = clampWelcomeTitle(activityTitle, 16);
+  return [
+    {
+      icon: '✓',
+      text: '挺顺利',
+      prompt: `这次「${title}」挺顺利，帮我记录一下反馈。`,
+      action: 'record_activity_feedback',
+      params: {
+        activityId,
+        feedback: 'positive',
+        reviewSummary: `这次「${title}」挺顺利。`,
+      },
+    },
+    {
+      icon: '·',
+      text: '一般',
+      prompt: `这次「${title}」一般，帮我记录一下并看看要不要调整。`,
+      action: 'record_activity_feedback',
+      params: {
+        activityId,
+        feedback: 'neutral',
+        reviewSummary: `这次「${title}」一般，需要后续再优化。`,
+      },
+    },
+    {
+      icon: '×',
+      text: '没成局',
+      prompt: `这次「${title}」没成局，帮我记录一下并分析原因。`,
+      action: 'record_activity_feedback',
+      params: {
+        activityId,
+        feedback: 'failed',
+        reviewSummary: `这次「${title}」没成局。`,
+      },
+    },
+  ];
+}
+
+function buildUnfinishedIntentLabel(stage: string, status: string): string {
+  if (stage === 'match_ready') {
+    return '有新匹配';
+  }
+
+  if (stage === 'draft_ready') {
+    return '草稿待确认';
+  }
+
+  if (status === 'waiting_async_result') {
+    return '结果待查看';
+  }
+
+  return '继续这件事';
+}
+
+async function selectWelcomeFocus(userId: string, now: Date): Promise<WelcomeFocus | undefined> {
+  const [postActivityTask] = await db
+    .select({
+      taskId: agentTasks.id,
+      activityId: agentTasks.activityId,
+      goalText: agentTasks.goalText,
+      activityTitle: activities.title,
+    })
+    .from(agentTasks)
+    .innerJoin(activities, eq(agentTasks.activityId, activities.id))
+    .where(and(
+      eq(agentTasks.userId, userId),
+      eq(agentTasks.taskType, 'join_activity'),
+      eq(agentTasks.currentStage, 'post_activity'),
+      inArray(agentTasks.status, OPEN_WELCOME_TASK_STATUSES),
+    ))
+    .orderBy(desc(agentTasks.updatedAt))
+    .limit(1);
+
+  if (postActivityTask) {
+    const title = postActivityTask.activityTitle || postActivityTask.goalText;
+    return {
+      type: 'post_activity_feedback',
+      label: `这次「${clampWelcomeTitle(title, 10)}」怎么样？`,
+      prompt: `这次「${title}」怎么样？帮我记录这次活动反馈。`,
+      priority: 1,
+      context: {
+        taskId: postActivityTask.taskId,
+        activityId: postActivityTask.activityId,
+        activityTitle: title,
+      },
+    };
+  }
+
+  const [recruitingActivity] = await db
+    .select({
+      id: activities.id,
+      title: activities.title,
+      currentParticipants: activities.currentParticipants,
+      maxParticipants: activities.maxParticipants,
+    })
+    .from(activities)
+    .where(and(
+      eq(activities.creatorId, userId),
+      eq(activities.status, 'active'),
+      gt(activities.startAt, now),
+      sql`${activities.currentParticipants} < ${activities.maxParticipants}`,
+    ))
+    .orderBy(sql`${activities.startAt} ASC`)
+    .limit(1);
+
+  if (recruitingActivity) {
+    const remaining = Math.max(recruitingActivity.maxParticipants - recruitingActivity.currentParticipants, 0);
+    return {
+      type: 'recruiting_result',
+      label: `「${clampWelcomeTitle(recruitingActivity.title, 10)}」还差 ${remaining} 人`,
+      prompt: `继续处理「${recruitingActivity.title}」的招人结果，还差 ${remaining} 人，帮我看看下一步怎么推进。`,
+      priority: 2,
+      context: {
+        activityId: recruitingActivity.id,
+        remaining,
+      },
+    };
+  }
+
+  const openTasks = await db
+    .select({
+      taskId: agentTasks.id,
+      taskType: agentTasks.taskType,
+      currentStage: agentTasks.currentStage,
+      status: agentTasks.status,
+      goalText: agentTasks.goalText,
+      activityId: agentTasks.activityId,
+      partnerIntentId: agentTasks.partnerIntentId,
+      intentMatchId: agentTasks.intentMatchId,
+    })
+    .from(agentTasks)
+    .where(and(
+      eq(agentTasks.userId, userId),
+      inArray(agentTasks.status, OPEN_WELCOME_TASK_STATUSES),
+    ))
+    .orderBy(desc(agentTasks.updatedAt))
+    .limit(5);
+
+  const unfinishedTask = openTasks.find((task) => task.currentStage !== 'post_activity');
+  if (!unfinishedTask) {
+    return undefined;
+  }
+
+  return {
+    type: 'unfinished_intent',
+    label: buildUnfinishedIntentLabel(unfinishedTask.currentStage, unfinishedTask.status),
+    prompt: `继续处理：${unfinishedTask.goalText}`,
+    priority: 3,
+    context: {
+      taskId: unfinishedTask.taskId,
+      taskType: unfinishedTask.taskType,
+      currentStage: unfinishedTask.currentStage,
+      status: unfinishedTask.status,
+      activityId: unfinishedTask.activityId,
+      partnerIntentId: unfinishedTask.partnerIntentId,
+      intentMatchId: unfinishedTask.intentMatchId,
+    },
+  };
+}
+
 export function generateGreeting(
   nickname: string | null,
   config: WelcomeCopyConfig = DEFAULT_WELCOME_COPY_CONFIG,
@@ -2653,12 +2831,15 @@ export async function getWelcomeCard(
   let socialProfile: { joinedActivities: number; hostedActivities: number; preferenceCompleteness: number } | undefined;
   let pendingActivities: WelcomePendingActivity[] = [];
   let hasDraftActivity = false;
+  let welcomeFocus: WelcomeFocus | undefined;
 
   if (userId) {
-    const [activityStats, profile] = await Promise.all([
+    const [activityStats, profile, selectedWelcomeFocus] = await Promise.all([
       getUserActivityStats(userId),
       getEnhancedUserProfile(userId),
+      selectWelcomeFocus(userId, now),
     ]);
+    welcomeFocus = selectedWelcomeFocus;
 
     const preferencesCount = profile.preferences.length;
     const locationsCount = profile.frequentLocations.length;
@@ -2785,7 +2966,12 @@ export async function getWelcomeCard(
   }
 
   // 快捷入口（v4.4 新增）
-  const quickPrompts = hasDraftActivity ? [] : welcomeUi.quickPrompts;
+  const focusContext = isRecord(welcomeFocus?.context) ? welcomeFocus.context : null;
+  const focusActivityTitle = getNonEmptyString(focusContext?.activityTitle);
+  const focusActivityId = getNonEmptyString(focusContext?.activityId);
+  const quickPrompts = welcomeFocus?.type === 'post_activity_feedback' && focusActivityTitle && focusActivityId
+    ? buildPostActivityFeedbackPrompts(focusActivityTitle, focusActivityId)
+    : hasDraftActivity ? [] : welcomeUi.quickPrompts;
 
   return {
     greeting,
@@ -2793,6 +2979,7 @@ export async function getWelcomeCard(
     sections,
     socialProfile,
     pendingActivities,
+    welcomeFocus,
     quickPrompts,
     ui: {
       composerPlaceholder: welcomeUi.composerPlaceholder,

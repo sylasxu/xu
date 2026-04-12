@@ -17,11 +17,11 @@
  * })
  * ```
  */
-import { create } from 'zustand'
-import { immer } from 'zustand/middleware/immer'
-import { persist, createJSONStorage } from 'zustand/middleware'
+import { createStore } from 'zustand/vanilla.js'
+import { createJSONStorage, persist } from 'zustand/middleware.js'
+import { immer } from 'zustand/middleware/immer.js'
 import type { SSEController, UIMessagePart } from '../utils/sse-request'
-import { API_CONFIG } from '../config'
+import { API_CONFIG } from '../config/index'
 import { useAppStore, type PendingActionAuthMode, type StructuredPendingAction } from './app'
 import type {
   GenUIBlock,
@@ -1440,7 +1440,7 @@ interface ChatState {
   _setController: (controller: SSEController | null) => void
 }
 
-export const useChatStore = create<ChatState>()(
+export const useChatStore = createStore<ChatState>()(
   persist(
     immer((set, get) => {
       const streamAssistantResponse = (params: {

@@ -5,15 +5,15 @@
   位置：Tabbar上方悬浮
   外观：类似灵动岛的黑色长条
 -->
-<view class="chat-sender {{isExpanded ? 'expanded' : ''}}">
+<view class="chat-sender {{isExpanded ? 'expanded' : ''}} {{welcome ? 'chat-sender--welcome' : 'chat-sender--chat'}}">
   <!-- 收起状态：点击展开 -->
   <view wx:if="{{!isExpanded}}" class="chat-sender__collapsed" bindtap="onBarTap">
     <view class="chat-sender__icon">
       <text>🤖</text>
     </view>
     <view class="chat-sender__placeholder">{{placeholder}}</view>
-    <view class="chat-sender__voice-btn" catchtap="onVoiceTap">
-      <t-icon name="sound" size="40rpx" color="#fff" />
+    <view class="chat-sender__send-btn">
+      <t-icon name="arrow-up" size="40rpx" color="#5B75FB" />
     </view>
   </view>
 
@@ -44,14 +44,8 @@
       </view>
     </view>
 
-    <!-- 语音/发送按钮 -->
-    <view class="chat-sender__action-btn" catchtap="{{inputValue ? 'onInputConfirm' : 'onVoiceTap'}}">
-      <view wx:if="{{isRecording}}" class="chat-sender__recording">
-        <view class="chat-sender__recording-dot"></view>
-        <text class="chat-sender__recording-text">{{recordingDuration}}s</text>
-      </view>
-      <t-icon wx:elif="{{inputValue}}" name="send" size="44rpx" color="#fff" />
-      <t-icon wx:else name="sound" size="44rpx" color="#fff" />
+    <view class="chat-sender__action-btn {{inputValue ? 'chat-sender__action-btn--active' : ''}}" catchtap="onInputConfirm">
+      <t-icon name="arrow-up" size="44rpx" color="{{inputValue ? '#FFFFFF' : '#5B75FB'}}" />
     </view>
   </view>
 </view>

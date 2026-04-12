@@ -10,7 +10,7 @@
  * - type: user-agreement | privacy-policy | about
  */
 
-import { ADMIN_CONFIG } from '@/config'
+import { ADMIN_CONFIG } from '../../src/config/index'
 
 Page({
   data: {

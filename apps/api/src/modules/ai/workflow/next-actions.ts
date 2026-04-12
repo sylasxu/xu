@@ -215,6 +215,34 @@ export function buildNextBestActions(params: NextBestActionInput): NextBestActio
           action: 'explore_nearby',
         },
       ];
+    case 'record_activity_feedback': {
+      const items: NextBestActionItem[] = [
+        {
+          label: '补一句具体感受',
+          action: 'quick_prompt',
+          params: {
+            prompt: '我想补充这次活动的具体感受：',
+          },
+        },
+      ];
+
+      if (activityId) {
+        items.push({
+          label: '想再约一次',
+          action: 'quick_prompt',
+          params: {
+            prompt: `基于这次活动（activityId: ${activityId}），帮我快速再约一场。`,
+          },
+        });
+      }
+
+      items.push({
+        label: '继续找新局',
+        action: 'explore_nearby',
+      });
+
+      return items;
+    }
     case 'confirm_match': {
       const items: NextBestActionItem[] = [];
       if (activityId) {

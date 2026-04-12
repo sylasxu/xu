@@ -4,9 +4,9 @@
  * 数据来源：conversations 表
  * 功能：缓存对话主场摘要，不再把会话列表误当成消息列表使用
  */
-import { create } from 'zustand'
-import { immer } from 'zustand/middleware/immer'
-import { persist, createJSONStorage } from 'zustand/middleware'
+import { createStore } from 'zustand/vanilla.js'
+import { createJSONStorage, persist } from 'zustand/middleware.js'
+import { immer } from 'zustand/middleware/immer.js'
 import type { AiConversationsResponseItemsItem } from '../api/model'
 import {
   getAiConversations,
@@ -70,7 +70,7 @@ function getCurrentUserId(): string {
   return ''
 }
 
-export const useChatHomeStore = create<HomeState>()(
+export const useChatHomeStore = createStore<HomeState>()(
   persist(
     immer((set, get) => ({
       conversations: [],

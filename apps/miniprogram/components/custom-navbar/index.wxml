@@ -75,7 +75,7 @@
 <!-- 下拉菜单 -->
 <view 
   wx:if="{{showDropmenu}}" 
-  class="dropmenu halo-card-mini"
+  class="dropmenu"
   style="top: {{statusBarHeight + navBarHeight + 8}}px; right: {{menuButtonInfo ? menuButtonInfo.width + 24 : 108}}px;"
 >
   <view 
@@ -84,7 +84,7 @@
     bindtap="onDropmenuItemTap"
     hover-class="dropmenu-item--hover"
   >
-    <view class="dropmenu-icon icon-circle icon-circle-sm icon-circle--blue">
+    <view class="dropmenu-icon">
       <t-icon name="chat" size="32rpx" />
     </view>
     <text class="dropmenu-text">消息中心</text>
@@ -98,7 +98,7 @@
     bindtap="onDropmenuItemTap"
     hover-class="dropmenu-item--hover"
   >
-    <view class="dropmenu-icon icon-circle icon-circle-sm icon-circle--purple">
+    <view class="dropmenu-icon">
       <t-icon name="add" size="32rpx" />
     </view>
     <text class="dropmenu-text">新对话</text>

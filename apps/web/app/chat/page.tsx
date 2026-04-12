@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   isDataUIPart,
   isTextUIPart,
@@ -12,10 +12,10 @@ import {
 import {
   ArrowUp,
   ChevronRight,
-  MoreHorizontal,
-  QrCode,
+  Moon,
+  Plus,
   Sparkles,
-  Volume2,
+  Sun,
 } from "lucide-react";
 
 import {
@@ -38,9 +38,11 @@ import {
   Suggestion,
   Suggestions,
 } from "@/components/ai-elements/suggestion";
+import BorderGlow from "@/components/BorderGlow";
 import { MessageCenterDrawer } from "@/components/chat/message-center-drawer";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { readClientToken } from "@/lib/client-auth";
+import { SidebarDrawer } from "@/components/chat/sidebar-drawer";
+import Orb from "@/components/Orb";
+import { readClientToken, readClientUserId } from "@/lib/client-auth";
 import { cn } from "@/lib/utils";
 import type {
   GenUIAlertBlock,
@@ -59,15 +61,15 @@ import type {
 } from "@/src/gen/genui-contract";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:1996";
-const GROUP_INVITE_URL = process.env.NEXT_PUBLIC_GROUP_INVITE_URL || "https://juchang.app";
-const GROUP_QR_IMAGE_URL =
-  process.env.NEXT_PUBLIC_GROUP_QR_URL ||
-  `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(GROUP_INVITE_URL)}`;
 const DEFAULT_PROMPTS = [
   "想租个周五晚上的局",
   "我在观音桥，想组个桌游局",
   "周末附近有什么活动",
 ];
+const DEFAULT_PROMPT_ENTRIES: WelcomePromptEntry[] = DEFAULT_PROMPTS.map((prompt) => ({
+  text: prompt,
+  prompt,
+}));
 const DEFAULT_WELCOME_GREETING = "你好～";
 const DEFAULT_WELCOME_SUB_GREETING = "今天想约什么局？";
 const DEFAULT_COMPOSER_PLACEHOLDER = "你想找什么活动？";
@@ -84,7 +86,9 @@ const DEFAULT_PROFILE_HINTS = {
 };
 const COMPOSER_EXPAND_THRESHOLD = 10;
 const PENDING_AGENT_ACTION_STORAGE_KEY = "juchang:web:pending-agent-action";
+const THEME_STORAGE_KEY = "juchang:web:theme";
 const TEXT_STREAM_CHUNK_DELAY_MS = 60;  // v5.5: 调慢打字机速度，提升可读性
+const ChatThemeContext = createContext(true);
 
 type ComposerStatus = "ready" | "submitted";
 type ActivityContextOverrides = Pick<GenUIRequestContext, "activityId" | "activityMode" | "entry">;
@@ -190,27 +194,6 @@ type ChatStreamDataTypes = {
 };
 type ChatStreamMessage = AISDKUIMessage<ChatStreamMessageMetadata, ChatStreamDataTypes>;
 type ChatStreamChunk = UIMessageChunk<ChatStreamMessageMetadata, ChatStreamDataTypes>;
-type WelcomeSocialProfile = {
-  joinedActivities: number;
-  hostedActivities: number;
-  preferenceCompleteness: number;
-};
-type WelcomePendingActivity = {
-  id: string;
-  title: string;
-  type: string;
-  startAt: string;
-  locationName: string;
-  locationHint: string;
-  currentParticipants: number;
-  maxParticipants: number;
-  status: string;
-};
-type WelcomeDraftAction = {
-  label: string;
-  prompt: string;
-  activityId?: string;
-};
 type WelcomeUiPayload = {
   composerPlaceholder: string;
   bottomQuickActions: string[];
@@ -220,11 +203,44 @@ type WelcomeUiPayload = {
     high: string;
   };
 };
+type WelcomePromptEntry = {
+  text: string;
+  prompt: string;
+  action?: string;
+  params?: Record<string, unknown>;
+};
+type WelcomeFocusPayload = {
+  type: "post_activity_feedback" | "recruiting_result" | "unfinished_intent";
+  label: string;
+  prompt: string;
+  priority: number;
+};
+type StoredConversationMessage = {
+  id: string;
+  userId: string;
+  userNickname: string | null;
+  role: "user" | "assistant";
+  type: string;
+  content: unknown;
+  activityId: string | null;
+  createdAt: string;
+};
+type StoredConversationMessagesPayload = {
+  conversationId: string;
+  items: StoredConversationMessage[];
+  total: number;
+  hasMore: boolean;
+  cursor: string | null;
+};
 
 const WELCOME_LOCATION_WAIT_MS = 600;
 
 function randomId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function useChatTheme() {
+  return useContext(ChatThemeContext);
 }
 
 function shouldExpandComposer(value: string) {
@@ -978,6 +994,26 @@ function isGenUITextBlock(block: GenUIBlock): block is GenUITextBlock {
   return block.type === "text";
 }
 
+function isGenUISuggestions(value: unknown): value is NonNullable<GenUIResponseEnvelope["response"]["suggestions"]> {
+  if (!isRecord(value) || typeof value.kind !== "string") {
+    return false;
+  }
+
+  if (value.kind === "choice") {
+    return Array.isArray(value.options);
+  }
+
+  if (value.kind === "list") {
+    return Array.isArray(value.items);
+  }
+
+  if (value.kind === "cta-group") {
+    return Array.isArray(value.items);
+  }
+
+  return false;
+}
+
 function isGenUIResponseEnvelope(value: unknown): value is GenUIResponseEnvelope {
   if (!isRecord(value) || typeof value.traceId !== "string" || typeof value.conversationId !== "string") {
     return false;
@@ -996,7 +1032,125 @@ function isGenUIResponseEnvelope(value: unknown): value is GenUIResponseEnvelope
   );
 }
 
-function extractWelcomePrompts(payload: unknown): string[] {
+function readStoredConversationText(content: unknown): string {
+  if (typeof content === "string") {
+    return content.trim();
+  }
+
+  if (!isRecord(content)) {
+    return "";
+  }
+
+  if (typeof content.text === "string" && content.text.trim()) {
+    return content.text.trim();
+  }
+
+  if (typeof content.message === "string" && content.message.trim()) {
+    return content.message.trim();
+  }
+
+  return "";
+}
+
+function buildEnvelopeFromStoredAssistantMessage(params: {
+  conversationId: string;
+  messageId: string;
+  content: unknown;
+}): GenUIResponseEnvelope | null {
+  if (isRecord(params.content) && isRecord(params.content.response)) {
+    const storedResponse = params.content.response;
+    const blocks = Array.isArray(storedResponse.blocks) ? storedResponse.blocks.filter(isGenUIBlock) : [];
+
+    if (blocks.length > 0) {
+      return {
+        traceId:
+          typeof storedResponse.traceId === "string" && storedResponse.traceId.trim()
+            ? storedResponse.traceId
+            : `history_trace_${params.messageId}`,
+        conversationId: params.conversationId,
+        response: {
+          responseId:
+            typeof storedResponse.responseId === "string" && storedResponse.responseId.trim()
+              ? storedResponse.responseId
+              : `history_response_${params.messageId}`,
+          role: "assistant",
+          status: isGenUIResponseStatus(storedResponse.status) ? storedResponse.status : "completed",
+          ...(isGenUISuggestions(storedResponse.suggestions) ? { suggestions: storedResponse.suggestions } : {}),
+          blocks,
+        },
+      };
+    }
+  }
+
+  const text = readStoredConversationText(params.content);
+  if (!text) {
+    return null;
+  }
+
+  return {
+    traceId: `history_trace_${params.messageId}`,
+    conversationId: params.conversationId,
+    response: {
+      responseId: `history_response_${params.messageId}`,
+      role: "assistant",
+      status: "completed",
+      blocks: [
+        {
+          blockId: `${params.messageId}_text`,
+          type: "text",
+          content: text,
+        },
+      ],
+    },
+  };
+}
+
+function buildChatRecordFromStoredMessage(
+  conversationId: string,
+  item: StoredConversationMessage
+): ChatRecord | null {
+  if (item.role === "user") {
+    const text = readStoredConversationText(item.content);
+    if (!text) {
+      return null;
+    }
+
+    const structuredAction =
+      item.type === "user_action" && isRecord(item.content) && typeof item.content.action === "string"
+        ? {
+            action: item.content.action,
+            actionId: item.id,
+            ...(isRecord(item.content.payload) ? { params: item.content.payload } : {}),
+            ...(typeof item.content.source === "string" ? { source: item.content.source } : {}),
+            displayText: text,
+          }
+        : undefined;
+
+    return {
+      id: item.id,
+      role: "user",
+      text,
+      ...(structuredAction ? { structuredAction } : {}),
+    };
+  }
+
+  const response = buildEnvelopeFromStoredAssistantMessage({
+    conversationId,
+    messageId: item.id,
+    content: item.content,
+  });
+  if (!response) {
+    return null;
+  }
+
+  return {
+    id: item.id,
+    role: "assistant",
+    response,
+  };
+}
+
+function extractWelcomePrompts(payload: unknown): WelcomePromptEntry[] {
   if (!isRecord(payload) || !Array.isArray(payload.quickPrompts)) {
     return [];
   }
@@ -1004,45 +1158,34 @@ function extractWelcomePrompts(payload: unknown): string[] {
   return payload.quickPrompts
     .map((item) => {
       if (!isRecord(item)) {
-        return "";
+        return null;
       }
 
-      if (typeof item.prompt === "string" && item.prompt.trim()) {
-        return item.prompt.trim();
+      const prompt =
+        typeof item.prompt === "string" && item.prompt.trim()
+          ? item.prompt.trim()
+          : typeof item.text === "string" && item.text.trim()
+            ? item.text.trim()
+            : "";
+      const text =
+        typeof item.text === "string" && item.text.trim()
+          ? item.text.trim()
+          : prompt;
+      const action = typeof item.action === "string" && item.action.trim() ? item.action.trim() : undefined;
+      const params = isRecord(item.params) ? item.params : undefined;
+      if (!prompt || !text) {
+        return null;
       }
 
-      if (typeof item.text === "string" && item.text.trim()) {
-        return item.text.trim();
-      }
-
-      return "";
+      return {
+        text,
+        prompt,
+        ...(action ? { action } : {}),
+        ...(params ? { params } : {}),
+      };
     })
-    .filter(Boolean)
+    .filter((item): item is WelcomePromptEntry => item !== null)
     .slice(0, 5);
-}
-
-function extractWelcomeSocialProfile(payload: unknown): WelcomeSocialProfile | null {
-  if (!isRecord(payload) || !isRecord(payload.socialProfile)) {
-    return null;
-  }
-
-  const joinedActivities = Number(payload.socialProfile.joinedActivities);
-  const hostedActivities = Number(payload.socialProfile.hostedActivities);
-  const preferenceCompleteness = Number(payload.socialProfile.preferenceCompleteness);
-
-  if (
-    !Number.isFinite(joinedActivities) ||
-    !Number.isFinite(hostedActivities) ||
-    !Number.isFinite(preferenceCompleteness)
-  ) {
-    return null;
-  }
-
-  return {
-    joinedActivities,
-    hostedActivities,
-    preferenceCompleteness,
-  };
 }
 
 function extractWelcomeGreeting(payload: unknown): { greeting: string; subGreeting: string } {
@@ -1063,6 +1206,39 @@ function extractWelcomeGreeting(payload: unknown): { greeting: string; subGreeti
       : DEFAULT_WELCOME_SUB_GREETING;
 
   return { greeting, subGreeting };
+}
+
+function isWelcomeFocusType(value: unknown): value is WelcomeFocusPayload["type"] {
+  return value === "post_activity_feedback" || value === "recruiting_result" || value === "unfinished_intent";
+}
+
+function extractWelcomeFocus(payload: unknown): WelcomeFocusPayload | null {
+  if (!isRecord(payload) || !isRecord(payload.welcomeFocus)) {
+    return null;
+  }
+
+  const focus = payload.welcomeFocus;
+  if (
+    !isWelcomeFocusType(focus.type) ||
+    typeof focus.label !== "string" ||
+    typeof focus.prompt !== "string" ||
+    typeof focus.priority !== "number"
+  ) {
+    return null;
+  }
+
+  const label = focus.label.trim();
+  const prompt = focus.prompt.trim();
+  if (!label || !prompt) {
+    return null;
+  }
+
+  return {
+    type: focus.type,
+    label,
+    prompt,
+    priority: focus.priority,
+  };
 }
 
 function extractWelcomeUi(payload: unknown): WelcomeUiPayload {
@@ -1109,112 +1285,6 @@ function extractWelcomeUi(payload: unknown): WelcomeUiPayload {
   };
 }
 
-function extractWelcomePendingActivities(payload: unknown): WelcomePendingActivity[] {
-  if (!isRecord(payload) || !Array.isArray(payload.pendingActivities)) {
-    return [];
-  }
-
-  return payload.pendingActivities
-    .map((item) => {
-      if (!isRecord(item)) {
-        return null;
-      }
-
-      const id = typeof item.id === "string" ? item.id : "";
-      const title = typeof item.title === "string" ? item.title : "";
-      const type = typeof item.type === "string" ? item.type : "other";
-      const startAt = typeof item.startAt === "string" ? item.startAt : "";
-      const locationName = typeof item.locationName === "string" ? item.locationName : "";
-      const locationHint = typeof item.locationHint === "string" ? item.locationHint : "";
-      const currentParticipants = Number(item.currentParticipants);
-      const maxParticipants = Number(item.maxParticipants);
-      const status = typeof item.status === "string" ? item.status : "";
-
-      if (!id || !title || !startAt || !locationName || !Number.isFinite(currentParticipants) || !Number.isFinite(maxParticipants)) {
-        return null;
-      }
-
-      return {
-        id,
-        title,
-        type,
-        startAt,
-        locationName,
-        locationHint,
-        currentParticipants,
-        maxParticipants,
-        status,
-      };
-    })
-    .filter((item): item is WelcomePendingActivity => item !== null)
-    .slice(0, 3);
-}
-
-function extractWelcomeDraftAction(payload: unknown): WelcomeDraftAction | null {
-  if (!isRecord(payload) || !Array.isArray(payload.sections)) {
-    return null;
-  }
-
-  const draftSection = payload.sections.find((section) => {
-    if (!isRecord(section)) {
-      return false;
-    }
-
-    return section.id === "draft" && Array.isArray(section.items);
-  });
-
-  if (!isRecord(draftSection) || !Array.isArray(draftSection.items) || draftSection.items.length === 0) {
-    return null;
-  }
-
-  const firstItem = draftSection.items[0];
-  if (!isRecord(firstItem)) {
-    return null;
-  }
-
-  const label = typeof firstItem.label === "string" ? firstItem.label.trim() : "";
-  const prompt = typeof firstItem.prompt === "string" ? firstItem.prompt.trim() : "";
-  const activityId =
-    isRecord(firstItem.context) && typeof firstItem.context.activityId === "string"
-      ? firstItem.context.activityId
-      : undefined;
-
-  if (!label || !prompt) {
-    return null;
-  }
-
-  return { label, prompt, activityId };
-}
-
-function formatWelcomeActivityTime(startAt: string): string {
-  const date = new Date(startAt);
-  if (Number.isNaN(date.getTime())) {
-    return "时间待定";
-  }
-
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function getProfileHint(
-  completeness: number,
-  profileHints: WelcomeUiPayload["profileHints"] = DEFAULT_PROFILE_HINTS
-): string {
-  if (completeness < 30) {
-    return profileHints.low;
-  }
-
-  if (completeness < 70) {
-    return profileHints.medium;
-  }
-
-  return profileHints.high;
-}
-
 function upsertBlockWithMode(
   blocks: GenUIBlock[],
   block: GenUIBlock,
@@ -1239,12 +1309,10 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<ComposerStatus>("ready");
   const [authToken, setAuthToken] = useState<string | null>(null);
-  const [quickPrompts, setQuickPrompts] = useState<string[]>(DEFAULT_PROMPTS);
-  const [welcomeProfile, setWelcomeProfile] = useState<WelcomeSocialProfile | null>(null);
-  const [welcomePendingActivities, setWelcomePendingActivities] = useState<WelcomePendingActivity[]>([]);
-  const [welcomeDraftAction, setWelcomeDraftAction] = useState<WelcomeDraftAction | null>(null);
+  const [quickPrompts, setQuickPrompts] = useState<WelcomePromptEntry[]>(DEFAULT_PROMPT_ENTRIES);
   const [welcomeGreeting, setWelcomeGreeting] = useState(DEFAULT_WELCOME_GREETING);
   const [welcomeSubGreeting, setWelcomeSubGreeting] = useState(DEFAULT_WELCOME_SUB_GREETING);
+  const [welcomeFocus, setWelcomeFocus] = useState<WelcomeFocusPayload | null>(null);
   const [isWelcomeLoading, setIsWelcomeLoading] = useState(true);
   const [welcomeUi, setWelcomeUi] = useState<WelcomeUiPayload>({
     composerPlaceholder: DEFAULT_COMPOSER_PLACEHOLDER,
@@ -1258,12 +1326,33 @@ export default function ChatPage() {
   const [pendingActionNotice, setPendingActionNotice] = useState<string | null>(null);
   const [messageCenterOpenSignal, setMessageCenterOpenSignal] = useState(0);
   const [messageCenterFocusMatchId, setMessageCenterFocusMatchId] = useState<string | null>(null);
-  const isDarkMode = false;
+  const [isDarkMode, setIsDarkMode] = useState(true);
   const hasResumedPendingActionRef = useRef(false);
-  const hasRequestedWelcomeRef = useRef(false);
+  const requestedWelcomeKeyRef = useRef<string | null>(null);
 
   const isSending = status === "submitted";
   const showComposerHint = shouldExpandComposer(input);
+  const currentUserId = useMemo(() => readClientUserId(authToken), [authToken]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+    if (storedTheme === "light") {
+      setIsDarkMode(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem(THEME_STORAGE_KEY, isDarkMode ? "dark" : "light");
+    document.documentElement.dataset.theme = isDarkMode ? "dark" : "light";
+  }, [isDarkMode]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1285,6 +1374,56 @@ export default function ChatPage() {
       document.removeEventListener("visibilitychange", syncAuth);
     };
   }, []);
+
+  const handleStartNewConversation = useCallback(() => {
+    if (isSending) {
+      return;
+    }
+
+    setMessages([]);
+    setConversationId(null);
+    setInput("");
+    setStatus("ready");
+    setPendingActionNotice(null);
+    setMessageCenterFocusMatchId(null);
+  }, [isSending]);
+
+  const handleSelectConversation = useCallback(
+    async (targetConversationId: string) => {
+      if (isSending || !authToken || !currentUserId) {
+        return;
+      }
+
+      const response = await fetch(
+        `${API_BASE}/ai/conversations/${targetConversationId}/messages?userId=${encodeURIComponent(currentUserId)}&limit=100`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+          },
+          cache: "no-store",
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(await readChatResponseErrorMessage(response));
+      }
+
+      const payload = (await response.json()) as StoredConversationMessagesPayload;
+      const nextMessages = [...payload.items]
+        .reverse()
+        .map((item) => buildChatRecordFromStoredMessage(payload.conversationId, item))
+        .filter((item): item is ChatRecord => item !== null);
+
+      setMessages(nextMessages);
+      setConversationId(payload.conversationId);
+      setInput("");
+      setStatus("ready");
+      setPendingActionNotice(null);
+      setMessageCenterFocusMatchId(null);
+    },
+    [authToken, currentUserId, isSending]
+  );
 
   useEffect(() => {
     const nextToken = readClientToken();
@@ -1372,12 +1511,14 @@ export default function ChatPage() {
       return;
     }
 
-    if (hasRequestedWelcomeRef.current) {
+    const currentAuthToken = authToken ?? readClientToken();
+    const locationKey = clientLocation ? `${clientLocation.lat.toFixed(4)},${clientLocation.lng.toFixed(4)}` : "none";
+    const welcomeRequestKey = `${currentAuthToken ? "auth" : "visitor"}:${locationKey}`;
+    if (requestedWelcomeKeyRef.current === welcomeRequestKey) {
       return;
     }
 
-    hasRequestedWelcomeRef.current = true;
-
+    requestedWelcomeKeyRef.current = welcomeRequestKey;
     const controller = new AbortController();
     let active = true;
     const welcomeUrl = new URL(`${API_BASE}/ai/welcome`);
@@ -1388,6 +1529,9 @@ export default function ChatPage() {
 
     void fetch(welcomeUrl.toString(), {
       method: "GET",
+      ...(currentAuthToken
+        ? { headers: { Authorization: `Bearer ${currentAuthToken}` } }
+        : {}),
       signal: controller.signal,
     })
       .then(async (response) => {
@@ -1402,10 +1546,8 @@ export default function ChatPage() {
         const { greeting, subGreeting } = extractWelcomeGreeting(payload);
         setWelcomeGreeting(greeting);
         setWelcomeSubGreeting(subGreeting);
+        setWelcomeFocus(extractWelcomeFocus(payload));
         setWelcomeUi(extractWelcomeUi(payload));
-        setWelcomeProfile(extractWelcomeSocialProfile(payload));
-        setWelcomePendingActivities(extractWelcomePendingActivities(payload));
-        setWelcomeDraftAction(extractWelcomeDraftAction(payload));
       })
       .catch(() => {
         // keep local fallback prompts
@@ -1420,7 +1562,7 @@ export default function ChatPage() {
       active = false;
       controller.abort();
     };
-  }, [clientLocation, welcomeLocationResolved]);
+  }, [authToken, clientLocation, welcomeLocationResolved]);
 
   const applyCompletionEffectsFromBlocks = useCallback((blocks: GenUIBlock[]) => {
     for (const block of blocks) {
@@ -1999,143 +2141,82 @@ export default function ChatPage() {
     [isSending, sendChatRequest]
   );
 
-  const handleWelcomeDraftContinue = useCallback(async () => {
-    if (!welcomeDraftAction) {
-      return;
-    }
-
-    if (welcomeDraftAction.activityId) {
-      await sendChatRequest(
-        {
-          type: "action",
-          action: "edit_draft",
-          actionId: randomId("action"),
-          params: { activityId: welcomeDraftAction.activityId },
-          displayText: welcomeDraftAction.label,
-        },
-        welcomeDraftAction.label
-      );
-      return;
-    }
-
-    await sendChatRequest(
-      {
-        type: "text",
-        text: welcomeDraftAction.prompt,
-      },
-      welcomeDraftAction.prompt
-    );
-  }, [sendChatRequest, welcomeDraftAction]);
-
-  const handleOpenPendingActivity = useCallback((activityId: string) => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    window.location.href = `/invite/${activityId}`;
-  }, []);
-
   return (
     <div
       className={cn(
         "relative min-h-screen overflow-hidden [font-family:SF_Pro_Display,SF_Pro_Text,PingFang_SC,-apple-system,BlinkMacSystemFont,Segoe_UI,sans-serif]",
         isDarkMode
-          ? "bg-[linear-gradient(180deg,#0f142e_0%,#111736_45%,#11182f_100%)]"
-          : "bg-[linear-gradient(180deg,#ebeefb_0%,#edf0fb_45%,#f2f4ff_100%)]"
+          ? messages.length === 0
+            ? "bg-[#090909]"
+            : "bg-black"
+          : "bg-white"
       )}
     >
-      <div
-        className={cn(
-          "pointer-events-none absolute inset-0",
-          isDarkMode
-            ? "bg-[radial-gradient(circle_at_22%_-8%,rgba(88,112,255,0.22)_0%,rgba(27,35,84,0.18)_50%,rgba(16,20,46,0)_72%)]"
-            : "bg-[radial-gradient(circle_at_22%_-8%,rgba(102,120,255,0.24)_0%,rgba(188,198,255,0.09)_48%,rgba(235,238,251,0)_72%)]"
-        )}
-      />
+      <ChatThemeContext.Provider value={isDarkMode}>
+      <div className={cn("relative mx-auto flex h-[100dvh] w-full max-w-[430px] flex-col", isDarkMode ? "text-zinc-100" : "text-slate-900")}>
+        <MessageCenterDrawer
+          disabled={isSending}
+          isDarkMode={isDarkMode}
+          openSignal={messageCenterOpenSignal}
+          focusPendingMatchId={messageCenterFocusMatchId}
+          trigger={null}
+          onSendPrompt={async (prompt, displayText, contextOverrides) => {
+            await sendChatRequest(
+              {
+                type: "text",
+                text: prompt,
+              },
+              displayText || prompt,
+              contextOverrides
+            );
+          }}
+        />
 
-      <div className={cn("relative mx-auto flex h-[100dvh] w-full max-w-[430px] flex-col", isDarkMode ? "text-slate-100" : "text-slate-900")}>
-        <header className="flex shrink-0 items-center justify-between px-3 pb-2 pt-3">
-          <div className="flex items-center gap-1.5">
-            <MessageCenterDrawer
+        <header className="flex shrink-0 items-center justify-between px-4 pb-3 pt-5">
+          <div className="flex items-center gap-2">
+            <SidebarDrawer
               disabled={isSending}
               isDarkMode={isDarkMode}
-              openSignal={messageCenterOpenSignal}
-              focusPendingMatchId={messageCenterFocusMatchId}
-              onSendPrompt={async (prompt, displayText, contextOverrides) => {
-                await sendChatRequest(
-                  {
-                    type: "text",
-                    text: prompt,
-                  },
-                  displayText || prompt,
-                  contextOverrides
-                );
+              activeConversationId={conversationId}
+              onSelectConversation={handleSelectConversation}
+              onOpenMessageCenter={() => {
+                setMessageCenterFocusMatchId(null);
+                setMessageCenterOpenSignal((value) => value + 1);
               }}
             />
-            <p className={cn("text-[18px] font-semibold tracking-tight", isDarkMode ? "text-[#f0f3ff]" : "text-[#111633]")}>聚场</p>
+            <p className={cn("text-[19px] font-semibold tracking-[-0.03em]", isDarkMode ? "text-white/96" : "text-black/90")}>聚场</p>
           </div>
 
           <div className="flex items-center gap-2">
-            <Popover>
-              <PopoverTrigger asChild>
-                <button
-                  type="button"
-                  className={cn(
-                    "inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium shadow-[0_8px_18px_-14px_rgba(66,85,164,0.7)]",
-                    isDarkMode
-                      ? "border border-[#3a4589]/70 bg-[#1b234f]/85 text-[#f0f3ff]"
-                      : "border border-white/60 bg-white/88 text-[#111633]"
-                  )}
-                >
-                  <QrCode className="h-4 w-4" />
-                  群二维码
-                </button>
-              </PopoverTrigger>
-              <PopoverContent
-                align="end"
-                sideOffset={8}
-                className={cn(
-                  "w-[232px] rounded-2xl border p-3",
-                  isDarkMode
-                    ? "border-[#3a4589] bg-[#141d42] text-[#e6eaff]"
-                    : "border-[#dfe4ff] bg-white text-[#1f275c]"
-                )}
-              >
-                <p className="text-sm font-semibold">社群二维码</p>
-                <p className={cn("mt-1 text-xs", isDarkMode ? "text-[#b8c0f4]" : "text-slate-500")}>
-                  扫码加入聚场交流群
-                </p>
-                <div
-                  className={cn(
-                    "mt-2 rounded-xl border p-2",
-                    isDarkMode ? "border-[#2f3979] bg-[#0f1533]" : "border-[#e7ebff] bg-[#f8f9ff]"
-                  )}
-                >
-                  <img
-                    src={GROUP_QR_IMAGE_URL}
-                    alt="聚场群二维码"
-                    className="h-[180px] w-[180px] rounded-md bg-white object-cover"
-                  />
-                </div>
-              </PopoverContent>
-            </Popover>
-
-            <div
+            <button
+              type="button"
+              onClick={() => setIsDarkMode((current) => !current)}
               className={cn(
-                "inline-flex h-9 items-center rounded-full px-1 shadow-[0_8px_18px_-14px_rgba(66,85,164,0.7)]",
-                isDarkMode
-                  ? "border border-[#3a4589]/70 bg-[#1b234f]/85 text-[#e6eaff]"
-                  : "border border-white/60 bg-white/88 text-[#22274d]"
+                "inline-flex h-9 w-9 items-center justify-center rounded-full border backdrop-blur-sm transition-colors",
+                  isDarkMode
+                    ? "border-white/8 bg-white/[0.03] text-white/78"
+                    : "border-black/10 bg-white text-black/72"
               )}
+              aria-label={isDarkMode ? "切换到明亮模式" : "切换到暗色模式"}
+              title={isDarkMode ? "切换到明亮模式" : "切换到暗色模式"}
             >
-              <button type="button" className="inline-flex h-7 w-7 items-center justify-center rounded-full">
-                <Volume2 className="h-4 w-4" />
-              </button>
-              <div className={cn("mx-1 h-4 w-px", isDarkMode ? "bg-[#425095]" : "bg-slate-200")} />
-              <button type="button" className="inline-flex h-7 w-7 items-center justify-center rounded-full">
-                <MoreHorizontal className="h-4 w-4" />
-              </button>
-            </div>
+              {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </button>
+            <button
+              type="button"
+              onClick={handleStartNewConversation}
+              disabled={isSending}
+              className={cn(
+                "inline-flex h-9 w-9 items-center justify-center rounded-full border backdrop-blur-sm transition-colors disabled:opacity-45",
+                isDarkMode
+                  ? "border-white/8 bg-white/[0.03] text-white/82 hover:bg-white/[0.05]"
+                  : "border-black/10 bg-white text-black/78 hover:bg-black/[0.03]"
+              )}
+              aria-label="开始新对话"
+              title="开始新对话"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
           </div>
         </header>
 
@@ -2144,10 +2225,10 @@ export default function ChatPage() {
             {pendingAgentAction ? (
               <section
                 className={cn(
-                  "rounded-[24px] border px-4 py-3 shadow-[0_18px_36px_-30px_rgba(120,94,16,0.55)]",
+                  "rounded-[24px] border px-4 py-3 shadow-[0_20px_36px_-30px_rgba(0,0,0,0.78)]",
                   isDarkMode
-                    ? "border-amber-400/30 bg-amber-400/10 text-amber-50"
-                    : "border-amber-200 bg-[linear-gradient(180deg,#fff8eb_0%,#fff4dc_100%)] text-amber-900"
+                    ? "border-white/10 bg-white/[0.04] text-white/88"
+                    : "border-black/10 bg-white text-black/88"
                 )}
               >
                 <div className="flex items-start justify-between gap-3">
@@ -2156,13 +2237,13 @@ export default function ChatPage() {
                     <p className="text-sm font-medium">
                       {pendingAgentAction.message || "这一步已经挂起，登录后会继续替你办完。"}
                     </p>
-                    <p className={cn("text-xs leading-5", isDarkMode ? "text-amber-100/80" : "text-amber-700")}>
+                    <p className={cn("text-xs leading-5", isDarkMode ? "text-white/54" : "text-black/52")}>
                       {pendingAgentAction.action.authMode === "bind_phone"
                         ? "完成绑定手机号后回到这里，我会自动继续。"
                         : "完成登录后回到这里，我会自动继续。"}
                     </p>
                     {pendingActionNotice ? (
-                      <p className={cn("text-xs", isDarkMode ? "text-amber-100/80" : "text-amber-700")}>{pendingActionNotice}</p>
+                      <p className={cn("text-xs", isDarkMode ? "text-white/54" : "text-black/52")}>{pendingActionNotice}</p>
                     ) : null}
                   </div>
                   <button
@@ -2173,7 +2254,7 @@ export default function ChatPage() {
                     disabled={isSending}
                     className={cn(
                       "shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition disabled:opacity-45",
-                      isDarkMode ? "bg-white/10 text-white hover:bg-white/15" : "bg-white text-[#8a5c12] hover:bg-white/90"
+                      isDarkMode ? "bg-white text-[#111111] hover:bg-white/92" : "bg-black text-white hover:bg-black/92"
                     )}
                   >
                     我已完成，继续
@@ -2184,156 +2265,166 @@ export default function ChatPage() {
           </div>
         ) : null}
 
-        <Conversation className="relative">
-          <ConversationContent className="w-full gap-4 px-3 pb-4 pt-1">
+        <div className="relative min-h-0 flex-1">
+          {messages.length > 0 ? (
+            <>
+              <div className={cn("pointer-events-none absolute inset-x-0 top-0 z-10 h-14 bg-gradient-to-b to-transparent", isDarkMode ? "from-black via-black/70" : "from-white via-white/88")} />
+              <div className={cn("pointer-events-none absolute inset-x-0 bottom-0 z-10 h-24 bg-gradient-to-t to-transparent", isDarkMode ? "from-black via-black/82" : "from-white via-white/92")} />
+            </>
+          ) : null}
+          <Conversation className="relative h-full">
+            <ConversationContent
+              className={cn(
+                "w-full gap-4 px-3 pb-4 pt-1",
+                messages.length > 0 &&
+                  (isDarkMode
+                    ? "[scrollbar-color:rgba(255,255,255,0.16)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/12 [&::-webkit-scrollbar-thumb:hover]:bg-white/20"
+                    : "[scrollbar-color:rgba(0,0,0,0.16)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-black/12 [&::-webkit-scrollbar-thumb:hover]:bg-black/20")
+              )}
+            >
             {messages.length === 0 ? (
-              <ConversationEmptyState className="justify-start px-1 pt-2">
-                <div className="w-full space-y-3">
-                  <div className="flex items-start justify-between px-2">
-                    <div className="min-h-[112px] space-y-1 text-left">
-                      {isWelcomeLoading ? (
-                        <div className="space-y-2 pt-1">
-                          <div className="h-9 w-36 animate-pulse rounded-full bg-white/55" />
-                          <div className="h-9 w-64 max-w-[78vw] animate-pulse rounded-full bg-white/55" />
-                          <div className="h-9 w-52 animate-pulse rounded-full bg-white/48" />
+              <ConversationEmptyState className="justify-start px-3 pt-3">
+                <div className="relative min-h-[510px] w-full overflow-visible pt-[136px]">
+                  <div
+                    className={cn(
+                      "pointer-events-none absolute left-1/2 z-0 -translate-x-1/2",
+                      isDarkMode
+                        ? "top-[-18px] h-[340px] w-[340px]"
+                        : "top-[6px] h-[300px] w-[300px]"
+                    )}
+                  >
+                    <Orb
+                      hue={1}
+                      hoverIntensity={0.2}
+                      rotateOnHover={false}
+                      forceHoverState={false}
+                      backgroundColor={isDarkMode ? "#000000" : "#ffffff"}
+                    />
+                  </div>
+                  <div
+                    className={cn(
+                      "pointer-events-none absolute left-1/2 z-0 -translate-x-1/2",
+                      isDarkMode
+                        ? "top-[128px] h-44 w-[360px] bg-[radial-gradient(ellipse_at_center,rgba(0,0,0,0.5)_0%,rgba(0,0,0,0.28)_42%,transparent_74%)]"
+                        : "top-[118px] h-36 w-[312px] bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.92)_0%,rgba(255,255,255,0.68)_44%,transparent_78%)]"
+                    )}
+                  />
+
+                  <div className="relative z-10 mx-auto max-w-[336px] text-center">
+                    {isWelcomeLoading ? (
+                      <div className="space-y-3 pt-1">
+                        <div className="mx-auto h-10 w-36 animate-pulse rounded-full bg-white/10" />
+                        <div className="mx-auto h-10 w-64 max-w-[78vw] animate-pulse rounded-full bg-white/10" />
+                        <div className="mx-auto h-10 w-52 animate-pulse rounded-full bg-white/10" />
+                      </div>
+                    ) : (
+                      <>
+                        {welcomeFocus ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void sendChatRequest(
+                                {
+                                  type: "text",
+                                  text: welcomeFocus.prompt,
+                                },
+                                welcomeFocus.prompt
+                              );
+                            }}
+                            className={cn(
+                              "mb-6 inline-flex max-w-[292px] items-center gap-2 rounded-full border px-3 py-1.5 text-[12px] font-medium tracking-[-0.01em] backdrop-blur-md transition",
+                              isDarkMode
+                                ? "border-white/10 bg-black/28 text-white/62 hover:bg-white/[0.07] hover:text-white/78"
+                                : "border-black/10 bg-white text-black/58 hover:bg-black/[0.03] hover:text-black/78"
+                            )}
+                          >
+                            <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", isDarkMode ? "bg-white/42" : "bg-black/36")} />
+                            <span className="truncate">{welcomeFocus.label}</span>
+                            <ChevronRight className={cn("h-3 w-3 shrink-0", isDarkMode ? "text-white/24" : "text-black/24")} />
+                          </button>
+                        ) : null}
+                        <div className="space-y-1.5">
+                          <p className={cn("mx-auto max-w-[304px] text-balance text-[40px] font-semibold leading-[0.96] tracking-[-0.065em]", isDarkMode ? "text-white/97 drop-shadow-[0_2px_14px_rgba(0,0,0,0.42)]" : "text-black/90")}>{welcomeGreeting}</p>
+                          <p className={cn("mx-auto max-w-[336px] text-balance text-[40px] font-semibold leading-[0.96] tracking-[-0.065em]", isDarkMode ? "text-white/94 drop-shadow-[0_2px_14px_rgba(0,0,0,0.42)]" : "text-black/84")}>{welcomeSubGreeting}</p>
                         </div>
-                      ) : (
-                        <>
-                          <p className={cn("text-[28px] font-bold leading-none", isDarkMode ? "text-[#e6eaff]" : "text-[#272f8b]")}>{welcomeGreeting}</p>
-                          <p className={cn("text-[28px] font-bold leading-none", isDarkMode ? "text-[#e6eaff]" : "text-[#272f8b]")}>{welcomeSubGreeting}</p>
-                        </>
-                      )}
-                    </div>
-                    <div className={cn("mt-1 flex items-start justify-end pb-1", isDarkMode ? "text-[#8e9cff]" : "text-[#5b67f4]")}>
-                      <Sparkles className="h-8 w-8" />
-                    </div>
+                      </>
+                    )}
                   </div>
 
-                  <div className="space-y-3 rounded-[28px] border border-white/65 bg-white/30 p-3 backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.72),inset_0_-14px_30px_rgba(109,126,255,0.08),0_22px_34px_-30px_rgba(60,75,156,0.6)]">
-                    <div className="rounded-2xl border border-white/70 bg-white/58 px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.68)]">
-                      <div className="mb-2 flex items-center gap-2 text-[#2b3168]">
-                        <span className="h-4 w-1 rounded-full bg-[linear-gradient(180deg,#6d78ff_0%,#8b8eff_100%)]" />
-                        <span className="text-[16px] font-semibold">我的社交状态</span>
-                      </div>
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="rounded-xl bg-white/76 px-2 py-2 text-center text-[#2f3870]">
-                          <p className="text-[11px] text-slate-500">参与</p>
-                          {isWelcomeLoading ? (
-                            <div className="mx-auto mt-2 h-6 w-12 animate-pulse rounded-full bg-white/75" />
-                          ) : (
-                            <p className="text-[16px] font-semibold">{welcomeProfile?.joinedActivities ?? 0}<span className="ml-0.5 text-[11px] font-normal">场</span></p>
-                          )}
-                        </div>
-                        <div className="rounded-xl bg-white/76 px-2 py-2 text-center text-[#2f3870]">
-                          <p className="text-[11px] text-slate-500">发起</p>
-                          {isWelcomeLoading ? (
-                            <div className="mx-auto mt-2 h-6 w-12 animate-pulse rounded-full bg-white/75" />
-                          ) : (
-                            <p className="text-[16px] font-semibold">{welcomeProfile?.hostedActivities ?? 0}<span className="ml-0.5 text-[11px] font-normal">场</span></p>
-                          )}
-                        </div>
-                        <div className="rounded-xl bg-white/76 px-2 py-2 text-center text-[#2f3870]">
-                          <p className="text-[11px] text-slate-500">偏好完善</p>
-                          {isWelcomeLoading ? (
-                            <div className="mx-auto mt-2 h-6 w-12 animate-pulse rounded-full bg-white/75" />
-                          ) : (
-                            <p className="text-[16px] font-semibold">{welcomeProfile?.preferenceCompleteness ?? 0}<span className="ml-0.5 text-[11px] font-normal">%</span></p>
-                          )}
-                        </div>
-                      </div>
-                      {isWelcomeLoading ? (
-                        <div className="mt-3 h-4 w-40 animate-pulse rounded-full bg-white/70" />
-                      ) : (
-                        <p className="mt-2 text-[12px] text-[#616c9f]">
-                          {getProfileHint(
-                            welcomeProfile?.preferenceCompleteness ?? 0,
-                            welcomeUi.profileHints
-                          )}
-                        </p>
-                      )}
-                    </div>
-
-                    {!isWelcomeLoading && welcomeDraftAction ? (
-                      <button
-                        type="button"
-                        onClick={() => void handleWelcomeDraftContinue()}
-                        className="flex w-full items-center justify-between rounded-2xl border border-[#dfe4ff] bg-[linear-gradient(135deg,rgba(255,255,255,0.98)_0%,rgba(243,245,255,0.95)_100%)] px-3 py-3 text-left shadow-[0_16px_28px_-24px_rgba(76,98,191,0.55)]"
-                      >
-                        <div className="space-y-1">
-                          <p className="text-[12px] font-medium text-[#6470a6]">继续上次草稿</p>
-                          <p className="text-[14px] font-semibold text-[#2a315e]">{welcomeDraftAction.label}</p>
-                        </div>
-                        <ChevronRight className="h-4 w-4 shrink-0 text-[#7f8ad1]" />
-                      </button>
-                    ) : null}
-
-                    {!isWelcomeLoading && welcomePendingActivities.length > 0 ? (
-                      <div className="space-y-2 rounded-2xl border border-white/70 bg-white/58 px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.68)]">
-                        <div className="mb-2 flex items-center gap-2 text-[#2b3168]">
-                          <span className="h-4 w-1 rounded-full bg-[linear-gradient(180deg,#5b75fb_0%,#7b90ff_100%)]" />
-                          <span className="text-[16px] font-semibold">接下来要参加的局</span>
-                        </div>
-                        <div className="space-y-2">
-                          {welcomePendingActivities.map((activity) => (
-                            <button
-                              key={activity.id}
-                              type="button"
-                              onClick={() => handleOpenPendingActivity(activity.id)}
-                              className="flex w-full items-start justify-between rounded-2xl bg-white/86 px-3 py-2.5 text-left shadow-[0_12px_24px_-20px_rgba(67,86,170,0.52)]"
-                            >
-                              <div className="min-w-0 flex-1 space-y-1 pr-3">
-                                <p className="truncate text-[14px] font-semibold text-[#2a315e]">{activity.title}</p>
-                                <p className="text-[12px] text-[#6470a6]">{formatWelcomeActivityTime(activity.startAt)} · {activity.locationName}</p>
-                                <p className="truncate text-[12px] text-slate-500">{activity.locationHint}</p>
-                              </div>
-                              <div className="shrink-0 text-right">
-                                <p className="text-[12px] font-medium text-[#5b67f4]">{activity.currentParticipants}/{activity.maxParticipants}人</p>
-                                <ChevronRight className="ml-auto mt-2 h-4 w-4 text-slate-300" />
-                              </div>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    <div className="space-y-2">
-                      {isWelcomeLoading
-                        ? [0.82, 0.7, 0.76].map((widthRatio, index) => (
+                  <div className="relative z-10 mt-10 space-y-3.5">
+                    {isWelcomeLoading
+                      ? [0.82, 0.7, 0.76].map((widthRatio, index) => (
+                          <div
+                            key={`welcome-skeleton-${index}`}
+                            className={cn(
+                              "mx-auto flex w-full max-w-[344px] items-center gap-3.5 rounded-[24px] border px-4.5 py-4",
+                              isDarkMode
+                                ? "border-white/8 bg-white/[0.025]"
+                                : "border-black/8 bg-white shadow-[0_16px_34px_-30px_rgba(0,0,0,0.12)]"
+                            )}
+                          >
                             <div
-                              key={`welcome-skeleton-${index}`}
-                              className="flex w-full items-end gap-2 rounded-2xl bg-white/86 px-3 py-2.5 shadow-[0_12px_24px_-20px_rgba(67,86,170,0.32)]"
+                              className={cn(
+                                "inline-flex h-6 w-6 shrink-0 animate-pulse rounded-full",
+                                isDarkMode ? "bg-white/10" : "bg-black/[0.06]"
+                              )}
+                            />
+                            <div
+                              className={cn("h-4 animate-pulse rounded-full", isDarkMode ? "bg-white/10" : "bg-black/[0.06]")}
+                              style={{ width: `${widthRatio * 100}%` }}
+                            />
+                            <div
+                              className={cn(
+                                "h-4 w-4 shrink-0 animate-pulse rounded-full",
+                                isDarkMode ? "bg-white/10" : "bg-black/[0.06]"
+                              )}
+                            />
+                          </div>
+                        ))
+                      : quickPrompts.slice(0, 3).map((entry, index) => (
+                          <button
+                            key={`${entry.action ?? "prompt"}-${entry.prompt}`}
+                            type="button"
+                            onClick={() => {
+                              void sendChatRequest(
+                                entry.action
+                                  ? {
+                                      type: "action",
+                                      action: entry.action,
+                                      actionId: randomId("action"),
+                                      params: entry.params,
+                                      displayText: entry.prompt,
+                                    }
+                                  : {
+                                      type: "text",
+                                      text: entry.prompt,
+                                    },
+                                entry.prompt
+                              );
+                            }}
+                            className={cn(
+                              "mx-auto flex w-full max-w-[344px] items-center gap-3.5 rounded-[24px] border px-4.5 py-4 text-left text-[17px] backdrop-blur-md transition",
+                              isDarkMode
+                                ? "border-white/10 bg-black/24 text-white/92 hover:bg-white/[0.06]"
+                                : "border-black/8 bg-white text-black/86 shadow-[0_18px_36px_-32px_rgba(0,0,0,0.14)] hover:bg-black/[0.02] hover:shadow-[0_22px_42px_-34px_rgba(0,0,0,0.16)]"
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[10px] font-medium",
+                                isDarkMode
+                                  ? "border-white/8 bg-white/[0.015] text-white/42"
+                                  : "border-black/8 bg-black/[0.025] text-black/42"
+                              )}
                             >
-                              <div className="mt-0.5 inline-flex h-5 w-5 shrink-0 animate-pulse rounded-md bg-[linear-gradient(140deg,#d4dbff_0%,#e5dcff_100%)]" />
-                              <div
-                                className="h-4 animate-pulse rounded-full bg-white/90"
-                                style={{ width: `${widthRatio * 100}%` }}
-                              />
-                              <div className="mt-0.5 h-4 w-4 shrink-0 animate-pulse rounded-full bg-[#e4e9ff]" />
-                            </div>
-                          ))
-                        : quickPrompts.slice(0, 3).map((prompt) => (
-                            <button
-                              key={prompt}
-                              type="button"
-                              onClick={() => {
-                                void sendChatRequest(
-                                  {
-                                    type: "text",
-                                    text: prompt,
-                                  },
-                                  prompt
-                                );
-                              }}
-                              className="flex w-full items-end gap-2 rounded-2xl bg-white/86 px-3 py-2.5 text-left text-[14px] text-[#2a315e] shadow-[0_12px_24px_-20px_rgba(67,86,170,0.52)]"
-                            >
-                              <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[linear-gradient(140deg,#4e5dff_0%,#8658f8_100%)] text-[12px] font-semibold text-white">
-                                #
-                              </span>
-                              <span className="flex-1 break-words pr-2 leading-5">{prompt}</span>
-                              <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-slate-300" />
-                            </button>
-                          ))}
-                    </div>
+                              {index + 1}
+                            </span>
+                            <span className={cn("flex-1 break-words pr-2 text-[15px] font-medium leading-[1.28] tracking-[-0.02em]", isDarkMode ? "text-white/88" : "text-black/80")}>
+                              {entry.text}
+                            </span>
+                            <ChevronRight className={cn("h-4 w-4 shrink-0", isDarkMode ? "text-white/14" : "text-black/16")} />
+                          </button>
+                        ))}
                   </div>
                 </div>
               </ConversationEmptyState>
@@ -2354,84 +2445,170 @@ export default function ChatPage() {
                 );
               })
             )}
-          </ConversationContent>
-        </Conversation>
+            </ConversationContent>
+          </Conversation>
+        </div>
 
         <div
           className={cn(
-            "shrink-0 px-3 pb-[calc(12px+env(safe-area-inset-bottom,0px))] pt-2",
-            isDarkMode
-              ? "border-t border-[#394480]/75 bg-[linear-gradient(180deg,rgba(17,24,55,0.92)_0%,rgba(15,21,48,0.96)_100%)]"
-              : "border-t border-white/65 bg-[linear-gradient(180deg,rgba(245,247,255,0.92)_0%,rgba(238,241,254,0.96)_100%)]"
+            "shrink-0 px-3 pb-[calc(14px+env(safe-area-inset-bottom,0px))] pt-2",
+            isDarkMode ? "bg-black" : "bg-white"
           )}
         >
-          <PromptInput
-            onSubmit={handleSubmit}
-            className={cn(
-              "rounded-3xl border border-transparent bg-transparent p-0 has-[[data-slot=input-group-control]:focus-visible]:!ring-0 has-[[data-slot=input-group-control]:focus-visible]:!border-transparent [&_[data-slot=input-group]]:h-auto [&_[data-slot=input-group]]:rounded-[20px] [&_[data-slot=input-group]]:!border-transparent [&_[data-slot=input-group]]:px-2 [&_[data-slot=input-group]]:py-1 [&_[data-slot=input-group]]:shadow-[0_14px_24px_-18px_rgba(66,84,156,0.52)] [&_[data-slot=input-group]]:focus-within:!ring-0 [&_[data-slot=input-group]]:focus-within:!border-transparent",
-              isDarkMode ? "[&_[data-slot=input-group]]:bg-[#1b244f]" : "[&_[data-slot=input-group]]:bg-white"
-            )}
-          >
-            <PromptInputTextarea
-              value={input}
-              onChange={(event) => {
-                const nextValue = event.target.value;
-                setInput(nextValue);
-                syncComposerHeight(event.currentTarget, nextValue);
-              }}
-              rows={1}
-              placeholder={welcomeUi.composerPlaceholder}
-              disabled={isSending}
-              className={cn(
-                "!max-h-none !min-h-0 flex-1 border-none bg-transparent px-3 py-1.5 text-[16px] leading-5 focus-visible:ring-0 focus-visible:outline-none",
-                showComposerHint ? "h-auto overflow-hidden" : "h-9 overflow-hidden",
-                isDarkMode ? "text-[#e9edff] placeholder:text-[#808bc1]" : "text-[#252c5b] placeholder:text-slate-400"
-              )}
-            />
-
-            <PromptInputFooter
-              align={showComposerHint ? "block-end" : "inline-end"}
-              className={cn(
-                "items-center gap-2",
-                showComposerHint ? "justify-between !px-2 !pt-1 !pb-1" : "justify-end pr-1"
-              )}
-            >
-              {showComposerHint ? (
-                <span
+          <div className={cn("mx-auto w-full", messages.length === 0 ? "max-w-[352px]" : "max-w-none")}>
+            {messages.length === 0 ? (
+              <BorderGlow
+                className="rounded-[28px]"
+                edgeSensitivity={30}
+                glowColor="40 80 80"
+                backgroundColor={isDarkMode ? "#060010" : "#ffffff"}
+                borderColor={isDarkMode ? "rgb(255 255 255 / 0.15)" : "#ffffff"}
+                borderRadius={28}
+                glowRadius={isDarkMode ? 40 : 30}
+                glowIntensity={isDarkMode ? 1 : 0.82}
+                coneSpread={25}
+                fillOpacity={isDarkMode ? 0.5 : 0.03}
+                baseShadow={
+                  isDarkMode
+                    ? `rgba(0, 0, 0, 0.1) 0px 1px 2px,
+                      rgba(0, 0, 0, 0.1) 0px 2px 4px,
+                      rgba(0, 0, 0, 0.1) 0px 4px 8px,
+                      rgba(0, 0, 0, 0.1) 0px 8px 16px,
+                      rgba(0, 0, 0, 0.1) 0px 16px 32px,
+                      rgba(0, 0, 0, 0.1) 0px 32px 64px`
+                    : "none"
+                }
+                animated
+                colors={["#c084fc", "#f472b6", "#38bdf8"]}
+              >
+                <PromptInput
+                  onSubmit={handleSubmit}
                   className={cn(
-                    "text-xs leading-5",
-                    isDarkMode ? "text-[#808bc1]" : "text-slate-400"
+                    "relative rounded-3xl border border-transparent bg-transparent p-0 has-[[data-slot=input-group-control]:focus-visible]:!ring-0 has-[[data-slot=input-group-control]:focus-visible]:!border-transparent [&_[data-slot=input-group]]:h-auto [&_[data-slot=input-group]]:px-2 [&_[data-slot=input-group]]:py-1.5 [&_[data-slot=input-group]]:focus-within:!ring-0 [&_[data-slot=input-group]]:focus-within:!border-transparent",
+                    isDarkMode
+                      ? "[&_[data-slot=input-group]]:rounded-[30px] [&_[data-slot=input-group]]:border [&_[data-slot=input-group]]:border-white/8 [&_[data-slot=input-group]]:bg-[#101012]/92 [&_[data-slot=input-group]]:shadow-[0_0_0_1px_rgba(255,255,255,0.015),0_24px_60px_-30px_rgba(0,0,0,0.82)]"
+                      : "[&_[data-slot=input-group]]:rounded-[28px] [&_[data-slot=input-group]]:border [&_[data-slot=input-group]]:border-white [&_[data-slot=input-group]]:bg-white [&_[data-slot=input-group]]:shadow-none"
                   )}
                 >
-                  也可以直接说地方、时间、类型或你想找的人
-                </span>
-              ) : null}
-              <PromptInputSubmit
-                status={isSending ? "submitted" : "ready"}
-                disabled={isSending || !input.trim()}
-                variant="ghost"
+                  <PromptInputTextarea
+                    value={input}
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      setInput(nextValue);
+                      syncComposerHeight(event.currentTarget, nextValue);
+                    }}
+                    rows={1}
+                    placeholder={welcomeUi.composerPlaceholder}
+                    disabled={isSending}
+                    className={cn(
+                      "!max-h-none !min-h-0 flex-1 border-none bg-transparent px-3 py-2 text-[16px] leading-5 focus-visible:ring-0 focus-visible:outline-none",
+                      isDarkMode ? "text-white/94 placeholder:text-white/34" : "text-black/88 placeholder:text-black/30",
+                      showComposerHint ? "h-auto overflow-hidden" : "h-9 overflow-hidden"
+                    )}
+                  />
+
+                  <PromptInputFooter
+                    align={showComposerHint ? "block-end" : "inline-end"}
+                    className={cn(
+                      "items-center gap-2",
+                      showComposerHint ? "justify-between !px-2 !pt-1 !pb-1" : "justify-end pr-1"
+                    )}
+                  >
+                    {showComposerHint ? (
+                      <span className={cn("text-xs leading-5", isDarkMode ? "text-white/24" : "text-black/28")}>
+                        也可以直接说地方、时间、类型或你想找的人
+                      </span>
+                    ) : null}
+                    <PromptInputSubmit
+                      status={isSending ? "submitted" : "ready"}
+                      disabled={isSending || !input.trim()}
+                      variant="ghost"
+                      className={cn(
+                        "h-10 w-10 rounded-full border p-0 backdrop-blur-sm focus-visible:ring-0 focus-visible:outline-none disabled:opacity-35",
+                        isDarkMode
+                          ? "border-black/5 bg-white text-[#111111] shadow-[0_10px_24px_-16px_rgba(255,255,255,0.28)] hover:bg-white/92"
+                          : "border-white bg-black text-white shadow-none hover:bg-black/92"
+                      )}
+                    >
+                      <ArrowUp className="h-4 w-4" />
+                    </PromptInputSubmit>
+                  </PromptInputFooter>
+                </PromptInput>
+              </BorderGlow>
+            ) : (
+              <PromptInput
+                onSubmit={handleSubmit}
                 className={cn(
-                  "h-10 w-10 rounded-full border-0 p-0 shadow-[0_14px_28px_-16px_rgba(82,102,191,0.52)] backdrop-blur-sm focus-visible:ring-0 focus-visible:outline-none disabled:opacity-35",
+                  "relative rounded-3xl border border-transparent bg-transparent p-0 has-[[data-slot=input-group-control]:focus-visible]:!ring-0 has-[[data-slot=input-group-control]:focus-visible]:!border-transparent [&_[data-slot=input-group]]:h-auto [&_[data-slot=input-group]]:rounded-[24px] [&_[data-slot=input-group]]:border [&_[data-slot=input-group]]:px-2 [&_[data-slot=input-group]]:py-1.5 [&_[data-slot=input-group]]:focus-within:!ring-0 [&_[data-slot=input-group]]:focus-within:!border-transparent",
                   isDarkMode
-                    ? "bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.22)_0%,rgba(129,150,236,0.2)_56%,rgba(79,97,171,0.2)_100%)] text-[#e9edff] hover:brightness-110"
-                    : "bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.98)_0%,rgba(244,248,255,0.96)_54%,rgba(230,238,255,0.95)_100%)] text-[#2d396f] hover:brightness-[1.02]"
+                    ? "[&_[data-slot=input-group]]:border-white/10 [&_[data-slot=input-group]]:bg-[#0f0f11] [&_[data-slot=input-group]]:shadow-[0_0_0_1px_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.82)]"
+                    : "[&_[data-slot=input-group]]:border-black/10 [&_[data-slot=input-group]]:bg-white [&_[data-slot=input-group]]:shadow-[0_0_0_1px_rgba(0,0,0,0.03),0_18px_36px_-28px_rgba(0,0,0,0.12)]"
                 )}
               >
-                <ArrowUp className="h-4 w-4" />
-              </PromptInputSubmit>
-            </PromptInputFooter>
-          </PromptInput>
+                <PromptInputTextarea
+                  value={input}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setInput(nextValue);
+                    syncComposerHeight(event.currentTarget, nextValue);
+                  }}
+                  rows={1}
+                  placeholder={welcomeUi.composerPlaceholder}
+                  disabled={isSending}
+                  className={cn(
+                    "!max-h-none !min-h-0 flex-1 border-none bg-transparent px-3 py-2 text-[16px] leading-5 focus-visible:ring-0 focus-visible:outline-none",
+                    isDarkMode ? "text-white/92 placeholder:text-white/28" : "text-black/88 placeholder:text-black/30",
+                    showComposerHint ? "h-auto overflow-hidden" : "h-9 overflow-hidden"
+                  )}
+                />
+
+                <PromptInputFooter
+                  align={showComposerHint ? "block-end" : "inline-end"}
+                  className={cn(
+                    "items-center gap-2",
+                    showComposerHint ? "justify-between !px-2 !pt-1 !pb-1" : "justify-end pr-1"
+                  )}
+                >
+                  {showComposerHint ? (
+                    <span className={cn("text-xs leading-5", isDarkMode ? "text-white/24" : "text-black/28")}>
+                      也可以直接说地方、时间、类型或你想找的人
+                    </span>
+                  ) : null}
+                  <PromptInputSubmit
+                    status={isSending ? "submitted" : "ready"}
+                    disabled={isSending || !input.trim()}
+                    variant="ghost"
+                    className={cn(
+                      "h-10 w-10 rounded-full border-0 p-0 backdrop-blur-sm focus-visible:ring-0 focus-visible:outline-none disabled:opacity-35",
+                      isDarkMode
+                        ? "bg-[#111111] text-white shadow-[0_10px_30px_-18px_rgba(0,0,0,0.7)] hover:bg-black"
+                        : "bg-black text-white shadow-[0_10px_30px_-18px_rgba(0,0,0,0.28)] hover:bg-black/88"
+                    )}
+                  >
+                    <ArrowUp className="h-4 w-4" />
+                  </PromptInputSubmit>
+                </PromptInputFooter>
+              </PromptInput>
+            )}
+          </div>
         </div>
       </div>
+      </ChatThemeContext.Provider>
     </div>
   );
 }
 
 function UserMessage({ text }: { text: string }) {
+  const isDarkMode = useChatTheme();
   return (
     <Message from="user" className="max-w-[82%] pt-4">
-      <MessageContent className="rounded-[18px] rounded-tr-[8px] bg-[linear-gradient(135deg,#6271ff_0%,#5766f9_46%,#4f59e4_100%)] px-4 py-3 text-white shadow-[0_14px_26px_-16px_rgba(81,99,230,0.72)]">
-        <MessageResponse className="text-[15px] leading-6 text-white">{text}</MessageResponse>
+      <MessageContent className={cn(
+        "rounded-[18px] rounded-tr-[8px] px-4 py-3",
+        isDarkMode
+          ? "bg-white/[0.08] text-white"
+          : "bg-black/[0.06] text-black"
+      )}>
+        <MessageResponse className={cn("text-[15px] leading-6", isDarkMode ? "text-white/96" : "text-black/90")}>{text}</MessageResponse>
       </MessageContent>
     </Message>
   );
@@ -2448,6 +2625,7 @@ function AssistantMessage({
   disabled: boolean;
   onActionSelect: (option: ActionOption) => Promise<void>;
 }) {
+  const isDarkMode = useChatTheme();
   const renderableBlocks = message.response ? getRenderableBlocks(message.response.response.blocks) : [];
   const hasRenderableBlocks = renderableBlocks.length > 0;
   // 非最后一条消息或正在发送中时，禁用交互
@@ -2455,9 +2633,9 @@ function AssistantMessage({
 
   return (
     <Message from="assistant" className="w-full max-w-none pr-0">
-      <MessageContent className="w-full overflow-visible rounded-none bg-transparent px-0 py-0 text-slate-800 shadow-none">
+      <MessageContent className={cn("w-full overflow-visible rounded-none bg-transparent px-0 py-0 shadow-none", isDarkMode ? "text-zinc-100" : "text-slate-900")}>
         {message.error ? (
-          <p className="text-sm text-rose-600">{message.error}</p>
+          <p className={cn("text-sm", isDarkMode ? "text-white/68" : "text-black/56")}>{message.error}</p>
         ) : hasRenderableBlocks ? (
           <div className="space-y-3">
             {renderableBlocks.map((block) => (
@@ -2473,7 +2651,7 @@ function AssistantMessage({
         ) : message.pending && isLast ? (
           <ThinkingDots />
         ) : (
-          <p className="text-sm text-slate-500">这条消息暂时没有可展示内容</p>
+          <p className={cn("text-sm", isDarkMode ? "text-white/45" : "text-black/42")}>这条消息暂时没有可展示内容</p>
         )}
       </MessageContent>
     </Message>
@@ -2489,9 +2667,10 @@ function TurnBlockRenderer({
   disabled: boolean;
   onActionSelect: (option: ActionOption) => Promise<void>;
 }) {
+  const isDarkMode = useChatTheme();
   if (block.type === "text") {
     return (
-      <MessageResponse className="w-full max-w-none text-[15px] leading-7 text-[#2b3568]">
+      <MessageResponse className={cn("w-full max-w-none text-[15px] leading-7", isDarkMode ? "text-white/88" : "text-black/78")}>
         {block.content}
       </MessageResponse>
     );
@@ -2550,7 +2729,7 @@ function TurnBlockRenderer({
   }
 
   return (
-    <p className="text-xs text-slate-500">这条内容正在整理展示中。</p>
+    <p className={cn("text-xs", isDarkMode ? "text-white/42" : "text-black/40")}>这条内容正在整理展示中。</p>
   );
 }
 
@@ -2567,22 +2746,23 @@ function GenUICardHeader({
   trailingLabel?: string;
   className?: string;
 }) {
+  const isDarkMode = useChatTheme();
   return (
     <div className={cn("mb-3", className)}>
       <div className="flex items-center justify-between gap-3">
-        <div className="mb-2 inline-flex items-center gap-1 rounded-full border border-white/70 bg-white/56 px-2.5 py-1 text-[11px] font-medium text-[#5b67f4] shadow-[inset_0_1px_0_rgba(255,255,255,0.82)]">
+        <div className={cn("mb-2 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-medium tracking-[-0.01em]", isDarkMode ? "border-white/8 bg-white/[0.03] text-white/52" : "border-black/8 bg-black/[0.035] text-black/44")}>
           <Sparkles className="h-3.5 w-3.5" />
           <span>{eyebrow}</span>
         </div>
         {trailingLabel ? (
-          <div className="shrink-0 rounded-full border border-white/70 bg-white/52 px-3 py-1.5 text-[11px] font-medium text-slate-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)]">
+          <div className={cn("shrink-0 rounded-full border px-3 py-1.5 text-[11px] font-medium tracking-[-0.01em]", isDarkMode ? "border-white/8 bg-white/[0.03] text-white/42" : "border-black/8 bg-black/[0.035] text-black/36")}>
             {trailingLabel}
           </div>
         ) : null}
       </div>
-      <p className="text-[15px] font-semibold tracking-[0.01em] text-slate-800">{title}</p>
+      <p className={cn("text-[15px] font-semibold tracking-[0.01em]", isDarkMode ? "text-white/92" : "text-black/88")}>{title}</p>
       {description ? (
-        <p className="mt-1.5 text-xs leading-5 text-slate-500">{description}</p>
+        <p className={cn("mt-1.5 text-xs leading-5", isDarkMode ? "text-white/45" : "text-black/42")}>{description}</p>
       ) : null}
     </div>
   );
@@ -2599,6 +2779,7 @@ function GenUIActionChips({
   }>;
   disabled: boolean;
 }) {
+  const isDarkMode = useChatTheme();
   return (
     <Suggestions className="gap-2.5">
       {items.map((item) => (
@@ -2607,7 +2788,12 @@ function GenUIActionChips({
           suggestion={item.label}
           onClick={item.onSelect}
           disabled={disabled}
-          className="h-11 rounded-full border border-white/78 bg-white/78 px-5 text-sm font-medium text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.86),0_12px_24px_-20px_rgba(67,86,170,0.34)] transition-all hover:border-[#d5dbff] hover:bg-white/86 disabled:opacity-45"
+          className={cn(
+            "h-11 rounded-full border px-5 text-sm font-medium tracking-[-0.015em] transition-colors disabled:opacity-45",
+            isDarkMode
+              ? "border-white/8 bg-white/[0.03] text-white/78 hover:bg-white/[0.05]"
+              : "border-black/8 bg-black/[0.035] text-black/72 hover:bg-black/[0.06]"
+          )}
         />
       ))}
     </Suggestions>
@@ -2633,6 +2819,7 @@ function ChoiceBlockCard({
   disabled: boolean;
   onActionSelect: (option: ActionOption) => Promise<void>;
 }) {
+  const isDarkMode = useChatTheme();
   const [customLocation, setCustomLocation] = useState("");
   const choicePresentation = useMemo(() => readChoicePresentation(block), [block]);
   const choiceInputMode = useMemo(() => readChoiceInputMode(block), [block]);
@@ -2707,17 +2894,15 @@ function ChoiceBlockCard({
     <div
       className={cn(
         "mt-1 space-y-2.5",
-        choicePresentation === "card-form"
-          ? "rounded-[26px] border border-white/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.72)_0%,rgba(245,248,255,0.62)_100%)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.78),0_20px_40px_-32px_rgba(60,78,160,0.48)] backdrop-blur-xl"
-          : undefined
+        choicePresentation === "card-form" ? "pt-0" : undefined
       )}
     >
       <GenUIActionChips items={choiceActionItems} disabled={disabled} />
 
       {supportsCustomLocation ? (
-        <div className="rounded-[24px] border border-white/78 bg-white/74 px-3.5 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.84),0_16px_28px_-24px_rgba(67,86,170,0.28)]">
-          <p className="text-[12px] font-medium text-slate-700">上面都不合适？直接输入片区</p>
-          <p className="mt-1 text-[11px] leading-5 text-slate-500">
+        <div className="px-0 py-1">
+          <p className={cn("text-[12px] font-medium", isDarkMode ? "text-white/78" : "text-black/76")}>上面都不合适？直接输入片区</p>
+          <p className={cn("mt-1 text-[11px] leading-5", isDarkMode ? "text-white/42" : "text-black/42")}>
             直接输入你常活动的地方，我会按这里继续筛。
           </p>
           <div className="mt-2.5 flex items-center gap-2">
@@ -2727,7 +2912,7 @@ function ChoiceBlockCard({
               onChange={(event) => setCustomLocation(event.target.value)}
               disabled={disabled}
               placeholder="比如大学城、沙坪坝、两路口"
-              className="h-10 min-w-0 flex-1 rounded-full border border-white/80 bg-white/92 px-3 text-xs text-slate-700 outline-none shadow-[inset_0_1px_0_rgba(255,255,255,0.66)] transition focus:border-[#c8d1ff] focus:bg-white disabled:opacity-45"
+              className={cn("h-10 min-w-0 flex-1 rounded-full border px-3 text-xs outline-none transition disabled:opacity-45", isDarkMode ? "border-white/10 bg-white/[0.08] text-white/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] placeholder:text-white/30 focus:border-white/16 focus:bg-white/[0.1]" : "border-black/10 bg-white/88 text-black/86 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] placeholder:text-black/30 focus:border-black/16 focus:bg-white")}
             />
             <button
               type="button"
@@ -2738,7 +2923,7 @@ function ChoiceBlockCard({
                 }
                 void onActionSelect(customLocationAction);
               }}
-              className="h-10 shrink-0 rounded-full bg-[linear-gradient(135deg,#5b67f4_0%,#7380ff_52%,#7d6bff_100%)] px-4 text-xs font-medium text-white shadow-[0_12px_24px_-16px_rgba(91,103,244,0.72)] transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-45"
+              className={cn("h-10 shrink-0 rounded-full border px-4 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-45", isDarkMode ? "border-white/8 bg-white/[0.05] text-white/88 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] hover:bg-white/[0.08]" : "border-black/8 bg-black text-white shadow-[0_10px_24px_-18px_rgba(0,0,0,0.18)] hover:bg-black/90")}
             >
               使用该区域
             </button>
@@ -2804,6 +2989,7 @@ function isShareEntityCard(block: GenUIEntityCardBlock): boolean {
 }
 
 function ShareEntityCardBlock({ block }: { block: GenUIEntityCardBlock }) {
+  const isDarkMode = useChatTheme();
   const fields =
     typeof block.fields === "object" && block.fields !== null
       ? (block.fields as Record<string, unknown>)
@@ -2844,28 +3030,28 @@ function ShareEntityCardBlock({ block }: { block: GenUIEntityCardBlock }) {
   }, [sharePath, shareTitle, shareUrl]);
 
   return (
-    <div className="rounded-xl border border-sky-100 bg-[linear-gradient(180deg,#ffffff_0%,#f2f7ff_100%)] p-3">
+    <div className="py-1">
       <div className="mb-2 flex items-center justify-between">
-        <p className="text-sm font-semibold text-slate-900">{block.title || "分享卡片"}</p>
-        <span className="rounded bg-white/80 px-1.5 py-0.5 text-[10px] text-slate-500">
+        <p className={cn("text-sm font-semibold", isDarkMode ? "text-white/92" : "text-black/88")}>{block.title || "分享卡片"}</p>
+        <span className={cn("rounded-full border px-2 py-0.5 text-[10px]", isDarkMode ? "border-white/8 bg-white/[0.03] text-white/42" : "border-black/8 bg-black/[0.03] text-black/38")}>
           ID: {activityId}
         </span>
       </div>
-      <p className="text-sm text-slate-800">{shareTitle}</p>
-      <p className="mt-1 text-xs text-slate-500">
+      <p className={cn("text-sm", isDarkMode ? "text-white/82" : "text-black/80")}>{shareTitle}</p>
+      <p className={cn("mt-1 text-xs", isDarkMode ? "text-white/42" : "text-black/42")}>
         {locationName} · {startAt}
       </p>
-      <p className="mt-1 text-xs text-slate-500">
+      <p className={cn("mt-1 text-xs", isDarkMode ? "text-white/42" : "text-black/42")}>
         已有 {currentParticipants}/{maxParticipants} 人报名
       </p>
 
       {(shareUrl || sharePath) && (
-        <div className="mt-3 space-y-1 rounded-lg bg-white/80 px-2 py-2">
+        <div className="mt-3 space-y-1 px-0 py-0">
           {shareUrl && (
-            <p className="break-all text-[11px] text-slate-600">H5: {shareUrl}</p>
+            <p className={cn("break-all text-[11px]", isDarkMode ? "text-white/50" : "text-black/48")}>H5: {shareUrl}</p>
           )}
           {sharePath && (
-            <p className="break-all text-[11px] text-slate-600">Mini: {sharePath}</p>
+            <p className={cn("break-all text-[11px]", isDarkMode ? "text-white/50" : "text-black/48")}>Mini: {sharePath}</p>
           )}
         </div>
       )}
@@ -2876,7 +3062,7 @@ function ShareEntityCardBlock({ block }: { block: GenUIEntityCardBlock }) {
           onClick={() => {
             void copySharePayload();
           }}
-          className="rounded-full bg-sky-500 px-3 py-1.5 text-xs text-white hover:bg-sky-600"
+          className="rounded-full bg-white px-3 py-1.5 text-xs font-medium text-[#111111] hover:bg-white/90"
         >
           {copyStatus === "copied"
             ? "已复制"
@@ -2889,7 +3075,7 @@ function ShareEntityCardBlock({ block }: { block: GenUIEntityCardBlock }) {
             href={shareUrl}
             target="_blank"
             rel="noreferrer"
-            className="rounded-full bg-white px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100"
+            className={cn("rounded-full border px-3 py-1.5 text-xs", isDarkMode ? "border-white/8 bg-white/[0.04] text-white/72 hover:bg-white/[0.08]" : "border-black/8 bg-black/[0.04] text-black/72 hover:bg-black/[0.06]")}
           >
             打开邀请页
           </a>
@@ -2900,16 +3086,17 @@ function ShareEntityCardBlock({ block }: { block: GenUIEntityCardBlock }) {
 }
 
 function EntityCardBlock({ block }: { block: GenUIEntityCardBlock }) {
+  const isDarkMode = useChatTheme();
   const entries = Object.entries(block.fields || {});
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white/85 p-3">
-      <p className="text-sm font-semibold text-slate-800">{block.title}</p>
+    <div className={cn("rounded-[20px] border p-3.5", isDarkMode ? "border-white/8 bg-white/[0.035] shadow-[inset_0_1px_0_rgba(255,255,255,0.035)]" : "border-black/8 bg-black/[0.03] shadow-[inset_0_1px_0_rgba(255,255,255,0.42)]")}>
+      <p className={cn("text-sm font-semibold", isDarkMode ? "text-white/88" : "text-black/84")}>{block.title}</p>
       <div className="mt-2 space-y-1.5">
         {entries.map(([key, value]) => (
           <div key={key} className="flex items-start justify-between gap-3 text-xs">
-            <span className="text-slate-500">{prettyFieldLabel(key)}</span>
-            <span className="text-right text-slate-700">{renderFieldValue(value)}</span>
+            <span className={cn(isDarkMode ? "text-white/42" : "text-black/42")}>{prettyFieldLabel(key)}</span>
+            <span className={cn("text-right", isDarkMode ? "text-white/72" : "text-black/70")}>{renderFieldValue(value)}</span>
           </div>
         ))}
       </div>
@@ -2954,6 +3141,7 @@ function ResultCarouselCard({
   disabled?: boolean;
   onActionSelect?: (option: ActionOption) => Promise<void>;
 }) {
+  const isDarkMode = useChatTheme();
   const title = readStringField(item, "title", `结果 ${index + 1}`);
   const type = readStringField(item, "type");
   const locationName = readStringField(item, "locationName", "附近");
@@ -3007,7 +3195,7 @@ function ResultCarouselCard({
   return (
     <article
       className={cn(
-        "flex min-h-[238px] flex-col rounded-[30px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(244,247,255,0.94)_100%)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_28px_48px_-34px_rgba(65,83,162,0.48)] transition-all duration-300",
+        "flex min-h-[238px] flex-col p-1 transition-all duration-300",
         active ? "opacity-100" : "opacity-[0.55]"
       )}
     >
@@ -3018,68 +3206,73 @@ function ResultCarouselCard({
               <img
                 src={avatarUrl}
                 alt={title}
-                className="h-11 w-11 shrink-0 rounded-full border border-white/80 object-cover shadow-[0_10px_24px_-18px_rgba(65,83,162,0.52)]"
+                className={cn("h-11 w-11 shrink-0 rounded-full border object-cover shadow-[0_10px_24px_-18px_rgba(0,0,0,0.22)]", isDarkMode ? "border-white/10" : "border-black/10")}
               />
             ) : (
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/80 bg-[linear-gradient(135deg,#eef2ff_0%,#dbe4ff_100%)] text-sm font-semibold text-[#5b67f4] shadow-[0_10px_24px_-18px_rgba(65,83,162,0.52)]">
+              <div className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-full border text-sm font-semibold shadow-[0_10px_24px_-18px_rgba(0,0,0,0.18)]", isDarkMode ? "border-white/10 bg-white/[0.06] text-white/82" : "border-black/10 bg-black/[0.05] text-black/78")}>
                 {title.slice(0, 1) || "搭"}
               </div>
             )
           ) : null}
           <div className="min-w-0">
           {type ? (
-            <div className="mb-2 inline-flex items-center rounded-full border border-white/75 bg-white/70 px-2.5 py-1 text-[11px] font-medium text-[#5b67f4] shadow-[inset_0_1px_0_rgba(255,255,255,0.82)]">
+            <div className={cn("mb-2 inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]", isDarkMode ? "border-white/8 bg-white/[0.03] text-white/56" : "border-black/8 bg-black/[0.03] text-black/50")}>
               {type}
             </div>
           ) : null}
-          <h3 className="text-[15px] font-semibold leading-6 text-slate-800">{title}</h3>
+          <h3 className={cn("text-[15px] font-semibold leading-6", isDarkMode ? "text-white/92" : "text-black/88")}>{title}</h3>
           </div>
         </div>
         {partnerMode && score > 0 ? (
-          <div className="shrink-0 rounded-full border border-[#dce4ff] bg-white/84 px-2.5 py-1 text-[11px] font-semibold text-[#4f63f3] shadow-[inset_0_1px_0_rgba(255,255,255,0.82)]">
+          <div className={cn("shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]", isDarkMode ? "border-white/8 bg-white/[0.05] text-white/78" : "border-black/8 bg-black/[0.05] text-black/76")}>
             匹配 {score}%
           </div>
         ) : (
-          <div className="shrink-0 rounded-full border border-white/75 bg-white/72 px-2.5 py-1 text-[11px] font-medium text-slate-500 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)]">
+          <div className={cn("shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-medium shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]", isDarkMode ? "border-white/8 bg-white/[0.03] text-white/42" : "border-black/8 bg-black/[0.03] text-black/40")}>
             {index + 1}
           </div>
         )}
       </div>
 
       <div className="mt-3 flex flex-wrap gap-2">
-        <span className="rounded-full bg-[rgba(92,106,244,0.08)] px-2.5 py-1 text-[11px] font-medium text-slate-600">
+        <span className={cn("rounded-full border px-2.5 py-1 text-[11px] font-medium", isDarkMode ? "border-white/8 bg-white/[0.04] text-white/68" : "border-black/8 bg-black/[0.04] text-black/66")}>
           {locationName}
         </span>
         {partnerMode && timePreference ? (
-          <span className="rounded-full bg-white/78 px-2.5 py-1 text-[11px] text-slate-500">
+          <span className={cn("rounded-full border px-2.5 py-1 text-[11px]", isDarkMode ? "border-white/8 bg-white/[0.03] text-white/46" : "border-black/8 bg-black/[0.03] text-black/46")}>
             {timePreference}
           </span>
         ) : null}
         {distance !== "-" ? (
-          <span className="rounded-full bg-white/78 px-2.5 py-1 text-[11px] text-slate-500">
+          <span className={cn("rounded-full border px-2.5 py-1 text-[11px]", isDarkMode ? "border-white/8 bg-white/[0.03] text-white/46" : "border-black/8 bg-black/[0.03] text-black/46")}>
             距离 {distance}
           </span>
         ) : null}
         {startAt !== "-" ? (
-          <span className="rounded-full bg-white/78 px-2.5 py-1 text-[11px] text-slate-500">
+          <span className={cn("rounded-full border px-2.5 py-1 text-[11px]", isDarkMode ? "border-white/8 bg-white/[0.03] text-white/46" : "border-black/8 bg-black/[0.03] text-black/46")}>
             {startAt}
           </span>
         ) : null}
       </div>
 
       {note ? (
-        <p className="mt-3 text-sm leading-6 text-slate-600">{note}</p>
+        <p className={cn("mt-3 text-sm leading-6", isDarkMode ? "text-white/62" : "text-black/60")}>{note}</p>
       ) : (
-        <p className="mt-3 text-sm leading-6 text-slate-500">
+        <p className={cn("mt-3 text-sm leading-6", isDarkMode ? "text-white/42" : "text-black/42")}>
           左右滑动看看其他结果，选到顺眼的我们再继续。
         </p>
       )}
 
       <div className="mt-4 space-y-2">
         {currentParticipants !== undefined && maxParticipants !== undefined ? (
-          <div className="flex items-center justify-between rounded-[20px] border border-white/75 bg-white/70 px-3 py-2 text-xs text-slate-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)]">
+          <div
+            className={cn(
+              "flex items-center justify-between px-0 py-1 text-xs",
+              isDarkMode ? "text-white/46" : "text-black/46"
+            )}
+          >
             <span>当前进度</span>
-            <span className="font-medium text-slate-700">
+            <span className={cn("font-medium", isDarkMode ? "text-white/76" : "text-black/76")}>
               {renderFieldValue(currentParticipants)}/{renderFieldValue(maxParticipants)} 人
             </span>
           </div>
@@ -3088,10 +3281,15 @@ function ResultCarouselCard({
         {detailEntries.map(([key, value]) => (
           <div
             key={key}
-            className="flex items-center justify-between gap-3 rounded-[20px] border border-white/70 bg-white/62 px-3 py-2 text-xs text-slate-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]"
+            className={cn(
+              "flex items-center justify-between gap-3 px-0 py-1 text-xs",
+              isDarkMode ? "text-white/46" : "text-black/46"
+            )}
           >
             <span>{prettyFieldLabel(key)}</span>
-            <span className="text-right font-medium text-slate-700">{renderFieldValue(value)}</span>
+            <span className={cn("text-right font-medium", isDarkMode ? "text-white/76" : "text-black/76")}>
+              {renderFieldValue(value)}
+            </span>
           </div>
         ))}
       </div>
@@ -3101,7 +3299,12 @@ function ResultCarouselCard({
           {tags.map((tag) => (
             <span
               key={tag}
-              className="rounded-full border border-white/75 bg-white/74 px-2.5 py-1 text-[11px] text-slate-500"
+              className={cn(
+                "rounded-full border px-2.5 py-1 text-[11px]",
+                isDarkMode
+                  ? "border-white/8 bg-white/[0.03] text-white/46"
+                  : "border-black/8 bg-black/[0.03] text-black/46"
+              )}
             >
               {tag}
             </span>
@@ -3124,8 +3327,12 @@ function ResultCarouselCard({
               className={cn(
                 "rounded-[18px] px-3.5 py-2.5 text-left text-xs font-medium transition-all disabled:opacity-45",
                 actionIndex === 0
-                  ? "bg-[linear-gradient(135deg,#5b67f4_0%,#6f7cff_100%)] text-white shadow-[0_18px_30px_-22px_rgba(81,96,236,0.72)]"
-                  : "border border-white/80 bg-white/84 text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]"
+                  ? isDarkMode
+                    ? "bg-white text-[#111111] shadow-[0_18px_30px_-22px_rgba(255,255,255,0.18)]"
+                    : "bg-black text-white shadow-[0_18px_30px_-22px_rgba(0,0,0,0.22)]"
+                  : isDarkMode
+                    ? "border border-white/8 bg-white/[0.04] text-white/78 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
+                    : "border border-black/8 bg-black/[0.04] text-black/76 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]"
               )}
             >
               {action.label}
@@ -3149,6 +3356,7 @@ function ResultCarousel({
   onActionSelect?: (option: ActionOption) => Promise<void>;
 }) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const isDarkMode = useChatTheme();
   const [activeIndex, setActiveIndex] = useState(0);
 
   useEffect(() => {
@@ -3220,11 +3428,11 @@ function ResultCarousel({
             ))}
           </div>
         </div>
-        <div className="pointer-events-none absolute inset-y-0 left-0 w-12 bg-gradient-to-r from-[#f3f6ff] via-[#f3f6ff] to-transparent" />
-        <div className="pointer-events-none absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-[#f3f6ff] via-[#f3f6ff] to-transparent" />
+        <div className={cn("pointer-events-none absolute inset-y-0 left-0 w-12 bg-gradient-to-r to-transparent", isDarkMode ? "from-black via-black/92" : "from-white via-white/92")} />
+        <div className={cn("pointer-events-none absolute inset-y-0 right-0 w-12 bg-gradient-to-l to-transparent", isDarkMode ? "from-black via-black/92" : "from-white via-white/92")} />
       </div>
 
-      <div className="mt-2 flex items-center justify-between px-1 text-[11px] text-slate-500">
+      <div className={cn("mt-2 flex items-center justify-between px-1 text-[11px]", isDarkMode ? "text-white/40" : "text-black/38")}>
         <span>左右滑动查看</span>
         <span>
           {activeIndex + 1} / {items.length}
@@ -3243,6 +3451,7 @@ function ListBlockGlobalActions({
   disabled: boolean;
   onActionSelect?: (option: ActionOption) => Promise<void>;
 }) {
+  const isDarkMode = useChatTheme();
   const primaryAction = isRecord(meta.primaryAction) ? meta.primaryAction : null;
   const secondaryAction = isRecord(meta.secondaryAction) ? meta.secondaryAction : null;
 
@@ -3272,7 +3481,7 @@ function ListBlockGlobalActions({
             }
           }}
           disabled={disabled}
-          className="rounded-[22px] border border-white/80 bg-white/84 px-5 py-3 text-sm font-medium text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] transition-all disabled:opacity-45"
+          className={cn("rounded-[22px] border px-5 py-3 text-sm font-medium transition-all disabled:opacity-45", isDarkMode ? "border-white/8 bg-white/[0.04] text-white/78 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]" : "border-black/8 bg-black/[0.04] text-black/74 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]")}
         >
           {secondaryLabel}
         </button>
@@ -3290,7 +3499,7 @@ function ListBlockGlobalActions({
             }
           }}
           disabled={disabled}
-          className="rounded-[22px] bg-[linear-gradient(135deg,#5b67f4_0%,#6f7cff_100%)] px-5 py-3 text-sm font-semibold text-white shadow-[0_18px_30px_-22px_rgba(81,96,236,0.72)] transition-all disabled:opacity-45"
+          className="rounded-[22px] bg-white px-5 py-3 text-sm font-semibold text-[#111111] shadow-[0_18px_30px_-22px_rgba(255,255,255,0.18)] transition-all disabled:opacity-45"
         >
           {primaryLabel}
         </button>
@@ -3308,6 +3517,7 @@ function ListBlockCard({
   disabled: boolean;
   onActionSelect: (option: ActionOption) => Promise<void>;
 }) {
+  const isDarkMode = useChatTheme();
   const partnerMode = isPartnerSearchResultsList(block);
   const browseable = isBrowseableResultList(block);
   const listPresentation = readListPresentation(block);
@@ -3323,10 +3533,10 @@ function ListBlockCard({
     <div
       className={cn(
         showHeader
-          ? "rounded-[28px] border border-white/75 bg-[linear-gradient(180deg,rgba(255,255,255,0.72)_0%,rgba(245,248,255,0.64)_100%)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.82),0_24px_46px_-34px_rgba(63,79,162,0.44)] backdrop-blur-xl"
+          ? "space-y-0"
           : "mt-1",
         showHeader && listPresentation === "compact-stack"
-          ? "rounded-[24px] bg-white/64 p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_18px_32px_-28px_rgba(63,79,162,0.28)]"
+          ? "space-y-0"
           : undefined
       )}
     >
@@ -3339,7 +3549,7 @@ function ListBlockCard({
       ) : null}
 
       {block.subtitle ? (
-        <p className="mt-2 text-sm text-slate-500">{block.subtitle}</p>
+        <p className={cn("mt-2 text-sm", isDarkMode ? "text-white/42" : "text-black/42")}>{block.subtitle}</p>
       ) : null}
 
       {browseable ? (
@@ -3365,12 +3575,12 @@ function ListBlockCard({
             ) : (
               <div
               key={String(item.id ?? index)}
-              className="rounded-[20px] border border-white/75 bg-white/80 px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)]"
+              className="px-0 py-1"
               >
-                <p className="text-sm font-medium text-slate-800">
+                <p className={cn("text-sm font-medium", isDarkMode ? "text-white/90" : "text-black/86")}>
                   {String(item.title ?? `活动 ${index + 1}`)}
                 </p>
-                <p className="mt-1 text-xs text-slate-500">
+                <p className={cn("mt-1 text-xs", isDarkMode ? "text-white/42" : "text-black/42")}>
                   {String(item.locationName ?? "附近")} · {formatDistance(item.distance)}
                 </p>
               </div>
@@ -3400,6 +3610,7 @@ function FormBlockCard({
   disabled: boolean;
   onActionSelect: (option: ActionOption) => Promise<void>;
 }) {
+  const isDarkMode = useChatTheme();
   const schema = useMemo(() => readGenUIFormSchema(block.schema), [block.schema]);
   const initialValues = useMemo(
     () => buildGenUIFormValues(isRecord(block.initialValues) ? block.initialValues : {}, schema),
@@ -3496,8 +3707,8 @@ function FormBlockCard({
       return (
         <div key={field.name} className="space-y-1.5">
           <div className="flex items-center gap-1">
-            <p className="text-[12px] font-medium text-slate-700">{field.label}</p>
-            {field.required ? <span className="text-[11px] text-rose-500">*</span> : null}
+            <p className={cn("text-[12px] font-medium", isDarkMode ? "text-white/82" : "text-black/82")}>{field.label}</p>
+            {field.required ? <span className={cn("text-[11px]", isDarkMode ? "text-white/38" : "text-black/36")}>*</span> : null}
           </div>
           <textarea
             value={currentValue}
@@ -3512,7 +3723,12 @@ function FormBlockCard({
             maxLength={typeof field.maxLength === "number" ? field.maxLength : 120}
             rows={3}
             placeholder={field.placeholder || `补充${field.label}`}
-            className="min-h-[92px] w-full rounded-[22px] border border-white/80 bg-white/92 px-3 py-2.5 text-sm text-slate-700 outline-none shadow-[inset_0_1px_0_rgba(255,255,255,0.66)] transition focus:border-[#c8d1ff] focus:bg-white disabled:opacity-45"
+            className={cn(
+              "min-h-[92px] w-full rounded-[22px] border px-3 py-2.5 text-sm outline-none transition disabled:opacity-45",
+              isDarkMode
+                ? "border-white/10 bg-white/[0.08] text-white/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] placeholder:text-white/30 focus:border-white/16 focus:bg-white/[0.1]"
+                : "border-black/10 bg-white text-black/88 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] placeholder:text-black/30 focus:border-black/16 focus:bg-white"
+            )}
           />
         </div>
       );
@@ -3523,8 +3739,8 @@ function FormBlockCard({
       return (
         <div key={field.name} className="space-y-1.5">
           <div className="flex items-center gap-1">
-            <p className="text-[12px] font-medium text-slate-700">{field.label}</p>
-            {field.required ? <span className="text-[11px] text-rose-500">*</span> : null}
+            <p className={cn("text-[12px] font-medium", isDarkMode ? "text-white/82" : "text-black/82")}>{field.label}</p>
+            {field.required ? <span className={cn("text-[11px]", isDarkMode ? "text-white/38" : "text-black/36")}>*</span> : null}
           </div>
           <input
             type="text"
@@ -3539,7 +3755,12 @@ function FormBlockCard({
             disabled={disabled}
             maxLength={typeof field.maxLength === "number" ? field.maxLength : 60}
             placeholder={field.placeholder || `补充${field.label}`}
-            className="h-11 w-full rounded-[18px] border border-white/80 bg-white/92 px-3 text-sm text-slate-700 outline-none shadow-[inset_0_1px_0_rgba(255,255,255,0.66)] transition focus:border-[#c8d1ff] focus:bg-white disabled:opacity-45"
+            className={cn(
+              "h-11 w-full rounded-[18px] border px-3 text-sm outline-none transition disabled:opacity-45",
+              isDarkMode
+                ? "border-white/10 bg-white/[0.08] text-white/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] placeholder:text-white/30 focus:border-white/16 focus:bg-white/[0.1]"
+                : "border-black/10 bg-white text-black/88 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] placeholder:text-black/30 focus:border-black/16 focus:bg-white"
+            )}
           />
         </div>
       );
@@ -3550,8 +3771,8 @@ function FormBlockCard({
       return (
         <div key={field.name} className="space-y-1.5">
           <div className="flex items-center gap-1">
-            <p className="text-[12px] font-medium text-slate-700">{field.label}</p>
-            {field.required ? <span className="text-[11px] text-rose-500">*</span> : null}
+            <p className={cn("text-[12px] font-medium", isDarkMode ? "text-white/82" : "text-black/82")}>{field.label}</p>
+            {field.required ? <span className={cn("text-[11px]", isDarkMode ? "text-white/38" : "text-black/36")}>*</span> : null}
           </div>
           <div className="flex flex-wrap gap-2">
             {(field.options || []).map((option) => {
@@ -3565,8 +3786,12 @@ function FormBlockCard({
                   className={cn(
                     "rounded-full border px-3 py-2 text-xs transition-all duration-150 disabled:opacity-45",
                     selected
-                      ? "border-transparent bg-[linear-gradient(135deg,#4856e8_0%,#6775ff_100%)] text-white shadow-[0_12px_24px_-16px_rgba(83,97,232,0.78)]"
-                      : "border-slate-200 bg-white/92 text-slate-700 hover:border-[#d5dbff] hover:bg-[#f7f8ff]"
+                      ? isDarkMode
+                        ? "border-white/10 bg-white text-[#111111] shadow-[0_12px_24px_-18px_rgba(255,255,255,0.16)]"
+                        : "border-black/10 bg-black text-white shadow-[0_12px_24px_-18px_rgba(0,0,0,0.18)]"
+                      : isDarkMode
+                        ? "border-white/10 bg-white/[0.05] text-white/78 hover:bg-white/[0.08]"
+                        : "border-black/10 bg-black/[0.04] text-black/76 hover:bg-black/[0.07]"
                   )}
                 >
                   {option.label}
@@ -3582,8 +3807,8 @@ function FormBlockCard({
     return (
       <div key={field.name} className="space-y-1.5">
         <div className="flex items-center gap-1">
-          <p className="text-[12px] font-medium text-slate-700">{field.label}</p>
-          {field.required ? <span className="text-[11px] text-rose-500">*</span> : null}
+          <p className={cn("text-[12px] font-medium", isDarkMode ? "text-white/82" : "text-black/82")}>{field.label}</p>
+          {field.required ? <span className={cn("text-[11px]", isDarkMode ? "text-white/38" : "text-black/36")}>*</span> : null}
         </div>
         <div className="flex flex-wrap gap-2">
           {(field.options || []).map((option) => (
@@ -3595,8 +3820,12 @@ function FormBlockCard({
               className={cn(
                 "rounded-full border px-3 py-2 text-xs transition-all duration-150 disabled:opacity-45",
                 currentValue === option.value
-                  ? "border-transparent bg-[linear-gradient(135deg,#5b67f4_0%,#7380ff_52%,#7d6bff_100%)] text-white shadow-[0_12px_24px_-16px_rgba(91,103,244,0.78)]"
-                  : "border-slate-200 bg-white/92 text-slate-700 hover:border-[#d5dbff] hover:bg-[#f7f8ff]"
+                  ? isDarkMode
+                    ? "border-white/10 bg-white text-[#111111] shadow-[0_12px_24px_-18px_rgba(255,255,255,0.16)]"
+                    : "border-black/10 bg-black text-white shadow-[0_12px_24px_-18px_rgba(0,0,0,0.18)]"
+                  : isDarkMode
+                    ? "border-white/10 bg-white/[0.05] text-white/78 hover:bg-white/[0.08]"
+                    : "border-black/10 bg-black/[0.04] text-black/76 hover:bg-black/[0.07]"
               )}
             >
               {option.label}
@@ -3611,7 +3840,7 @@ function FormBlockCard({
     <div
       className={cn(
         showHeader
-          ? "rounded-[28px] border border-[#dde3ff] bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(246,248,255,0.96)_100%)] p-4 shadow-[0_26px_46px_-34px_rgba(63,79,162,0.48)]"
+          ? "space-y-3"
           : "mt-1 space-y-3"
       )}
     >
@@ -3637,19 +3866,19 @@ function FormBlockCard({
       {showFallbackPreview ? (
         <div className={cn(showHeader ? "mt-2 space-y-2" : "space-y-2")}>
           {Object.entries(initialValues).map(([key, value]) => (
-            <div key={key} className="rounded-lg bg-slate-50/90 px-3 py-2">
-              <p className="text-[11px] text-slate-500">{prettyFieldLabel(key)}</p>
-              <p className="text-sm text-slate-800">{renderFieldValue(value)}</p>
+            <div key={key} className={cn("rounded-[16px] px-3 py-2.5", isDarkMode ? "bg-white/[0.04]" : "bg-black/[0.03]")}>
+              <p className={cn("text-[11px]", isDarkMode ? "text-white/42" : "text-black/42")}>{prettyFieldLabel(key)}</p>
+              <p className={cn("text-sm", isDarkMode ? "text-white/88" : "text-black/84")}>{renderFieldValue(value)}</p>
             </div>
           ))}
         </div>
       ) : (
         <div className={cn(showHeader ? "mt-3 space-y-3" : "space-y-3")}>
           {requiredFields.length > 0 ? (
-            <div className="space-y-3 rounded-[24px] border border-[#ffd8e1] bg-[linear-gradient(180deg,rgba(255,247,249,0.96)_0%,rgba(255,241,245,0.92)_100%)] p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]">
+            <div className="space-y-3">
               <div className="flex items-center justify-between gap-3">
-                <p className="text-[12px] font-semibold tracking-[0.02em] text-slate-700">先填这几项</p>
-                <span className="rounded-full bg-white/72 px-2 py-1 text-[11px] text-rose-500">
+                <p className={cn("text-[12px] font-semibold tracking-[0.02em]", isDarkMode ? "text-white/86" : "text-black/82")}>先填这几项</p>
+                <span className={cn("rounded-full border px-2 py-1 text-[11px]", isDarkMode ? "border-white/8 bg-white/[0.03] text-white/56" : "border-black/8 bg-black/[0.03] text-black/48")}>
                   {missingRequiredCount > 0 ? `还差 ${missingRequiredCount} 项` : "已补齐"}
                 </span>
               </div>
@@ -3658,17 +3887,17 @@ function FormBlockCard({
           ) : null}
 
           {optionalFields.length > 0 ? (
-            <div className="space-y-3 rounded-[24px] border border-[#e3e8f6] bg-[linear-gradient(180deg,rgba(250,251,255,0.96)_0%,rgba(244,247,252,0.92)_100%)] p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.78)]">
+            <div className="space-y-3">
               <div className="flex items-center justify-between gap-3">
-                <p className="text-[12px] font-semibold tracking-[0.02em] text-slate-700">有空再补</p>
-                <span className="text-[11px] text-slate-500">选填，能帮我筛得更准</span>
+                <p className={cn("text-[12px] font-semibold tracking-[0.02em]", isDarkMode ? "text-white/82" : "text-black/80")}>有空再补</p>
+                <span className={cn("text-[11px]", isDarkMode ? "text-white/42" : "text-black/42")}>选填，能帮我筛得更准</span>
               </div>
               <div className="space-y-3">{optionalFields.map(renderField)}</div>
             </div>
           ) : null}
 
           {formError ? (
-            <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">{formError}</p>
+            <p className={cn("px-0 py-1 text-xs", isDarkMode ? "text-white/72" : "text-black/72")}>{formError}</p>
           ) : null}
 
           <button
@@ -3678,15 +3907,19 @@ function FormBlockCard({
             }}
             disabled={disabled}
             className={cn(
-              "w-full rounded-[22px] px-4 py-3 text-sm font-medium text-white transition-all",
+              "w-full rounded-[22px] px-4 py-3 text-sm font-medium transition-all",
               submitBlocked
-                ? "bg-[linear-gradient(135deg,#b4bddf_0%,#96a1c9_100%)] shadow-[inset_0_1px_0_rgba(255,255,255,0.35)]"
-                : "bg-[linear-gradient(135deg,#5b67f4_0%,#6e7cff_52%,#7d6bff_100%)] shadow-[0_22px_36px_-24px_rgba(81,96,236,0.72)] hover:brightness-[1.02]"
+                ? isDarkMode
+                  ? "bg-white/[0.12] text-white/46 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+                  : "bg-black/[0.08] text-black/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]"
+                : isDarkMode
+                  ? "bg-white text-[#111111] shadow-[0_16px_32px_-24px_rgba(255,255,255,0.2)] hover:bg-white/92"
+                  : "bg-black text-white shadow-[0_16px_32px_-24px_rgba(0,0,0,0.22)] hover:bg-black/92"
             )}
           >
             {submitButtonLabel}
           </button>
-          <p className="px-1 text-[11px] leading-5 text-slate-500">
+          <p className={cn("px-1 text-[11px] leading-5", isDarkMode ? "text-white/42" : "text-black/42")}>
             {submitBlocked
               ? "把上面的必填补齐后，我就按这些条件开始匹配。"
               : "提交后会直接进入匹配，不会再让你重填一遍。"}
@@ -3723,24 +3956,25 @@ function CtaGroupBlockCard({
 }
 
 function AlertBlockCard({ block }: { block: GenUIAlertBlock }) {
+  const isDarkMode = useChatTheme();
   const alertStyleMap: Record<
     GenUIAlertBlock["level"],
     { className: string; label: string }
   > = {
     info: {
-      className: "border-sky-200 bg-sky-50 text-sky-800",
+      className: isDarkMode ? "border-white/8 bg-white/[0.04] text-white/78" : "border-black/8 bg-black/[0.04] text-black/76",
       label: "提示",
     },
     warning: {
-      className: "border-amber-200 bg-amber-50 text-amber-800",
+      className: isDarkMode ? "border-white/8 bg-white/[0.05] text-white/78" : "border-black/8 bg-black/[0.05] text-black/76",
       label: "注意",
     },
     error: {
-      className: "border-rose-200 bg-rose-50 text-rose-700",
+      className: isDarkMode ? "border-white/10 bg-white/[0.06] text-white/82" : "border-black/10 bg-black/[0.06] text-black/82",
       label: "异常",
     },
     success: {
-      className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+      className: isDarkMode ? "border-white/8 bg-white/[0.04] text-white/78" : "border-black/8 bg-black/[0.04] text-black/76",
       label: "成功",
     },
   };
@@ -3819,12 +4053,17 @@ function formatDistance(value: unknown): string {
 }
 
 function ThinkingDots() {
+  const isDarkMode = useChatTheme();
   return (
-    <div className="flex items-center gap-1 py-1">
+    <div
+      className={cn(
+        "inline-flex items-center gap-1 px-0 py-2"
+      )}
+    >
       {[0, 1, 2].map((index) => (
         <span
           key={index}
-          className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-500"
+          className={cn("h-1.5 w-1.5 animate-pulse rounded-full", isDarkMode ? "bg-white/68" : "bg-black/56")}
           style={{ animationDelay: `${index * 0.12}s` }}
         />
       ))}

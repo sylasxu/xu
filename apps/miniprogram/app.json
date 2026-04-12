@@ -25,11 +25,6 @@
       "pages": ["index", "about/index"]
     },
     {
-      "root": "subpackages/setting",
-      "name": "setting-sub",
-      "pages": ["preference/index"]
-    },
-    {
       "root": "pages/login",
       "name": "login",
       "pages": ["login"]

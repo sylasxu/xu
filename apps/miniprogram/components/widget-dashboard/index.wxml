@@ -16,8 +16,8 @@
       <t-icon name="chat" size="40rpx" />
     </view>
     <view class="greeting-content">
-      <text class="greeting-text">{{greeting}}</text>
-      <text wx:if="{{subGreeting}}" class="sub-greeting-text">{{subGreeting}}</text>
+      <text class="greeting-text">{{displayGreeting}}</text>
+      <text wx:if="{{displaySubGreeting}}" class="sub-greeting-text">{{displaySubGreeting}}</text>
     </view>
   </view>
   
@@ -45,7 +45,7 @@
   <block wx:if="{{hasSections && !hasQuickPrompts}}">
     <view class="sections-container">
       <view 
-        wx:for="{{sections}}" 
+        wx:for="{{displaySections}}" 
         wx:key="id"
         class="section-group"
       >

@@ -15,7 +15,16 @@
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: var(--bg-page, @bg-page);
+  background: #050505;
+  overflow: hidden;
+}
+
+.chat-page--welcome {
+  background: #090909;
+}
+
+.chat-page--conversation {
+  background: #000;
 }
 
 // ==================== 空气感渐变背景 ====================
@@ -23,21 +32,84 @@
 
 .atmospheric-bg {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 400rpx;
-  background: linear-gradient(
-    180deg,
-    var(--bg-atmospheric-top, rgba(91, 117, 251, 0.08)) 0%,
-    var(--bg-atmospheric-bottom, rgba(91, 117, 251, 0)) 100%
-  );
+  top: 40rpx;
+  left: 50%;
+  width: 660rpx;
+  height: 560rpx;
+  transform: translateX(-50%);
+  background:
+    radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0.08) 20%, rgba(163, 150, 255, 0.12) 36%, rgba(83, 92, 168, 0.08) 52%, rgba(0, 0, 0, 0) 76%),
+    radial-gradient(circle at 48% 48%, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.02) 28%, rgba(0, 0, 0, 0) 62%);
+  filter: blur(26rpx);
+  opacity: 0.9;
   pointer-events: none;
   z-index: 0;
 }
 
 .chat-task-panel {
   padding: @spacing-4 @spacing-4 @spacing-2;
+}
+
+.welcome-layout {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  z-index: 1;
+}
+
+.welcome-layout__inner {
+  padding: 164rpx 40rpx 236rpx;
+}
+
+.welcome-hero {
+  position: relative;
+  margin-bottom: 92rpx;
+}
+
+.welcome-hero__copy {
+  position: relative;
+  z-index: 1;
+}
+
+.welcome-hero__title,
+.welcome-hero__subtitle {
+  display: block;
+  color: #f5f5f4;
+  font-weight: 700;
+  letter-spacing: -0.05em;
+}
+
+.welcome-hero__title {
+  max-width: 520rpx;
+  font-size: 82rpx;
+  line-height: 0.98;
+}
+
+.welcome-hero__subtitle {
+  max-width: 620rpx;
+  margin-top: 14rpx;
+  font-size: 82rpx;
+  line-height: 0.98;
+  color: #ececea;
+}
+
+.welcome-hero__spark {
+  position: absolute;
+  top: -32rpx;
+  left: 50%;
+  width: 420rpx;
+  height: 420rpx;
+  transform: translateX(-50%);
+  border-radius: 999rpx;
+  background:
+    radial-gradient(circle at 50% 48%, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0.06) 26%, rgba(125, 117, 255, 0.16) 42%, rgba(68, 76, 146, 0.14) 58%, rgba(0, 0, 0, 0) 74%);
+  filter: blur(18rpx);
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+.welcome-layout__spacer {
+  height: 180rpx;
 }
 
 // ==================== 加载更多指示器 ====================
@@ -142,19 +214,16 @@
 
 @media (prefers-color-scheme: dark) {
   .chat-page {
-    background: var(--bg-page, @bg-page-dark);
-  }
-
-  .atmospheric-bg {
-    background: linear-gradient(
-      180deg,
-      var(--bg-atmospheric-top, rgba(91, 117, 251, 0.15)) 0%,
-      var(--bg-atmospheric-bottom, rgba(91, 117, 251, 0)) 100%
-    );
+    background: #050505;
   }
 
   .loading-dot {
     background-color: var(--color-primary-light, @color-primary-light);
+  }
+
+  .welcome-hero__title,
+  .welcome-hero__subtitle {
+    color: #f5f5f4;
   }
 
   .widget-error {

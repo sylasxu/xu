@@ -3,7 +3,7 @@
  * 将 Orval 生成的参数映射到 wx.request
  */
 
-import { API_CONFIG } from '../config'
+import { API_CONFIG } from '../config/index'
 
 const BASE_URL = API_CONFIG.BASE_URL
 

@@ -24,9 +24,9 @@ type Activity = WelcomePendingActivity;
 type WelcomeUi = WelcomeResponse['ui'];
 
 interface WidgetDashboardData {
-  greeting: string;
-  subGreeting: string;
-  sections: WelcomeSection[];
+  displayGreeting: string;
+  displaySubGreeting: string;
+  displaySections: WelcomeSection[];
   displayActivities: Activity[];
   hasActivities: boolean;
   hasSections: boolean;
@@ -35,8 +35,6 @@ interface WidgetDashboardData {
   displayQuickPrompts: QuickPrompt[];
   hasSocialProfile: boolean;
   hasQuickPrompts: boolean;
-  // 从 properties 同步
-  nickname: string;
   displayUi: WelcomeUi | null;
 }
 
@@ -170,9 +168,9 @@ function readWelcomeUi(value: unknown): WelcomeUi | null {
 }
 
 const WIDGET_DASHBOARD_DATA: WidgetDashboardData = {
-  greeting: '',
-  subGreeting: '',
-  sections: [],
+  displayGreeting: '',
+  displaySubGreeting: '',
+  displaySections: [],
   displayActivities: [],
   hasActivities: false,
   hasSections: false,
@@ -180,7 +178,6 @@ const WIDGET_DASHBOARD_DATA: WidgetDashboardData = {
   displayQuickPrompts: [],
   hasSocialProfile: false,
   hasQuickPrompts: false,
-  nickname: '搭子',
   displayUi: null,
 };
 
@@ -248,9 +245,10 @@ Component({
       this.updateGreeting();
     },
     'sections': function(sections: WelcomeSection[]) {
+      const resolvedSections = Array.isArray(sections) ? sections : [];
       this.setData({
-        sections: sections || [],
-        hasSections: (sections || []).length > 0,
+        displaySections: resolvedSections,
+        hasSections: resolvedSections.length > 0,
       });
     },
     // v4.4 新增
@@ -291,8 +289,8 @@ Component({
       const apiSubGreeting = readString(this.properties.subGreeting);
 
       this.setData({
-        greeting: apiGreeting || '你好～',
-        subGreeting: apiSubGreeting || '今天想约什么局？',
+        displayGreeting: apiGreeting || '你好～',
+        displaySubGreeting: apiSubGreeting || '今天想约什么局？',
       });
     },
 

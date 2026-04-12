@@ -16,7 +16,13 @@ import {
   type StructuredPendingAction,
 } from '../../src/stores/app'
 import { useUserStore } from '../../src/stores/user'
-import { getWelcomeCard, getUserLocation, type QuickItem } from '../../src/services/welcome'
+import {
+  getWelcomeCard,
+  getUserLocation,
+  type QuickItem,
+  type QuickPrompt,
+  type SocialProfile,
+} from '../../src/services/welcome'
 import { getAiTasksCurrent } from '../../src/api/endpoints/ai/ai'
 import type {
   ActivityData,
@@ -24,15 +30,35 @@ import type {
   ActivityType,
   ShareActivityData,
 } from '../../src/types/global'
-import { getHotKeywords } from '../../src/api/endpoints/hot-keywords/hot-keywords'
 import type {
   AiCurrentTasksResponseItemsItem,
   AiCurrentTasksResponseItemsItemPrimaryAction,
   AiCurrentTasksResponseItemsItemSecondaryAction,
-  HotKeywordsListResponseItemsItem,
 } from '../../src/api/model'
 
 const DEFAULT_COMPOSER_PLACEHOLDER = '你想找什么活动？'
+const DEFAULT_WELCOME_GREETING = '晚上好，朋友！'
+const DEFAULT_WELCOME_SUB_GREETING = '附近有新局，想直接看看吗？'
+const DEFAULT_WELCOME_PROFILE_HINTS = {
+  low: '补充偏好后，小聚推荐会更准',
+  medium: '补充更多偏好，小聚推荐会更准',
+  high: '你的偏好已很完整，小聚推荐会更准',
+}
+const DEFAULT_WELCOME_SOCIAL_PROFILE: SocialProfile = {
+  joinedActivities: 0,
+  hostedActivities: 0,
+  preferenceCompleteness: 0,
+}
+type WelcomeProfileHints = {
+  low: string
+  medium: string
+  high: string
+}
+const DEFAULT_WELCOME_QUICK_PROMPTS: QuickPrompt[] = [
+  { icon: '#', text: '周末附近有什么活动', prompt: '周末附近有什么活动' },
+  { icon: '#', text: '帮我找个运动搭子', prompt: '帮我找个运动搭子' },
+  { icon: '#', text: '想组个周五晚的局', prompt: '想组个周五晚的局' },
+]
 
 // 页面数据类型
 interface PageData {
@@ -47,14 +73,18 @@ interface PageData {
   isAuthSheetVisible: boolean
   isShareGuideVisible: boolean
   shareGuideData: { activityId?: string; title?: string; mapUrl?: string } | null
+  shareGuideTitle: string
+  shareGuideLocationName: string
+  isWelcomeState: boolean
+  welcomeGreeting: string
+  welcomeSubGreeting: string
+  welcomeSocialProfile: SocialProfile | null
+  welcomeProfileHints: WelcomeProfileHints | null
+  welcomeQuickPrompts: QuickPrompt[]
   
   // 欢迎卡片 (v3.10 新结构)
   composerPlaceholder: string
   currentTasks: ChatTaskItem[]
-  
-  // 热词列表 (v4.7 全局关键词系统)
-  hotKeywords: HotKeywordsListResponseItemsItem[]
-  showHotKeywords: boolean
 }
 
 type ChatTaskAction = {
@@ -299,12 +329,8 @@ function isDashboardOnlyMessage(message: UIMessage | undefined): boolean {
   return part.type === 'widget' && part.widgetType === 'dashboard'
 }
 
-function shouldShowWelcomeHotKeywords(messages: UIMessage[]): boolean {
-  if (messages.length === 0) {
-    return true
-  }
-
-  return messages.length === 1 && isDashboardOnlyMessage(messages[0])
+function isWelcomeState(messages: UIMessage[]): boolean {
+  return messages.length === 0 || (messages.length === 1 && isDashboardOnlyMessage(messages[0]))
 }
 
 const INITIAL_UNSUBSCRIBE: (() => void) | null = null;
@@ -321,10 +347,16 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     isAuthSheetVisible: false,
     isShareGuideVisible: false,
     shareGuideData: null,
+    shareGuideTitle: '',
+    shareGuideLocationName: '',
+    isWelcomeState: true,
+    welcomeGreeting: DEFAULT_WELCOME_GREETING,
+    welcomeSubGreeting: DEFAULT_WELCOME_SUB_GREETING,
+    welcomeSocialProfile: DEFAULT_WELCOME_SOCIAL_PROFILE,
+    welcomeProfileHints: DEFAULT_WELCOME_PROFILE_HINTS,
+    welcomeQuickPrompts: DEFAULT_WELCOME_QUICK_PROMPTS,
     composerPlaceholder: DEFAULT_COMPOSER_PLACEHOLDER,
     currentTasks: [],
-    hotKeywords: [],
-    showHotKeywords: true,
   },
 
   unsubscribeChat: INITIAL_UNSUBSCRIBE,
@@ -341,7 +373,6 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     this.initChat()
     this.loadUserInfo()
     this.loadCurrentTasks()
-    this.loadHotKeywords()
     this.applyPrefillPrompt(options.prefill)
   },
 
@@ -375,7 +406,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
       status: chatStore.status,
       streamingMessageId: chatStore.streamingMessageId,
       inputValue: chatStore.input,
-      showHotKeywords: shouldShowWelcomeHotKeywords(chatStore.messages),
+      isWelcomeState: isWelcomeState(chatStore.messages),
     })
     
     this.unsubscribeChat = useChatStore.subscribe((state) => {
@@ -384,7 +415,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
         status: state.status,
         streamingMessageId: state.streamingMessageId,
         inputValue: state.input,
-        showHotKeywords: shouldShowWelcomeHotKeywords(state.messages),
+        isWelcomeState: isWelcomeState(state.messages),
       })
       this.lastChatStatus = state.status
     })
@@ -396,12 +427,16 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
       isAuthSheetVisible: appStore.isAuthSheetVisible,
       isShareGuideVisible: appStore.isShareGuideVisible,
       shareGuideData: appStore.shareGuideData,
+      shareGuideTitle: typeof appStore.shareGuideData?.title === 'string' ? appStore.shareGuideData.title : '',
+      shareGuideLocationName: typeof appStore.shareGuideData?.locationName === 'string' ? appStore.shareGuideData.locationName : '',
     })
     this.unsubscribeApp = useAppStore.subscribe((state) => {
       this.setData({
         isAuthSheetVisible: state.isAuthSheetVisible,
         isShareGuideVisible: state.isShareGuideVisible,
         shareGuideData: state.shareGuideData,
+        shareGuideTitle: typeof state.shareGuideData?.title === 'string' ? state.shareGuideData.title : '',
+        shareGuideLocationName: typeof state.shareGuideData?.locationName === 'string' ? state.shareGuideData.locationName : '',
       })
     })
   },
@@ -478,38 +513,10 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
   },
 
   /**
-   * 加载热词列表 - Requirements: 3.7, 3.8, 3.9
-   */
-  async loadHotKeywords() {
-    try {
-      const response = await getHotKeywords({ limit: 5 })
-      
-      if (response.status === 200) {
-        this.setData({ hotKeywords: response.data.items })
-        
-        // 埋点：记录热词曝光事件 - Requirements: 3.9
-        if (response.data.items.length > 0) {
-          wx.reportEvent('hot_chip_show', {
-            keyword_count: response.data.items.length,
-            keywords: response.data.items
-              .map((k: HotKeywordsListResponseItemsItem) => k.keyword)
-              .join(','),
-          })
-        }
-      }
-    } catch (error) {
-      console.error('[Chat] Failed to load hot keywords:', error)
-      // 静默失败，不影响主流程
-    }
-  },
-
-  /**
    * 显示欢迎卡片
    * v4.4: 增加社交档案和快捷入口
    */
   async showWelcomeDashboard() {
-    const chatStore = useChatStore.getState()
-    
     try {
       if (!this.userLocation) {
         this.userLocation = await getUserLocation()
@@ -523,26 +530,36 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
         typeof welcomeData.ui?.composerPlaceholder === 'string' && welcomeData.ui.composerPlaceholder.trim()
           ? welcomeData.ui.composerPlaceholder.trim()
           : DEFAULT_COMPOSER_PLACEHOLDER
-      
-      this.setData({ composerPlaceholder })
-      
-      // 使用 useChatStore 添加 Dashboard Widget (v4.4 新结构)
-      chatStore.addWidgetMessage('dashboard', {
-        nickname: this.data.userNickname,
-        greeting: welcomeData.greeting,
-        subGreeting: welcomeData.subGreeting,
-        activities: welcomeData.pendingActivities || [],
-        sections: welcomeData.sections,
-        socialProfile: welcomeData.socialProfile,
-        quickPrompts: welcomeData.quickPrompts,
-        ui: welcomeData.ui,
+
+      this.setData({
+        composerPlaceholder,
+        isWelcomeState: true,
+        welcomeGreeting:
+          typeof welcomeData.greeting === 'string' && welcomeData.greeting.trim()
+            ? welcomeData.greeting.trim()
+            : DEFAULT_WELCOME_GREETING,
+        welcomeSubGreeting:
+          typeof welcomeData.subGreeting === 'string' && welcomeData.subGreeting.trim()
+            ? welcomeData.subGreeting.trim()
+            : DEFAULT_WELCOME_SUB_GREETING,
+        welcomeSocialProfile: welcomeData.socialProfile ?? DEFAULT_WELCOME_SOCIAL_PROFILE,
+        welcomeProfileHints: welcomeData.ui?.profileHints ?? DEFAULT_WELCOME_PROFILE_HINTS,
+        welcomeQuickPrompts:
+          Array.isArray(welcomeData.quickPrompts) && welcomeData.quickPrompts.length > 0
+            ? welcomeData.quickPrompts
+            : DEFAULT_WELCOME_QUICK_PROMPTS,
       })
     } catch (error) {
       console.error('[Chat] Failed to load welcome card:', error)
-      
-      // 降级：使用本地欢迎卡片
-      chatStore.addWidgetMessage('dashboard', {
-        nickname: this.data.userNickname,
+
+      this.setData({
+        composerPlaceholder: DEFAULT_COMPOSER_PLACEHOLDER,
+        isWelcomeState: true,
+        welcomeGreeting: DEFAULT_WELCOME_GREETING,
+        welcomeSubGreeting: DEFAULT_WELCOME_SUB_GREETING,
+        welcomeSocialProfile: DEFAULT_WELCOME_SOCIAL_PROFILE,
+        welcomeProfileHints: DEFAULT_WELCOME_PROFILE_HINTS,
+        welcomeQuickPrompts: DEFAULT_WELCOME_QUICK_PROMPTS,
       })
     }
   },
@@ -551,8 +568,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
    * 新对话
    */
   async onNewChat() {
-    const chatStore = useChatStore.getState()
-    chatStore.clearMessages()
+    useChatStore.getState().clearMessages()
     
     // 同时清空服务端历史
     try {
@@ -1022,12 +1038,9 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     this.initChat()
   },
 
-  /**
-   * 处理热词点击 - Requirements: 3.5, 3.6, 3.11
-   */
-  onHotChipClick(e: WechatMiniprogram.CustomEvent<{ id: string; keyword: string }>) {
-    const { keyword } = e.detail
-    this.runPrompt(keyword)
+  onWelcomePromptTap(e: WechatMiniprogram.CustomEvent<{ prompt: string }>) {
+    const prompt = typeof e.detail?.prompt === 'string' ? e.detail.prompt : ''
+    this.runPrompt(prompt)
   },
 
   runPrompt(text: string) {

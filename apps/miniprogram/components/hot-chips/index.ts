@@ -16,10 +16,6 @@ interface Keyword {
   priority: number;
 }
 
-interface ComponentData {
-  keywords: Keyword[];
-}
-
 Component({
   options: {
     styleIsolation: 'apply-shared',
@@ -32,11 +28,6 @@ Component({
       value: [] as Keyword[],
     },
   },
-
-  data: {
-    keywords: [] as Keyword[],
-  } as ComponentData,
-
   methods: {
     /**
      * 点击 Chip - Requirements: 3.5, 3.6, 3.10

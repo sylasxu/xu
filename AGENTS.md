@@ -1,11 +1,11 @@
 ---
 inclusion: always
 ---
-# JuChang 项目规范
+# xu 项目规范
 
 ## 🎯 核心哲学
 
-1. **Single Source of Truth**: `@juchang/db` 是绝对的数据源
+1. **Single Source of Truth**: `@xu/db` 是绝对的数据源
 2. **Zero Redundancy**: 禁止手动重复定义 TypeBox Schema，必须从 DB 派生
 3. **Spec-First & SDK-Driven**: Eden Treaty (Admin) / Orval SDK (小程序)
 4. **Dual-Track Architecture**: API (Elysia + JWT) + Admin (Vite SPA)
@@ -49,7 +49,7 @@ inclusion: always
 
 ## 🏗️ Monorepo 结构
 
-### @juchang/db (数据源)
+### @xu/db (数据源)
 - **Tech**: Drizzle ORM (PostgreSQL + PostGIS + pgvector) + `drizzle-typebox`
 - **Schema 以 `packages/db/src/schema` 中的 `pgTable(...)` 定义为准**，当前已包含用户、活动、搭子、通知、AI 观测、配置、安全、内容运营等多类真源表
 - **Schema 规范**:
@@ -182,7 +182,7 @@ myProcessor.processorName = 'my-processor';
 const userSchema = t.Object({ id: t.String(), nickname: t.String() });
 
 // ✅ 必须从 DB 派生
-import { selectUserSchema } from '@juchang/db';
+import { selectUserSchema } from '@xu/db';
 const userSchema = t.Pick(selectUserSchema, ['id', 'nickname']);
 ```
 
@@ -194,7 +194,7 @@ const formSchema = t.Object({
 });
 
 // ✅ 从 DB 派生，Pick 需要的字段
-import { insertUserSchema } from '@juchang/db';
+import { insertUserSchema } from '@xu/db';
 const formSchema = t.Pick(insertUserSchema, ['nickname', 'avatarUrl']);
 ```
 
@@ -212,7 +212,7 @@ const formSchema = t.Pick(insertUserSchema, ['nickname', 'avatarUrl']);
 ```typescript
 import { t } from 'elysia';
 import { tool, jsonSchema } from 'ai';
-import { toJsonSchema } from '@juchang/utils';
+import { toJsonSchema } from '@xu/utils';
 
 const myToolSchema = t.Object({
   title: t.String({ description: '活动标题' }),

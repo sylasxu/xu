@@ -1,6 +1,6 @@
-# JuChang Admin Panel API Integration
+# xu Admin Panel API Integration
 
-本文档描述了聚场管理后台的 API 集成架构，基于 Eden Treaty 和 TypeBox 实现类型安全的 API 通信。
+本文档描述了 xu 管理后台的 API 集成架构，基于 Eden Treaty 和 TypeBox 实现类型安全的 API 通信。
 
 ## 架构概览
 
@@ -18,7 +18,7 @@
 │      (Type-safe API calls)             │
 ├─────────────────────────────────────────┤
 │         Elysia API Server              │
-│      (@juchang/api)                    │
+│      (@xu/api)                    │
 └─────────────────────────────────────────┘
 ```
 
@@ -385,7 +385,7 @@ function AdminAction() {
 
 ### 添加新的 API 端点
 
-1. 在 `@juchang/api` 中定义新的路由
+1. 在 `@xu/api` 中定义新的路由
 2. 创建对应的 Hook 文件
 3. 添加到 `api.ts` 导出
 4. 更新 `queryKeys` 配置

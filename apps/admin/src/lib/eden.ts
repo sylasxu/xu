@@ -1,6 +1,6 @@
 // Eden Treaty 客户端 - 类型安全的 API 调用
 import { treaty } from '@elysiajs/eden'
-import type { App } from '@juchang/api'
+import type { App } from '@xu/api'
 import { toast } from 'sonner'
 
 // API 基础 URL - 统一导出，禁止其他文件自行定义

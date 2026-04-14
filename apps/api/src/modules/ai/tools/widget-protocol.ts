@@ -1,5 +1,5 @@
 /**
- * Widget Protocol — 聚场 Gen UI 协议层
+ * Widget Protocol — xu Gen UI 协议层
  *
  * 定义 Widget 系统的数据获取和交互能力。
  * 所有 Widget 类型共享此协议，具体 Widget 按需使用。

@@ -8,8 +8,8 @@
 
 import { t } from 'elysia';
 import { tool, jsonSchema } from 'ai';
-import { toJsonSchema } from '@juchang/utils';
-import { db, activities, participants, users, eq, and, desc, sql } from '@juchang/db';
+import { toJsonSchema } from '@xu/utils';
+import { db, activities, participants, users, eq, and, desc, sql } from '@xu/db';
 import { joinActivity as joinActivityCommand, updateActivityStatus } from '../../activities/activity.service';
 
 // ============ Schema 定义 ============

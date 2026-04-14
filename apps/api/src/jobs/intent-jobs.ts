@@ -6,7 +6,7 @@
  * 2. 过期匹配处理 - 每 10 分钟检查过期匹配，尝试重新分配或标记过期
  */
 
-import { db, partnerIntents, intentMatches, eq, and, lt, not, inArray } from '@juchang/db';
+import { db, partnerIntents, intentMatches, eq, and, lt, not, inArray } from '@xu/db';
 import { jobLogger } from '../lib/logger';
 import { notifyTempOrganizerReassigned } from '../modules/notifications/notification.service';
 

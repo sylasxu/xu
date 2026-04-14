@@ -13,8 +13,8 @@ import {
   type AgentTask,
   type AgentTaskEvent,
   type NewAgentTask,
-} from '@juchang/db';
-import type { GenUIBlock, GenUIRequest } from '@juchang/genui-contract';
+} from '@xu/db';
+import type { GenUIBlock, GenUIRequest } from '@xu/genui-contract';
 
 type AgentTaskType = AgentTask['taskType'];
 type AgentTaskStage = AgentTask['currentStage'];

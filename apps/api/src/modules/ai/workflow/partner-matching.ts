@@ -5,7 +5,7 @@
  * 状态持久化到 conversation_messages，刷新不丢失
  */
 
-import { db, conversationMessages, eq, desc } from '@juchang/db';
+import { db, conversationMessages, eq, desc } from '@xu/db';
 import { randomUUID } from 'crypto';
 import { createLogger } from '../observability/logger';
 import { understandPartnerRequest, type PartnerScenarioType, type PartnerSemanticType } from './partner-understanding';

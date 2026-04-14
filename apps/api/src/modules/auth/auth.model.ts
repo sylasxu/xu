@@ -1,7 +1,7 @@
 // Auth Model - TypeBox schemas and types
 import { Elysia, t, type Static } from 'elysia';
 import { ErrorResponseSchema, type ErrorResponse } from "../../common/common.model";
-import { selectUserSchema } from '@juchang/db';
+import { selectUserSchema } from '@xu/db';
 
 const AuthPermission = t.Object({
   resource: t.String(),

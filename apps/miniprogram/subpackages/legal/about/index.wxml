@@ -1,10 +1,10 @@
 <!--
-  关于聚场页面
+  关于 xu 页面
   Requirements: 8.1, 8.2, 8.3, 8.4
 -->
 <view class="about-page page">
   <!-- 自定义导航栏 -->
-  <custom-navbar title="关于聚场" bind:back="onBack" />
+  <custom-navbar title="关于 xu" bind:back="onBack" />
 
   <!-- 页面内容 -->
   <view class="content about-page__content">
@@ -15,9 +15,9 @@
         src="/static/logo.png" 
         mode="aspectFit"
       />
-      <text class="about-page__brand">聚场</text>
+      <text class="about-page__brand">xu</text>
       <text class="about-page__version">v{{version}}</text>
-      <text class="about-page__slogan">你的 AI 活动助理</text>
+      <text class="about-page__slogan">碎片化社交助理</text>
     </view>
 
     <!-- 微信群入口 -->
@@ -55,7 +55,7 @@
 
     <!-- 版权信息 -->
     <view class="copyright about-page__copyright">
-      <text class="about-page__copyright-text">© 2024 聚场 JuChang</text>
+      <text class="about-page__copyright-text">© 2024 xu</text>
     </view>
   </view>
 </view>

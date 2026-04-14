@@ -2,7 +2,7 @@
  * Widget Types and Builders - Widget 类型定义和构建函数
  * 
  * Widget 是 Tool 返回的结构化 UI 数据，前端根据 messageType 渲染不同组件
- * Schema 从 @juchang/db 派生
+ * Schema 从 @xu/db 派生
  */
 
 import { t } from 'elysia';
@@ -26,7 +26,7 @@ export const WidgetType = {
 export type WidgetTypeValue = typeof WidgetType[keyof typeof WidgetType];
 
 // ==========================================
-// Widget Payload Schemas（从 @juchang/db 派生）
+// Widget Payload Schemas（从 @xu/db 派生）
 // ==========================================
 
 /**

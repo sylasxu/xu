@@ -175,9 +175,9 @@ export function createDataset(
 }
 
 /**
- * 小聚评估数据集（覆盖所有主要意图类型）
+ * xu 评估数据集（覆盖所有主要意图类型）
  */
-export const xiaojuEvalDataset: Dataset = createDataset('xiaoju_basic', [
+export const xuEvalDataset: Dataset = createDataset('xu_basic', [
   // === create 意图（4 个样本） ===
   {
     input: '帮我组个火锅局',

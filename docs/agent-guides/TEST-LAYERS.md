@@ -144,11 +144,11 @@ bun run release:gate
 
 ## 当前脚本归属
 
-- [five-user-smoke.ts](/Users/sylas/Documents/GitHub/juchang/scripts/five-user-smoke.ts)：手动联调和演示用冒烟工具
-- [sandbox-regression.ts](/Users/sylas/Documents/GitHub/juchang/scripts/sandbox-regression.ts)：用户流程回归层
-- [chat-regression.ts](/Users/sylas/Documents/GitHub/juchang/scripts/chat-regression.ts)：协议与流式回归层
-- [flow-regression.ts](/Users/sylas/Documents/GitHub/juchang/scripts/flow-regression.ts)：流程回归统一入口
-- [release-gate.ts](/Users/sylas/Documents/GitHub/juchang/scripts/release-gate.ts)：发布门禁统一入口
+- [five-user-smoke.ts](../../scripts/five-user-smoke.ts)：手动联调和演示用冒烟工具
+- [sandbox-regression.ts](../../scripts/sandbox-regression.ts)：用户流程回归层
+- [chat-regression.ts](../../scripts/chat-regression.ts)：协议与流式回归层
+- [flow-regression.ts](../../scripts/flow-regression.ts)：流程回归统一入口
+- [release-gate.ts](../../scripts/release-gate.ts)：发布门禁统一入口
 
 ## 使用建议
 

@@ -1,10 +1,10 @@
 /**
  * Memory Module Types - 记忆系统类型定义
  * 
- * 基于 @juchang/db 的 conversations 和 conversationMessages 表
+ * 基于 @xu/db 的 conversations 和 conversationMessages 表
  */
 
-import type { Conversation, Message } from '@juchang/db';
+import type { Conversation, Message } from '@xu/db';
 
 /**
  * ConversationThread（会话）- 对应 conversations 表

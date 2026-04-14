@@ -14,7 +14,7 @@
  */
 
 import { t } from 'elysia';
-import type { Activity } from '@juchang/db';
+import type { Activity } from '@xu/db';
 import { createToolFactory } from './create-tool';
 import { search } from '../rag';
 import type { ScoredActivity } from '../rag';

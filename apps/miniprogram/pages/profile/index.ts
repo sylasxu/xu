@@ -6,7 +6,7 @@
  * - Header: 头像、昵称、Slogan
  * - Group 1: [我发布的]、[我参与的]、[已结束活动]
  * - Group 2: [手机绑定]、[隐私设置]
- * - Group 3: [关于聚场]、[意见反馈]
+ * - Group 3: [关于 xu]、[意见反馈]
  */
 
 import { useAppStore } from '../../src/stores/app'
@@ -67,7 +67,7 @@ Page({
         id: userInfo.id || '',
         nickname: userInfo.nickname || '未登录',
         avatarUrl: userInfo.avatarUrl || '',
-        slogan: userInfo.slogan || '在聚场，遇见有趣的人',
+        slogan: userInfo.slogan || '遇见有趣的人',
         phoneNumber: userInfo.phoneNumber || '',
       },
     })
@@ -167,7 +167,7 @@ Page({
   },
 
   /**
-   * 跳转到关于聚场
+   * 跳转到关于 xu
    * Requirements: 8.10
    */
   goToAbout() {

@@ -4,7 +4,7 @@ import { ErrorResponseSchema, type ErrorResponse } from "../../common/common.mod
 import {
   insertContentNoteSchema,
   selectContentNoteSchema,
-} from '@juchang/db'
+} from '@xu/db'
 import { Elysia, t, type Static } from 'elysia'
 import { ContentTypeSchema } from './content-type'
 import { ContentPlatformSchema } from './content-platform'

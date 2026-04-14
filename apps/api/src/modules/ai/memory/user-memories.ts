@@ -1,4 +1,4 @@
-import { db, userMemories, eq, and } from '@juchang/db';
+import { db, userMemories, eq, and } from '@xu/db';
 import { generateEmbedding } from '../rag';
 import type { PreferenceExtraction } from './extractor';
 

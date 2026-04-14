@@ -23,7 +23,7 @@ export const API_CONFIG = {
   // 开发环境使用局域网 IP + 本地 API 端口，生产环境使用正式域名
   BASE_URL: isDev 
     ? `http://${DEV_HOST}:1996`
-    : 'https://api.juchang.app',   // TODO: 替换为正式域名
+    : 'https://api.xu.example',   // TODO: 替换为正式域名
 }
 
 /**
@@ -32,7 +32,7 @@ export const API_CONFIG = {
 export const ADMIN_CONFIG = {
   BASE_URL: isDev
     ? `http://${DEV_HOST}:5173`
-    : 'https://admin.juchang.app', // TODO: 替换为正式域名
+    : 'https://admin.xu.example', // TODO: 替换为正式域名
 }
 
 /**

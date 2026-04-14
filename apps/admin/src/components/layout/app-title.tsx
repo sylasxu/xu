@@ -25,8 +25,8 @@ export function AppTitle() {
               onClick={() => setOpenMobile(false)}
               className='grid flex-1 text-start text-sm leading-tight'
             >
-              <span className='truncate font-bold'>聚场管理后台</span>
-              <span className='truncate text-xs'>JuChang Admin</span>
+              <span className='truncate font-bold'>xu 管理后台</span>
+              <span className='truncate text-xs'>xu Admin</span>
             </Link>
             <ToggleSidebar />
           </div>

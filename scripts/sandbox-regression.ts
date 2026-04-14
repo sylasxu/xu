@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { agentTasks, and, db, desc, eq, inArray, partnerIntents, userMemories } from '@juchang/db';
+import { agentTasks, and, db, desc, eq, inArray, partnerIntents, userMemories } from '@xu/db';
 import { app } from '../apps/api/src/index';
 import { readAiChatEnvelope } from './ai-chat-sse';
 

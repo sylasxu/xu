@@ -62,17 +62,16 @@ import type {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:1996";
 const DEFAULT_PROMPTS = [
-  "想租个周五晚上的局",
-  "我在观音桥，想组个桌游局",
-  "周末附近有什么活动",
+  "周末想找个轻松局",
+  "想认识附近同频的人",
+  "帮我写个不尴尬的邀约",
 ];
 const DEFAULT_PROMPT_ENTRIES: WelcomePromptEntry[] = DEFAULT_PROMPTS.map((prompt) => ({
   text: prompt,
   prompt,
 }));
-const DEFAULT_WELCOME_GREETING = "你好～";
-const DEFAULT_WELCOME_SUB_GREETING = "今天想约什么局？";
-const DEFAULT_COMPOSER_PLACEHOLDER = "你想找什么活动？";
+const DEFAULT_WELCOME_GREETING = "今天有什么想玩的？";
+const DEFAULT_COMPOSER_PLACEHOLDER = "想玩什么，或者想找谁一起？";
 const DEFAULT_BOTTOM_ACTIONS: string[] = [
   "快速组局",
   "找搭子",
@@ -80,13 +79,13 @@ const DEFAULT_BOTTOM_ACTIONS: string[] = [
   "我的草稿",
 ];
 const DEFAULT_PROFILE_HINTS = {
-  low: "补充偏好后，小聚推荐会更准",
-  medium: "社交画像正在完善中，继续聊聊你的习惯",
-  high: "社交画像已较完整，可直接让小聚给你安排",
+  low: "多聊一点，我会更懂你的偏好",
+  medium: "我正在记住你的习惯",
+  high: "你的偏好已经比较清楚，可以直接让我来安排",
 };
 const COMPOSER_EXPAND_THRESHOLD = 10;
-const PENDING_AGENT_ACTION_STORAGE_KEY = "juchang:web:pending-agent-action";
-const THEME_STORAGE_KEY = "juchang:web:theme";
+const PENDING_AGENT_ACTION_STORAGE_KEY = "xu:web:pending-agent-action";
+const THEME_STORAGE_KEY = "xu:web:theme";
 const TEXT_STREAM_CHUNK_DELAY_MS = 60;  // v5.5: 调慢打字机速度，提升可读性
 const ChatThemeContext = createContext(true);
 
@@ -1188,24 +1187,16 @@ function extractWelcomePrompts(payload: unknown): WelcomePromptEntry[] {
     .slice(0, 5);
 }
 
-function extractWelcomeGreeting(payload: unknown): { greeting: string; subGreeting: string } {
+function extractWelcomeGreeting(payload: unknown): string {
   if (!isRecord(payload)) {
-    return {
-      greeting: DEFAULT_WELCOME_GREETING,
-      subGreeting: DEFAULT_WELCOME_SUB_GREETING,
-    };
+    return DEFAULT_WELCOME_GREETING;
   }
 
-  const greeting =
+  return (
     typeof payload.greeting === "string" && payload.greeting.trim()
       ? payload.greeting.trim()
-      : DEFAULT_WELCOME_GREETING;
-  const subGreeting =
-    typeof payload.subGreeting === "string" && payload.subGreeting.trim()
-      ? payload.subGreeting.trim()
-      : DEFAULT_WELCOME_SUB_GREETING;
-
-  return { greeting, subGreeting };
+      : DEFAULT_WELCOME_GREETING
+  );
 }
 
 function isWelcomeFocusType(value: unknown): value is WelcomeFocusPayload["type"] {
@@ -1311,7 +1302,6 @@ export default function ChatPage() {
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [quickPrompts, setQuickPrompts] = useState<WelcomePromptEntry[]>(DEFAULT_PROMPT_ENTRIES);
   const [welcomeGreeting, setWelcomeGreeting] = useState(DEFAULT_WELCOME_GREETING);
-  const [welcomeSubGreeting, setWelcomeSubGreeting] = useState(DEFAULT_WELCOME_SUB_GREETING);
   const [welcomeFocus, setWelcomeFocus] = useState<WelcomeFocusPayload | null>(null);
   const [isWelcomeLoading, setIsWelcomeLoading] = useState(true);
   const [welcomeUi, setWelcomeUi] = useState<WelcomeUiPayload>({
@@ -1543,9 +1533,7 @@ export default function ChatPage() {
         if (prompts.length > 0) {
           setQuickPrompts(prompts);
         }
-        const { greeting, subGreeting } = extractWelcomeGreeting(payload);
-        setWelcomeGreeting(greeting);
-        setWelcomeSubGreeting(subGreeting);
+        setWelcomeGreeting(extractWelcomeGreeting(payload));
         setWelcomeFocus(extractWelcomeFocus(payload));
         setWelcomeUi(extractWelcomeUi(payload));
       })
@@ -2172,8 +2160,8 @@ export default function ChatPage() {
           }}
         />
 
-        <header className="flex shrink-0 items-center justify-between px-4 pb-3 pt-5">
-          <div className="flex items-center gap-2">
+        <header className="flex shrink-0 items-center justify-between px-5 pb-2 pt-6">
+          <div className="flex items-center gap-2.5">
             <SidebarDrawer
               disabled={isSending}
               isDarkMode={isDarkMode}
@@ -2184,7 +2172,9 @@ export default function ChatPage() {
                 setMessageCenterOpenSignal((value) => value + 1);
               }}
             />
-            <p className={cn("text-[19px] font-semibold tracking-[-0.03em]", isDarkMode ? "text-white/96" : "text-black/90")}>聚场</p>
+            <div className="flex flex-col">
+              <p className={cn("text-[20px] font-semibold tracking-[-0.04em]", isDarkMode ? "text-white/96" : "text-black/92")}>xu</p>
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -2192,10 +2182,10 @@ export default function ChatPage() {
               type="button"
               onClick={() => setIsDarkMode((current) => !current)}
               className={cn(
-                "inline-flex h-9 w-9 items-center justify-center rounded-full border backdrop-blur-sm transition-colors",
+                "inline-flex h-10 w-10 items-center justify-center rounded-full border backdrop-blur-sm transition-all",
                   isDarkMode
-                    ? "border-white/8 bg-white/[0.03] text-white/78"
-                    : "border-black/10 bg-white text-black/72"
+                    ? "border-white/8 bg-white/[0.035] text-white/80 hover:bg-white/[0.06]"
+                    : "border-black/10 bg-white text-black/74 hover:bg-black/[0.03]"
               )}
               aria-label={isDarkMode ? "切换到明亮模式" : "切换到暗色模式"}
               title={isDarkMode ? "切换到明亮模式" : "切换到暗色模式"}
@@ -2207,9 +2197,9 @@ export default function ChatPage() {
               onClick={handleStartNewConversation}
               disabled={isSending}
               className={cn(
-                "inline-flex h-9 w-9 items-center justify-center rounded-full border backdrop-blur-sm transition-colors disabled:opacity-45",
+                "inline-flex h-10 w-10 items-center justify-center rounded-full border backdrop-blur-sm transition-all disabled:opacity-45",
                 isDarkMode
-                  ? "border-white/8 bg-white/[0.03] text-white/82 hover:bg-white/[0.05]"
+                  ? "border-white/8 bg-white/[0.035] text-white/84 hover:bg-white/[0.06]"
                   : "border-black/10 bg-white text-black/78 hover:bg-black/[0.03]"
               )}
               aria-label="开始新对话"
@@ -2283,14 +2273,14 @@ export default function ChatPage() {
               )}
             >
             {messages.length === 0 ? (
-              <ConversationEmptyState className="justify-start px-3 pt-3">
-                <div className="relative min-h-[510px] w-full overflow-visible pt-[136px]">
+              <ConversationEmptyState className="justify-start px-4 pt-3">
+                <div className="relative min-h-[544px] w-full overflow-visible pt-[128px]">
                   <div
                     className={cn(
                       "pointer-events-none absolute left-1/2 z-0 -translate-x-1/2",
                       isDarkMode
-                        ? "top-[-18px] h-[340px] w-[340px]"
-                        : "top-[6px] h-[300px] w-[300px]"
+                        ? "top-[-8px] h-[356px] w-[356px]"
+                        : "top-[10px] h-[312px] w-[312px]"
                     )}
                   >
                     <Orb
@@ -2305,12 +2295,12 @@ export default function ChatPage() {
                     className={cn(
                       "pointer-events-none absolute left-1/2 z-0 -translate-x-1/2",
                       isDarkMode
-                        ? "top-[128px] h-44 w-[360px] bg-[radial-gradient(ellipse_at_center,rgba(0,0,0,0.5)_0%,rgba(0,0,0,0.28)_42%,transparent_74%)]"
-                        : "top-[118px] h-36 w-[312px] bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.92)_0%,rgba(255,255,255,0.68)_44%,transparent_78%)]"
+                        ? "top-[140px] h-44 w-[368px] bg-[radial-gradient(ellipse_at_center,rgba(0,0,0,0.56)_0%,rgba(0,0,0,0.22)_48%,transparent_78%)]"
+                        : "top-[126px] h-36 w-[320px] bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.95)_0%,rgba(255,255,255,0.68)_46%,transparent_80%)]"
                     )}
                   />
 
-                  <div className="relative z-10 mx-auto max-w-[336px] text-center">
+                  <div className="relative z-10 mx-auto max-w-[340px] text-center">
                     {isWelcomeLoading ? (
                       <div className="space-y-3 pt-1">
                         <div className="mx-auto h-10 w-36 animate-pulse rounded-full bg-white/10" />
@@ -2332,9 +2322,9 @@ export default function ChatPage() {
                               );
                             }}
                             className={cn(
-                              "mb-6 inline-flex max-w-[292px] items-center gap-2 rounded-full border px-3 py-1.5 text-[12px] font-medium tracking-[-0.01em] backdrop-blur-md transition",
+                              "mb-7 inline-flex max-w-[300px] items-center gap-2 rounded-full border px-3.5 py-1.5 text-[12px] font-medium tracking-[-0.01em] backdrop-blur-md transition-all",
                               isDarkMode
-                                ? "border-white/10 bg-black/28 text-white/62 hover:bg-white/[0.07] hover:text-white/78"
+                                ? "border-white/10 bg-white/[0.035] text-white/64 hover:bg-white/[0.07] hover:text-white/80"
                                 : "border-black/10 bg-white text-black/58 hover:bg-black/[0.03] hover:text-black/78"
                             )}
                           >
@@ -2343,24 +2333,23 @@ export default function ChatPage() {
                             <ChevronRight className={cn("h-3 w-3 shrink-0", isDarkMode ? "text-white/24" : "text-black/24")} />
                           </button>
                         ) : null}
-                        <div className="space-y-1.5">
-                          <p className={cn("mx-auto max-w-[304px] text-balance text-[40px] font-semibold leading-[0.96] tracking-[-0.065em]", isDarkMode ? "text-white/97 drop-shadow-[0_2px_14px_rgba(0,0,0,0.42)]" : "text-black/90")}>{welcomeGreeting}</p>
-                          <p className={cn("mx-auto max-w-[336px] text-balance text-[40px] font-semibold leading-[0.96] tracking-[-0.065em]", isDarkMode ? "text-white/94 drop-shadow-[0_2px_14px_rgba(0,0,0,0.42)]" : "text-black/84")}>{welcomeSubGreeting}</p>
+                        <div>
+                          <p className={cn("mx-auto max-w-[320px] text-balance text-[38px] font-semibold leading-[0.98] tracking-[-0.058em]", isDarkMode ? "text-white/97 drop-shadow-[0_2px_14px_rgba(0,0,0,0.42)]" : "text-black/92")}>{welcomeGreeting}</p>
                         </div>
                       </>
                     )}
                   </div>
 
-                  <div className="relative z-10 mt-10 space-y-3.5">
+                  <div className="relative z-10 mt-12 space-y-3">
                     {isWelcomeLoading
                       ? [0.82, 0.7, 0.76].map((widthRatio, index) => (
                           <div
                             key={`welcome-skeleton-${index}`}
                             className={cn(
-                              "mx-auto flex w-full max-w-[344px] items-center gap-3.5 rounded-[24px] border px-4.5 py-4",
+                              "mx-auto flex w-full max-w-[348px] items-center gap-3.5 rounded-[26px] border px-5 py-4.5",
                               isDarkMode
-                                ? "border-white/8 bg-white/[0.025]"
-                                : "border-black/8 bg-white shadow-[0_16px_34px_-30px_rgba(0,0,0,0.12)]"
+                                ? "border-white/8 bg-white/[0.03]"
+                                : "border-black/8 bg-white shadow-[0_18px_36px_-30px_rgba(0,0,0,0.12)]"
                             )}
                           >
                             <div
@@ -2403,9 +2392,9 @@ export default function ChatPage() {
                               );
                             }}
                             className={cn(
-                              "mx-auto flex w-full max-w-[344px] items-center gap-3.5 rounded-[24px] border px-4.5 py-4 text-left text-[17px] backdrop-blur-md transition",
+                              "mx-auto flex w-full max-w-[348px] items-center gap-3.5 rounded-[26px] border px-5 py-4.5 text-left text-[17px] backdrop-blur-md transition-all duration-200",
                               isDarkMode
-                                ? "border-white/10 bg-black/24 text-white/92 hover:bg-white/[0.06]"
+                                ? "border-white/10 bg-white/[0.035] text-white/92 hover:bg-white/[0.06]"
                                 : "border-black/8 bg-white text-black/86 shadow-[0_18px_36px_-32px_rgba(0,0,0,0.14)] hover:bg-black/[0.02] hover:shadow-[0_22px_42px_-34px_rgba(0,0,0,0.16)]"
                             )}
                           >
@@ -2413,13 +2402,13 @@ export default function ChatPage() {
                               className={cn(
                                 "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[10px] font-medium",
                                 isDarkMode
-                                  ? "border-white/8 bg-white/[0.015] text-white/42"
+                                  ? "border-white/8 bg-white/[0.02] text-white/42"
                                   : "border-black/8 bg-black/[0.025] text-black/42"
                               )}
                             >
                               {index + 1}
                             </span>
-                            <span className={cn("flex-1 break-words pr-2 text-[15px] font-medium leading-[1.28] tracking-[-0.02em]", isDarkMode ? "text-white/88" : "text-black/80")}>
+                            <span className={cn("flex-1 break-words pr-2 text-[15px] font-medium leading-[1.3] tracking-[-0.02em]", isDarkMode ? "text-white/88" : "text-black/80")}>
                               {entry.text}
                             </span>
                             <ChevronRight className={cn("h-4 w-4 shrink-0", isDarkMode ? "text-white/14" : "text-black/16")} />
@@ -2451,11 +2440,11 @@ export default function ChatPage() {
 
         <div
           className={cn(
-            "shrink-0 px-3 pb-[calc(14px+env(safe-area-inset-bottom,0px))] pt-2",
+            "shrink-0 px-4 pb-[calc(14px+env(safe-area-inset-bottom,0px))] pt-2",
             isDarkMode ? "bg-black" : "bg-white"
           )}
         >
-          <div className={cn("mx-auto w-full", messages.length === 0 ? "max-w-[352px]" : "max-w-none")}>
+          <div className={cn("mx-auto w-full", messages.length === 0 ? "max-w-[356px]" : "max-w-none")}>
             {messages.length === 0 ? (
               <BorderGlow
                 className="rounded-[28px]"

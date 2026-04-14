@@ -13,9 +13,9 @@
  * v4.6: 批量 Embedding、索引清理、动态配置、推荐理由模板
  */
 
-import { db, eq, sql, isNotNull } from '@juchang/db';
-import { activities } from '@juchang/db';
-import type { Activity } from '@juchang/db';
+import { db, eq, sql, isNotNull } from '@xu/db';
+import { activities } from '@xu/db';
+import type { Activity } from '@xu/db';
 import type {
   HybridSearchParams,
   ScoredActivity,

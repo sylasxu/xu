@@ -10,7 +10,7 @@
  */
 
 import type { ProcessorContext, ProcessorResult } from './types';
-import { db, activities, participants, conversationMessages, userMemories, eq, sql, and, or } from '@juchang/db';
+import { db, activities, participants, conversationMessages, userMemories, eq, sql, and, or } from '@xu/db';
 import { generateEmbedding } from '../rag';
 import { rerank } from '../models/router';
 

@@ -1,6 +1,6 @@
 // Participant Service - 参与者辅助功能 (MVP 简化版)
 // 主要逻辑已移到 activities 模块
-import { db, participants, users, activities, activityMessages, eq, and, inArray } from '@juchang/db';
+import { db, participants, users, activities, activityMessages, eq, and, inArray } from '@xu/db';
 import {
   addInterestVector,
   markActivityOutcomeRebookTriggered,

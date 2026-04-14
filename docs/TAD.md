@@ -1,4 +1,4 @@
-# 聚场 (JuChang) 技术架构文档
+# xu 技术架构文档
 
 > **版本**：v5.4 (Editorial Dark Welcome + Structured Action Flow + Real Social Loop)
 > **更新日期**：2026-04-11
@@ -19,7 +19,7 @@
 
 ### 1.2 技术架构原则
 
-1. **Database First**：`@juchang/db` (Drizzle ORM) 是绝对数据源，TypeBox Schema 从 Drizzle 自动派生
+1. **Database First**：`@xu/db` (Drizzle ORM) 是绝对数据源，TypeBox Schema 从 Drizzle 自动派生
 2. **原生极致性能**：小程序端使用微信开发者工具直接构建原生 WXML/LESS/TS，零运行时开销
 3. **Spec-Coding 契约驱动**：Elysia TypeBox 定义路由契约，Orval 自动生成客户端 SDK
 4. **服务每个人**：不只服务群主（Creator），也服务参与者（Joiner）
@@ -68,7 +68,7 @@
 │   │   │   │   └── discussion/ # 活动讨论区
 │   │   │   ├── legal/        # 法律文档
 │   │   │   │   ├── index     # 用户协议
-│   │   │   │   └── about/    # 关于聚场
+│   │   │   │   └── about/    # 关于xu
 │   │   │   ├── safety/       # 安全中心
 │   │   │   ├── search/       # 活动搜索
 │   │   │   ├── chat/         # 活动群聊 (Lite_Chat)
@@ -144,7 +144,7 @@
 │   │   │   │   └── [id]/
 │   │   │   │       └── page.tsx    # SSR 活动邀请函（OG Tags + 动态背景）
 │   │   │   └── chat/
-│   │   │       └── page.tsx        # 小聚对话（AI SDK Elements）
+│   │   │       └── page.tsx        # xu对话（AI SDK Elements）
 │   │   ├── components/       # 组件
 │   │   │   ├── ai-elements/        # AI SDK Elements 组件（copy-paste 模式）
 │   │   │   │   ├── conversation.tsx
@@ -1356,7 +1356,7 @@ const tools = resolveToolsForIntent(userId, intent, options);
 
 ### 6.4 状态层：记忆系统 (Memory System)
 
-聚场的记忆系统参考 Mastra 架构，支持三种类型的记忆：
+xu的记忆系统参考 Mastra 架构，支持三种类型的记忆：
 
 | 记忆类型 | 说明 | 存储位置 | 状态 |
 |---------|------|---------|------|
@@ -1559,7 +1559,7 @@ Widget 协议层定义了 Gen UI 系统的数据获取和交互能力，是 API 
 
 ```typescript
 /**
- * Widget Protocol — 聚场 Gen UI 协议层
+ * Widget Protocol — xu Gen UI 协议层
  *
  * 三个正交维度：
  * - payload（必选）：Widget 数据
@@ -2102,7 +2102,7 @@ recordTokenUsage(actualModelId, promptTokens, completionTokens);
 
 ```typescript
 const result = await runEval({
-  dataset: xiaojuEvalDataset,
+  dataset: xuEvalDataset,
   scorers: defaultScorers,
 }, async (input) => {
   const envelope = await callAiChatEnvelope({
@@ -2469,13 +2469,13 @@ Widget 按钮点击
 
 ### 6.13 执行层：Prompt 工程
 
-**小橘人设**：
+**xu 人设**：
 
 ```xml
 <role>
-你是「小橘」，聚场的 AI 组局助手。
-性格：热情、接地气、重庆味儿
-语气：像朋友聊天，不要太正式
+你是「xu」，碎片化社交助理。
+性格：短句、直接、会张罗，但不过度热情、不装熟
+语气：先整理清楚，再给下一步
 </role>
 
 <context>
@@ -2903,7 +2903,7 @@ apps/web/
 │   │   └── [id]/
 │   │       └── page.tsx           # SSR 活动邀请函（OG Tags + 动态背景）
 │   └── chat/
-│       └── page.tsx               # 小聚对话（AI SDK Elements）
+│       └── page.tsx               # xu对话（AI SDK Elements）
 ├── components/
 │   ├── ai-elements/               # AI SDK Elements 组件（copy-paste 模式）
 │   │   ├── conversation.tsx       # 对话容器
@@ -2921,7 +2921,7 @@ apps/web/
 │   ├── themes.ts                  # 预设主题配置（与 API 端同步）
 │   └── wechat.ts                  # 微信环境检测工具
 ├── next.config.ts
-├── package.json                   # @juchang/web
+├── package.json                   # @xu/web
 ├── tailwind.config.ts
 └── tsconfig.json
 ```
@@ -2973,7 +2973,7 @@ Next.js SSR
 **OG Tags 生成**：
 - `og:title` = 活动标题
 - `og:description` = "已有X人报名 · 地点 · 时间"（FOMO 文案）
-- `og:url` = `https://juchang.app/invite/{activityId}`
+- `og:url` = `https://xu.example/invite/{activityId}`
 
 **邀请函主题背景**：
 - 由 `ThemeBackground` 根据 `ThemeConfig.background.component` 渲染对应背景
@@ -3031,7 +3031,7 @@ Next.js SSR
 ```typescript
 // apps/web/lib/eden.ts
 import { treaty } from '@elysiajs/eden';
-import type { App } from '@juchang/api';
+import type { App } from '@xu/api';
 
 export const eden = treaty<App>(process.env.NEXT_PUBLIC_API_URL!);
 ```
@@ -3400,7 +3400,7 @@ AI
 ```typescript
 // lib/eden.ts
 import { treaty } from '@elysiajs/eden';
-import type { App } from '@juchang/api';
+import type { App } from '@xu/api';
 
 export const api = treaty<App>(import.meta.env.VITE_API_URL);
 ```
@@ -3410,7 +3410,7 @@ export const api = treaty<App>(import.meta.env.VITE_API_URL);
 ```typescript
 // lib/eden.ts
 import { treaty } from '@elysiajs/eden';
-import type { App } from '@juchang/api';
+import type { App } from '@xu/api';
 
 export const api = treaty<App>(import.meta.env.VITE_API_URL);
 ```
@@ -3586,7 +3586,7 @@ PlaygroundLayout (全屏容器)
 
 ### 10.1 核心原则
 
-**禁止手动定义 TypeBox Schema，必须从 `@juchang/db` 派生**
+**禁止手动定义 TypeBox Schema，必须从 `@xu/db` 派生**
 
 ```typescript
 // ❌ 错误：手动定义
@@ -3596,7 +3596,7 @@ const userResponseSchema = t.Object({
 });
 
 // ✅ 正确：从 DB 派生
-import { selectUserSchema } from '@juchang/db';
+import { selectUserSchema } from '@xu/db';
 const userResponseSchema = t.Pick(selectUserSchema, ['id', 'nickname']);
 ```
 
@@ -3643,7 +3643,7 @@ bun run db:seed         # 填充种子数据
 bun run dev             # 启动所有服务
 bun run dev:api         # 仅启动 API
 bun run dev:admin       # 仅启动 Admin
-bun run dev --filter=@juchang/web  # 仅启动 Web
+bun run dev --filter=@xu/web  # 仅启动 Web
 
 # 代码生成
 bun run gen:api         # 生成 Orval SDK

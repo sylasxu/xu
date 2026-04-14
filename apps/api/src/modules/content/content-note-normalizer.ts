@@ -1,4 +1,4 @@
-import type { ContentType } from '@juchang/db'
+import type { ContentType } from '@xu/db'
 import type { ContentPlatform } from './content-platform'
 
 export interface GeneratedContentDraft {

@@ -9,7 +9,7 @@
  * - 执行结果异步写入 ai_tool_calls 表
  */
 
-import { db, aiToolCalls } from '@juchang/db';
+import { db, aiToolCalls } from '@xu/db';
 import { getConfigValue } from '../config/config.service';
 import type { ToolDefinition, ToolContext, ToolResult } from './types';
 

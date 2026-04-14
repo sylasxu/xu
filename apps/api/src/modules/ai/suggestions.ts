@@ -8,7 +8,7 @@ import type {
   GenUISuggestionCtaItem,
   GenUIListSuggestions,
   GenUISuggestionListItem,
-} from '@juchang/genui-contract';
+} from '@xu/genui-contract';
 import { isStructuredActionType, type StructuredAction } from './user-action';
 
 type ChoiceBlock = Extract<GenUIBlock, { type: 'choice' }>;

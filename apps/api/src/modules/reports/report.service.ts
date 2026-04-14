@@ -9,7 +9,7 @@ import {
   and, 
   count, 
   desc 
-} from '@juchang/db';
+} from '@xu/db';
 import type { 
   CreateReportRequest, 
   ReportListQuery, 

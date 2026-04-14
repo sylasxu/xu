@@ -138,7 +138,7 @@ export async function getUserById(id: string) {
 ## 📊 Schema 派生
 
 ```typescript
-import { selectUserSchema, insertUserSchema } from '@juchang/db';
+import { selectUserSchema, insertUserSchema } from '@xu/db';
 
 // 选择字段
 const UserResponseSchema = t.Pick(selectUserSchema, ['id', 'nickname', 'avatarUrl']);
@@ -179,7 +179,7 @@ if (!user) {
 ## 📅 SQL 日期参数
 
 ```typescript
-import { db, sql, toTimestamp } from '@juchang/db';
+import { db, sql, toTimestamp } from '@xu/db';
 
 // ❌ 错误：直接传递 Date
 const result = await db.execute(sql`
@@ -223,7 +223,7 @@ bun run db:push
 - [ ] 端点表达领域能力，不是前端需求
 - [ ] 不按 H5 / Admin / 小程序拆分同义后端接口
 - [ ] 使用显式参数控制行为
-- [ ] Schema 从 `@juchang/db` 派生
+- [ ] Schema 从 `@xu/db` 派生
 - [ ] Service 是纯函数
 - [ ] 错误返回 `ErrorResponse` 格式
 - [ ] SQL Date 参数使用 `toTimestamp()`

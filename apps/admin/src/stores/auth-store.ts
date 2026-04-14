@@ -8,7 +8,7 @@ const ACCESS_TOKEN = 'admin_token'
 interface AuthUser {
   id: string
   username: string  // nickname
-  email: string     // phoneNumber@juchang.app
+  email: string     // phoneNumber@xu.example
   phoneNumber?: string
   avatarUrl?: string
   role?: {

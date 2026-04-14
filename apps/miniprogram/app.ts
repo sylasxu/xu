@@ -1,5 +1,5 @@
 /**
- * 聚场小程序入口
+ * xu 小程序入口
  * Requirements: 15.3 - 解析启动scene参数，直接跳转活动详情
  */
 import createBus from './utils/eventBus';

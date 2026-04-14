@@ -172,7 +172,7 @@ export function UserAuthForm({
       setUser({
         id: user.id,
         username: user.nickname || '管理员',
-        email: `${user.phoneNumber}@juchang.app`,
+        email: `${user.phoneNumber}@xu.example`,
         phoneNumber: user.phoneNumber,
         avatarUrl: user.avatarUrl || undefined,
         role: user.role ? {

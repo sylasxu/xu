@@ -1,4 +1,4 @@
-import { CONTENT_PLATFORM_VALUES, type ContentPlatform } from '@juchang/db'
+import { CONTENT_PLATFORM_VALUES, type ContentPlatform } from '@xu/db'
 import { t } from 'elysia'
 
 const [xiaohongshu, douyin, wechat] = CONTENT_PLATFORM_VALUES

@@ -1,4 +1,4 @@
-# Docker Compose for Juchang Development
+# Docker Compose for xu Development
 
 services:
   postgres:
@@ -6,15 +6,15 @@ services:
     build:
       context: ./postgres
       dockerfile: Dockerfile
-    image: juchang-postgres:pgvector-postgis
-    container_name: juchang-db
+    image: xu-postgres:pgvector-postgis
+    container_name: xu-db
     restart: always
     ports:
       - "5432:5432"
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
-      POSTGRES_DB: juchang
+      POSTGRES_DB: xu
       PGDATA: /var/lib/postgresql/data/pgdata
     command: 
       - "postgres"
@@ -26,14 +26,14 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ../scripts/init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d juchang"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d xu"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   redis:
     image: redis:8-alpine
-    container_name: juchang-redis
+    container_name: xu-redis
     ports:
       - "6379:6379"
     volumes:

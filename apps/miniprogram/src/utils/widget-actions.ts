@@ -56,7 +56,7 @@ export async function executeWidgetAction(
 
   return {
     state: 'error',
-    error: `${actionLabel}现在需要走小聚的连续对话链路，请从卡片入口继续`,
+    error: `${actionLabel}现在需要回到连续对话里处理，请从卡片入口继续`,
     resultPayload: undefined,
   }
 }

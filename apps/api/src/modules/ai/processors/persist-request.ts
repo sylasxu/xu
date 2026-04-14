@@ -8,7 +8,7 @@
  */
 
 import type { ProcessorContext, ProcessorResult, ProcessorLogEntry } from './types';
-import { db, aiRequests } from '@juchang/db';
+import { db, aiRequests } from '@xu/db';
 
 /**
  * 持久化数据（通过 context.metadata.persistData 传入）

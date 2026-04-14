@@ -8,8 +8,8 @@
 
 import { t } from 'elysia';
 import { tool, jsonSchema } from 'ai';
-import { toJsonSchema } from '@juchang/utils';
-import { db, users, partnerIntents, eq, and, desc, not, sql, type PartnerIntent } from '@juchang/db';
+import { toJsonSchema } from '@xu/utils';
+import { db, users, partnerIntents, eq, and, desc, not, sql, type PartnerIntent } from '@xu/db';
 import { detectMatchesForIntent, getPendingMatchesForUser, confirmMatch as confirmMatchService } from './partner-match';
 import { recordPartnerTaskIntentPosted } from '../task-runtime/agent-task.service';
 import { understandPartnerRequest, type PartnerScenarioType } from '../workflow/partner-understanding';

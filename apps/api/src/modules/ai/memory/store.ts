@@ -2,7 +2,7 @@
  * Memory Store - 会话存储
  * 
  * 基于 PostgreSQL 的会话和消息存储
- * 复用 @juchang/db 的 conversations 和 conversationMessages 表
+ * 复用 @xu/db 的 conversations 和 conversationMessages 表
  */
 
 import {
@@ -15,7 +15,7 @@ import {
   toTimestamp,
   type Conversation,
   type Message,
-} from '@juchang/db';
+} from '@xu/db';
 import { getEmbedding } from '../models/router';
 import { createLogger } from '../observability/logger';
 import type { SaveMessageParams, SessionWindowConfig } from './types';

@@ -9,7 +9,7 @@ import {
   sql,
   and,
   gt,
-} from '@juchang/db';
+} from '@xu/db';
 import {
   notifyJoin,
   notifyNewParticipant,

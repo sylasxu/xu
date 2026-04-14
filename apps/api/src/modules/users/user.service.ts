@@ -1,5 +1,5 @@
 // User Service - 纯业务逻辑 (纯 RESTful)
-import { db, users, eq, or, ilike, count, desc, sql, toTimestamp, and } from '@juchang/db';
+import { db, users, eq, or, ilike, count, desc, sql, toTimestamp, and } from '@xu/db';
 import type { 
   UserResponse,
   UserListQuery, 

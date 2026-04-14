@@ -14,9 +14,9 @@
  *   --delay=N   批次间延迟（毫秒），默认 100
  */
 
-import { db, eq, isNull, and, sql } from '@juchang/db';
-import { activities } from '@juchang/db';
-import type { Activity } from '@juchang/db';
+import { db, eq, isNull, and, sql } from '@xu/db';
+import { activities } from '@xu/db';
+import type { Activity } from '@xu/db';
 import { indexActivity } from '../apps/api/src/modules/ai/rag';
 
 // 解析命令行参数

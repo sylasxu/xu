@@ -5,7 +5,7 @@
  * 支持批量审核、结果持久化和动态配置
  */
 
-import { db, eq, inArray, activities, aiSecurityEvents } from '@juchang/db';
+import { db, eq, inArray, activities, aiSecurityEvents } from '@xu/db';
 import { checkInput } from '../guardrails/input-guard';
 import { getConfigValue } from '../config/config.service';
 

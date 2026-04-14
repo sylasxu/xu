@@ -1,7 +1,7 @@
 // User Model - TypeBox schemas (纯 RESTful)
 import { Elysia, t, type Static } from 'elysia';
 import { ErrorResponseSchema } from "../../common/common.model";
-import { selectUserSchema } from '@juchang/db';
+import { selectUserSchema } from '@xu/db';
 
 /**
  * User Model Plugin

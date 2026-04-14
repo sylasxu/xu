@@ -1,5 +1,5 @@
 {
-  "name": "@juchang/miniprogram",
+  "name": "@xu/miniprogram",
   "version": "1.0.0",
   "main": "app.js",
   "scripts": {
@@ -16,12 +16,12 @@
   "keywords": [
     "wechat",
     "miniprogram",
-    "juchang",
+    "xu",
     "social"
   ],
-  "author": "Juchang Team",
+  "author": "xu Team",
   "license": "MIT",
-  "description": "聚场小程序 - AI碎片化社交找搭子平台",
+  "description": "xu 小程序 - 碎片化社交助理",
   "dependencies": {
     "immer": "^11.0.1",
     "tdesign-miniprogram": "^1.8.6",

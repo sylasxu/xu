@@ -17,8 +17,8 @@ import {
   normalizeAiProviderErrorMessage,
   streamAiChatResponse,
 } from './ai.service';
-import type { GenUIRequest } from '@juchang/genui-contract';
-import { db, users, activities, eq } from '@juchang/db';
+import type { GenUIRequest } from '@xu/genui-contract';
+import { db, users, activities, eq } from '@xu/db';
 
 import { aiSessionsController } from './ai-sessions.controller';
 import { aiSecurityController } from './ai-security.controller';

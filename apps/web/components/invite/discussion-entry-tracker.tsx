@@ -21,7 +21,7 @@ export function DiscussionEntryTracker({
       return
     }
 
-    const storageKey = `juchang:web:discussion-entered:${activityId}:${entry}`
+    const storageKey = `xu:web:discussion-entered:${activityId}:${entry}`
     if (window.sessionStorage.getItem(storageKey) === "1") {
       return
     }

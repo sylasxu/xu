@@ -43,9 +43,9 @@ const welcomeUiConfig = {
   ],
   bottomQuickActions: ['快速组局', '找搭子', '附近活动', '我的草稿'],
   profileHints: {
-    low: '补充偏好后，小聚推荐会更准',
-    medium: '社交画像正在完善中，继续聊聊你的习惯',
-    high: '社交画像已较完整，可直接让小聚给你安排',
+    low: '多聊一点，我会更懂你的偏好',
+    medium: '我正在记住你的习惯',
+    high: '你的偏好已经比较清楚，可以直接让我来安排',
   },
 };
 

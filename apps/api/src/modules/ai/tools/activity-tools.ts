@@ -8,8 +8,8 @@
 
 import { t } from 'elysia';
 import { tool, jsonSchema } from 'ai';
-import { toJsonSchema } from '@juchang/utils';
-import { db, activities, eq, and, desc } from '@juchang/db';
+import { toJsonSchema } from '@xu/utils';
+import { db, activities, eq, and, desc } from '@xu/db';
 import {
   createDraftActivity,
   publishDraftActivity,
@@ -41,7 +41,7 @@ const createDraftSchema = t.Object({
   location: t.Tuple([t.Number(), t.Number()], { description: '位置坐标 [lng, lat]' }),
   startAt: t.String({ description: '开始时间，ISO 8601 格式' }),
   maxParticipants: t.Number({ minimum: 2, maximum: 50, description: '最大参与人数' }),
-  summary: t.String({ maxLength: 30, description: '小聚的推荐语，30字内，温暖接地气' }),
+  summary: t.String({ maxLength: 30, description: 'xu 的推荐语，30字内，温暖接地气' }),
 });
 
 /** 查询草稿参数 */
@@ -93,7 +93,7 @@ interface PublishedActivityCardPayload {
 }
 
 function generateShareUrl(activityId: string): string {
-  return `https://juchang.app/activity/${activityId}`;
+  return `${process.env.WEB_BASE_URL || process.env.NEXT_PUBLIC_WEB_URL || 'https://xu.example'}/activity/${activityId}`;
 }
 
 function generateSharePath(activityId: string): string {

@@ -3,7 +3,7 @@ import type {
   GenUIAlertBlock,
   GenUIBlock,
   GenUIChoiceOption,
-} from '@juchang/genui-contract';
+} from '@xu/genui-contract';
 
 function createBlockId(): string {
   return `block_${randomUUID().slice(0, 8)}`;

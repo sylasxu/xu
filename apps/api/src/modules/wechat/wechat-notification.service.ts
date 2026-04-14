@@ -1,4 +1,4 @@
-import { db, users, eq } from '@juchang/db';
+import { db, users, eq } from '@xu/db';
 import { clearTokenCache, getAccessToken } from '../content-security';
 
 type ServiceNotificationScene =

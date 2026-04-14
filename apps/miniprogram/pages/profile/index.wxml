@@ -29,7 +29,7 @@
     </view>
     <view class="user-info">
       <text class="nickname">{{user.nickname || '未登录'}}</text>
-      <text class="slogan">{{user.slogan || '在聚场，遇见有趣的人'}}</text>
+      <text class="slogan">{{user.slogan || '遇见有趣的人'}}</text>
     </view>
   </view>
 
@@ -93,7 +93,7 @@
         <view class="cell-icon cell-icon--purple">
           <t-icon name="info-circle" size="40rpx" />
         </view>
-        <text class="cell-title">关于聚场</text>
+        <text class="cell-title">关于 xu</text>
         <t-icon name="chevron-right" size="40rpx" color="#9CA3AF" />
       </view>
       <view class="cell-item" bindtap="goToFeedback">
@@ -108,6 +108,6 @@
   
   <!-- 版本信息 -->
   <view class="version-info">
-    <text>聚场 v1.0.0</text>
+    <text>xu v1.0.0</text>
   </view>
 </view>

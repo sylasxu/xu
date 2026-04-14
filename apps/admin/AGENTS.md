@@ -201,13 +201,13 @@ const { auth } = useAuthStore()
 
 ## 🚫 类型派生规则 (Zero Redundancy)
 
-### 🚨 禁止在 Admin 前端导入 `@juchang/db`
+### 🚨 禁止在 Admin 前端导入 `@xu/db`
 
-`@juchang/db` 包含服务端数据库连接代码，会导致 `Buffer is not defined` 错误：
+`@xu/db` 包含服务端数据库连接代码，会导致 `Buffer is not defined` 错误：
 
 ```typescript
 // ❌ 禁止：会导致运行时错误
-import { insertUserSchema, selectUserSchema } from '@juchang/db'
+import { insertUserSchema, selectUserSchema } from '@xu/db'
 
 // ✅ 正确：从 Eden Treaty 推导所有类型
 import { api } from '@/lib/eden'
@@ -250,7 +250,7 @@ const form = useForm<UserForm>({
 | 2 | Eden Treaty Input 推导 | `Parameters<ReturnType<typeof api.users>['put']>[0]` |
 | 3 | 前端特有类型 | UI 状态、Dialog 类型等 |
 
-**禁止**：直接导入 `@juchang/db`
+**禁止**：直接导入 `@xu/db`
 
 ---
 
@@ -284,6 +284,6 @@ const form = useForm<UserForm>({
 - [ ] 搜索使用 `DataTableToolbar`
 - [ ] Header 使用 `fixed` 属性
 - [ ] 弹窗抽取为独立组件
-- [ ] **禁止导入 `@juchang/db`**（会导致 Buffer 错误）
+- [ ] **禁止导入 `@xu/db`**（会导致 Buffer 错误）
 - [ ] API 响应类型从 Eden Treaty 推导
 - [ ] 表单类型从 Eden Treaty 推导（无需 resolver）

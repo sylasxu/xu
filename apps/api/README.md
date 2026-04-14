@@ -1,4 +1,4 @@
-# 聚场 API Server
+# xu API Server
 
 基于 ElysiaJS 的高性能 API 服务器，使用 TypeBox 进行类型验证。
 

@@ -1,5 +1,5 @@
 // Hot Keywords Service - 纯业务逻辑 (v4.8 Digital Ascension)
-import { db, globalKeywords, eq, and, sql, desc, toTimestamp } from '@juchang/db';
+import { db, globalKeywords, eq, and, sql, desc, toTimestamp } from '@xu/db';
 import type {
   GlobalKeywordResponse,
   HotKeywordListItem,
@@ -591,7 +591,7 @@ function readKeywordContextId(value: unknown): string | null {
 
 export async function trackConversion(userId: string): Promise<void> {
   try {
-    const { conversationMessages, conversations } = await import('@juchang/db');
+    const { conversationMessages, conversations } = await import('@xu/db');
     
     // 查询用户最近 30 分钟内的 AI 响应消息
     const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);

@@ -1,7 +1,7 @@
 import { defineConfig } from 'orval'
 
 export default defineConfig({
-  juchang: {
+  xu: {
     input: {
       target: '.openapi/openapi.json',
       parserOptions: {

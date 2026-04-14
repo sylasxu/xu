@@ -9,7 +9,7 @@
 
 import type { TSchema } from 'elysia';
 import { tool, jsonSchema } from 'ai';
-import { toJsonSchema } from '@juchang/utils';
+import { toJsonSchema } from '@xu/utils';
 import type { ToolContext, ToolResult } from './types';
 
 /**

@@ -238,7 +238,7 @@ export function SidebarDrawer({
         )}
       >
         <DialogHeader className={cn("border-b px-5 pb-4 pt-5 text-left", isDarkMode ? "border-white/8" : "border-black/8")}>
-          <DialogTitle className="text-[18px] font-semibold tracking-tight">聚场</DialogTitle>
+          <DialogTitle className="text-[18px] font-semibold tracking-tight">xu</DialogTitle>
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto px-5 pb-6 pt-4">

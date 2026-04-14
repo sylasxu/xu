@@ -174,7 +174,7 @@ Page({
   showPreferenceInsight() {
     wx.showModal({
       title: '偏好线索',
-      content: '你的活动偏好、常去地点和常用表达，会在对话和真实参与结果里慢慢被小聚学会，不用单独填一大张表。',
+      content: '你的活动偏好、常去地点和常用表达，会在对话和真实参与结果里慢慢被我记住，不用单独填一大张表。',
       showCancel: false,
     });
   },
@@ -208,8 +208,8 @@ Page({
    */
   showAbout() {
     wx.showModal({
-      title: '关于聚场',
-      content: '聚场 - LBS找搭子平台\n版本: 1.0.0\n\n让每一次相聚都有意义',
+      title: '关于 xu',
+      content: 'xu - 碎片化社交助理\n版本: 1.0.0\n\n帮你把想玩的事张罗起来',
       showCancel: false,
     });
   },

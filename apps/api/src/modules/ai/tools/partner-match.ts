@@ -21,7 +21,7 @@ import {
   sql,
   type PartnerIntent,
   type IntentMatch,
-} from '@juchang/db';
+} from '@xu/db';
 import {
   recordPartnerTaskMatchCancelled,
   recordPartnerTaskMatchConfirmed,

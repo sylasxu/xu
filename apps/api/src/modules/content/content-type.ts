@@ -1,4 +1,4 @@
-import { CONTENT_TYPE_VALUES, type ContentType } from '@juchang/db'
+import { CONTENT_TYPE_VALUES, type ContentType } from '@xu/db'
 import { t } from 'elysia'
 
 const [activityRecruit, buddyStory, localGuide, productSeed] = CONTENT_TYPE_VALUES

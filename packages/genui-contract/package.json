@@ -1,7 +1,7 @@
 {
-  "name": "@juchang/genui-contract",
+  "name": "@xu/genui-contract",
   "version": "1.0.0",
-  "description": "Generative UI protocol contract for Juchang",
+  "description": "Generative UI protocol contract for xu",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -15,7 +15,7 @@
     }
   },
   "devDependencies": {
-    "@juchang/ts-config": "workspace:*",
+    "@xu/ts-config": "workspace:*",
     "typescript": "^5.9.3"
   }
 }

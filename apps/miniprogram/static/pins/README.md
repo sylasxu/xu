@@ -1,6 +1,6 @@
 # Pin Icons
 
-This folder contains map pin icons for the JuChang miniprogram.
+This folder contains map pin icons for the xu miniprogram.
 
 ## Required Icons
 

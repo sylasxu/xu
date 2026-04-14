@@ -1,5 +1,5 @@
 {
-  "extends": "@juchang/ts-config/base.json",
+  "extends": "@xu/ts-config/base.json",
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }

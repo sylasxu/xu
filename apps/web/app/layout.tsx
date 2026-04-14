@@ -8,8 +8,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "聚场 - 你的 AI 活动助理",
-  description: "聚场帮你轻松组局，AI 智能推荐活动，一键报名参与。",
+  title: "xu，碎片化社交助理",
+  description: "xu 帮你接住碎片化社交需求，找人、凑局、开口、跟进结果。",
 };
 
 export default function RootLayout({

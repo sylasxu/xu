@@ -8,7 +8,7 @@
  * - 日期格式化函数
  */
 
-import type { Activity } from '@juchang/db';
+import type { Activity } from '@xu/db';
 import type { ActivityVibe, TimeOfDay, DayOfWeek } from './types';
 import { getEmbedding, getEmbeddings } from '../models/router';
 import { EMBEDDING_DIMENSIONS } from '../models/types';

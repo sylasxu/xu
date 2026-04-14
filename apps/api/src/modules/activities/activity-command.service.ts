@@ -8,7 +8,7 @@ import {
   eq,
   sql,
   and,
-} from '@juchang/db';
+} from '@xu/db';
 import type { CreateActivityRequest } from './activity.model';
 import { deductAiCreateQuota } from '../users/user.service';
 import { indexActivity, deleteIndex } from '../ai/rag';

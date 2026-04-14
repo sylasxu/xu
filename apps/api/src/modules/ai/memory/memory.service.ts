@@ -2,7 +2,7 @@
  * Memory Service - 记忆运营领域服务
  */
 
-import { db, users, activities, userMemories, eq, sql, inArray, desc } from '@juchang/db';
+import { db, users, activities, userMemories, eq, sql, inArray, desc } from '@xu/db';
 import {
   getEnhancedUserProfileWithVectors,
   getInterestVectors,

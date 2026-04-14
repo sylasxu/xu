@@ -14,7 +14,7 @@ import {
   desc,
   count,
   gte,
-} from '@juchang/db';
+} from '@xu/db';
 import type {
   ActivityDetailResponse,
   ActivityJoinState,

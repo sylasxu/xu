@@ -4,7 +4,7 @@
  * 实时查询检测异常用户行为，支持动态配置阈值和结果持久化
  */
 
-import { db, sql, toTimestamp, aiSecurityEvents } from '@juchang/db';
+import { db, sql, toTimestamp, aiSecurityEvents } from '@xu/db';
 import { getConfigValue } from '../config/config.service';
 
 export type AnomalyType = 'bulk_create' | 'frequent_cancel' | 'high_token_usage' | 'duplicate_requests';

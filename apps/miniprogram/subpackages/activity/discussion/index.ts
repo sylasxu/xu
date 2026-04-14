@@ -110,12 +110,12 @@ Page<DiscussionPageData, WechatMiniprogram.Page.CustomOption>({
     joinGuideHint: '先打个招呼吧，大家更容易接住你。',
     quickStarters: [],
     taskStageTitle: '当前进度：讨论中',
-    taskStageHint: '这场局已经进入协作阶段，活动后小聚还会继续帮你承接结果。',
+    taskStageHint: '这场局已经进入协作阶段，活动后我还会继续帮你承接结果。',
     statusChipPrimary: '讨论协作中',
     statusChipSecondary: '等待大家继续接话',
     statusActionHint: '先确认时间地点，再把这场局慢慢聊热。',
     stagePrimaryActionLabel: '查看活动详情',
-    stageSecondaryActionLabel: '回主场找小聚',
+    stageSecondaryActionLabel: '回主场',
   },
 
   // Store 订阅取消函数
@@ -350,7 +350,7 @@ Page<DiscussionPageData, WechatMiniprogram.Page.CustomOption>({
     let statusChipSecondary = context.isConnected ? '已连上当前讨论区' : '正在恢复讨论连接'
     let statusActionHint = '先确认时间地点，再把这场局慢慢聊热。'
     let stagePrimaryActionLabel = '查看活动详情'
-    let stageSecondaryActionLabel = '回主场找小聚'
+    let stageSecondaryActionLabel = '回主场'
 
     if (context.showJoinGuide) {
       statusChipPrimary = '刚加入，先破冰'

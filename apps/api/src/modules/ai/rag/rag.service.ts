@@ -9,7 +9,7 @@ import {
   sql,
   isNotNull,
   desc,
-} from '@juchang/db';
+} from '@xu/db';
 import { indexActivity, indexActivities, search } from './search';
 import { generateEmbedding } from './utils';
 import { getInterestVectors, calculateMaxSim } from '../memory/working';

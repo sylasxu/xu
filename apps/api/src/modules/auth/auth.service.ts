@@ -1,5 +1,5 @@
 // Auth Service - 认证相关业务逻辑 (MVP 简化版)
-import { db, users, eq } from '@juchang/db';
+import { db, users, eq } from '@xu/db';
 import { getJwtSecret } from '../../setup';
 import type {
   WechatCodeLoginRequest,

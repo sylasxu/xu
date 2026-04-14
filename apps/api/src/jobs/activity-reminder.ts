@@ -7,7 +7,7 @@
  * 防重复：使用 notifications 表查询是否已发送过该活动的 activity_reminder
  */
 
-import { db, activities, notifications, eq, and, sql, gt, toTimestamp } from '@juchang/db';
+import { db, activities, notifications, eq, and, sql, gt, toTimestamp } from '@xu/db';
 import { notifyActivityReminder } from '../modules/notifications/notification.service';
 import { jobLogger } from '../lib/logger';
 

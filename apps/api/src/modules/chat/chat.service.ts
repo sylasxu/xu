@@ -1,5 +1,5 @@
 // Chat Service - 群聊消息业务逻辑 (v3.3 使用 activityMessages)
-import { db, activityMessages, activities, participants, users, eq, and, gt, count, desc, inArray, sql } from '@juchang/db';
+import { db, activityMessages, activities, participants, users, eq, and, gt, count, desc, inArray, sql } from '@xu/db';
 import type {
   ChatActivitiesQuery,
   ChatActivitiesResponse,

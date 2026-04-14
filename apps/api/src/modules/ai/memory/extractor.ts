@@ -8,7 +8,7 @@ import { runObject } from '../models/runtime';
 import { t } from 'elysia';
 import { jsonSchema } from 'ai';
 import { resolveChatModelSelection, shouldOmitTemperatureForModelId } from '../models/router';
-import { toJsonSchema } from '@juchang/utils';
+import { toJsonSchema } from '@xu/utils';
 import { createLogger } from '../observability/logger';
 
 const logger = createLogger('extractor');

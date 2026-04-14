@@ -4,7 +4,7 @@
  * v4.5 活动语义搜索功能
  */
 
-import type { Activity } from '@juchang/db';
+import type { Activity } from '@xu/db';
 import { ACTIVE_MODELS, EMBEDDING_DIMENSIONS } from '../models/types';
 
 /**

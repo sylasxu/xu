@@ -5,7 +5,7 @@
  * 高风险活动记录到日志，后续可扩展自动处理
  */
 
-import { db, sql, toTimestamp, activities } from '@juchang/db';
+import { db, sql, toTimestamp, activities } from '@xu/db';
 import { analyzeContent } from '../modules/ai/moderation/moderation.service';
 
 /**

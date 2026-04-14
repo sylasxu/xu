@@ -1,6 +1,6 @@
-# 聚场小程序
+# xu 小程序
 
-聚场小程序是当前最主要的用户端，承担找局、找搭子、报名、讨论区承接和个人设置等核心流程。
+xu 小程序是当前最主要的用户端，承担找局、找搭子、报名、讨论区承接和个人设置等核心流程。
 
 ## 当前重点能力
 
@@ -29,7 +29,7 @@ bun run dev
 bun run dev:full
 ```
 
-2. 用微信开发者工具打开 [apps/miniprogram](/Users/sylas/Documents/GitHub/juchang/apps/miniprogram)
+2. 用微信开发者工具打开当前小程序目录
 3. 在微信开发者工具里执行“工具 -> 构建 npm”
 
 ## API 与代码生成
@@ -96,4 +96,4 @@ apps/miniprogram/
 
 ## 许可证
 
-MIT License - 详见根目录 [LICENSE](/Users/sylas/Documents/GitHub/juchang/LICENSE)
+MIT License - 详见根目录 [LICENSE](../../LICENSE)

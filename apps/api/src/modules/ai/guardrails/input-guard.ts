@@ -9,7 +9,7 @@
 import type { GuardResult, InputGuardConfig, RiskLevel } from './types';
 import { DEFAULT_INPUT_GUARD_CONFIG } from './types';
 import { getConfigValue } from '../config/config.service';
-import { db, aiSensitiveWords, eq } from '@juchang/db';
+import { db, aiSensitiveWords, eq } from '@xu/db';
 
 // 延迟导入避免循环依赖
 let recordSecurityEventFn: ((event: {

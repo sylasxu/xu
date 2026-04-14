@@ -10,7 +10,7 @@ import { resolve } from 'path';
 
 const apiDir = resolve(process.cwd(), 'apps/api');
 
-console.log('🚀 启动 JuChang API 开发服务器...\n');
+console.log('🚀 启动 xu API 开发服务器...\n');
 
 // 启动 API 服务器，过滤掉文件监听警告
 const apiProcess = spawn('bun', ['run', '--watch', '--silent', 'src/index.ts'], {

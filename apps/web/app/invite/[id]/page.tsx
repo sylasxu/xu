@@ -9,7 +9,7 @@ import { DiscussionRuntimePanel } from "@/components/invite/discussion-runtime-p
 import { WechatRedirect } from "@/components/invite/wechat-redirect"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:1996"
-const WEB_BASE = process.env.NEXT_PUBLIC_WEB_URL || "https://juchang.app"
+const WEB_BASE = process.env.NEXT_PUBLIC_WEB_URL || "https://xu.example"
 
 async function getPublicActivity(id: string): Promise<PublicActivity | null> {
   try {
@@ -42,7 +42,7 @@ export async function generateMetadata({
   const activity = await getPublicActivity(id)
 
   if (!activity) {
-    return { title: "活动不存在 - 聚场" }
+    return { title: "活动不存在 - xu" }
   }
 
   const vacancy = activity.maxParticipants - activity.currentParticipants
@@ -52,7 +52,7 @@ export async function generateMetadata({
       : "已满员"
 
   return {
-    title: `${activity.title} - 聚场邀请你`,
+    title: `${activity.title} - xu 邀请你`,
     description: `${fomoText} · ${activity.locationName} · ${formatDateShort(activity.startAt)}`,
     openGraph: {
       title: activity.title,
@@ -64,7 +64,7 @@ export async function generateMetadata({
           url: `${WEB_BASE}/og/invite-default.svg`,
           width: 1200,
           height: 630,
-          alt: "聚场活动邀请函",
+          alt: "xu 活动邀请函",
         },
       ],
     },

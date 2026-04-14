@@ -2,7 +2,7 @@ import type { JSONSchema7 } from '@ai-sdk/provider'
 import type { TSchema } from '@sinclair/typebox';
 
 export const formatPrice = (fen: number) => `¥${(fen / 100).toFixed(2)}`;
-export const LOGO_TEXT = "聚场 Juchang";
+export const LOGO_TEXT = "xu";
 
 /**
  * 将 TypeBox Schema 转换为纯 JSON Schema
@@ -21,7 +21,7 @@ export const LOGO_TEXT = "聚场 Juchang";
  * @example
  * ```typescript
  * import { t } from 'elysia';
- * import { toJsonSchema } from '@juchang/utils';
+ * import { toJsonSchema } from '@xu/utils';
  * 
  * const MySchema = t.Object({
  *   title: t.String(),

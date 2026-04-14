@@ -10,7 +10,7 @@
  */
 
 import type { ProcessorContext, ProcessorResult } from './types';
-import { db, conversations, conversationMessages, eq, sql } from '@juchang/db';
+import { db, conversations, conversationMessages, eq, sql } from '@xu/db';
 
 /**
  * Save History Processor

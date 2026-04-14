@@ -553,7 +553,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     const { activity } = this.data;
     if (!activity) {
       return {
-        title: '聚场 - 微信群组局神器',
+        title: 'xu - 碎片化社交助理',
         path: `/subpackages/activity/detail/index?id=${this.data.activityId}&share=1`,
       };
     }
@@ -585,7 +585,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     const { activity } = this.data;
     if (!activity) {
       return {
-        title: '聚场 - 微信群组局神器',
+        title: 'xu - 碎片化社交助理',
       };
     }
 
@@ -594,7 +594,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     const vacancyText = vacancy > 0 ? `${vacancy}缺1` : '已满员';
 
     return {
-      title: `${activity.title} | ${vacancyText} | 聚场`,
+      title: `${activity.title} | ${vacancyText} | xu`,
       // 零成本方案：使用活动图片或默认封面
       imageUrl: activity.images?.[0] || '',
     };

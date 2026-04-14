@@ -1,4 +1,4 @@
-# 聚场 Web Chat UI
+# xu Web Chat UI
 
 基于 **AI SDK React** 的世界级 AI 对话界面。
 

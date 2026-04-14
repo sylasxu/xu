@@ -1,7 +1,7 @@
 {
-  "name": "@juchang/ts-config",
+  "name": "@xu/ts-config",
   "version": "1.0.0",
-  "description": "Shared TypeScript configurations for Juchang platform",
+  "description": "Shared TypeScript configurations for xu",
   "private": true,
   "exports": {
     "./base.json": "./base.json",

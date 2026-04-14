@@ -2,7 +2,7 @@
  * 活动 Schema - 从 Eden Treaty API 推导
  * 
  * 遵循项目规范：Eden Treaty (Admin) / Orval SDK (小程序)
- * 前端不应直接导入 @juchang/db
+ * 前端不应直接导入 @xu/db
  */
 
 // 从 Eden Treaty 推导活动类型

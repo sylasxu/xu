@@ -52,6 +52,6 @@
 
   <!-- 版本信息 -->
   <view class="setting-page__version">
-    <text>聚场 v1.0.0</text>
+    <text>xu v1.0.0</text>
   </view>
 </view>

@@ -13,7 +13,7 @@ import {
   intentMatches,
   sql,
   userMemories,
-} from '@juchang/db';
+} from '@xu/db';
 import { app } from '../../../index';
 import {
   listCurrentAgentTaskSnapshots,
@@ -26,7 +26,7 @@ import {
   syncJoinTaskFromChatResponse,
   syncPartnerTaskFromChatResponse,
 } from '../task-runtime/agent-task.service';
-import type { GenUIBlock, GenUIRequest } from '@juchang/genui-contract';
+import type { GenUIBlock, GenUIRequest } from '@xu/genui-contract';
 
 interface ApiError {
   code?: number;

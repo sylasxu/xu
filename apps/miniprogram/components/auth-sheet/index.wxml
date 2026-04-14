@@ -20,9 +20,9 @@
     <!-- Header: 品牌 Logo + 标题 -->
     <view class="auth-sheet__header">
       <view class="auth-sheet__logo">
-        <text class="auth-sheet__logo-text">聚</text>
+        <text class="auth-sheet__logo-text">✓</text>
       </view>
-      <view class="auth-sheet__title">加入聚场，认识新朋友</view>
+      <view class="auth-sheet__title">绑定手机号后继续</view>
     </view>
     
     <!-- Body: 说明文案 -->

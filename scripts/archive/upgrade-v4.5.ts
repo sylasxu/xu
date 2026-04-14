@@ -13,9 +13,9 @@
  *   --skip-backfill  跳过 embedding 回填
  */
 
-import { db, sql } from '@juchang/db';
-import { activities } from '@juchang/db';
-import type { Activity } from '@juchang/db';
+import { db, sql } from '@xu/db';
+import { activities } from '@xu/db';
+import type { Activity } from '@xu/db';
 import { indexActivity } from '../apps/api/src/modules/ai/rag';
 
 // 解析命令行参数

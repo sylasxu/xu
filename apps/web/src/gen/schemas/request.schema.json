@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://juchang.dev/schemas/genui/request.schema.json",
+  "$id": "https://xu.example/schemas/genui/request.schema.json",
   "title": "GenUIRequest",
   "type": "object",
   "required": ["input"],

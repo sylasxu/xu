@@ -7,7 +7,7 @@
  * 2. JSON 格式（新版，支持置信度和时效性）
  */
 
-import { db, userMemories, eq, desc, sql } from '@juchang/db';
+import { db, userMemories, eq, desc, sql } from '@xu/db';
 import type { ActivityOutcome, InterestVector, UserProfile } from './types';
 import type { PreferenceExtraction, PreferenceCategory, PreferenceSentiment } from './extractor';
 import { calculatePreferenceScore } from './temporal-decay';

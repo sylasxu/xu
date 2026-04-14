@@ -1,7 +1,7 @@
 // AI Model - AI 对话协议、会话历史与运营 Schema
 import { Elysia, t, type Static } from 'elysia';
 import { ErrorResponseSchema, type ErrorResponse } from "../../common/common.model";
-import { selectConversationSchema, selectMessageSchema } from '@juchang/db';
+import { selectConversationSchema, selectMessageSchema } from '@xu/db';
 
 /**
  * AI Model Plugin

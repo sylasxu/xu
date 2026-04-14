@@ -4,7 +4,7 @@
  * 6 种预设主题 + 活动类型自动映射
  * 与 apps/web/lib/themes.ts 保持同步
  */
-import type { ThemeConfig } from '@juchang/db';
+import type { ThemeConfig } from '@xu/db';
 
 /** 活动类型 → 预设主题名称映射 */
 export const ACTIVITY_TYPE_THEME_MAP: Record<string, string> = {

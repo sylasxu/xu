@@ -7,7 +7,7 @@
  * 使用 db.select().from() 语法（无需 Drizzle relations）
  */
 
-import { db, aiConfigs, aiConfigHistory, eq, desc, and } from '@juchang/db';
+import { db, aiConfigs, aiConfigHistory, eq, desc, and } from '@xu/db';
 
 // ============ 内存缓存 ============
 

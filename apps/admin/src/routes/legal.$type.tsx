@@ -4,7 +4,7 @@
  * 路由：/legal/:type
  * - /legal/user-agreement - 用户协议
  * - /legal/privacy-policy - 隐私政策
- * - /legal/about - 关于聚场
+ * - /legal/about - 关于 xu
  * 
  * 用途：
  * - 小程序 web-view 加载
@@ -16,11 +16,11 @@ import { createFileRoute } from '@tanstack/react-router'
 // 法务内容配置
 const LEGAL_CONTENT = {
   'user-agreement': {
-    title: '聚场用户服务协议',
+    title: 'xu 用户服务协议',
     content: `
 ## 一、服务条款的确认和接纳
 
-欢迎使用聚场（以下简称"本平台"）提供的服务。在使用本平台服务之前，请您仔细阅读本协议的全部内容。
+欢迎使用 xu（以下简称"本平台"）提供的服务。在使用本平台服务之前，请您仔细阅读本协议的全部内容。
 
 如果您对本协议的任何条款表示异议，您可以选择不使用本平台服务。当您注册成功，无论是进入本平台，还是在本平台上发布任何内容，均意味着您完全接受本协议项下的全部条款。
 
@@ -60,7 +60,7 @@ const LEGAL_CONTENT = {
     `,
   },
   'privacy-policy': {
-    title: '聚场隐私政策',
+    title: 'xu 隐私政策',
     content: `
 ## 一、我们收集的信息
 
@@ -112,15 +112,15 @@ const LEGAL_CONTENT = {
     `,
   },
   'about': {
-    title: '关于聚场',
+    title: '关于 xu',
     content: `
 ## 产品介绍
 
-聚场是一款基于地理位置的 P2P 社交平台，帮助用户发现和参与身边的有趣活动。
+xu 是一款碎片化社交助理，帮助用户把找人、凑局、开口和活动后跟进变得更轻松。
 
 ## 核心功能
 
-- **AI 智能组局**：告诉 AI 你想做什么，自动帮你创建活动
+- **对话组局**：说出你想玩什么，帮你整理成可推进的活动
 - **探索附近**：发现身边正在进行的活动
 - **轻量群聊**：活动参与者实时交流
 - **一键分享**：快速邀请好友参与
@@ -173,7 +173,7 @@ function LegalPage() {
       {/* Footer */}
       <footer className="max-w-2xl mx-auto px-4 py-8 text-center">
         <p className="text-xs text-slate-400 dark:text-slate-500">
-          © 2024 聚场 JuChang. All rights reserved.
+          © 2024 xu. All rights reserved.
         </p>
       </footer>
     </div>

@@ -8,7 +8,7 @@
  * @module content-security
  */
 
-import { db, aiSecurityEvents } from '@juchang/db';
+import { db, aiSecurityEvents } from '@xu/db';
 import { msgSecCheck } from './wechat-api.client';
 
 // ==========================================

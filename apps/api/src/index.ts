@@ -41,9 +41,9 @@ type JobsStatusErrorResponse = {
 const openApiPlugin = openapi({
   documentation: {
     info: {
-      title: '聚场 API',
+      title: 'xu API',
       version: '1.0.0',
-      description: '帮助用户更容易参加一场局的聚场后端 API',
+      description: 'xu 碎片化社交助理后端 API',
     },
     tags: [
       { name: 'Auth', description: '认证相关' },
@@ -123,7 +123,7 @@ const appWithBase = new Elysia()
 
 export const app = appWithBase
   // 健康检查
-  .get('/', () => 'Hello Juchang API')
+  .get('/', () => 'Hello xu API')
   .get('/health', () => ({ status: 'ok', timestamp: new Date().toISOString() }))
   // 定时任务状态查询（仅供调试）
   .get('/jobs/status', getJobsStatusHandler)
@@ -141,7 +141,7 @@ export const app = appWithBase
 
 if (import.meta.main) {
   // 打印启动 Banner
-  printBanner('聚场 API', '1.0.0');
+  printBanner('xu API', '1.0.0');
 
   // 启动服务器
   const port = Number(process.env.API_PORT || 3000);

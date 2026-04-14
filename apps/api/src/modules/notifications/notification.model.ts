@@ -1,7 +1,7 @@
 // Notification Model - 通知与消息中心
 import { Elysia, t, type Static } from 'elysia';
 import { ErrorResponseSchema, type ErrorResponse } from "../../common/common.model";
-import { selectNotificationSchema } from '@juchang/db';
+import { selectNotificationSchema } from '@xu/db';
 
 /**
  * Notification Model Plugin

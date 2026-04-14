@@ -5,7 +5,7 @@
  * 执行频率：每 5 分钟
  */
 
-import { db, activities, activityMessages, eq, and, sql, toTimestamp } from '@juchang/db';
+import { db, activities, activityMessages, eq, and, sql, toTimestamp } from '@xu/db';
 import { notifyPostActivity } from '../modules/notifications/notification.service';
 import { jobLogger } from '../lib/logger';
 

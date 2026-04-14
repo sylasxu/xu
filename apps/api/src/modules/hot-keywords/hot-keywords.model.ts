@@ -1,7 +1,7 @@
 // Hot Keywords Model - TypeBox schemas (v4.8 Digital Ascension)
 import { Elysia, t, type Static } from 'elysia';
 import { ErrorResponseSchema, type ErrorResponse } from "../../common/common.model";
-import { selectGlobalKeywordSchema } from '@juchang/db';
+import { selectGlobalKeywordSchema } from '@xu/db';
 
 /**
  * Hot Keywords Model Plugin (v4.8 Digital Ascension)

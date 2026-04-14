@@ -4,7 +4,7 @@
  * 
  * Chat-First 架构的顶部导航栏
  * - 左侧：Menu 图标（跳转个人中心）或返回按钮
- * - 中间：品牌词"聚场"或自定义标题
+ * - 中间：品牌词"xu"或自定义标题
  * - 右侧：More 图标（显示下拉菜单）
  */
 
@@ -30,10 +30,10 @@ Component({
   },
 
   properties: {
-    // 标题文字，默认"聚场"
+    // 标题文字，默认"xu"
     title: {
       type: String,
-      value: '聚场',
+      value: 'xu',
     },
     // 是否显示左侧 Menu 图标
     showMenu: {

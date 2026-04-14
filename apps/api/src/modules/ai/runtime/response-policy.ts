@@ -2,7 +2,7 @@ import type {
   GenUIRequest,
   GenUITracePayload,
   GenUIResponseEnvelope,
-} from '@juchang/genui-contract';
+} from '@xu/genui-contract';
 import {
   createAlertBlock,
 } from '../shared/genui-blocks';

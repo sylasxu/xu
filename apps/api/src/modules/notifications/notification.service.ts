@@ -1,5 +1,5 @@
 // Notification Service - 通知与消息中心业务逻辑
-import { db, notifications, users, participants, intentMatches, partnerIntents, matchMessages, agentTasks, eq, count, and, desc, inArray, sql } from '@juchang/db';
+import { db, notifications, users, participants, intentMatches, partnerIntents, matchMessages, agentTasks, eq, count, and, desc, inArray, sql } from '@xu/db';
 import type {
   MessageCenterQuery,
   MessageCenterResponse,

@@ -1,7 +1,7 @@
 {
-  "name": "@juchang/db",
+  "name": "@xu/db",
   "version": "1.0.0",
-  "description": "Database layer for Juchang with Drizzle ORM",
+  "description": "Database layer for xu with Drizzle ORM",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -23,7 +23,7 @@
     "postgres": "^3.4.3"
   },
   "devDependencies": {
-    "@juchang/ts-config": "workspace:*",
+    "@xu/ts-config": "workspace:*",
     "@types/node": "^24.10.1",
     "drizzle-kit": "^0.31.7",
     "typescript": "^5.9.3"

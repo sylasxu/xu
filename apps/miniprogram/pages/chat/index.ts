@@ -40,9 +40,9 @@ const DEFAULT_COMPOSER_PLACEHOLDER = '你想找什么活动？'
 const DEFAULT_WELCOME_GREETING = '晚上好，朋友！'
 const DEFAULT_WELCOME_SUB_GREETING = '附近有新局，想直接看看吗？'
 const DEFAULT_WELCOME_PROFILE_HINTS = {
-  low: '补充偏好后，小聚推荐会更准',
-  medium: '补充更多偏好，小聚推荐会更准',
-  high: '你的偏好已很完整，小聚推荐会更准',
+  low: '多聊一点，我会更懂你的偏好',
+  medium: '我正在记住你的习惯',
+  high: '你的偏好已经比较清楚，可以直接让我来安排',
 }
 const DEFAULT_WELCOME_SOCIAL_PROFILE: SocialProfile = {
   joinedActivities: 0,
@@ -931,14 +931,14 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
       return result
     }
     return {
-      title: '聚场 - 想怎么玩？跟小聚说说',
+      title: 'xu - 今天有什么想玩的？',
       path: '/pages/chat/index',
     }
   },
 
   onShareTimeline() {
     return {
-      title: '聚场 - 你的 AI 活动助理',
+      title: 'xu，碎片化社交助理',
     }
   },
 

@@ -5,7 +5,7 @@
  */
 
 import type { MetricPoint, MetricType } from './types';
-import { db, sql, toTimestamp } from '@juchang/db';
+import { db, sql, toTimestamp } from '@xu/db';
 
 /**
  * 指标存储

@@ -1,7 +1,7 @@
 {
-  "name": "@juchang/utils",
+  "name": "@xu/utils",
   "version": "1.0.0",
-  "description": "Shared utilities for Juchang platform",
+  "description": "Shared utilities for xu",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -16,7 +16,7 @@
     "@sinclair/typebox": "^0.34.33"
   },
   "devDependencies": {
-    "@juchang/ts-config": "workspace:*",
+    "@xu/ts-config": "workspace:*",
     "typescript": "^5.9.3"
   }
 }

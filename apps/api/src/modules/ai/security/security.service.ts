@@ -16,7 +16,7 @@ import {
   lte,
   and,
   toTimestamp,
-} from '@juchang/db';
+} from '@xu/db';
 import { createLogger } from '../observability/logger';
 
 const logger = createLogger('ai-security');

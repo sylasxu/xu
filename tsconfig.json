@@ -11,9 +11,9 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@juchang/db": ["./packages/db/src"],
-      "@juchang/utils": ["./packages/utils/src"],
-      "@juchang/api": ["./apps/api/src"]
+      "@xu/db": ["./packages/db/src"],
+      "@xu/utils": ["./packages/utils/src"],
+      "@xu/api": ["./apps/api/src"]
     }
   }
 }

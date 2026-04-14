@@ -1,4 +1,4 @@
-import { db, sql, conversationMessages, eq, and } from '@juchang/db';
+import { db, sql, conversationMessages, eq, and } from '@xu/db';
 import { getEmbedding } from '../models/router';
 import { createLogger } from '../observability/logger';
 import type { RecalledMessage } from './types';

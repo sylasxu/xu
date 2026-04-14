@@ -9,7 +9,7 @@ import {
   partnerIntents,
   sql,
   users,
-} from '@juchang/db';
+} from '@xu/db';
 import { app } from '../apps/api/src/index';
 import { readAiChatEnvelope } from './ai-chat-sse';
 import { indexActivities } from '../apps/api/src/modules/ai/rag';

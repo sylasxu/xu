@@ -1369,10 +1369,10 @@ function buildPartnerSearchCardActions(params: {
       ? (params.userId ? '发起补位邀约' : '登录后发起补位邀约')
       : (params.userId ? '发起搭子邀请' : '登录后发起搭子邀请');
   const groupUpLabel = params.scenarioType === 'destination_companion'
-    ? (params.userId ? '让小聚帮我问要不要一起去' : '登录后让小聚帮我问要不要一起去')
+    ? (params.userId ? '让我帮你问要不要一起去' : '登录后让我帮你问要不要一起去')
     : params.scenarioType === 'fill_seat'
-      ? (params.userId ? '让小聚帮我问能不能补位' : '登录后让小聚帮我问能不能补位')
-      : (params.userId ? '让小聚帮我问能不能组局' : '登录后让小聚帮我问能不能组局');
+      ? (params.userId ? '让我帮你问能不能补位' : '登录后让我帮你问能不能补位')
+      : (params.userId ? '让我帮你问能不能组局' : '登录后让我帮你问能不能组局');
 
   return [
     {

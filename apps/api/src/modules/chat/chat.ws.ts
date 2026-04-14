@@ -1,5 +1,5 @@
 // WebSocket 处理器 - 活动讨论区实时通讯
-import { db, activityMessages, activities, participants, users, eq, and, desc } from '@juchang/db';
+import { db, activityMessages, activities, participants, users, eq, and, desc } from '@xu/db';
 import { verifyToken } from '../auth/auth.service';
 import { validateContent } from '../content-security/content-security.service';
 import * as pool from './connection-pool';

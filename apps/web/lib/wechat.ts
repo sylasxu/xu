@@ -12,7 +12,7 @@ export function isWechatBrowser(): boolean {
 }
 
 function getWebBaseUrl(): string {
-  return process.env.NEXT_PUBLIC_WEB_URL || 'https://juchang.app'
+  return process.env.NEXT_PUBLIC_WEB_URL || 'https://xu.example'
 }
 
 function getMiniProgramPath(activityId: string): string {

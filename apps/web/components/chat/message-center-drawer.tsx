@@ -910,7 +910,7 @@ export function MessageCenterDrawer({
                             isDarkMode ? "border-white/8 bg-white/[0.03]" : "border-black/8 bg-black/[0.02]"
                           )}
                         >
-                          <p className="text-sm font-semibold">当前该谁推进</p>
+                          <p className="text-sm font-semibold">下一步怎么做</p>
                           <p className={cn("mt-2 text-xs leading-6", isDarkMode ? "text-white/54" : "text-black/52")}>{pendingMatchDetail.nextActionText}</p>
                         </div>
 

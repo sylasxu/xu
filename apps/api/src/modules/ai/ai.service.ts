@@ -26,7 +26,7 @@ import {
   or,
   gt,
   lt,
-} from '@juchang/db';
+} from '@xu/db';
 import {
   convertToModelMessages,
   stepCountIs,
@@ -35,8 +35,8 @@ import {
   type UIMessage,
 } from 'ai';
 import { randomUUID } from 'crypto';
-import type { ProcessorLogEntry } from '@juchang/db';
-import type { GenUIBlock, GenUIRequest, GenUITracePayload, GenUISuggestions } from '@juchang/genui-contract';
+import type { ProcessorLogEntry } from '@xu/db';
+import type { GenUIBlock, GenUIRequest, GenUITracePayload, GenUISuggestions } from '@xu/genui-contract';
 
 // 新架构模块
 import { type ClassifyResult } from './intent';
@@ -1102,23 +1102,23 @@ export async function executeChatRequest(request: ChatRequest): Promise<ChatExec
 // ==========================================
 
 /**
- * 小聚人设 System Prompt
- * 用于轻量 LLM 生成有温度的回复
+ * xu 人设 System Prompt
+ * 用于轻量 LLM 生成符合 xu 气质的回复
  */
-const XIAOJU_PERSONA = `你是"小聚"，一个热情、接地气、有活力的组局达人。你是用户的社交助理，像朋友一样帮忙组局、找搭子、探索活动。
+const XU_PERSONA = `你是"xu"，一个碎片化社交助理。你帮用户把想玩的事、找人、组局、开口和活动后的跟进整理成可执行的下一步。
 
 说话风格：
-- 像朋友一样自然，不要太正式
-- 用表情符号增加温度 😊🎉🔥
-- 不要说"已为您构建"，要说"帮你把局组好了！"
-- 不要说"正在解析"，要说"收到，小聚正在帮你整理..."
-- 用户是喜欢组局、参加活动的人，你要表现出对社交活动的热情
-- 称呼用户为"朋友"或直接对话，不要叫"用户"
+- 短句、自然、直接，不要像客服，也不要装熟
+- 先帮用户把事情理清楚，再给下一步选择
+- 不替用户做社交表演，不冒进承诺，不催促
+- 可以温和一点，但少用感叹号和表情符号
+- 不要说"正在解析"，要说"收到，我先帮你整理一下。"
+- 称呼用户时优先直接对话，不要叫"用户"
 
-记住：你是"组局助手"小聚，有血有肉有灵魂，不是冷冰冰的系统。`;
+记住：你是 xu，一个会帮用户张罗但懂分寸的社交助理。`;
 
 /**
- * 轻量 LLM 生成有灵魂的回复
+ * 轻量 LLM 生成自然回复
  * 默认跟随当前主聊天链路的 Kimi 路由
  */
 async function generateSoulfulResponse(
@@ -1138,18 +1138,18 @@ async function generateSoulfulResponse(
 触发了热词"${context.keyword}"，意图是${context.intent}。
 参考信息：${context.responseHint}
 
-请用一句话热情回应用户，体现小聚的组局达人性格。要求：
-1. 自然、有温度、像朋友一样
-2. 可以带表情符号
+请用一句话回应用户，体现 xu 的碎片化社交助理气质。要求：
+1. 自然、有边界、不装熟
+2. 少用表情符号，不要过度热情
 3. 不要机械复述参考信息，要转化成自己的话
-4. 如果是活动相关，表现出热情
+4. 如果是活动相关，优先给出可继续推进的感觉
 5. 直接输出回应文字，不要解释
 
 回应：`;
 
     const result = await generateText({
       model,
-      system: XIAOJU_PERSONA,
+      system: XU_PERSONA,
       prompt,
       ...(shouldOmitTemperatureForModelId(modelId) ? {} : { temperature: 0.8 }),
       maxOutputTokens: 150,
@@ -1183,24 +1183,24 @@ type DirectResponseScenario =
 
 /** 限流场景预设文案 - 随机选择增加多样性 */
 const RATE_LIMIT_RESPONSES = [
-  '哎呀，小聚有点忙不过来了，你稍等 1 分钟再来呗 😅',
-  '哇，你今天好活跃！让我喘口气，等会儿继续帮你组局～',
-  '小聚正在处理其他朋友的请求，1 分钟后回来找你！',
-  '等等我等等我！小聚马上就好，你稍等片刻 ⏳',
+  '我现在有点忙，你稍等 1 分钟再试一次。',
+  '请求有点密，我缓一下，等会儿继续帮你整理。',
+  '我正在处理其他朋友的请求，1 分钟后回来找你！',
+  '稍等一下，我马上回来。',
 ];
 
 /** 拦截场景预设文案 */
 const BLOCKED_RESPONSES = [
-  '这个话题我帮不了你 😅 我们聊点别的？比如最近有什么好玩的活动～',
-  '哎呀，这个我不太方便聊，换个话题呗？你最近想组什么局？',
-  '小聚是个组局助手，这方面不太懂 😅 聊聊活动怎么样？',
+  '这个话题我帮不了你。我们换个更适合聊的方向吧。',
+  '这个我不太方便继续。你可以跟我说说最近想玩什么。',
+  '这方面我不适合帮你判断。聊聊活动或找搭子会更合适。',
 ];
 
 /**
- * 小聚快速回复生成器
+ * xu 快速回复生成器
  * 为各种边缘场景生成有灵魂的兜底回复
  */
-async function xiaoJuQuickReply(scenario: DirectResponseScenario): Promise<string> {
+async function xuQuickReply(scenario: DirectResponseScenario): Promise<string> {
   // 限流和拦截场景：直接返回预设文案，不调用 LLM（减少延迟和成本）
   if (scenario.type === 'rate_limit') {
     const index = Math.floor(Math.random() * RATE_LIMIT_RESPONSES.length);
@@ -1233,7 +1233,7 @@ async function xiaoJuQuickReply(scenario: DirectResponseScenario): Promise<strin
 
     const result = await generateText({
       model,
-      system: XIAOJU_PERSONA,
+      system: XU_PERSONA,
       prompt,
       ...(shouldOmitTemperatureForModelId(modelId) ? {} : { temperature: 0.7 }),
       maxOutputTokens: 100,
@@ -1259,7 +1259,7 @@ async function xiaoJuQuickReply(scenario: DirectResponseScenario): Promise<strin
 function getFallbackText(scenario: DirectResponseScenario): string {
   switch (scenario.type) {
     case 'rate_limit':
-      return '哎呀，小聚有点忙不过来了，你稍等 1 分钟再来呗 😅';
+      return '哎呀，我有点忙不过来了，你稍等 1 分钟再来呗 😅';
     case 'blocked':
       return '这个话题我帮不了你 😅';
     case 'error':
@@ -1267,7 +1267,7 @@ function getFallbackText(scenario: DirectResponseScenario): string {
     case 'fallback':
       return '我没太明白，换个说法呗？';
     default:
-      return '小聚还在学习中，再试一次？';
+      return '我还在学习中，再试一次？';
   }
 }
 
@@ -1278,7 +1278,7 @@ function createExecutionTrace(stage: string, detail: Record<string, unknown>): G
 async function buildDirectResponseResult(
   scenario: DirectResponseScenario
 ): Promise<ChatExecutionResult> {
-  const text = await xiaoJuQuickReply(scenario);
+  const text = await xuQuickReply(scenario);
   return {
     assistantText: text,
     executionPath: 'llm_orchestrated',
@@ -2469,9 +2469,9 @@ const DEFAULT_WELCOME_UI_CONFIG: WelcomeUiConfig = {
   ],
   bottomQuickActions: ['快速组局', '找搭子', '附近活动', '我的草稿'],
   profileHints: {
-    low: '补充偏好后，小聚推荐会更准',
-    medium: '社交画像正在完善中，继续聊聊你的习惯',
-    high: '社交画像已较完整，可直接让小聚给你安排',
+    low: '多聊一点，我会更懂你的偏好',
+    medium: '我正在记住你的习惯',
+    high: '你的偏好已经比较清楚，可以直接让我来安排',
   },
 };
 
@@ -2960,7 +2960,7 @@ export async function getWelcomeCard(
   } else if (pendingActivities.length > 0) {
     subGreeting = `你有 ${pendingActivities.length} 个待参加活动，先看看接下来怎么安排？`;
   } else if (socialProfile && socialProfile.preferenceCompleteness < 30) {
-    subGreeting = '告诉我你偏爱什么，小聚会推荐得更准。';
+    subGreeting = '告诉我你偏爱什么，我会更懂你。';
   } else if (location) {
     subGreeting = '附近有新局，想直接看看吗？';
   }

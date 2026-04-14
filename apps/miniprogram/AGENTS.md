@@ -158,7 +158,7 @@ const value = e.detail.value;
 // 开发环境使用局域网 IP
 const BASE_URL = __DEV__ 
   ? 'http://192.168.x.x:3000'
-  : 'https://api.juchang.com'
+  : 'https://api.xu.example'
 ```
 
 **微信开发者工具**：勾选「不校验合法域名」

@@ -10,7 +10,7 @@ import type {
   GenUITracePayload,
   GenUISuggestions,
   GenUIResponseEnvelope,
-} from '@juchang/genui-contract';
+} from '@xu/genui-contract';
 import {
   getConversationMessages,
   executeChatRequest,

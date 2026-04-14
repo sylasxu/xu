@@ -427,7 +427,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
 
   onShareAppMessage(): WechatMiniprogram.Page.ICustomShareContent {
     return {
-      title: '我在聚场创建了一个活动，快来参加吧！',
+      title: '我用 xu 创建了一个活动，快来参加吧！',
       path: '/pages/chat/index',
     };
   },

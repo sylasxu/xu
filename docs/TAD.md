@@ -68,7 +68,7 @@
 │   │   │   │   └── discussion/ # 活动讨论区
 │   │   │   ├── legal/        # 法律文档
 │   │   │   │   ├── index     # 用户协议
-│   │   │   │   └── about/    # 关于xu
+│   │   │   │   └── about/    # 关于 xu
 │   │   │   ├── safety/       # 安全中心
 │   │   │   ├── search/       # 活动搜索
 │   │   │   ├── chat/         # 活动群聊 (Lite_Chat)
@@ -1356,7 +1356,7 @@ const tools = resolveToolsForIntent(userId, intent, options);
 
 ### 6.4 状态层：记忆系统 (Memory System)
 
-xu的记忆系统参考 Mastra 架构，支持三种类型的记忆：
+xu 的记忆系统参考 Mastra 架构，支持三种类型的记忆：
 
 | 记忆类型 | 说明 | 存储位置 | 状态 |
 |---------|------|---------|------|

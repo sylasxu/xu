@@ -37,6 +37,11 @@ export const UserListResponseSchema = t.Object({
   limit: t.Number({ description: '每页数量' }),
 });
 
+export const UserQuotaResponseSchema = t.Object({
+  aiCreateQuota: t.Number({ description: '今日剩余 AI 创建活动额度' }),
+  resetAt: t.Union([t.String(), t.Null()], { description: '额度重置时间' }),
+});
+
 // 更新用户请求体
 export const UpdateUserRequestSchema = t.Object({
   nickname: t.Optional(t.String({ maxLength: 50, description: '昵称' })),
@@ -52,6 +57,7 @@ export const userModel = new Elysia({ name: 'userModel' })
     'user.success': SuccessResponse,
     'user.listQuery': UserListQuerySchema,
     'user.listResponse': UserListResponseSchema,
+    'user.quotaResponse': UserQuotaResponseSchema,
     'user.updateRequest': UpdateUserRequestSchema,
   });
 
@@ -61,4 +67,5 @@ export type UserResponse = Static<typeof UserResponseSchema>;
 export type SuccessResponse = Static<typeof SuccessResponse>;
 export type UserListQuery = Static<typeof UserListQuerySchema>;
 export type UserListResponse = Static<typeof UserListResponseSchema>;
+export type UserQuotaResponse = Static<typeof UserQuotaResponseSchema>;
 export type UpdateUserRequest = Static<typeof UpdateUserRequestSchema>;

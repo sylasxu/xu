@@ -83,6 +83,30 @@ const DEFAULT_PROFILE_HINTS = {
   medium: "我正在记住你的习惯",
   high: "你的偏好已经比较清楚，可以直接让我来安排",
 };
+const DEFAULT_CHAT_SHELL_UI = {
+  composerHint: "也可以直接说地方、时间、类型或你想找的人",
+  pendingActionTitle: "待恢复动作",
+  pendingActionDefaultMessage: "这一步已经挂起，登录后会继续替你办完。",
+  pendingActionLoginHint: "完成登录后回到这里，我会自动继续。",
+  pendingActionBindPhoneHint: "完成绑定手机号后回到这里，我会自动继续。",
+  pendingActionResumeLabel: "我已完成，继续",
+};
+const DEFAULT_SIDEBAR_UI = {
+  title: "xu",
+  authSubtitle: "会话与后续进展会持续同步",
+  visitorSubtitle: "先聊当前这一轮，需要时再同步记录",
+  messageCenterLabel: "消息中心",
+  messageCenterHint: "搭子确认 / 活动跟进",
+  authContinuationHint: "需要确认搭子或回看结果时，我会帮你继续接上",
+  historyTitle: "历史会话",
+  historyDescriptionAuthenticated: "继续上次聊到一半的内容",
+  historyDescriptionVisitor: "当前设备上的会话会先留在这里",
+  searchPlaceholder: "搜索历史会话",
+  visitorHistoryHint: "访客模式下可以直接开始聊天，但不会在这里展示云端会话记录。",
+  emptySearchResult: "没有找到匹配的历史会话。",
+  emptyHistory: "还没有历史会话，发起第一条消息后这里就会出现。",
+  composerCapabilityHint: "当前输入区已只保留文本发送，没有语音和附件入口。",
+};
 const COMPOSER_EXPAND_THRESHOLD = 10;
 const PENDING_AGENT_ACTION_STORAGE_KEY = "xu:web:pending-agent-action";
 const THEME_STORAGE_KEY = "xu:web:theme";
@@ -200,6 +224,30 @@ type WelcomeUiPayload = {
     low: string;
     medium: string;
     high: string;
+  };
+  chatShell: {
+    composerHint: string;
+    pendingActionTitle: string;
+    pendingActionDefaultMessage: string;
+    pendingActionLoginHint: string;
+    pendingActionBindPhoneHint: string;
+    pendingActionResumeLabel: string;
+  };
+  sidebar: {
+    title: string;
+    authSubtitle: string;
+    visitorSubtitle: string;
+    messageCenterLabel: string;
+    messageCenterHint: string;
+    authContinuationHint: string;
+    historyTitle: string;
+    historyDescriptionAuthenticated: string;
+    historyDescriptionVisitor: string;
+    searchPlaceholder: string;
+    visitorHistoryHint: string;
+    emptySearchResult: string;
+    emptyHistory: string;
+    composerCapabilityHint: string;
   };
 };
 type WelcomePromptEntry = {
@@ -1238,6 +1286,8 @@ function extractWelcomeUi(payload: unknown): WelcomeUiPayload {
       composerPlaceholder: DEFAULT_COMPOSER_PLACEHOLDER,
       bottomQuickActions: DEFAULT_BOTTOM_ACTIONS,
       profileHints: DEFAULT_PROFILE_HINTS,
+      chatShell: DEFAULT_CHAT_SHELL_UI,
+      sidebar: DEFAULT_SIDEBAR_UI,
     };
   }
 
@@ -1268,11 +1318,97 @@ function extractWelcomeUi(payload: unknown): WelcomeUiPayload {
     payload.ui.composerPlaceholder.trim()
       ? payload.ui.composerPlaceholder.trim()
       : DEFAULT_COMPOSER_PLACEHOLDER;
+  const chatShellSource = isRecord(payload.ui.chatShell) ? payload.ui.chatShell : {};
+  const sidebarSource = isRecord(payload.ui.sidebar) ? payload.ui.sidebar : {};
 
   return {
     composerPlaceholder,
     bottomQuickActions: actions.length ? actions : DEFAULT_BOTTOM_ACTIONS,
     profileHints,
+    chatShell: {
+      composerHint:
+        typeof chatShellSource.composerHint === "string" && chatShellSource.composerHint.trim()
+          ? chatShellSource.composerHint.trim()
+          : DEFAULT_CHAT_SHELL_UI.composerHint,
+      pendingActionTitle:
+        typeof chatShellSource.pendingActionTitle === "string" && chatShellSource.pendingActionTitle.trim()
+          ? chatShellSource.pendingActionTitle.trim()
+          : DEFAULT_CHAT_SHELL_UI.pendingActionTitle,
+      pendingActionDefaultMessage:
+        typeof chatShellSource.pendingActionDefaultMessage === "string" && chatShellSource.pendingActionDefaultMessage.trim()
+          ? chatShellSource.pendingActionDefaultMessage.trim()
+          : DEFAULT_CHAT_SHELL_UI.pendingActionDefaultMessage,
+      pendingActionLoginHint:
+        typeof chatShellSource.pendingActionLoginHint === "string" && chatShellSource.pendingActionLoginHint.trim()
+          ? chatShellSource.pendingActionLoginHint.trim()
+          : DEFAULT_CHAT_SHELL_UI.pendingActionLoginHint,
+      pendingActionBindPhoneHint:
+        typeof chatShellSource.pendingActionBindPhoneHint === "string" && chatShellSource.pendingActionBindPhoneHint.trim()
+          ? chatShellSource.pendingActionBindPhoneHint.trim()
+          : DEFAULT_CHAT_SHELL_UI.pendingActionBindPhoneHint,
+      pendingActionResumeLabel:
+        typeof chatShellSource.pendingActionResumeLabel === "string" && chatShellSource.pendingActionResumeLabel.trim()
+          ? chatShellSource.pendingActionResumeLabel.trim()
+          : DEFAULT_CHAT_SHELL_UI.pendingActionResumeLabel,
+    },
+    sidebar: {
+      title:
+        typeof sidebarSource.title === "string" && sidebarSource.title.trim()
+          ? sidebarSource.title.trim()
+          : DEFAULT_SIDEBAR_UI.title,
+      authSubtitle:
+        typeof sidebarSource.authSubtitle === "string" && sidebarSource.authSubtitle.trim()
+          ? sidebarSource.authSubtitle.trim()
+          : DEFAULT_SIDEBAR_UI.authSubtitle,
+      visitorSubtitle:
+        typeof sidebarSource.visitorSubtitle === "string" && sidebarSource.visitorSubtitle.trim()
+          ? sidebarSource.visitorSubtitle.trim()
+          : DEFAULT_SIDEBAR_UI.visitorSubtitle,
+      messageCenterLabel:
+        typeof sidebarSource.messageCenterLabel === "string" && sidebarSource.messageCenterLabel.trim()
+          ? sidebarSource.messageCenterLabel.trim()
+          : DEFAULT_SIDEBAR_UI.messageCenterLabel,
+      messageCenterHint:
+        typeof sidebarSource.messageCenterHint === "string" && sidebarSource.messageCenterHint.trim()
+          ? sidebarSource.messageCenterHint.trim()
+          : DEFAULT_SIDEBAR_UI.messageCenterHint,
+      authContinuationHint:
+        typeof sidebarSource.authContinuationHint === "string" && sidebarSource.authContinuationHint.trim()
+          ? sidebarSource.authContinuationHint.trim()
+          : DEFAULT_SIDEBAR_UI.authContinuationHint,
+      historyTitle:
+        typeof sidebarSource.historyTitle === "string" && sidebarSource.historyTitle.trim()
+          ? sidebarSource.historyTitle.trim()
+          : DEFAULT_SIDEBAR_UI.historyTitle,
+      historyDescriptionAuthenticated:
+        typeof sidebarSource.historyDescriptionAuthenticated === "string" && sidebarSource.historyDescriptionAuthenticated.trim()
+          ? sidebarSource.historyDescriptionAuthenticated.trim()
+          : DEFAULT_SIDEBAR_UI.historyDescriptionAuthenticated,
+      historyDescriptionVisitor:
+        typeof sidebarSource.historyDescriptionVisitor === "string" && sidebarSource.historyDescriptionVisitor.trim()
+          ? sidebarSource.historyDescriptionVisitor.trim()
+          : DEFAULT_SIDEBAR_UI.historyDescriptionVisitor,
+      searchPlaceholder:
+        typeof sidebarSource.searchPlaceholder === "string" && sidebarSource.searchPlaceholder.trim()
+          ? sidebarSource.searchPlaceholder.trim()
+          : DEFAULT_SIDEBAR_UI.searchPlaceholder,
+      visitorHistoryHint:
+        typeof sidebarSource.visitorHistoryHint === "string" && sidebarSource.visitorHistoryHint.trim()
+          ? sidebarSource.visitorHistoryHint.trim()
+          : DEFAULT_SIDEBAR_UI.visitorHistoryHint,
+      emptySearchResult:
+        typeof sidebarSource.emptySearchResult === "string" && sidebarSource.emptySearchResult.trim()
+          ? sidebarSource.emptySearchResult.trim()
+          : DEFAULT_SIDEBAR_UI.emptySearchResult,
+      emptyHistory:
+        typeof sidebarSource.emptyHistory === "string" && sidebarSource.emptyHistory.trim()
+          ? sidebarSource.emptyHistory.trim()
+          : DEFAULT_SIDEBAR_UI.emptyHistory,
+      composerCapabilityHint:
+        typeof sidebarSource.composerCapabilityHint === "string" && sidebarSource.composerCapabilityHint.trim()
+          ? sidebarSource.composerCapabilityHint.trim()
+          : DEFAULT_SIDEBAR_UI.composerCapabilityHint,
+    },
   };
 }
 
@@ -1308,6 +1444,8 @@ export default function ChatPage() {
     composerPlaceholder: DEFAULT_COMPOSER_PLACEHOLDER,
     bottomQuickActions: DEFAULT_BOTTOM_ACTIONS,
     profileHints: DEFAULT_PROFILE_HINTS,
+    chatShell: DEFAULT_CHAT_SHELL_UI,
+    sidebar: DEFAULT_SIDEBAR_UI,
   });
   const [clientLocation, setClientLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [welcomeLocationResolved, setWelcomeLocationResolved] = useState(false);
@@ -2166,6 +2304,7 @@ export default function ChatPage() {
               disabled={isSending}
               isDarkMode={isDarkMode}
               activeConversationId={conversationId}
+              ui={welcomeUi.sidebar}
               onSelectConversation={handleSelectConversation}
               onOpenMessageCenter={() => {
                 setMessageCenterFocusMatchId(null);
@@ -2223,14 +2362,14 @@ export default function ChatPage() {
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="space-y-1">
-                    <p className="text-[12px] font-semibold tracking-wide">待恢复动作</p>
+                    <p className="text-[12px] font-semibold tracking-wide">{welcomeUi.chatShell.pendingActionTitle}</p>
                     <p className="text-sm font-medium">
-                      {pendingAgentAction.message || "这一步已经挂起，登录后会继续替你办完。"}
+                      {pendingAgentAction.message || welcomeUi.chatShell.pendingActionDefaultMessage}
                     </p>
                     <p className={cn("text-xs leading-5", isDarkMode ? "text-white/54" : "text-black/52")}>
                       {pendingAgentAction.action.authMode === "bind_phone"
-                        ? "完成绑定手机号后回到这里，我会自动继续。"
-                        : "完成登录后回到这里，我会自动继续。"}
+                        ? welcomeUi.chatShell.pendingActionBindPhoneHint
+                        : welcomeUi.chatShell.pendingActionLoginHint}
                     </p>
                     {pendingActionNotice ? (
                       <p className={cn("text-xs", isDarkMode ? "text-white/54" : "text-black/52")}>{pendingActionNotice}</p>
@@ -2247,7 +2386,7 @@ export default function ChatPage() {
                       isDarkMode ? "bg-white text-[#111111] hover:bg-white/92" : "bg-black text-white hover:bg-black/92"
                     )}
                   >
-                    我已完成，继续
+                    {welcomeUi.chatShell.pendingActionResumeLabel}
                   </button>
                 </div>
               </section>
@@ -2505,7 +2644,7 @@ export default function ChatPage() {
                   >
                     {showComposerHint ? (
                       <span className={cn("text-xs leading-5", isDarkMode ? "text-white/24" : "text-black/28")}>
-                        也可以直接说地方、时间、类型或你想找的人
+                        {welcomeUi.chatShell.composerHint}
                       </span>
                     ) : null}
                     <PromptInputSubmit
@@ -2560,7 +2699,7 @@ export default function ChatPage() {
                 >
                   {showComposerHint ? (
                     <span className={cn("text-xs leading-5", isDarkMode ? "text-white/24" : "text-black/28")}>
-                      也可以直接说地方、时间、类型或你想找的人
+                      {welcomeUi.chatShell.composerHint}
                     </span>
                   ) : null}
                   <PromptInputSubmit

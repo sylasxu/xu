@@ -10,7 +10,7 @@
   <view class="report-sheet" catchtouchmove="noop">
     <!-- 标题栏 -->
     <view class="report-sheet__header">
-      <text class="report-sheet__title">{{type === 'activity' ? '举报活动' : type === 'message' ? '举报消息' : '举报用户'}}</text>
+      <text class="report-sheet__title">{{type === 'activity' ? titleByType.activity : type === 'message' ? titleByType.message : titleByType.user}}</text>
       <view class="close-btn" bindtap="onClose">
         <text class="report-sheet__close-icon">✕</text>
       </view>
@@ -18,7 +18,7 @@
 
     <!-- 举报原因选择 -->
     <view class="report-sheet__section">
-      <text class="report-sheet__label">请选择举报原因</text>
+      <text class="report-sheet__label">{{sectionTitles.reason}}</text>
       <t-radio-group
         value="{{selectedReason}}"
         bind:change="onReasonChange"
@@ -37,10 +37,10 @@
 
     <!-- 举报说明 -->
     <view class="report-sheet__section report-sheet__section--compact">
-      <text class="report-sheet__label report-sheet__label--compact">补充说明（可选）</text>
+      <text class="report-sheet__label report-sheet__label--compact">{{sectionTitles.description}}</text>
       <t-textarea
         value="{{description}}"
-        placeholder="请描述具体问题..."
+        placeholder="{{descriptionPlaceholder}}"
         maxlength="{{500}}"
         autosize
         bind:change="onDescriptionInput"
@@ -56,7 +56,7 @@
         disabled="{{!selectedReason || submitting}}"
         bindtap="onSubmit"
       >
-        提交举报
+        {{submitLabel}}
       </t-button>
     </view>
   </view>

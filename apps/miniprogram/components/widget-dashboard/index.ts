@@ -287,10 +287,9 @@ Component({
     updateGreeting() {
       const apiGreeting = readString(this.properties.greeting);
       const apiSubGreeting = readString(this.properties.subGreeting);
-
       this.setData({
         displayGreeting: apiGreeting || '你好～',
-        displaySubGreeting: apiSubGreeting || '今天想约什么局？',
+        displaySubGreeting: apiSubGreeting || '',
       });
     },
 

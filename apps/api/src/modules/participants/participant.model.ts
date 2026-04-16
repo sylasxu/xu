@@ -62,6 +62,38 @@ const ActionResponse = t.Object({
   msg: t.String(),
 });
 
+const FeedbackProblemOption = t.Object({
+  value: t.Union([
+    t.Literal('late'),
+    t.Literal('no_show'),
+    t.Literal('bad_attitude'),
+    t.Literal('not_as_described'),
+    t.Literal('other'),
+  ]),
+  label: t.String(),
+  icon: t.String(),
+});
+
+const FeedbackMetaResponse = t.Object({
+  title: t.String(),
+  positiveLabel: t.String(),
+  negativeLabel: t.String(),
+  problemSectionTitle: t.String(),
+  nextStepLabel: t.String(),
+  targetSectionTitle: t.String(),
+  descriptionSectionTitle: t.String(),
+  descriptionPlaceholder: t.String(),
+  backLabel: t.String(),
+  submitLabel: t.String(),
+  problems: t.Array(FeedbackProblemOption),
+  toast: t.Object({
+    missingProblem: t.String(),
+    missingTarget: t.String(),
+    success: t.String(),
+    failed: t.String(),
+  }),
+});
+
 // 路径参数
 const IdParams = t.Object({
   id: t.String({ format: 'uuid', description: '活动ID' }),
@@ -77,6 +109,8 @@ export const participantModel = new Elysia({ name: 'participantModel' })
     'participant.confirmFulfillmentResponse': ConfirmFulfillmentResponse,
     'participant.rebookFollowUpRequest': RebookFollowUpRequest,
     'participant.actionResponse': ActionResponse,
+    'participant.feedbackProblemOption': FeedbackProblemOption,
+    'participant.feedbackMetaResponse': FeedbackMetaResponse,
     'participant.idParams': IdParams,
     'common.error': ErrorResponseSchema,
   });
@@ -88,4 +122,6 @@ export type ConfirmFulfillmentRequest = Static<typeof ConfirmFulfillmentRequest>
 export type ConfirmFulfillmentResponse = Static<typeof ConfirmFulfillmentResponse>;
 export type RebookFollowUpRequest = Static<typeof RebookFollowUpRequest>;
 export type ActionResponse = Static<typeof ActionResponse>;
+export type FeedbackProblemOption = Static<typeof FeedbackProblemOption>;
+export type FeedbackMetaResponse = Static<typeof FeedbackMetaResponse>;
 export type IdParams = Static<typeof IdParams>;

@@ -136,12 +136,42 @@ const MessageCenterChatActivities = t.Object({
   totalUnread: t.Number(),
 });
 
+const MessageCenterUi = t.Object({
+  title: t.String({ description: '消息中心标题' }),
+  description: t.String({ description: '消息中心副文案' }),
+  visitorTitle: t.String({ description: '未登录占位标题' }),
+  visitorDescription: t.String({ description: '未登录占位说明' }),
+  summaryTitle: t.String({ description: '未读摘要标题' }),
+  pendingMatchesTitle: t.String({ description: '待确认匹配分区标题' }),
+  pendingMatchesEmpty: t.String({ description: '待确认匹配空状态文案' }),
+  requestAuthHint: t.String({ description: '未登录查看消息中心提示' }),
+  loadFailedText: t.String({ description: '消息中心加载失败文案' }),
+  markReadSuccess: t.String({ description: '标记已读成功提示' }),
+  markReadFailed: t.String({ description: '标记已读失败提示' }),
+  pendingDetailAuthHint: t.String({ description: '未登录查看匹配详情提示' }),
+  pendingDetailLoadFailed: t.String({ description: '匹配详情加载失败文案' }),
+  actionFailed: t.String({ description: '匹配操作失败文案' }),
+  followUpFailed: t.String({ description: '跟进动作失败文案' }),
+  refreshLabel: t.String({ description: '刷新按钮说明' }),
+  systemSectionTitle: t.String({ description: '系统跟进分区标题' }),
+  systemEmpty: t.String({ description: '系统通知空状态文案' }),
+  reviewActionLabel: t.String({ description: '活动复盘按钮文案' }),
+  rebookActionLabel: t.String({ description: '活动再约按钮文案' }),
+  kickoffActionLabel: t.String({ description: '群聊开场按钮文案' }),
+  markReadActionLabel: t.String({ description: '标记已读按钮文案' }),
+  chatSummarySectionTitle: t.String({ description: '群聊摘要分区标题' }),
+  chatSummaryDescription: t.String({ description: '群聊摘要说明文案' }),
+  chatSummaryEmpty: t.String({ description: '群聊摘要空状态文案' }),
+  chatSummaryFallbackMessage: t.String({ description: '群聊摘要默认消息文案' }),
+});
+
 const MessageCenterResponse = t.Object({
   systemNotifications: NotificationListResponse,
   pendingMatches: t.Array(MatchPendingItem),
   unreadNotificationCount: t.Number({ description: '通知区未读总数（系统未读 + 待确认匹配）' }),
   chatActivities: MessageCenterChatActivities,
   totalUnread: t.Number({ description: '消息中心未读总数（通知区 + 群聊区）' }),
+  ui: MessageCenterUi,
 });
 
 // 未读数量响应
@@ -181,6 +211,7 @@ export const notificationModel = new Elysia({ name: 'notificationModel' })
     'notification.matchPendingRequestMode': MatchPendingRequestMode,
     'notification.matchPendingDetailResponse': MatchPendingDetailResponse,
     'notification.messageCenterQuery': MessageCenterQuery,
+    'notification.messageCenterUi': MessageCenterUi,
     'notification.messageCenterChatItem': MessageCenterChatItem,
     'notification.messageCenterChatActivities': MessageCenterChatActivities,
     'notification.messageCenterResponse': MessageCenterResponse,
@@ -204,6 +235,7 @@ export type MatchPendingIcebreaker = Static<typeof MatchPendingIcebreaker>;
 export type MatchPendingRequestMode = Static<typeof MatchPendingRequestMode>;
 export type MatchPendingDetailResponse = Static<typeof MatchPendingDetailResponse>;
 export type MessageCenterQuery = Static<typeof MessageCenterQuery>;
+export type MessageCenterUi = Static<typeof MessageCenterUi>;
 export type MessageCenterChatItem = Static<typeof MessageCenterChatItem>;
 export type MessageCenterChatActivities = Static<typeof MessageCenterChatActivities>;
 export type MessageCenterResponse = Static<typeof MessageCenterResponse>;

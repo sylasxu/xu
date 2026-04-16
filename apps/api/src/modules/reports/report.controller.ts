@@ -3,6 +3,8 @@ import { Elysia } from 'elysia';
 import { basePlugins, verifyAuth, verifyAdmin, type ErrorResponse } from '../../setup';
 import {
   reportModel,
+  REPORT_REASONS,
+  type ReportMetaResponse,
 } from './report.model';
 import {
   createReport,
@@ -10,10 +12,112 @@ import {
   getReportById,
   updateReport,
 } from './report.service';
+import { getConfigValue } from '../ai/config/config.service';
+
+const DEFAULT_REPORT_META: ReportMetaResponse = {
+  titleByType: {
+    activity: '举报活动',
+    message: '举报消息',
+    user: '举报用户',
+  },
+  sectionTitles: {
+    reason: '请选择举报原因',
+    description: '补充说明（可选）',
+  },
+  descriptionPlaceholder: '请描述具体问题...',
+  submitLabel: '提交举报',
+  reasons: [
+    { value: 'inappropriate', label: '违规内容' },
+    { value: 'fake', label: '虚假信息' },
+    { value: 'harassment', label: '骚扰行为' },
+    { value: 'other', label: '其他' },
+  ],
+  toast: {
+    missingReason: '请选择举报原因',
+    invalidTarget: '举报目标无效',
+    invalidType: '举报类型无效',
+    success: '举报已提交',
+    failed: '举报失败',
+    networkError: '网络错误，请重试',
+  },
+};
+
+function readString(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function normalizeReportMeta(raw: unknown): ReportMetaResponse {
+  if (!raw || typeof raw !== 'object') {
+    return DEFAULT_REPORT_META;
+  }
+
+  const value = raw as Record<string, unknown>;
+  const titleByType = typeof value.titleByType === 'object' && value.titleByType !== null
+    ? value.titleByType as Record<string, unknown>
+    : {};
+  const sectionTitles = typeof value.sectionTitles === 'object' && value.sectionTitles !== null
+    ? value.sectionTitles as Record<string, unknown>
+    : {};
+  const reasons = typeof value.reasons === 'object' && value.reasons !== null
+    ? value.reasons as Record<string, unknown>
+    : {};
+  const toast = typeof value.toast === 'object' && value.toast !== null
+    ? value.toast as Record<string, unknown>
+    : {};
+
+  return {
+    titleByType: {
+      activity: readString(titleByType.activity) ?? DEFAULT_REPORT_META.titleByType.activity,
+      message: readString(titleByType.message) ?? DEFAULT_REPORT_META.titleByType.message,
+      user: readString(titleByType.user) ?? DEFAULT_REPORT_META.titleByType.user,
+    },
+    sectionTitles: {
+      reason: readString(sectionTitles.reason) ?? DEFAULT_REPORT_META.sectionTitles.reason,
+      description: readString(sectionTitles.description) ?? DEFAULT_REPORT_META.sectionTitles.description,
+    },
+    descriptionPlaceholder: readString(value.descriptionPlaceholder) ?? DEFAULT_REPORT_META.descriptionPlaceholder,
+    submitLabel: readString(value.submitLabel) ?? DEFAULT_REPORT_META.submitLabel,
+    reasons: REPORT_REASONS.map((reason) => ({
+      value: reason,
+      label: readString(reasons[reason]) ?? DEFAULT_REPORT_META.reasons.find((item) => item.value === reason)?.label ?? reason,
+    })),
+    toast: {
+      missingReason: readString(toast.missingReason) ?? DEFAULT_REPORT_META.toast.missingReason,
+      invalidTarget: readString(toast.invalidTarget) ?? DEFAULT_REPORT_META.toast.invalidTarget,
+      invalidType: readString(toast.invalidType) ?? DEFAULT_REPORT_META.toast.invalidType,
+      success: readString(toast.success) ?? DEFAULT_REPORT_META.toast.success,
+      failed: readString(toast.failed) ?? DEFAULT_REPORT_META.toast.failed,
+      networkError: readString(toast.networkError) ?? DEFAULT_REPORT_META.toast.networkError,
+    },
+  };
+}
 
 export const reportController = new Elysia({ prefix: '/reports' })
   .use(basePlugins)
   .use(reportModel)
+
+  .get(
+    '/meta',
+    async () => {
+      const raw = await getConfigValue<unknown>('ui.report', DEFAULT_REPORT_META);
+      return normalizeReportMeta(raw);
+    },
+    {
+      detail: {
+        tags: ['Reports'],
+        summary: '获取举报 UI 元数据',
+        description: '返回举报弹层所需的标题、原因标签、输入框提示与 toast 文案。',
+      },
+      response: {
+        200: 'report.metaResponse',
+      },
+    }
+  )
 
   // POST /reports - 提交举报（需要登录）
   .post(

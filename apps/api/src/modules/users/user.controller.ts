@@ -12,6 +12,7 @@ import {
   getUserList, 
   updateUser,
   deleteUser,
+  getQuota,
 } from './user.service';
 import { getEnhancedUserProfile } from '../ai/memory/working';
 
@@ -46,6 +47,45 @@ export const userController = new Elysia({ prefix: '/users' })
         200: UserListResponseSchema,
         401: 'common.error',
         403: 'common.error',
+        500: 'common.error',
+      },
+    }
+  )
+
+  // 获取用户 AI 创建额度
+  .get(
+    '/:id/quota',
+    async ({ params, set, jwt, headers }) => {
+      try {
+        await verifySelfOrAdmin(jwt, headers, params.id);
+      } catch (error) {
+        if (error instanceof AuthError) {
+          set.status = error.status;
+          return { code: error.status, msg: error.message } satisfies ErrorResponse;
+        }
+        set.status = 500;
+        return { code: 500, msg: '鉴权失败' } satisfies ErrorResponse;
+      }
+
+      const quota = await getQuota(params.id);
+      if (!quota) {
+        set.status = 404;
+        return { code: 404, msg: '用户不存在' } satisfies ErrorResponse;
+      }
+
+      return quota;
+    },
+    {
+      detail: {
+        tags: ['Internal'],
+        summary: '获取用户 AI 创建额度',
+        description: '获取指定用户今日剩余 AI 创建活动额度',
+      },
+      response: {
+        200: 'user.quotaResponse',
+        401: 'common.error',
+        403: 'common.error',
+        404: 'common.error',
         500: 'common.error',
       },
     }

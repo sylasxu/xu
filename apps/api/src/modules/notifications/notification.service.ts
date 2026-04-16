@@ -3,6 +3,7 @@ import { db, notifications, users, participants, intentMatches, partnerIntents, 
 import type {
   MessageCenterQuery,
   MessageCenterResponse,
+  MessageCenterUi,
   MatchPendingDetailResponse,
   MatchPendingResponse,
   NotificationListQuery,
@@ -12,6 +13,7 @@ import type {
 import { getChatActivities } from '../chat/chat.service';
 import { sendServiceNotificationByUserId, type ServiceNotificationScene } from '../wechat';
 import { confirmMatch as confirmPendingMatchService, cancelMatch as cancelPendingMatchService } from '../ai/tools/partner-match';
+import { getConfigValue } from '../ai/config/config.service';
 
 // 通知类型枚举值
 const NOTIFICATION_TYPES = ['join', 'quit', 'activity_start', 'completed', 'cancelled', 'new_participant', 'post_activity', 'activity_reminder'] as const;
@@ -32,6 +34,80 @@ const SPORT_TYPE_NAMES: Record<string, string> = {
   swimming: '游泳',
   cycling: '骑行',
 };
+
+const DEFAULT_MESSAGE_CENTER_UI: MessageCenterUi = {
+  title: '消息中心',
+  description: '待确认搭子、活动后跟进、群聊摘要都在这里处理。',
+  visitorTitle: '这里会接住后续进展',
+  visitorDescription: '待确认搭子、活动后跟进和群聊未读，都会整理到这里。',
+  summaryTitle: '未读总数',
+  pendingMatchesTitle: '待确认搭子',
+  pendingMatchesEmpty: '当前没有待确认匹配，新的搭子撮合到了会先出现在这里。',
+  requestAuthHint: '请先登录后再查看消息中心',
+  loadFailedText: '消息中心加载失败',
+  markReadSuccess: '已标记为已读',
+  markReadFailed: '标记已读失败',
+  pendingDetailAuthHint: '请先登录后再查看匹配详情',
+  pendingDetailLoadFailed: '详情加载失败',
+  actionFailed: '操作失败，请稍后再试',
+  followUpFailed: '发起失败，请稍后再试',
+  refreshLabel: '刷新消息中心',
+  systemSectionTitle: '系统跟进',
+  systemEmpty: '暂无系统通知，活动进度有变化会第一时间出现在这里。',
+  reviewActionLabel: '去复盘',
+  rebookActionLabel: '去再约',
+  kickoffActionLabel: '让 AI 帮我写开场白',
+  markReadActionLabel: '标记已读',
+  chatSummarySectionTitle: '活动群聊摘要',
+  chatSummaryDescription: 'H5 先提供摘要和跟进入口，完整活动群聊体验目前仍以小程序为主。',
+  chatSummaryEmpty: '暂无活动群聊记录，参与活动后这里会同步显示最近动态。',
+  chatSummaryFallbackMessage: '还没人说话，发句开场吧',
+};
+
+function readNonEmptyString(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function normalizeMessageCenterUi(raw: unknown): MessageCenterUi {
+  if (!raw || typeof raw !== 'object') {
+    return DEFAULT_MESSAGE_CENTER_UI;
+  }
+
+  const value = raw as Record<string, unknown>;
+  return {
+    title: readNonEmptyString(value.title) ?? DEFAULT_MESSAGE_CENTER_UI.title,
+    description: readNonEmptyString(value.description) ?? DEFAULT_MESSAGE_CENTER_UI.description,
+    visitorTitle: readNonEmptyString(value.visitorTitle) ?? DEFAULT_MESSAGE_CENTER_UI.visitorTitle,
+    visitorDescription: readNonEmptyString(value.visitorDescription) ?? DEFAULT_MESSAGE_CENTER_UI.visitorDescription,
+    summaryTitle: readNonEmptyString(value.summaryTitle) ?? DEFAULT_MESSAGE_CENTER_UI.summaryTitle,
+    pendingMatchesTitle: readNonEmptyString(value.pendingMatchesTitle) ?? DEFAULT_MESSAGE_CENTER_UI.pendingMatchesTitle,
+    pendingMatchesEmpty: readNonEmptyString(value.pendingMatchesEmpty) ?? DEFAULT_MESSAGE_CENTER_UI.pendingMatchesEmpty,
+    requestAuthHint: readNonEmptyString(value.requestAuthHint) ?? DEFAULT_MESSAGE_CENTER_UI.requestAuthHint,
+    loadFailedText: readNonEmptyString(value.loadFailedText) ?? DEFAULT_MESSAGE_CENTER_UI.loadFailedText,
+    markReadSuccess: readNonEmptyString(value.markReadSuccess) ?? DEFAULT_MESSAGE_CENTER_UI.markReadSuccess,
+    markReadFailed: readNonEmptyString(value.markReadFailed) ?? DEFAULT_MESSAGE_CENTER_UI.markReadFailed,
+    pendingDetailAuthHint: readNonEmptyString(value.pendingDetailAuthHint) ?? DEFAULT_MESSAGE_CENTER_UI.pendingDetailAuthHint,
+    pendingDetailLoadFailed: readNonEmptyString(value.pendingDetailLoadFailed) ?? DEFAULT_MESSAGE_CENTER_UI.pendingDetailLoadFailed,
+    actionFailed: readNonEmptyString(value.actionFailed) ?? DEFAULT_MESSAGE_CENTER_UI.actionFailed,
+    followUpFailed: readNonEmptyString(value.followUpFailed) ?? DEFAULT_MESSAGE_CENTER_UI.followUpFailed,
+    refreshLabel: readNonEmptyString(value.refreshLabel) ?? DEFAULT_MESSAGE_CENTER_UI.refreshLabel,
+    systemSectionTitle: readNonEmptyString(value.systemSectionTitle) ?? DEFAULT_MESSAGE_CENTER_UI.systemSectionTitle,
+    systemEmpty: readNonEmptyString(value.systemEmpty) ?? DEFAULT_MESSAGE_CENTER_UI.systemEmpty,
+    reviewActionLabel: readNonEmptyString(value.reviewActionLabel) ?? DEFAULT_MESSAGE_CENTER_UI.reviewActionLabel,
+    rebookActionLabel: readNonEmptyString(value.rebookActionLabel) ?? DEFAULT_MESSAGE_CENTER_UI.rebookActionLabel,
+    kickoffActionLabel: readNonEmptyString(value.kickoffActionLabel) ?? DEFAULT_MESSAGE_CENTER_UI.kickoffActionLabel,
+    markReadActionLabel: readNonEmptyString(value.markReadActionLabel) ?? DEFAULT_MESSAGE_CENTER_UI.markReadActionLabel,
+    chatSummarySectionTitle: readNonEmptyString(value.chatSummarySectionTitle) ?? DEFAULT_MESSAGE_CENTER_UI.chatSummarySectionTitle,
+    chatSummaryDescription: readNonEmptyString(value.chatSummaryDescription) ?? DEFAULT_MESSAGE_CENTER_UI.chatSummaryDescription,
+    chatSummaryEmpty: readNonEmptyString(value.chatSummaryEmpty) ?? DEFAULT_MESSAGE_CENTER_UI.chatSummaryEmpty,
+    chatSummaryFallbackMessage: readNonEmptyString(value.chatSummaryFallbackMessage) ?? DEFAULT_MESSAGE_CENTER_UI.chatSummaryFallbackMessage,
+  };
+}
 
 function getIntentTypeName(activityType: string, sportType?: string | null): string {
   if (activityType === 'sports' && sportType && SPORT_TYPE_NAMES[sportType]) {
@@ -463,7 +539,7 @@ export async function getMessageCenterData(
   const chatPage = query.chatPage || 1;
   const chatLimit = query.chatLimit || 20;
 
-  const [systemNotifications, pendingMatchesResult, unreadCountResult, chatActivities] = await Promise.all([
+  const [systemNotifications, pendingMatchesResult, unreadCountResult, chatActivities, rawUi] = await Promise.all([
     getNotifications(userId, {
       userId,
       page: notificationPage,
@@ -476,6 +552,7 @@ export async function getMessageCenterData(
       page: chatPage,
       limit: chatLimit,
     }),
+    getConfigValue<unknown>('ui.message_center', DEFAULT_MESSAGE_CENTER_UI),
   ]);
 
   const unreadNotificationCount = (unreadCountResult.count || 0) + pendingMatchesResult.items.length;
@@ -487,6 +564,7 @@ export async function getMessageCenterData(
     unreadNotificationCount,
     chatActivities,
     totalUnread,
+    ui: normalizeMessageCenterUi(rawUi),
   };
 }
 

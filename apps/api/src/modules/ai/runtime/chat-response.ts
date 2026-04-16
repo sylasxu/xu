@@ -1076,6 +1076,7 @@ async function resolveConversationContext(
   viewer: ViewerContext | null
 ): Promise<ResolvedConversation> {
   const requestedConversationId = request.conversationId?.trim() || '';
+  const requestLevelSuggestions = request.latestAssistantSuggestions;
 
   if (!viewer) {
     const conversationId = requestedConversationId || createId(ID_PREFIX.conversation);
@@ -1119,7 +1120,8 @@ async function resolveConversationContext(
         throw new Error('无权限访问该会话');
       }
 
-      const latestAssistantSuggestions = readLatestAssistantSuggestionsFromStoredMessages(conversation.messages);
+      const latestAssistantSuggestions = readLatestAssistantSuggestionsFromStoredMessages(conversation.messages)
+        ?? requestLevelSuggestions;
       const allHistoryMessages = toHistoryMessages(conversation.messages);
       const { historyMessages, conversationSummary } = compressConversationHistory(
         allHistoryMessages,
@@ -1154,6 +1156,7 @@ async function resolveConversationContext(
   return {
     conversationId: thread.id,
     historyMessages: [],
+    ...(requestLevelSuggestions ? { latestAssistantSuggestions: requestLevelSuggestions } : {}),
     trace: {
       stage: 'conversation_resolved',
       detail: {
@@ -1163,7 +1166,7 @@ async function resolveConversationContext(
         conversationId: thread.id,
         conversationMode: 'authenticated_persistent',
         historySource: 'empty',
-        suggestions: null,
+        suggestions: requestLevelSuggestions?.kind || null,
       },
     },
   };

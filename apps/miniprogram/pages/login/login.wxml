@@ -5,7 +5,7 @@
 <t-navbar left-arrow />
 <view class="login-page">
   <!-- 标题 -->
-  <view class="login-page__title">登录后保存聊天和活动进展</view>
+  <view class="login-page__title">继续这次聊天和活动进展</view>
 
   <!-- 输入区域 -->
   <view class="login-input">

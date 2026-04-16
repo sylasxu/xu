@@ -181,6 +181,7 @@ export const DEFAULT_FEATURE_RULES: FeatureCombinationRule[] = [
       { keywords: ['找搭子', '求搭子', '谁组我就去', '懒得组局', '等人约'] },
       { keywords: ['我的意向', '我的搭子意向', '确认匹配', '确认发布'] },
       { keywords: [], syntaxPattern: /找搭子|求搭子|找[^，。！？\s]{0,12}搭子|谁组我就去|等人约/ },
+      { keywords: [], syntaxPattern: new RegExp(`${ACTIVITY_TYPE_WORDS.join('|')}.{0,6}搭子|搭子.{0,6}${ACTIVITY_TYPE_WORDS.join('|')}`) },
     ],
     baseConfidence: 0.65,
     signalBoost: 0.15,

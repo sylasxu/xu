@@ -20,6 +20,21 @@ Component({
     styleIsolation: 'apply-shared',
   },
 
+  properties: {
+    offlineText: {
+      type: String,
+      value: '网络连接已断开',
+    },
+    retryText: {
+      type: String,
+      value: '重试',
+    },
+    restoredToast: {
+      type: String,
+      value: '网络已恢复',
+    },
+  },
+
   data: {
     visible: false,
     networkType: 'unknown',
@@ -78,7 +93,7 @@ Component({
       // 网络恢复时显示提示
       if (isOnline && this.data.visible) {
         wx.showToast({
-          title: '网络已恢复',
+          title: this.properties.restoredToast,
           icon: 'success',
           duration: 1500,
         })

@@ -134,6 +134,39 @@ const CreateReportSuccessSchema = t.Object({
   id: t.String({ description: '举报 ID' }),
 });
 
+const ReportReasonOptionSchema = t.Object({
+  value: t.Union([
+    t.Literal('inappropriate'),
+    t.Literal('fake'),
+    t.Literal('harassment'),
+    t.Literal('other'),
+  ]),
+  label: t.String({ description: '举报原因展示文案' }),
+});
+
+const ReportMetaResponseSchema = t.Object({
+  titleByType: t.Object({
+    activity: t.String(),
+    message: t.String(),
+    user: t.String(),
+  }),
+  sectionTitles: t.Object({
+    reason: t.String(),
+    description: t.String(),
+  }),
+  descriptionPlaceholder: t.String(),
+  submitLabel: t.String(),
+  reasons: t.Array(ReportReasonOptionSchema),
+  toast: t.Object({
+    missingReason: t.String(),
+    invalidTarget: t.String(),
+    invalidType: t.String(),
+    success: t.String(),
+    failed: t.String(),
+    networkError: t.String(),
+  }),
+});
+
 // ============ 注册到 Elysia ============
 
 export const reportModel = new Elysia({ name: 'reportModel' })
@@ -144,6 +177,7 @@ export const reportModel = new Elysia({ name: 'reportModel' })
     'report.idParams': ReportIdParamsSchema,
     'report.response': ReportResponseSchema,
     'report.listResponse': ReportListResponseSchema,
+    'report.metaResponse': ReportMetaResponseSchema,
     'report.error': ErrorResponseSchema,
     'common.error': ErrorResponseSchema,
     'report.success': SuccessResponseSchema,
@@ -158,4 +192,5 @@ export type UpdateReportRequest = Static<typeof UpdateReportRequestSchema>;
 export type ReportIdParams = Static<typeof ReportIdParamsSchema>;
 export type ReportResponse = Static<typeof ReportResponseSchema>;
 export type ReportListResponse = Static<typeof ReportListResponseSchema>;
+export type ReportMetaResponse = Static<typeof ReportMetaResponseSchema>;
 export type SuccessResponse = Static<typeof SuccessResponseSchema>;

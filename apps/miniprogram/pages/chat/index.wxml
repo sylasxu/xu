@@ -9,7 +9,12 @@
 -->
 <view class="chat-page {{isWelcomeState ? 'chat-page--welcome' : 'chat-page--conversation'}}">
   <!-- 网络状态通知条 -->
-  <network-status bind:retry="onNetworkRetry" />
+  <network-status
+    offlineText="{{networkOfflineText}}"
+    retryText="{{networkRetryText}}"
+    restoredToast="{{networkRestoredToast}}"
+    bind:retry="onNetworkRetry"
+  />
   
   <view wx:if="{{isWelcomeState}}" class="atmospheric-bg"></view>
   
@@ -28,7 +33,7 @@
       <view class="welcome-hero">
         <view class="welcome-hero__copy">
           <text class="welcome-hero__title">{{welcomeGreeting}}</text>
-          <text class="welcome-hero__subtitle">{{welcomeSubGreeting}}</text>
+          <text wx:if="{{welcomeSubGreeting}}" class="welcome-hero__subtitle">{{welcomeSubGreeting}}</text>
         </view>
         <view class="welcome-hero__spark"></view>
       </view>
@@ -86,6 +91,8 @@
                   part="{{part}}"
                   userNickname="{{userNickname}}"
                   isHistorical="{{index < messages.length - 1}}"
+                  defaultErrorMessage="{{widgetErrorMessage}}"
+                  defaultErrorRetryText="{{widgetErrorRetryText}}"
                   bind:dashboardactivitytap="onDashboardActivityTap"
                   bind:dashboardprompttap="onDashboardPromptTap"
                   bind:dashboardquickitemtap="onDashboardQuickItemTap"

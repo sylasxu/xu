@@ -44,6 +44,13 @@ const DEFAULT_WELCOME_PROFILE_HINTS = {
   medium: '我正在记住你的习惯',
   high: '你的偏好已经比较清楚，可以直接让我来安排',
 }
+const DEFAULT_RUNTIME_STATUS_UI = {
+  networkOfflineText: '网络连接已断开',
+  networkRetryText: '重试',
+  networkRestoredToast: '网络已恢复',
+  widgetErrorMessage: '出了点问题',
+  widgetErrorRetryText: '重试',
+}
 const DEFAULT_WELCOME_SOCIAL_PROFILE: SocialProfile = {
   joinedActivities: 0,
   hostedActivities: 0,
@@ -84,6 +91,11 @@ interface PageData {
   
   // 欢迎卡片 (v3.10 新结构)
   composerPlaceholder: string
+  networkOfflineText: string
+  networkRetryText: string
+  networkRestoredToast: string
+  widgetErrorMessage: string
+  widgetErrorRetryText: string
   currentTasks: ChatTaskItem[]
 }
 
@@ -356,6 +368,11 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     welcomeProfileHints: DEFAULT_WELCOME_PROFILE_HINTS,
     welcomeQuickPrompts: DEFAULT_WELCOME_QUICK_PROMPTS,
     composerPlaceholder: DEFAULT_COMPOSER_PLACEHOLDER,
+    networkOfflineText: DEFAULT_RUNTIME_STATUS_UI.networkOfflineText,
+    networkRetryText: DEFAULT_RUNTIME_STATUS_UI.networkRetryText,
+    networkRestoredToast: DEFAULT_RUNTIME_STATUS_UI.networkRestoredToast,
+    widgetErrorMessage: DEFAULT_RUNTIME_STATUS_UI.widgetErrorMessage,
+    widgetErrorRetryText: DEFAULT_RUNTIME_STATUS_UI.widgetErrorRetryText,
     currentTasks: [],
   },
 
@@ -530,9 +547,35 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
         typeof welcomeData.ui?.composerPlaceholder === 'string' && welcomeData.ui.composerPlaceholder.trim()
           ? welcomeData.ui.composerPlaceholder.trim()
           : DEFAULT_COMPOSER_PLACEHOLDER
+      const runtimeStatus = welcomeData.ui?.chatShell?.runtimeStatus
+      const networkOfflineText =
+        typeof runtimeStatus?.networkOfflineText === 'string' && runtimeStatus.networkOfflineText.trim()
+          ? runtimeStatus.networkOfflineText.trim()
+          : DEFAULT_RUNTIME_STATUS_UI.networkOfflineText
+      const networkRetryText =
+        typeof runtimeStatus?.networkRetryText === 'string' && runtimeStatus.networkRetryText.trim()
+          ? runtimeStatus.networkRetryText.trim()
+          : DEFAULT_RUNTIME_STATUS_UI.networkRetryText
+      const networkRestoredToast =
+        typeof runtimeStatus?.networkRestoredToast === 'string' && runtimeStatus.networkRestoredToast.trim()
+          ? runtimeStatus.networkRestoredToast.trim()
+          : DEFAULT_RUNTIME_STATUS_UI.networkRestoredToast
+      const widgetErrorMessage =
+        typeof runtimeStatus?.widgetErrorMessage === 'string' && runtimeStatus.widgetErrorMessage.trim()
+          ? runtimeStatus.widgetErrorMessage.trim()
+          : DEFAULT_RUNTIME_STATUS_UI.widgetErrorMessage
+      const widgetErrorRetryText =
+        typeof runtimeStatus?.widgetErrorRetryText === 'string' && runtimeStatus.widgetErrorRetryText.trim()
+          ? runtimeStatus.widgetErrorRetryText.trim()
+          : DEFAULT_RUNTIME_STATUS_UI.widgetErrorRetryText
 
       this.setData({
         composerPlaceholder,
+        networkOfflineText,
+        networkRetryText,
+        networkRestoredToast,
+        widgetErrorMessage,
+        widgetErrorRetryText,
         isWelcomeState: true,
         welcomeGreeting:
           typeof welcomeData.greeting === 'string' && welcomeData.greeting.trim()
@@ -554,6 +597,11 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
 
       this.setData({
         composerPlaceholder: DEFAULT_COMPOSER_PLACEHOLDER,
+        networkOfflineText: DEFAULT_RUNTIME_STATUS_UI.networkOfflineText,
+        networkRetryText: DEFAULT_RUNTIME_STATUS_UI.networkRetryText,
+        networkRestoredToast: DEFAULT_RUNTIME_STATUS_UI.networkRestoredToast,
+        widgetErrorMessage: DEFAULT_RUNTIME_STATUS_UI.widgetErrorMessage,
+        widgetErrorRetryText: DEFAULT_RUNTIME_STATUS_UI.widgetErrorRetryText,
         isWelcomeState: true,
         welcomeGreeting: DEFAULT_WELCOME_GREETING,
         welcomeSubGreeting: DEFAULT_WELCOME_SUB_GREETING,

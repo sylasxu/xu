@@ -116,6 +116,7 @@
   <block wx:elif="{{part.widgetType === 'error'}}">
     <widget-error
       message="{{errorMessage}}"
+      retryText="{{errorRetryText}}"
       showRetry="{{errorShowRetry}}"
       data-original-text="{{part.data.originalText}}"
       bind:retry="onWidgetErrorRetry"

@@ -55,6 +55,34 @@ type MessageCenterResponse = {
     totalUnread: number;
   };
   totalUnread: number;
+  ui: {
+    title: string;
+    description: string;
+    visitorTitle: string;
+    visitorDescription: string;
+    summaryTitle: string;
+    pendingMatchesTitle: string;
+    pendingMatchesEmpty: string;
+    requestAuthHint: string;
+    loadFailedText: string;
+    markReadSuccess: string;
+    markReadFailed: string;
+    pendingDetailAuthHint: string;
+    pendingDetailLoadFailed: string;
+    actionFailed: string;
+    followUpFailed: string;
+    refreshLabel: string;
+    systemSectionTitle: string;
+    systemEmpty: string;
+    reviewActionLabel: string;
+    rebookActionLabel: string;
+    kickoffActionLabel: string;
+    markReadActionLabel: string;
+    chatSummarySectionTitle: string;
+    chatSummaryDescription: string;
+    chatSummaryEmpty: string;
+    chatSummaryFallbackMessage: string;
+  };
 };
 
 type PendingMatch = {
@@ -379,7 +407,7 @@ export function MessageCenterDrawer({
   const requestJson = useCallback(
     async <T,>(path: string, init?: RequestInit): Promise<T> => {
       if (!authToken) {
-        throw new Error("请先登录后再查看消息中心");
+        throw new Error(messageCenter?.ui.requestAuthHint || "请先登录后再查看消息中心");
       }
 
       const headers = new Headers(init?.headers);
@@ -401,7 +429,7 @@ export function MessageCenterDrawer({
 
       return payload as T;
     },
-    [authToken]
+    [authToken, messageCenter?.ui.requestAuthHint]
   );
 
   const refreshMessageCenter = useCallback(
@@ -439,7 +467,7 @@ export function MessageCenterDrawer({
         setError(null);
       } catch (requestError) {
         if (!silent) {
-          setError(requestError instanceof Error ? requestError.message : "消息中心加载失败");
+          setError(requestError instanceof Error ? requestError.message : messageCenter?.ui.loadFailedText || "消息中心加载失败");
         }
       } finally {
         if (silent) {
@@ -449,7 +477,7 @@ export function MessageCenterDrawer({
         }
       }
     },
-    [authToken, requestJson, userId]
+    [authToken, messageCenter?.ui.loadFailedText, requestJson, userId]
   );
 
   useEffect(() => {
@@ -487,24 +515,24 @@ export function MessageCenterDrawer({
       setPendingActionKey(actionKey);
       try {
         await markNotificationRead(notificationId);
-        setNotice({ kind: "success", text: "已标记为已读" });
+        setNotice({ kind: "success", text: messageCenter?.ui.markReadSuccess || "已标记为已读" });
         await refreshMessageCenter({ silent: true });
       } catch (requestError) {
         setNotice({
           kind: "error",
-          text: requestError instanceof Error ? requestError.message : "标记已读失败",
+          text: requestError instanceof Error ? requestError.message : messageCenter?.ui.markReadFailed || "标记已读失败",
         });
       } finally {
         setPendingActionKey(null);
       }
     },
-    [markNotificationRead, refreshMessageCenter]
+    [markNotificationRead, messageCenter?.ui.markReadFailed, messageCenter?.ui.markReadSuccess, refreshMessageCenter]
   );
 
   const openPendingMatchDetail = useCallback(
     async (matchId: string) => {
       if (!userId) {
-        setNotice({ kind: "error", text: "请先登录后再查看匹配详情" });
+        setNotice({ kind: "error", text: messageCenter?.ui.pendingDetailAuthHint || "请先登录后再查看匹配详情" });
         return;
       }
 
@@ -520,12 +548,14 @@ export function MessageCenterDrawer({
         );
         setPendingMatchDetail(payload);
       } catch (requestError) {
-        setPendingMatchDetailError(requestError instanceof Error ? requestError.message : "详情加载失败");
+        setPendingMatchDetailError(
+          requestError instanceof Error ? requestError.message : messageCenter?.ui.pendingDetailLoadFailed || "详情加载失败"
+        );
       } finally {
         setPendingMatchDetailLoading(false);
       }
     },
-    [requestJson, userId]
+    [messageCenter?.ui.pendingDetailAuthHint, messageCenter?.ui.pendingDetailLoadFailed, requestJson, userId]
   );
 
   const closePendingMatchDetail = useCallback(() => {
@@ -599,13 +629,13 @@ export function MessageCenterDrawer({
       } catch (requestError) {
         setNotice({
           kind: "error",
-          text: requestError instanceof Error ? requestError.message : "操作失败，请稍后再试",
+          text: requestError instanceof Error ? requestError.message : messageCenter?.ui.actionFailed || "操作失败，请稍后再试",
         });
       } finally {
         setPendingActionKey(null);
       }
     },
-    [closePendingMatchDetail, refreshMessageCenter, requestJson]
+    [closePendingMatchDetail, messageCenter?.ui.actionFailed, refreshMessageCenter, requestJson]
   );
 
   const handleFollowUpPrompt = useCallback(
@@ -634,7 +664,12 @@ export function MessageCenterDrawer({
               ? buildRebookPrompt(notification)
               : buildKickoffPrompt(notification.activityId || undefined, notification.title));
         const displayText =
-          promptOverride?.label || (mode === "review" ? "去复盘" : mode === "rebook" ? "去再约" : "让 AI 帮我写开场白");
+          promptOverride?.label ||
+          (mode === "review"
+            ? messageCenter?.ui.reviewActionLabel || "去复盘"
+            : mode === "rebook"
+              ? messageCenter?.ui.rebookActionLabel || "去再约"
+              : messageCenter?.ui.kickoffActionLabel || "让 AI 帮我写开场白");
         const contextOverrides: PromptContextOverrides = {
           ...(notification.activityId ? { activityId: notification.activityId } : {}),
           activityMode: mode,
@@ -648,13 +683,22 @@ export function MessageCenterDrawer({
       } catch (requestError) {
         setNotice({
           kind: "error",
-          text: requestError instanceof Error ? requestError.message : "发起失败，请稍后再试",
+          text: requestError instanceof Error ? requestError.message : messageCenter?.ui.followUpFailed || "发起失败，请稍后再试",
         });
       } finally {
         setPendingActionKey(null);
       }
     },
-    [markNotificationRead, onSendPrompt, recordRebookFollowUp, refreshMessageCenter]
+    [
+      markNotificationRead,
+      messageCenter?.ui.followUpFailed,
+      messageCenter?.ui.kickoffActionLabel,
+      messageCenter?.ui.rebookActionLabel,
+      messageCenter?.ui.reviewActionLabel,
+      onSendPrompt,
+      recordRebookFollowUp,
+      refreshMessageCenter,
+    ]
   );
 
   const pendingMatches = messageCenter?.pendingMatches || [];
@@ -694,10 +738,10 @@ export function MessageCenterDrawer({
         <DialogHeader className={cn("border-b px-5 pb-4 pt-5 text-left", isDarkMode ? "border-white/8" : "border-black/8")}>
           <DialogTitle className="flex items-center gap-2 text-[18px] font-semibold tracking-tight">
             <BellRing className="h-5 w-5" />
-            消息中心
+            {messageCenter?.ui.title || "消息中心"}
           </DialogTitle>
           <DialogDescription className={cn("text-sm", isDarkMode ? "text-white/54" : "text-black/52")}>
-            待确认搭子、活动后跟进、群聊摘要都在这里处理。
+            {messageCenter?.ui.description || "待确认搭子、活动后跟进、群聊摘要都在这里处理。"}
           </DialogDescription>
         </DialogHeader>
 
@@ -771,9 +815,9 @@ export function MessageCenterDrawer({
                 isDarkMode ? "border-white/10 bg-white/[0.035]" : "border-black/8 bg-white"
               )}
             >
-              <p className="text-base font-semibold">未登录也能先和 AI 聊</p>
+              <p className="text-base font-semibold">{messageCenter?.ui.visitorTitle || "这里会接住后续进展"}</p>
               <p className={cn("mt-2 text-sm leading-6", isDarkMode ? "text-white/54" : "text-black/52")}>
-                登录后，这里才会展示待确认搭子、活动后跟进和群聊未读。
+                {messageCenter?.ui.visitorDescription || "待确认搭子、活动后跟进和群聊未读，都会整理到这里。"}
               </p>
             </div>
           ) : loading && !messageCenter ? (
@@ -804,7 +848,7 @@ export function MessageCenterDrawer({
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-semibold">未读总数</p>
+                  <p className="text-sm font-semibold">{messageCenter?.ui.summaryTitle || "未读总数"}</p>
                   <p className={cn("mt-1 text-xs", isDarkMode ? "text-white/54" : "text-black/52")}>
                     通知 {messageCenter?.unreadNotificationCount || 0} 条，群聊 {messageCenter?.chatActivities.totalUnread || 0} 条
                   </p>
@@ -817,7 +861,7 @@ export function MessageCenterDrawer({
                     "inline-flex h-9 w-9 items-center justify-center rounded-full border transition",
                     isDarkMode ? "border-white/10 bg-white/[0.035] text-white/82 hover:bg-white/[0.06]" : "border-black/8 bg-white text-black/76 hover:bg-black/[0.03]"
                   )}
-                  aria-label="刷新消息中心"
+                  aria-label={messageCenter?.ui.refreshLabel || "刷新消息中心"}
                 >
                   <RefreshCw className={cn("h-4 w-4", refreshing ? "animate-spin" : "")} />
                 </button>
@@ -831,7 +875,7 @@ export function MessageCenterDrawer({
               >
                 <div className="mb-3 flex items-center gap-2">
                   <Users className="h-4 w-4 text-white/62" />
-                  <p className="text-sm font-semibold">待确认搭子</p>
+                  <p className="text-sm font-semibold">{messageCenter?.ui.pendingMatchesTitle || "待确认搭子"}</p>
                   <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", isDarkMode ? "border border-white/8 bg-white/[0.04] text-white/70" : "border border-black/8 bg-black/[0.03] text-black/70")}>
                     {pendingMatches.length}
                   </span>
@@ -1004,7 +1048,7 @@ export function MessageCenterDrawer({
                   </div>
                 ) : pendingMatches.length === 0 ? (
                   <p className={cn("text-sm leading-6", isDarkMode ? "text-white/54" : "text-black/52")}>
-                    当前没有待确认匹配，新的搭子撮合到了会先出现在这里。
+                    {messageCenter?.ui.pendingMatchesEmpty || "当前没有待确认匹配，新的搭子撮合到了会先出现在这里。"}
                   </p>
                 ) : (
                   <div className="space-y-3">
@@ -1092,7 +1136,7 @@ export function MessageCenterDrawer({
               >
                 <div className="mb-3 flex items-center gap-2">
                   <BellRing className="h-4 w-4 text-white/62" />
-                  <p className="text-sm font-semibold">系统跟进</p>
+                  <p className="text-sm font-semibold">{messageCenter?.ui.systemSectionTitle || "系统跟进"}</p>
                   <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", isDarkMode ? "border border-white/8 bg-white/[0.04] text-white/70" : "border border-black/8 bg-black/[0.03] text-black/70")}>
                     {systemNotifications.length}
                   </span>
@@ -1100,7 +1144,7 @@ export function MessageCenterDrawer({
 
                 {systemNotifications.length === 0 ? (
                   <p className={cn("text-sm leading-6", isDarkMode ? "text-white/54" : "text-black/52")}>
-                    暂无系统通知，活动进度有变化会第一时间出现在这里。
+                    {messageCenter?.ui.systemEmpty || "暂无系统通知，活动进度有变化会第一时间出现在这里。"}
                   </p>
                 ) : (
                   <div className="space-y-3">
@@ -1151,7 +1195,7 @@ export function MessageCenterDrawer({
                                 className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-2 text-xs font-medium text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 {pendingActionKey === reviewKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                                去复盘
+                                {messageCenter?.ui.reviewActionLabel || "去复盘"}
                               </button>
                               <button
                                 type="button"
@@ -1163,7 +1207,7 @@ export function MessageCenterDrawer({
                                 )}
                               >
                                 {pendingActionKey === rebookKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                                去再约
+                                {messageCenter?.ui.rebookActionLabel || "去再约"}
                               </button>
                             </div>
                           ) : canKickoff ? (
@@ -1175,7 +1219,7 @@ export function MessageCenterDrawer({
                                 className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-2 text-xs font-medium text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 {pendingActionKey === kickoffKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                                让 AI 帮我写开场白
+                                {messageCenter?.ui.kickoffActionLabel || "让 AI 帮我写开场白"}
                               </button>
                             </div>
                           ) : !notification.isRead ? (
@@ -1189,7 +1233,7 @@ export function MessageCenterDrawer({
                               )}
                             >
                               {pendingActionKey === readKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                              标记已读
+                              {messageCenter?.ui.markReadActionLabel || "标记已读"}
                             </button>
                           ) : null}
                         </div>
@@ -1207,18 +1251,18 @@ export function MessageCenterDrawer({
               >
                 <div className="mb-3 flex items-center gap-2">
                   <MessageSquareText className="h-4 w-4 text-white/62" />
-                  <p className="text-sm font-semibold">活动群聊摘要</p>
+                  <p className="text-sm font-semibold">{messageCenter?.ui.chatSummarySectionTitle || "活动群聊摘要"}</p>
                   <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", isDarkMode ? "border border-white/8 bg-white/[0.04] text-white/70" : "border border-black/8 bg-black/[0.03] text-black/70")}>
                     {messageCenter?.chatActivities.totalUnread || 0} 条未读
                   </span>
                 </div>
                 <p className={cn("mb-3 text-xs leading-5", isDarkMode ? "text-white/42" : "text-black/42")}>
-                  H5 先提供摘要和跟进入口，完整活动群聊体验目前仍以小程序为主。
+                  {messageCenter?.ui.chatSummaryDescription || "H5 先提供摘要和跟进入口，完整活动群聊体验目前仍以小程序为主。"}
                 </p>
 
                 {chatActivities.length === 0 ? (
                   <p className={cn("text-sm leading-6", isDarkMode ? "text-white/54" : "text-black/52")}>
-                    暂无活动群聊记录，参与活动后这里会同步显示最近动态。
+                    {messageCenter?.ui.chatSummaryEmpty || "暂无活动群聊记录，参与活动后这里会同步显示最近动态。"}
                   </p>
                 ) : (
                   <div className="space-y-3">
@@ -1234,7 +1278,7 @@ export function MessageCenterDrawer({
                           <div>
                             <p className="text-sm font-semibold">{chat.activityTitle}</p>
                             <p className={cn("mt-1 text-xs leading-5", isDarkMode ? "text-white/54" : "text-black/52")}>
-                              {chat.lastMessage || "还没人说话，发句开场吧"}
+                              {chat.lastMessage || messageCenter?.ui.chatSummaryFallbackMessage || "还没人说话，发句开场吧"}
                             </p>
                           </div>
                           {chat.unreadCount > 0 ? (
@@ -1282,7 +1326,7 @@ export function MessageCenterDrawer({
                               )}
                             >
                               <Sparkles className="h-3.5 w-3.5" />
-                              让 AI 帮我写开场白
+                              {messageCenter?.ui.kickoffActionLabel || "让 AI 帮我写开场白"}
                             </button>
                           </div>
                         ) : null}

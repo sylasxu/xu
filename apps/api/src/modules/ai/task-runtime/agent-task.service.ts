@@ -1678,12 +1678,17 @@ export async function syncJoinTaskFromChatResponse(params: {
     buildJoinTaskContextFromRequest(params.request),
   ) ?? buildSlotSummaryFromRequest(params.request);
   const entry = typeof params.request.context?.entry === 'string' ? params.request.context.entry : undefined;
+  const actionName = params.request.input.type === 'action' ? params.request.input.action : null;
+  if (actionName === 'record_activity_feedback') {
+    return;
+  }
+
   const joinActivityIdFromRequest = extractJoinActivityIdFromRequest(params.request);
   const joinActivityIdFromBlocks = extractJoinActivityIdFromBlocks(params.blocks);
   const joinActivityId = joinActivityIdFromBlocks ?? joinActivityIdFromRequest;
   const authRequirement = extractJoinAuthRequirement(params.blocks);
   const explored = params.outcome === 'explored' || extractExploreSignal(params.blocks);
-  const isJoinAction = params.request.input.type === 'action' && params.request.input.action === 'join_activity';
+  const isJoinAction = actionName === 'join_activity';
   const activityMode = params.request.context?.activityMode;
   const contextActivityId = readTextValue(params.request.context?.activityId);
 

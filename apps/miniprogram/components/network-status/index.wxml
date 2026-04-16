@@ -9,9 +9,9 @@
 <view wx:if="{{visible}}" class="network-status network-status--offline">
   <view class="network-status__content">
     <t-icon name="wifi-off" size="32rpx" />
-    <text class="network-status__text">网络连接已断开</text>
+    <text class="network-status__text">{{offlineText}}</text>
   </view>
   <view class="network-status__action" bindtap="onRetry">
-    <text>重试</text>
+    <text>{{retryText}}</text>
   </view>
 </view>

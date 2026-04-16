@@ -14,6 +14,7 @@ interface WidgetPartDataState {
   partnerIntentFormDisabled: boolean;
   draftSettingsDisabled: boolean;
   errorMessage: string;
+  errorRetryText: string;
   errorShowRetry: boolean;
 }
 
@@ -35,6 +36,14 @@ Component({
       type: Boolean,
       value: false,
     },
+    defaultErrorMessage: {
+      type: String,
+      value: '出了点问题',
+    },
+    defaultErrorRetryText: {
+      type: String,
+      value: '重试',
+    },
   },
 
   data: {
@@ -51,11 +60,18 @@ Component({
     partnerIntentFormDisabled: false,
     draftSettingsDisabled: false,
     errorMessage: '出了点问题',
+    errorRetryText: '重试',
     errorShowRetry: true,
   } as WidgetPartDataState,
 
   observers: {
-    'part, userNickname, isHistorical': function(part: Record<string, unknown>, userNickname: string, isHistorical: boolean) {
+    'part, userNickname, isHistorical, defaultErrorMessage, defaultErrorRetryText': function(
+      part: Record<string, unknown>,
+      userNickname: string,
+      isHistorical: boolean,
+      defaultErrorMessage: string,
+      defaultErrorRetryText: string
+    ) {
       const partData = part && typeof part === 'object' && part.data && typeof part.data === 'object'
         ? (part.data as Record<string, unknown>)
         : {}
@@ -66,8 +82,11 @@ Component({
         : userNickname || '搭子'
       const errorMessage = typeof partData.message === 'string' && partData.message.trim()
         ? partData.message
-        : '出了点问题'
+        : defaultErrorMessage || '出了点问题'
       const errorShowRetry = partData.showRetry !== false
+      const errorRetryText = typeof partData.retryText === 'string' && partData.retryText.trim()
+        ? partData.retryText
+        : defaultErrorRetryText || '重试'
       const dashboardGreeting = typeof partData.greeting === 'string' ? partData.greeting : ''
       const dashboardSubGreeting = typeof partData.subGreeting === 'string' ? partData.subGreeting : ''
       const dashboardSections = Array.isArray(partData.sections) ? partData.sections as Record<string, unknown>[] : []
@@ -94,6 +113,7 @@ Component({
         partnerIntentFormDisabled: disabled,
         draftSettingsDisabled: disabled,
         errorMessage,
+        errorRetryText,
         errorShowRetry,
       })
     },

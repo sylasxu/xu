@@ -2369,6 +2369,30 @@ export interface WelcomeResponse {
       medium: string;
       high: string;
     };
+    chatShell?: {
+      composerHint: string;
+      pendingActionTitle: string;
+      pendingActionDefaultMessage: string;
+      pendingActionLoginHint: string;
+      pendingActionBindPhoneHint: string;
+      pendingActionResumeLabel: string;
+    };
+    sidebar?: {
+      title: string;
+      authSubtitle: string;
+      visitorSubtitle: string;
+      messageCenterLabel: string;
+      messageCenterHint: string;
+      authContinuationHint: string;
+      historyTitle: string;
+      historyDescriptionAuthenticated: string;
+      historyDescriptionVisitor: string;
+      searchPlaceholder: string;
+      visitorHistoryHint: string;
+      emptySearchResult: string;
+      emptyHistory: string;
+      composerCapabilityHint: string;
+    };
   };
 }
 
@@ -2405,6 +2429,12 @@ type WelcomeGreetingPeriod =
 interface WelcomeCopyConfig {
   fallbackNickname: string;
   subGreeting: string;
+  stateSubGreetings: {
+    hasDraft: string;
+    pendingActivities: string;
+    lowPreference: string;
+    nearbyExplore: string;
+  };
   greetingTemplates: Record<WelcomeGreetingPeriod, string>;
 }
 
@@ -2430,11 +2460,48 @@ interface WelcomeUiConfig {
     medium: string;
     high: string;
   };
+  chatShell: {
+    composerHint: string;
+    pendingActionTitle: string;
+    pendingActionDefaultMessage: string;
+    pendingActionLoginHint: string;
+    pendingActionBindPhoneHint: string;
+    pendingActionResumeLabel: string;
+    runtimeStatus: {
+      networkOfflineText: string;
+      networkRetryText: string;
+      networkRestoredToast: string;
+      widgetErrorMessage: string;
+      widgetErrorRetryText: string;
+    };
+  };
+  sidebar: {
+    title: string;
+    authSubtitle: string;
+    visitorSubtitle: string;
+    messageCenterLabel: string;
+    messageCenterHint: string;
+    authContinuationHint: string;
+    historyTitle: string;
+    historyDescriptionAuthenticated: string;
+    historyDescriptionVisitor: string;
+    searchPlaceholder: string;
+    visitorHistoryHint: string;
+    emptySearchResult: string;
+    emptyHistory: string;
+    composerCapabilityHint: string;
+  };
 }
 
 const DEFAULT_WELCOME_COPY_CONFIG: WelcomeCopyConfig = {
   fallbackNickname: '朋友',
   subGreeting: '今天想约什么局？',
+  stateSubGreetings: {
+    hasDraft: '你有一个草稿还没发出去，要不要现在继续？',
+    pendingActivities: '你有 {count} 个待参加活动，先看看接下来怎么安排？',
+    lowPreference: '告诉我你偏爱什么，我会更懂你。',
+    nearbyExplore: '附近有新局，想直接看看吗？',
+  },
   greetingTemplates: {
     lateNight: '夜深了，{nickname}～',
     morning: '早上好，{nickname}！',
@@ -2472,6 +2539,37 @@ const DEFAULT_WELCOME_UI_CONFIG: WelcomeUiConfig = {
     low: '多聊一点，我会更懂你的偏好',
     medium: '我正在记住你的习惯',
     high: '你的偏好已经比较清楚，可以直接让我来安排',
+  },
+  chatShell: {
+    composerHint: '也可以直接说地方、时间、类型或你想找的人',
+    pendingActionTitle: '待恢复动作',
+    pendingActionDefaultMessage: '这一步已经挂起，登录后会继续替你办完。',
+    pendingActionLoginHint: '完成登录后回到这里，我会自动继续。',
+    pendingActionBindPhoneHint: '完成绑定手机号后回到这里，我会自动继续。',
+    pendingActionResumeLabel: '我已完成，继续',
+    runtimeStatus: {
+      networkOfflineText: '网络连接已断开',
+      networkRetryText: '重试',
+      networkRestoredToast: '网络已恢复',
+      widgetErrorMessage: '出了点问题',
+      widgetErrorRetryText: '重试',
+    },
+  },
+  sidebar: {
+    title: 'xu',
+    authSubtitle: '会话与后续进展会持续同步',
+    visitorSubtitle: '先聊当前这一轮，需要时再同步记录',
+    messageCenterLabel: '消息中心',
+    messageCenterHint: '搭子确认 / 活动跟进',
+    authContinuationHint: '需要确认搭子或回看结果时，我会帮你继续接上',
+    historyTitle: '历史会话',
+    historyDescriptionAuthenticated: '继续上次聊到一半的内容',
+    historyDescriptionVisitor: '当前设备上的会话会先留在这里',
+    searchPlaceholder: '搜索历史会话',
+    visitorHistoryHint: '访客模式下可以直接开始聊天，但不会在这里展示云端会话记录。',
+    emptySearchResult: '没有找到匹配的历史会话。',
+    emptyHistory: '还没有历史会话，发起第一条消息后这里就会出现。',
+    composerCapabilityHint: '当前输入区已只保留文本发送，没有语音和附件入口。',
   },
 };
 
@@ -2513,6 +2611,12 @@ function normalizeWelcomeCopyConfig(raw: unknown): WelcomeCopyConfig {
   return {
     fallbackNickname: getNonEmptyString(raw.fallbackNickname) ?? DEFAULT_WELCOME_COPY_CONFIG.fallbackNickname,
     subGreeting: getNonEmptyString(raw.subGreeting) ?? DEFAULT_WELCOME_COPY_CONFIG.subGreeting,
+    stateSubGreetings: {
+      hasDraft: getNonEmptyString(isRecord(raw.stateSubGreetings) ? raw.stateSubGreetings.hasDraft : null) ?? DEFAULT_WELCOME_COPY_CONFIG.stateSubGreetings.hasDraft,
+      pendingActivities: getNonEmptyString(isRecord(raw.stateSubGreetings) ? raw.stateSubGreetings.pendingActivities : null) ?? DEFAULT_WELCOME_COPY_CONFIG.stateSubGreetings.pendingActivities,
+      lowPreference: getNonEmptyString(isRecord(raw.stateSubGreetings) ? raw.stateSubGreetings.lowPreference : null) ?? DEFAULT_WELCOME_COPY_CONFIG.stateSubGreetings.lowPreference,
+      nearbyExplore: getNonEmptyString(isRecord(raw.stateSubGreetings) ? raw.stateSubGreetings.nearbyExplore : null) ?? DEFAULT_WELCOME_COPY_CONFIG.stateSubGreetings.nearbyExplore,
+    },
     greetingTemplates,
   };
 }
@@ -2595,6 +2699,8 @@ function normalizeWelcomeUiConfig(raw: unknown): WelcomeUiConfig {
   };
 
   const composerPlaceholder = getNonEmptyString(raw.composerPlaceholder) ?? DEFAULT_WELCOME_UI_CONFIG.composerPlaceholder;
+  const chatShellInput = isRecord(raw.chatShell) ? raw.chatShell : null;
+  const sidebarInput = isRecord(raw.sidebar) ? raw.sidebar : null;
 
   return {
     composerPlaceholder,
@@ -2604,6 +2710,37 @@ function normalizeWelcomeUiConfig(raw: unknown): WelcomeUiConfig {
     quickPrompts: quickPrompts.length ? quickPrompts : DEFAULT_WELCOME_UI_CONFIG.quickPrompts,
     bottomQuickActions: bottomQuickActions.length ? bottomQuickActions : DEFAULT_WELCOME_UI_CONFIG.bottomQuickActions,
     profileHints,
+    chatShell: {
+      composerHint: getNonEmptyString(chatShellInput?.composerHint) ?? DEFAULT_WELCOME_UI_CONFIG.chatShell.composerHint,
+      pendingActionTitle: getNonEmptyString(chatShellInput?.pendingActionTitle) ?? DEFAULT_WELCOME_UI_CONFIG.chatShell.pendingActionTitle,
+      pendingActionDefaultMessage: getNonEmptyString(chatShellInput?.pendingActionDefaultMessage) ?? DEFAULT_WELCOME_UI_CONFIG.chatShell.pendingActionDefaultMessage,
+      pendingActionLoginHint: getNonEmptyString(chatShellInput?.pendingActionLoginHint) ?? DEFAULT_WELCOME_UI_CONFIG.chatShell.pendingActionLoginHint,
+      pendingActionBindPhoneHint: getNonEmptyString(chatShellInput?.pendingActionBindPhoneHint) ?? DEFAULT_WELCOME_UI_CONFIG.chatShell.pendingActionBindPhoneHint,
+      pendingActionResumeLabel: getNonEmptyString(chatShellInput?.pendingActionResumeLabel) ?? DEFAULT_WELCOME_UI_CONFIG.chatShell.pendingActionResumeLabel,
+      runtimeStatus: {
+        networkOfflineText: getNonEmptyString(isRecord(chatShellInput?.runtimeStatus) ? chatShellInput.runtimeStatus.networkOfflineText : null) ?? DEFAULT_WELCOME_UI_CONFIG.chatShell.runtimeStatus.networkOfflineText,
+        networkRetryText: getNonEmptyString(isRecord(chatShellInput?.runtimeStatus) ? chatShellInput.runtimeStatus.networkRetryText : null) ?? DEFAULT_WELCOME_UI_CONFIG.chatShell.runtimeStatus.networkRetryText,
+        networkRestoredToast: getNonEmptyString(isRecord(chatShellInput?.runtimeStatus) ? chatShellInput.runtimeStatus.networkRestoredToast : null) ?? DEFAULT_WELCOME_UI_CONFIG.chatShell.runtimeStatus.networkRestoredToast,
+        widgetErrorMessage: getNonEmptyString(isRecord(chatShellInput?.runtimeStatus) ? chatShellInput.runtimeStatus.widgetErrorMessage : null) ?? DEFAULT_WELCOME_UI_CONFIG.chatShell.runtimeStatus.widgetErrorMessage,
+        widgetErrorRetryText: getNonEmptyString(isRecord(chatShellInput?.runtimeStatus) ? chatShellInput.runtimeStatus.widgetErrorRetryText : null) ?? DEFAULT_WELCOME_UI_CONFIG.chatShell.runtimeStatus.widgetErrorRetryText,
+      },
+    },
+    sidebar: {
+      title: getNonEmptyString(sidebarInput?.title) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.title,
+      authSubtitle: getNonEmptyString(sidebarInput?.authSubtitle) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.authSubtitle,
+      visitorSubtitle: getNonEmptyString(sidebarInput?.visitorSubtitle) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.visitorSubtitle,
+      messageCenterLabel: getNonEmptyString(sidebarInput?.messageCenterLabel) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.messageCenterLabel,
+      messageCenterHint: getNonEmptyString(sidebarInput?.messageCenterHint) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.messageCenterHint,
+      authContinuationHint: getNonEmptyString(sidebarInput?.authContinuationHint) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.authContinuationHint,
+      historyTitle: getNonEmptyString(sidebarInput?.historyTitle) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.historyTitle,
+      historyDescriptionAuthenticated: getNonEmptyString(sidebarInput?.historyDescriptionAuthenticated) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.historyDescriptionAuthenticated,
+      historyDescriptionVisitor: getNonEmptyString(sidebarInput?.historyDescriptionVisitor) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.historyDescriptionVisitor,
+      searchPlaceholder: getNonEmptyString(sidebarInput?.searchPlaceholder) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.searchPlaceholder,
+      visitorHistoryHint: getNonEmptyString(sidebarInput?.visitorHistoryHint) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.visitorHistoryHint,
+      emptySearchResult: getNonEmptyString(sidebarInput?.emptySearchResult) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.emptySearchResult,
+      emptyHistory: getNonEmptyString(sidebarInput?.emptyHistory) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.emptyHistory,
+      composerCapabilityHint: getNonEmptyString(sidebarInput?.composerCapabilityHint) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.composerCapabilityHint,
+    },
   };
 }
 
@@ -2956,13 +3093,13 @@ export async function getWelcomeCard(
   let subGreeting = welcomeCopy.subGreeting;
 
   if (hasDraftActivity) {
-    subGreeting = '你有一个草稿还没发出去，要不要现在继续？';
+    subGreeting = welcomeCopy.stateSubGreetings.hasDraft;
   } else if (pendingActivities.length > 0) {
-    subGreeting = `你有 ${pendingActivities.length} 个待参加活动，先看看接下来怎么安排？`;
+    subGreeting = renderTemplate(welcomeCopy.stateSubGreetings.pendingActivities, { count: String(pendingActivities.length) });
   } else if (socialProfile && socialProfile.preferenceCompleteness < 30) {
-    subGreeting = '告诉我你偏爱什么，我会更懂你。';
+    subGreeting = welcomeCopy.stateSubGreetings.lowPreference;
   } else if (location) {
-    subGreeting = '附近有新局，想直接看看吗？';
+    subGreeting = welcomeCopy.stateSubGreetings.nearbyExplore;
   }
 
   // 快捷入口（v4.4 新增）
@@ -2985,6 +3122,8 @@ export async function getWelcomeCard(
       composerPlaceholder: welcomeUi.composerPlaceholder,
       bottomQuickActions: welcomeUi.bottomQuickActions,
       profileHints: welcomeUi.profileHints,
+      chatShell: welcomeUi.chatShell,
+      sidebar: welcomeUi.sidebar,
     },
   };
 }

@@ -5,7 +5,7 @@
  * Chat-First 架构的超级输入坞
  * - 悬浮胶囊样式（距离底部/左右 32rpx，圆角 48rpx）
  * - Halo Card 渐变边框效果
- * - 输入框（placeholder: "你想找什么活动？"）
+ * - 输入框（placeholder: 由 welcome.ui.composerPlaceholder 下发，组件内仅保留兜底值）
  * - [📋 粘贴] 快捷按钮 + 上箭头发送按钮
  * - 键盘弹起处理（adjust-position=false + 手动计算高度）
  * - 按钮 Scale Down 回弹效果 + wx.vibrateShort 触感反馈

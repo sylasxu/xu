@@ -6,7 +6,7 @@
   <view class="feedback-dialog" catch:tap="noop">
     <!-- 头部 -->
     <view class="feedback-dialog__header">
-      <text class="feedback-dialog__title">活动体验如何？</text>
+      <text class="feedback-dialog__title">{{title}}</text>
       <view class="feedback-dialog__close" bind:tap="onClose">
         <t-icon name="close" size="44rpx" />
       </view>
@@ -17,15 +17,15 @@
       <view class="feedback-dialog__actions">
         <view class="good-btn" bind:tap="onGoodFeedback">
           <t-icon name="thumb-up" size="48rpx" />
-          <text>挺好的</text>
+          <text>{{positiveLabel}}</text>
         </view>
         <view class="problem-btn" bind:tap="onNextStep" wx:if="{{selectedProblem}}">
           <t-icon name="thumb-down" size="48rpx" />
-          <text>有问题</text>
+          <text>{{negativeLabel}}</text>
         </view>
       </view>
 
-      <view class="feedback-dialog__section-title">遇到什么问题？</view>
+      <view class="feedback-dialog__section-title">{{problemSectionTitle}}</view>
       <view class="feedback-dialog__problem-grid">
         <view
           wx:for="{{problemOptions}}"
@@ -41,7 +41,7 @@
 
       <view class="feedback-dialog__footer safe-bottom">
         <t-button theme="primary" size="large" block disabled="{{!selectedProblem}}" bind:tap="onNextStep">
-          下一步：选择反馈对象
+          {{nextStepLabel}}
         </t-button>
       </view>
     </view>
@@ -50,10 +50,10 @@
     <view class="feedback-dialog__body" wx:if="{{step === 2}}">
       <view class="feedback-dialog__back" bind:tap="onPrevStep">
         <t-icon name="chevron-left" size="40rpx" />
-        <text>返回</text>
+        <text>{{backLabel}}</text>
       </view>
 
-      <view class="feedback-dialog__section-title">选择反馈对象</view>
+      <view class="feedback-dialog__section-title">{{targetSectionTitle}}</view>
       <view class="feedback-dialog__target-list">
         <view
           wx:for="{{participants}}"
@@ -69,10 +69,10 @@
       </view>
 
       <view class="feedback-dialog__description">
-        <view class="feedback-dialog__section-title">补充说明（选填）</view>
+        <view class="feedback-dialog__section-title">{{descriptionSectionTitle}}</view>
         <textarea
           class="feedback-dialog__textarea"
-          placeholder="请描述具体情况..."
+          placeholder="{{descriptionPlaceholder}}"
           value="{{description}}"
           maxlength="200"
           bindinput="onDescriptionInput"
@@ -82,7 +82,7 @@
 
       <view class="feedback-dialog__footer safe-bottom">
         <t-button theme="primary" size="large" block disabled="{{selectedTargets.length === 0}}" loading="{{submitting}}" bind:tap="onSubmit">
-          提交反馈
+          {{submitLabel}}
         </t-button>
       </view>
     </view>

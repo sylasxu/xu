@@ -7,6 +7,9 @@
  * - 提交反馈API
  */
 
+import { getParticipantsFeedbackMeta } from '../../src/api/endpoints/participants/participants'
+import type { ParticipantFeedbackMetaResponse } from '../../src/api/model'
+
 // ==================== 类型定义 ====================
 
 /** 问题类型 */
@@ -38,8 +41,19 @@ interface FeedbackDialogPropertiesData {
 
 /** 组件数据 */
 interface FeedbackDialogData {
+  title: string;
+  positiveLabel: string;
+  negativeLabel: string;
+  problemSectionTitle: string;
+  nextStepLabel: string;
+  targetSectionTitle: string;
+  descriptionSectionTitle: string;
+  descriptionPlaceholder: string;
+  backLabel: string;
+  submitLabel: string;
   /** 问题类型选项 */
   problemOptions: ProblemOption[];
+  toast: ParticipantFeedbackMetaResponse['toast'];
   /** 选中的问题类型 */
   selectedProblem: ProblemType | null;
   /** 选中的反馈对象 */
@@ -61,13 +75,100 @@ const PROBLEM_OPTIONS: ProblemOption[] = [
   { value: 'other', label: '其他问题', icon: 'ellipsis' },
 ];
 
+const DEFAULT_FEEDBACK_META: ParticipantFeedbackMetaResponse = {
+  title: '活动体验如何？',
+  positiveLabel: '挺好的',
+  negativeLabel: '有问题',
+  problemSectionTitle: '遇到什么问题？',
+  nextStepLabel: '下一步：选择反馈对象',
+  targetSectionTitle: '选择反馈对象',
+  descriptionSectionTitle: '补充说明（选填）',
+  descriptionPlaceholder: '请描述具体情况...',
+  backLabel: '返回',
+  submitLabel: '提交反馈',
+  problems: PROBLEM_OPTIONS,
+  toast: {
+    missingProblem: '请选择问题类型',
+    missingTarget: '请选择反馈对象',
+    success: '反馈已提交',
+    failed: '提交失败',
+  },
+}
+
 const FEEDBACK_DIALOG_DATA: FeedbackDialogData = {
-  problemOptions: PROBLEM_OPTIONS,
+  title: DEFAULT_FEEDBACK_META.title,
+  positiveLabel: DEFAULT_FEEDBACK_META.positiveLabel,
+  negativeLabel: DEFAULT_FEEDBACK_META.negativeLabel,
+  problemSectionTitle: DEFAULT_FEEDBACK_META.problemSectionTitle,
+  nextStepLabel: DEFAULT_FEEDBACK_META.nextStepLabel,
+  targetSectionTitle: DEFAULT_FEEDBACK_META.targetSectionTitle,
+  descriptionSectionTitle: DEFAULT_FEEDBACK_META.descriptionSectionTitle,
+  descriptionPlaceholder: DEFAULT_FEEDBACK_META.descriptionPlaceholder,
+  backLabel: DEFAULT_FEEDBACK_META.backLabel,
+  submitLabel: DEFAULT_FEEDBACK_META.submitLabel,
+  problemOptions: DEFAULT_FEEDBACK_META.problems,
+  toast: DEFAULT_FEEDBACK_META.toast,
   selectedProblem: null,
   selectedTargets: [],
   description: '',
   submitting: false,
   step: 1,
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function readProblemType(value: unknown): ProblemType | null {
+  switch (value) {
+    case 'late':
+    case 'no_show':
+    case 'bad_attitude':
+    case 'not_as_described':
+    case 'other':
+      return value
+    default:
+      return null
+  }
+}
+
+function normalizeFeedbackMeta(meta: ParticipantFeedbackMetaResponse | null | undefined): ParticipantFeedbackMetaResponse {
+  if (!meta) {
+    return DEFAULT_FEEDBACK_META
+  }
+
+  return {
+    title: readString(meta.title) || DEFAULT_FEEDBACK_META.title,
+    positiveLabel: readString(meta.positiveLabel) || DEFAULT_FEEDBACK_META.positiveLabel,
+    negativeLabel: readString(meta.negativeLabel) || DEFAULT_FEEDBACK_META.negativeLabel,
+    problemSectionTitle: readString(meta.problemSectionTitle) || DEFAULT_FEEDBACK_META.problemSectionTitle,
+    nextStepLabel: readString(meta.nextStepLabel) || DEFAULT_FEEDBACK_META.nextStepLabel,
+    targetSectionTitle: readString(meta.targetSectionTitle) || DEFAULT_FEEDBACK_META.targetSectionTitle,
+    descriptionSectionTitle: readString(meta.descriptionSectionTitle) || DEFAULT_FEEDBACK_META.descriptionSectionTitle,
+    descriptionPlaceholder: readString(meta.descriptionPlaceholder) || DEFAULT_FEEDBACK_META.descriptionPlaceholder,
+    backLabel: readString(meta.backLabel) || DEFAULT_FEEDBACK_META.backLabel,
+    submitLabel: readString(meta.submitLabel) || DEFAULT_FEEDBACK_META.submitLabel,
+    problems: Array.isArray(meta.problems) && meta.problems.length > 0
+      ? meta.problems
+          .map((item) => {
+            const value = readProblemType(item?.value)
+            const label = readString(item?.label)
+            const icon = readString(item?.icon)
+            if (!value || !label || !icon) {
+              return null
+            }
+
+            return { value, label, icon }
+          })
+          .filter((item): item is ProblemOption => Boolean(item))
+      : DEFAULT_FEEDBACK_META.problems,
+    toast: {
+      missingProblem: readString(meta.toast?.missingProblem) || DEFAULT_FEEDBACK_META.toast.missingProblem,
+      missingTarget: readString(meta.toast?.missingTarget) || DEFAULT_FEEDBACK_META.toast.missingTarget,
+      success: readString(meta.toast?.success) || DEFAULT_FEEDBACK_META.toast.success,
+      failed: readString(meta.toast?.failed) || DEFAULT_FEEDBACK_META.toast.failed,
+    },
+  }
 }
 
 Component({
@@ -90,6 +191,12 @@ Component({
     ...FEEDBACK_DIALOG_DATA,
   },
 
+  lifetimes: {
+    attached() {
+      void this.loadMeta()
+    },
+  },
+
   observers: {
     visible(val: boolean) {
       if (val) {
@@ -105,6 +212,29 @@ Component({
   },
 
   methods: {
+    async loadMeta() {
+      try {
+        const response = await getParticipantsFeedbackMeta()
+        const meta = normalizeFeedbackMeta(response.data)
+        this.setData({
+          title: meta.title,
+          positiveLabel: meta.positiveLabel,
+          negativeLabel: meta.negativeLabel,
+          problemSectionTitle: meta.problemSectionTitle,
+          nextStepLabel: meta.nextStepLabel,
+          targetSectionTitle: meta.targetSectionTitle,
+          descriptionSectionTitle: meta.descriptionSectionTitle,
+          descriptionPlaceholder: meta.descriptionPlaceholder,
+          backLabel: meta.backLabel,
+          submitLabel: meta.submitLabel,
+          problemOptions: meta.problems,
+          toast: meta.toast,
+        })
+      } catch (error) {
+        console.warn('加载反馈元数据失败，使用默认文案', error)
+      }
+    },
+
     // ==================== 事件处理 ====================
 
     /** 选择问题类型 (Requirements: 13.2) */
@@ -115,8 +245,9 @@ Component({
 
     /** 下一步 - 选择反馈对象 */
     onNextStep() {
+      const { toast } = this.data
       if (!this.data.selectedProblem) {
-        wx.showToast({ title: '请选择问题类型', icon: 'none' });
+        wx.showToast({ title: toast.missingProblem, icon: 'none' });
         return;
       }
       this.setData({ step: 2 });
@@ -160,17 +291,17 @@ Component({
 
     /** 提交反馈 (Requirements: 13.3) */
     async onSubmit() {
-      const { activityId, selectedProblem, selectedTargets, description, submitting } = this.data;
+      const { activityId, selectedProblem, selectedTargets, description, submitting, toast } = this.data;
 
       if (submitting) return;
 
       if (!selectedProblem) {
-        wx.showToast({ title: '请选择问题类型', icon: 'none' });
+        wx.showToast({ title: toast.missingProblem, icon: 'none' });
         return;
       }
 
       if (selectedTargets.length === 0) {
-        wx.showToast({ title: '请选择反馈对象', icon: 'none' });
+        wx.showToast({ title: toast.missingTarget, icon: 'none' });
         return;
       }
 
@@ -188,7 +319,7 @@ Component({
         // 模拟 API 调用
         await new Promise((resolve) => setTimeout(resolve, 500));
 
-        wx.showToast({ title: '反馈已提交', icon: 'success' });
+        wx.showToast({ title: toast.success, icon: 'success' });
 
         this.triggerEvent('close');
         this.triggerEvent('feedback', {
@@ -200,7 +331,7 @@ Component({
       } catch (error) {
         console.error('提交反馈失败', error);
         wx.showToast({
-          title: (error as Error).message || '提交失败',
+          title: (error as Error).message || toast.failed,
           icon: 'none',
         });
       } finally {

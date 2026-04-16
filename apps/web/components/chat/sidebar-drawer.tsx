@@ -27,6 +27,22 @@ type SidebarDrawerProps = {
   isDarkMode?: boolean;
   disabled?: boolean;
   activeConversationId?: string | null;
+  ui: {
+    title: string;
+    authSubtitle: string;
+    visitorSubtitle: string;
+    messageCenterLabel: string;
+    messageCenterHint: string;
+    authContinuationHint: string;
+    historyTitle: string;
+    historyDescriptionAuthenticated: string;
+    historyDescriptionVisitor: string;
+    searchPlaceholder: string;
+    visitorHistoryHint: string;
+    emptySearchResult: string;
+    emptyHistory: string;
+    composerCapabilityHint: string;
+  };
   onSelectConversation: (conversationId: string) => Promise<void>;
   onOpenMessageCenter: () => void;
 };
@@ -93,6 +109,7 @@ export function SidebarDrawer({
   isDarkMode = false,
   disabled = false,
   activeConversationId = null,
+  ui,
   onSelectConversation,
   onOpenMessageCenter,
 }: SidebarDrawerProps) {
@@ -213,8 +230,8 @@ export function SidebarDrawer({
   const secondaryLabel = userProfile?.phoneNumber?.trim()
     ? userProfile.phoneNumber
     : authToken
-      ? "已登录，可同步历史会话与结果"
-      : "未登录也能先聊，登录后再同步历史";
+      ? ui.authSubtitle
+      : ui.visitorSubtitle;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -237,8 +254,8 @@ export function SidebarDrawer({
           isDarkMode ? "border-white/10 bg-black text-white/92" : "border-black/8 bg-white text-black/88"
         )}
       >
-        <DialogHeader className={cn("border-b px-5 pb-4 pt-5 text-left", isDarkMode ? "border-white/8" : "border-black/8")}>
-          <DialogTitle className="text-[18px] font-semibold tracking-tight">xu</DialogTitle>
+          <DialogHeader className={cn("border-b px-5 pb-4 pt-5 text-left", isDarkMode ? "border-white/8" : "border-black/8")}>
+          <DialogTitle className="text-[18px] font-semibold tracking-tight">{ui.title}</DialogTitle>
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto px-5 pb-6 pt-4">
@@ -289,9 +306,9 @@ export function SidebarDrawer({
               >
                 <span className="inline-flex items-center gap-2">
                   <BellRing className="h-4 w-4" />
-                  消息中心
+                  {ui.messageCenterLabel}
                 </span>
-                <span className={cn("text-xs", isDarkMode ? "text-white/40" : "text-black/38")}>搭子确认 / 活动跟进</span>
+                <span className={cn("text-xs", isDarkMode ? "text-white/40" : "text-black/38")}>{ui.messageCenterHint}</span>
               </button>
 
               {!authToken ? (
@@ -302,7 +319,7 @@ export function SidebarDrawer({
                   )}
                 >
                   <LogIn className="h-4 w-4" />
-                  登录后这里会同步你的历史会话和后续结果
+                  {ui.authContinuationHint}
                 </div>
               ) : null}
             </div>
@@ -311,9 +328,9 @@ export function SidebarDrawer({
           <section className="mt-5">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
-                <p className={cn("text-[15px] font-semibold", isDarkMode ? "text-white/92" : "text-black/88")}>历史会话</p>
+                <p className={cn("text-[15px] font-semibold", isDarkMode ? "text-white/92" : "text-black/88")}>{ui.historyTitle}</p>
                 <p className={cn("mt-1 text-xs", isDarkMode ? "text-white/42" : "text-black/40")}>
-                  {authToken ? "继续上次聊到一半的内容" : "登录后自动保存云端历史"}
+                  {authToken ? ui.historyDescriptionAuthenticated : ui.historyDescriptionVisitor}
                 </p>
               </div>
               <History className={cn("h-4 w-4", isDarkMode ? "text-white/40" : "text-black/36")} />
@@ -331,7 +348,7 @@ export function SidebarDrawer({
                   type="text"
                   value={searchValue}
                   onChange={(event) => setSearchValue(event.target.value)}
-                  placeholder="搜索历史会话"
+                  placeholder={ui.searchPlaceholder}
                   className={cn(
                     "min-w-0 flex-1 bg-transparent text-sm outline-none",
                     isDarkMode ? "text-white/84 placeholder:text-white/26" : "text-black/84 placeholder:text-black/26"
@@ -347,7 +364,7 @@ export function SidebarDrawer({
                   isDarkMode ? "border-white/8 bg-white/[0.02] text-white/60" : "border-black/8 bg-white text-black/60"
                 )}
               >
-                访客模式下可以直接开始聊天，但不会在这里展示云端会话记录。
+                {ui.visitorHistoryHint}
               </div>
             ) : loading ? (
               <div className="space-y-2">
@@ -368,7 +385,7 @@ export function SidebarDrawer({
                   isDarkMode ? "border-white/8 bg-white/[0.02] text-white/60" : "border-black/8 bg-white text-black/60"
                 )}
               >
-                {searchValue.trim() ? "没有找到匹配的历史会话。" : "还没有历史会话，发起第一条消息后这里就会出现。"}
+                {searchValue.trim() ? ui.emptySearchResult : ui.emptyHistory}
               </div>
             ) : (
               <div className="space-y-2">
@@ -424,7 +441,7 @@ export function SidebarDrawer({
           <div className="mt-5 flex items-center gap-2 rounded-[20px] border px-3.5 py-3">
             <Sparkles className={cn("h-4 w-4", isDarkMode ? "text-white/40" : "text-black/36")} />
             <p className={cn("text-xs leading-5", isDarkMode ? "text-white/46" : "text-black/44")}>
-              当前输入区已只保留文本发送，没有语音和附件入口。
+              {ui.composerCapabilityHint}
             </p>
           </div>
         </div>

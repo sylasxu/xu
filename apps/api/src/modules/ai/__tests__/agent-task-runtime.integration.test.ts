@@ -55,6 +55,31 @@ interface ChatTurnResponse {
   };
 }
 
+function readResponseCompleteFromSse<T>(bodyText: string): T | null {
+  const packets = bodyText.split(/\r?\n\r?\n/);
+  for (const packet of packets) {
+    const lines = packet.split(/\r?\n/);
+    const event = lines.find((line) => line.startsWith('event:'))?.slice(6).trim();
+    if (event !== 'response-complete') {
+      continue;
+    }
+
+    const dataText = lines
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trim())
+      .join('\n');
+    const payload = JSON.parse(dataText) as Record<string, unknown>;
+    return {
+      ...payload,
+      ...(typeof payload.turn === 'undefined' && typeof payload.response !== 'undefined'
+        ? { turn: payload.response }
+        : {}),
+    } as T;
+  }
+
+  return null;
+}
+
 const ADMIN_PHONE = process.env.SMOKE_ADMIN_PHONE?.trim()
   || process.env.ADMIN_PHONE_WHITELIST?.split(',').map((phone) => phone.trim()).find(Boolean)
   || '13996092317';
@@ -87,6 +112,17 @@ async function requestJson<T>(params: {
   );
 
   const bodyText = await response.text();
+  if (bodyText.startsWith('event:')) {
+    const ssePayload = readResponseCompleteFromSse<T>(bodyText);
+    if (!ssePayload) {
+      throw new Error(`${params.method} ${params.path} 未返回 response-complete SSE 事件`);
+    }
+    if (!response.ok) {
+      throw new Error(`${params.method} ${params.path} 失败: HTTP ${response.status} ${bodyText}`);
+    }
+    return ssePayload;
+  }
+
   const parsed = bodyText ? JSON.parse(bodyText) as T | ApiError : {};
 
   if (!response.ok) {

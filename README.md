@@ -159,12 +159,12 @@ bun run regression:protocol
 
 ```text
 用户输入
-  -> 对话运行时
-  -> 动作推断
-  -> 处理管线
-  -> 工具 / 工作流 / 模型路由
-  -> 任务运行时 / 持久化
-  -> 界面块 / 流式响应
+  -> 对话运行时（Chat Runtime）
+  -> 动作推断（Action Inference）
+  -> 处理管线（Processing Pipeline）
+  -> 工具 / 工作流 / 模型路由（Tool / Workflow / Model Router）
+  -> 任务运行时 / 持久化（Task Runtime / Persistence）
+  -> 界面块 / 流式响应（UI Blocks / Stream Response）
 ```
 
 这一层把 `text / action / context` 收成同一套请求语义，并始终走同一条 SSE 主链返回结果。

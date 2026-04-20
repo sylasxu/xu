@@ -22,14 +22,14 @@ inclusion: always
 - **TAD (技术架构文档)**：包含所有技术架构、数据库设计、API 设计的完整描述
 
 **规则**：
-- ❌ 禁止精简或删除已有内容
+- ❌ 禁止为了“瘦身”而随意删减仍然成立的关键内容
 - ❌ 禁止只写"新增"或"变更"的增量内容
 - ✅ 任何人看这两个文档就能完整理解整个产品和技术架构
 - ✅ 新功能必须完整写入对应章节，而非追加到末尾
-- ✅ 版本号更新时，保留所有历史功能描述
+- ✅ 当产品主轴发生收敛时，允许重构章节目录，但不能丢掉仍成立的重要内容
 
 **文档结构**：
-- PRD：产品哲学 → 核心功能 → 用户体验 → 视觉设计 → 成功指标 → 术语表
+- PRD：产品哲学 → 产品本质与定位 → 当前阶段判断 → 首页与主流程 → 关键模块 → 视觉与语气 → 后置观察 → 术语表
 - TAD：技术栈 → 目录结构 → 数据库 Schema → API 设计 → 正确性属性
 
 ---
@@ -133,7 +133,7 @@ myProcessor.processorName = 'my-processor';
 - **Tech**: Vite + React 19 + TanStack Router + Eden Treaty
 - **禁止**: Zod、zodResolver
 - **信息架构优先按领域组织**: Admin 默认按 `概览 / 内容 / 组局 / 风控 / AI / 设置` 分组，而不是按角色或临时工作流拆菜单
-- **瘦身方式**: 通过稳定分组、明确命名、页内 tabs 收口复杂度；`热词` 收到 `内容工作台` 内部，`AI 配置` 收到 `AI Playground` 工作区内；不要靠隐藏真实能力或额外造一套“开发后台 / 运营后台”
+- **瘦身方式**: 通过稳定分组、明确命名、页内 tabs 收口复杂度；内容工作台内部承接选题、出稿、配置和效果回填，`AI 配置` 收到 `AI Playground` 工作区内；不要靠隐藏真实能力或额外造一套“开发后台 / 运营后台”
 
 ### apps/miniprogram (小程序)
 - **Tech**: Native WeChat + TypeScript + Zustand Vanilla + LESS
@@ -156,9 +156,11 @@ myProcessor.processorName = 'my-processor';
 
 - **Visitor-First + Action-Gated Auth**：浏览、欢迎卡、附近探索可先体验；报名、发布、找搭子确认等写入动作统一先登录 + 绑定手机号
 - **找搭子 / 组局 Agent 是主引擎**：产品主线优先围绕 `find_partner / create_activity / join_activity` 收口；内容工作台负责把真实需求翻成外部分发内容
+- **状态首页是统一入口**：首页不是活动广场，也不是纯 chat；首页负责判断“现在最需要被接住的事”，agent 负责继续推进
 - **内容生成主入口统一**：当前只允许 `POST /content/generate` 与 `POST /content/topic-suggestions`；旧 AI 内容路由已删除，禁止恢复兼容别名
 - **`/ai/chat` 统一协议**：请求体固定为 `conversationId? + input + context`，统一返回 SSE 事件流；`response-complete` 事件携带完整 response envelope，禁止继续使用旧 `messages[]` / `scene` / 非流式主响应
 - **报名成功统一链路**：活动详情、半屏详情、地图探索、AI 推荐卡报名成功后，统一走 `join_success -> discussion -> quick starters`
+- **H5 与小程序共享同一产品哲学**：`/chat` 是统一首页主路由；分享出去的活动详情本身承担邀请职责，不再围绕独立邀请函心智设计主流程
 - **真实结果驱动 Memory**：`join` 只算轻信号；强反馈来自 `confirm-fulfillment`、`rebook-follow-up` 等真实社交结果
 
 ## 🚫 Schema 派生规则

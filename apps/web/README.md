@@ -1,14 +1,15 @@
-# xu Web Chat UI
+# xu Web / H5
 
-基于 **AI SDK React** 的世界级 AI 对话界面。
+H5 是 xu 的轻端主承接面之一。
 
-## 特性
+它不再只是“小程序不可用时的降级聊天页”，而是围绕 `/chat` 首页主路由，承接状态首页、对话主舞台、活动详情与分享态。
 
-- ⚡ **流式渲染** - 基于 `@ai-sdk/react` 的 `useChat` hook
-- 🎨 **生成式 UI** - Tool Invocation 卡片（草稿、探索、发布）
-- 🎬 **精致动画** - Framer Motion 驱动的入场和过渡动画
-- 📱 **响应式设计** - Mobile-first，桌面端优雅居中
-- 🎯 **快捷提示** - 空状态引导，一键发送常用语句
+## 当前定位
+
+- `/chat` 是 H5 的首页主路由
+- 首页和 chat 是同一个页面的两种状态
+- H5 与小程序共享同一产品哲学，不应长成两套不同世界观
+- 当前仍保留 `/invite/[id]` 历史分享页，但产品方向上会逐步由“活动详情分享态”吸收其职责
 
 ## 技术栈
 
@@ -24,11 +25,12 @@
 
 ```
 app/
+├── page.tsx               # 根路由，重定向到 /chat
 ├── chat/
-│   └── page.tsx          # 对话页面（单文件实现所有功能）
+│   └── page.tsx          # 首页主路由：状态首页 + 对话主舞台
 ├── invite/
 │   └── [id]/
-│       └── page.tsx      # 活动邀请函页面
+│       └── page.tsx      # 历史分享页（后续逐步由详情分享态吸收）
 └── layout.tsx            # 根布局
 
 lib/
@@ -38,97 +40,46 @@ lib/
 └── wechat.ts             # 微信环境检测
 
 components/
-└── invite/               # 邀请函专用组件
-    ├── activity-card.tsx
-    ├── discussion-preview.tsx
-    ├── theme-background.tsx
-    └── wechat-redirect.tsx
+├── ai-elements/          # 对话主轴组件
+├── chat/                 # 消息中心 / 侧边抽屉等承接组件
+└── invite/               # 历史分享页组件
 ```
 
-## 流式渲染实现
+## 当前主轴
 
-### 使用 `useChat` Hook
+### 1. `/chat` 统一承接
 
-```typescript
-const { messages, input, handleInputChange, handleSubmit, isLoading, stop } = useChat({
-  api: `${API_BASE}/ai/chat`,
-  body: { source: "web" },
-})
-```
+- 状态首页和对话主舞台在同一路由内切换
+- 首页负责判断“现在最需要被接住的事”
+- agent 负责理解需求、调用数据、推进流程
+- GenUI 负责把结果、进度和下一步动作长出来
 
-### 自动处理
+### 2. AI Elements 是聊天主轴
 
-- ✅ 流式文本增量渲染
-- ✅ 消息状态管理
-- ✅ Tool Invocation 解析
-- ✅ 加载状态追踪
-- ✅ 错误处理和重试
+- 对话消息流、输入框和消息容器继续基于 `components/ai-elements/*`
+- 不在 H5 里另起一套平行聊天运行时
+- 结构化承接围绕统一 `GenUI blocks` 协议，而不是继续扩张旧 `Widget_*` 心智
 
-## 生成式 UI (Generative UI)
+### 3. 活动详情分享态
 
-### Tool Invocation 卡片
+- 分享出去的活动详情本身应该承担邀请职责
+- `/invite/[id]` 当前仍存在，但属于历史分享承接面
+- 产品方向上，详情页会逐步吸收独立邀请函页面的职责
 
-| Tool | 卡片类型 | 状态 |
-|------|----------|------|
-| `createActivityDraft` | 活动草稿卡片 | 加载中 / 完成 |
-| `exploreNearby` | 探索结果列表 | 加载中 / 完成 |
-| `publishActivity` | 发布成功提示 | 加载中 / 完成 |
+## 流式协议
 
-### 示例：草稿卡片
+H5 消费统一的 `/ai/chat` SSE 协议：
 
-```typescript
-function DraftToolCard({ args, result, isComplete }) {
-  if (!isComplete) {
-    return <LoadingState />  // 脉冲动画
-  }
-  
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-    >
-      {/* 活动信息 + 确认按钮 */}
-    </motion.div>
-  )
-}
-```
+- 请求体：`conversationId? + input + context`
+- 返回：流式事件 + `response-complete`
+- 当前结构化承接围绕统一 `GenUI blocks`
 
-## API 响应格式
+## 当前交互重点
 
-后端使用 AI SDK 的 `toUIMessageStreamResponse()`，前端通过 `useChat` 自动解析。
-
-### Tool Result 结构
-
-```typescript
-interface ToolInvocation {
-  toolCallId: string
-  toolName: string
-  args: Record<string, unknown>
-  result?: Record<string, unknown>
-  state: "call" | "result"
-}
-```
-
-## 动画效果
-
-| 元素 | 动画 | 参数 |
-|------|------|------|
-| 欢迎 Logo | 缩放入场 | `scale: 0.8 → 1`, `opacity: 0 → 1` |
-| 快捷提示 | 交错入场 | `delay: index * 0.1s` |
-| Widget 卡片 | 上滑入场 | `y: 10 → 0`, `opacity: 0 → 1` |
-| 思考指示器 | 呼吸点 | `opacity: [0.3, 1, 0.3]` |
-| 探索列表项 | 交错滑入 | `x: -10 → 0`, `delay: index * 0.05` |
-
-## 快捷提示
-
-空状态显示 4 个快捷提示：
-
-1. 🍜 今晚想找人吃火锅
-2. 🎲 周末剧本杀缺人
-3. 🏃 附近有什么运动
-4. 🎉 帮我策划生日聚会
-
-点击后自动发送消息。
+- 状态首页空态、待继续、进行中、待出发表达
+- 消息中心作为“任务收件箱 + 结果更新流”
+- 活动详情承担报名、复制、分享展示、讨论区预览和二次转化
+- H5 在现实实践里优先保证主链完整，而不是只做展示页
 
 ## 开发
 

@@ -159,12 +159,12 @@ bun run regression:protocol
 
 ```text
 用户输入
-  -> Chat Runtime
-  -> Action Inference
-  -> Processing Pipeline
-  -> Tool / Workflow / Model Router
-  -> Task Runtime / Persistence
-  -> UI Blocks / Stream Response
+  -> 对话运行时
+  -> 动作推断
+  -> 处理管线
+  -> 工具 / 工作流 / 模型路由
+  -> 任务运行时 / 持久化
+  -> 界面块 / 流式响应
 ```
 
 这一层把 `text / action / context` 收成同一套请求语义，并始终走同一条 SSE 主链返回结果。
@@ -181,12 +181,12 @@ bun run regression:protocol
 
 当前主动作包括：
 
-- `explore_nearby`
-- `find_partner`
-- `search_partners`
-- `create_activity`
-- `join_activity`
-- `publish_draft`
+- `explore_nearby`：探索附近有什么局
+- `find_partner`：进入找搭子主链
+- `search_partners`：先按条件搜索搭子结果
+- `create_activity`：开始组一个新局
+- `join_activity`：报名参加一个局
+- `publish_draft`：把草稿正式发布出去
 
 核心模块：
 

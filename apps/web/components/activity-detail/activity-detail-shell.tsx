@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Loader2, MessageCircle, Share2, UserPlus } from "lucide-react";
+import { ArrowLeft, Loader2, MessageCircle, Plus, Share2, UserPlus } from "lucide-react";
 
 import { AuthSheet } from "@/components/auth/auth-sheet";
 import { ActivityCard, type PublicActivity } from "@/components/activity/activity-card";
@@ -88,6 +88,40 @@ function openDiscussionFromDetail(activityId: string, entry?: string): void {
   window.location.href = buildActivityDetailPath(activityId, {
     entry: resolveActivityEntry(entry, "join_success"),
   });
+}
+
+const ACTIVITY_TYPE_NAMES: Record<string, string> = {
+  food: "美食",
+  entertainment: "娱乐",
+  sports: "运动",
+  boardgame: "桌游",
+  other: "",
+};
+
+function buildClonePrompt(activity: PublicActivity): string {
+  const typeName = ACTIVITY_TYPE_NAMES[activity.type] || "";
+  const location = activity.locationName || activity.locationHint || "";
+  const parts: string[] = [];
+  parts.push("帮我发一个类似的");
+  if (typeName) {
+    parts.push(`${typeName}局`);
+  } else {
+    parts.push("活动");
+  }
+  if (location) {
+    parts.push(`，地点在${location}`);
+  }
+  if (activity.maxParticipants > 0) {
+    parts.push(`，大概${activity.maxParticipants}个人`);
+  }
+  parts.push("，时间你帮我安排合适的");
+  return parts.join("");
+}
+
+function navigateToChatWithPrefill(prefill: string): void {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.setItem("xu:chat:prefill", prefill);
+  window.location.href = "/chat";
 }
 
 export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
@@ -231,6 +265,11 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
     }
   }, [activity]);
 
+  const cloneActivity = useCallback(() => {
+    const prompt = buildClonePrompt(activity);
+    navigateToChatWithPrefill(prompt);
+  }, [activity]);
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-black text-white">
       <DiscussionEntryTracker activityId={activity.id} />
@@ -302,6 +341,17 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
               <span className="sr-only">{shareStatus === "copied" ? "已复制" : "分享"}</span>
             </Button>
           </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              cloneActivity();
+            }}
+            className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl py-2 text-xs text-white/44 transition hover:bg-white/[0.04] hover:text-white/70"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            我也组一个
+          </button>
 
           {shareStatus !== "idle" ? (
             <p className="mt-2 text-center text-xs text-white/44">

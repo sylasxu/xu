@@ -1726,6 +1726,18 @@ export default function ChatPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const prefill = window.sessionStorage.getItem("xu:chat:prefill");
+    if (prefill) {
+      setInput(prefill);
+      window.sessionStorage.removeItem("xu:chat:prefill");
+    }
+  }, []);
+
   const refreshCurrentTasks = useCallback(
     async (tokenOverride?: string | null) => {
       const effectiveToken = tokenOverride ?? authToken ?? readClientToken();

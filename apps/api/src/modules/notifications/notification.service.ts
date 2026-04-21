@@ -59,7 +59,7 @@ const DEFAULT_MESSAGE_CENTER_UI: MessageCenterUi = {
   kickoffActionLabel: '让 AI 帮我写开场白',
   markReadActionLabel: '标记已读',
   chatSummarySectionTitle: '活动群聊摘要',
-  chatSummaryDescription: 'H5 先提供摘要和跟进入口，完整活动群聊体验目前仍以小程序为主。',
+  chatSummaryDescription: '这里汇总活动群聊的最近动态，点进详情可以继续讨论和跟进。',
   chatSummaryEmpty: '暂无活动群聊记录，参与活动后这里会同步显示最近动态。',
   chatSummaryFallbackMessage: '还没人说话，发句开场吧',
 };

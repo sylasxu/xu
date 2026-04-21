@@ -3,7 +3,14 @@
 import { Elysia } from 'elysia';
 import { AuthError, basePlugins, verifyAdmin, verifyAuth } from '../../setup';
 import { authModel, type ErrorResponse, type LoginRequest, type PhoneOtpLoginRequest } from './auth.model';
-import { loginWithWechatCode, bindPhone, loginWithPhoneCode, bootstrapTestUsers } from './auth.service';
+import {
+  loginWithWechatCode,
+  bindPhone,
+  loginWithPhoneCode,
+  loginWithPrivilegedPhoneCode,
+  getAuthGateUi,
+  bootstrapTestUsers,
+} from './auth.service';
 
 function isPhoneOtpLoginRequest(body: LoginRequest): body is PhoneOtpLoginRequest {
   return typeof (body as PhoneOtpLoginRequest).phone === 'string';
@@ -12,6 +19,23 @@ function isPhoneOtpLoginRequest(body: LoginRequest): body is PhoneOtpLoginReques
 export const authController = new Elysia({ prefix: '/auth' })
   .use(basePlugins)
   .use(authModel)
+
+  .get(
+    '/ui',
+    async () => {
+      return await getAuthGateUi();
+    },
+    {
+      detail: {
+        tags: ['Auth'],
+        summary: '获取认证动作闸门文案',
+        description: '返回登录、绑定手机号等动作闸门所需的用户可见文案。',
+      },
+      response: {
+        200: 'auth.gateUi',
+      },
+    }
+  )
   
   // 统一登录
   .post(
@@ -21,7 +45,22 @@ export const authController = new Elysia({ prefix: '/auth' })
         const loginBody = body as LoginRequest;
 
         if (isPhoneOtpLoginRequest(loginBody)) {
-          const user = await loginWithPhoneCode(loginBody);
+          if (loginBody.audience === 'user') {
+            const user = await loginWithPhoneCode(loginBody);
+            const token = await jwt.sign({
+              id: user.id,
+              phoneNumber: user.phoneNumber,
+              role: 'user',
+            });
+
+            return {
+              user,
+              token,
+              isNewUser: false,
+            };
+          }
+
+          const user = await loginWithPrivilegedPhoneCode(loginBody);
 
           // Token 过期时间：24小时
           const exp = Math.floor(Date.now() / 1000) + 24 * 60 * 60;
@@ -66,7 +105,7 @@ export const authController = new Elysia({ prefix: '/auth' })
       detail: {
         tags: ['Auth'],
         summary: '登录',
-        description: '统一登录入口：支持微信 code 登录和受保护手机号验证码登录。',
+        description: '统一登录入口：支持微信 code 登录、H5 普通用户手机号验证码登录和受保护手机号验证码登录。',
       },
       body: 'auth.login',
       response: {

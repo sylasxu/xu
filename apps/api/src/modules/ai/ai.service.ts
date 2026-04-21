@@ -2377,13 +2377,17 @@ export interface WelcomeResponse {
       pendingActionBindPhoneHint: string;
       pendingActionResumeLabel: string;
     };
-    sidebar?: {
+  sidebar?: {
       title: string;
       authSubtitle: string;
       visitorSubtitle: string;
       messageCenterLabel: string;
       messageCenterHint: string;
       authContinuationHint: string;
+      currentTasksTitle: string;
+      currentTasksDescriptionAuthenticated: string;
+      currentTasksDescriptionVisitor: string;
+      currentTasksEmpty: string;
       historyTitle: string;
       historyDescriptionAuthenticated: string;
       historyDescriptionVisitor: string;
@@ -2482,6 +2486,10 @@ interface WelcomeUiConfig {
     messageCenterLabel: string;
     messageCenterHint: string;
     authContinuationHint: string;
+    currentTasksTitle: string;
+    currentTasksDescriptionAuthenticated: string;
+    currentTasksDescriptionVisitor: string;
+    currentTasksEmpty: string;
     historyTitle: string;
     historyDescriptionAuthenticated: string;
     historyDescriptionVisitor: string;
@@ -2562,6 +2570,10 @@ const DEFAULT_WELCOME_UI_CONFIG: WelcomeUiConfig = {
     messageCenterLabel: '消息中心',
     messageCenterHint: '搭子确认 / 活动跟进',
     authContinuationHint: '需要确认搭子或回看结果时，我会帮你继续接上',
+    currentTasksTitle: '现在最需要继续的事',
+    currentTasksDescriptionAuthenticated: '先接住还在推进中的事，再决定要不要翻旧对话。',
+    currentTasksDescriptionVisitor: '登录后，这里会继续接住你没做完的事。',
+    currentTasksEmpty: '当前没有需要继续推进的事，新的进展会先出现在这里。',
     historyTitle: '历史会话',
     historyDescriptionAuthenticated: '继续上次聊到一半的内容',
     historyDescriptionVisitor: '当前设备上的会话会先留在这里',
@@ -2732,6 +2744,10 @@ function normalizeWelcomeUiConfig(raw: unknown): WelcomeUiConfig {
       messageCenterLabel: getNonEmptyString(sidebarInput?.messageCenterLabel) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.messageCenterLabel,
       messageCenterHint: getNonEmptyString(sidebarInput?.messageCenterHint) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.messageCenterHint,
       authContinuationHint: getNonEmptyString(sidebarInput?.authContinuationHint) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.authContinuationHint,
+      currentTasksTitle: getNonEmptyString(sidebarInput?.currentTasksTitle) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.currentTasksTitle,
+      currentTasksDescriptionAuthenticated: getNonEmptyString(sidebarInput?.currentTasksDescriptionAuthenticated) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.currentTasksDescriptionAuthenticated,
+      currentTasksDescriptionVisitor: getNonEmptyString(sidebarInput?.currentTasksDescriptionVisitor) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.currentTasksDescriptionVisitor,
+      currentTasksEmpty: getNonEmptyString(sidebarInput?.currentTasksEmpty) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.currentTasksEmpty,
       historyTitle: getNonEmptyString(sidebarInput?.historyTitle) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.historyTitle,
       historyDescriptionAuthenticated: getNonEmptyString(sidebarInput?.historyDescriptionAuthenticated) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.historyDescriptionAuthenticated,
       historyDescriptionVisitor: getNonEmptyString(sidebarInput?.historyDescriptionVisitor) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.historyDescriptionVisitor,

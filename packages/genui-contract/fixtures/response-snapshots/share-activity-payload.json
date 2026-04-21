@@ -32,7 +32,7 @@
             "dedupeKey": "share_ready",
             "replacePolicy": "replace",
             "level": "success",
-            "message": "已生成邀请链接与小程序路径。"
+            "message": "已生成活动详情链接。"
           },
           {
             "type": "entity-card",
@@ -51,8 +51,7 @@
               "lat": 29.58567,
               "lng": 106.52988,
               "shareTitle": "🔥 周五 20:00桌游局，还差5人，速来！",
-              "shareUrl": "https://xu.example/invite/activity_demo_001",
-              "sharePath": "/subpackages/activity/detail/index?id=activity_demo_001&share=1"
+              "shareUrl": "https://xu.example/activities/activity_demo_001"
             }
           }
         ]

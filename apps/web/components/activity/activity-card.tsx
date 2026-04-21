@@ -18,8 +18,10 @@ export interface PublicActivity {
   themeConfig: unknown
   isArchived: boolean
   canJoin: boolean
-  creatorNickname: string | null
-  creatorAvatarUrl: string | null
+  creator: {
+    nickname: string | null
+    avatarUrl: string | null
+  }
   participants: Array<{ nickname: string | null; avatarUrl: string | null }>
   recentMessages: Array<{
     senderNickname: string | null
@@ -182,7 +184,9 @@ export function ActivityCard({
   const primaryColor = themeConfig.colorScheme?.primary || "#374151"
   const isEnded = activity.status === "completed" || activity.status === "cancelled"
   const typeLabel = ACTIVITY_TYPE_LABELS[activity.type] || "✨ 活动"
-  const seatText = activity.isFull ? "当前已满员，可先到小程序候补" : `还剩 ${activity.remainingSeats} 个位置`
+  const seatText = activity.isFull ? "当前已满员，可以先关注后续动态" : `还剩 ${activity.remainingSeats} 个位置`
+  const creatorNickname = activity.creator.nickname
+  const creatorAvatarUrl = activity.creator.avatarUrl
 
   return (
     <div className="w-full max-w-lg mx-auto rounded-2xl bg-white/90 backdrop-blur-sm shadow-xl overflow-hidden">
@@ -256,8 +260,8 @@ export function ActivityCard({
         {/* 发起人 */}
         <div className="flex items-center gap-3">
           <Avatar
-            url={activity.creatorAvatarUrl}
-            name={activity.creatorNickname}
+            url={creatorAvatarUrl}
+            name={creatorNickname}
             size="w-9 h-9"
             textSize="text-sm"
           />
@@ -272,7 +276,7 @@ export function ActivityCard({
               className="text-sm font-medium"
               style={{ color: textColor }}
             >
-              {activity.creatorNickname || "匿名用户"}
+              {creatorNickname || "匿名用户"}
             </span>
           </div>
         </div>

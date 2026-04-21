@@ -75,6 +75,10 @@ const welcomeUiConfig = {
     messageCenterLabel: '消息中心',
     messageCenterHint: '搭子确认 / 活动跟进',
     authContinuationHint: '需要确认搭子或回看结果时，我会帮你继续接上',
+    currentTasksTitle: '现在最需要继续的事',
+    currentTasksDescriptionAuthenticated: '先接住还在推进中的事，再决定要不要翻旧对话。',
+    currentTasksDescriptionVisitor: '登录后，这里会继续接住你没做完的事。',
+    currentTasksEmpty: '当前没有需要继续推进的事，新的进展会先出现在这里。',
     historyTitle: '历史会话',
     historyDescriptionAuthenticated: '继续上次聊到一半的内容',
     historyDescriptionVisitor: '当前设备上的会话会先留在这里',
@@ -110,9 +114,24 @@ const messageCenterUiConfig = {
   kickoffActionLabel: '让 AI 帮我写开场白',
   markReadActionLabel: '标记已读',
   chatSummarySectionTitle: '活动群聊摘要',
-  chatSummaryDescription: 'H5 先提供摘要和跟进入口，完整活动群聊体验目前仍以小程序为主。',
+  chatSummaryDescription: '这里汇总活动群聊的最近动态，点进详情可以继续讨论和跟进。',
   chatSummaryEmpty: '暂无活动群聊记录，参与活动后这里会同步显示最近动态。',
   chatSummaryFallbackMessage: '还没人说话，发句开场吧',
+};
+
+const authGateUiConfig = {
+  loginTitle: '登录后继续',
+  bindPhoneTitle: '用手机号继续',
+  loginDescription: '先确认身份，后续进展和讨论记录会接着保留。',
+  bindPhoneDescription: '这一步需要确认可联系的手机号，完成后会继续刚才的动作。',
+  invalidPhoneText: '请输入 11 位手机号',
+  missingCodeText: '请输入验证码',
+  loginFailedText: '登录失败，请稍后再试',
+  phonePlaceholder: '手机号',
+  codePlaceholder: '验证码',
+  submitLabel: '继续',
+  submittingLabel: '正在继续',
+  privacyHint: '当前使用手机号验证码登录承接动作，完成后会继续刚才的动作。',
 };
 
 const reportUiConfig = {
@@ -219,6 +238,12 @@ const aiConfigSeeds = [
     configValue: messageCenterUiConfig,
     category: 'ui',
     description: '消息中心壳层文案配置',
+  },
+  {
+    configKey: 'ui.auth_gate',
+    configValue: authGateUiConfig,
+    category: 'ui',
+    description: '认证动作闸门文案配置',
   },
   {
     configKey: 'ui.report',

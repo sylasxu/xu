@@ -15,8 +15,8 @@
 
   <path d="M220 440C360 280 560 500 740 330C830 245 915 250 980 320" stroke="url(#line)" stroke-width="5" stroke-linecap="round"/>
 
-  <text x="220" y="250" fill="#F8FAFC" font-size="64" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif" font-weight="700">xu · 活动邀请函</text>
-  <text x="220" y="320" fill="#CBD5E1" font-size="34" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif">查看活动详情，打开小程序立即报名</text>
+  <text x="220" y="250" fill="#F8FAFC" font-size="64" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif" font-weight="700">xu · 活动详情</text>
+  <text x="220" y="320" fill="#CBD5E1" font-size="34" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif">查看活动详情，报名后继续讨论</text>
 
   <rect x="220" y="366" width="248" height="64" rx="32" fill="#111827"/>
   <text x="258" y="408" fill="#F8FAFC" font-size="30" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif">碎片化社交助理</text>

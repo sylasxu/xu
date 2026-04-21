@@ -496,6 +496,62 @@ function hasRecentCreatePrompt(historyMessages: ChatRequest['messages']): boolea
   return false;
 }
 
+function readRecentCreatePrompt(historyMessages: ChatRequest['messages']): string | null {
+  let inspectedUserMessages = 0;
+
+  for (const message of [...historyMessages].reverse()) {
+    if (message.role !== 'user') {
+      continue;
+    }
+
+    inspectedUserMessages += 1;
+    const content = typeof message.content === 'string' ? message.content.trim() : '';
+    if (content && CREATE_ACTIVITY_PATTERN.test(content)) {
+      return content;
+    }
+
+    if (inspectedUserMessages >= 4) {
+      break;
+    }
+  }
+
+  return null;
+}
+
+function resolveCreateLocationFollowUpAction(
+  inputText: string,
+  historyMessages: ChatRequest['messages']
+): ChatRequest['structuredAction'] | undefined {
+  const normalizedText = inputText.trim();
+  const center = findKnownLocationCenter(normalizedText);
+  if (!center || inferActivityTypeFromText(normalizedText)) {
+    return undefined;
+  }
+
+  if (!hasRecentCreatePrompt(historyMessages) && !hasRecentLocationPrompt(historyMessages)) {
+    return undefined;
+  }
+
+  const recentCreatePrompt = readRecentCreatePrompt(historyMessages) || normalizedText;
+  return {
+    action: 'select_preference',
+    source: 'conversation_state',
+    originalText: normalizedText,
+    payload: {
+      questionType: 'location',
+      selectedValue: center.name,
+      selectedLabel: center.name,
+      locationName: center.name,
+      lat: center.lat,
+      lng: center.lng,
+      semanticQuery: buildTaskFirstSemanticQuery({
+        inputText: recentCreatePrompt,
+        locationName: center.name,
+      }),
+    },
+  };
+}
+
 function looksLikePartnerQuestion(text: string): boolean {
   return /(搭子|想玩什么运动|想玩点什么|想在哪儿玩|在哪片活动方便|想找什么样的搭子)/.test(text);
 }
@@ -1182,13 +1238,16 @@ async function resolveAiChatExecution(
   const suggestionResolution = request.input.type === 'text'
     ? resolveContinuationFromSuggestions(request.input.text, conversation.latestAssistantSuggestions)
     : undefined;
+  const stateResolution = request.input.type === 'text'
+    ? resolveCreateLocationFollowUpAction(request.input.text, conversation.historyMessages)
+    : undefined;
   const resolvedStructuredAction = request.input.type === 'action'
     ? resolveStructuredActionFromInput(
         request.input,
         conversation.latestAssistantSuggestions,
         typeof request.context?.entry === 'string' ? request.context.entry : undefined
       )
-    : suggestionResolution?.structuredAction;
+    : suggestionResolution?.structuredAction ?? stateResolution;
   const location = parseRequestLocation(request) || parseStructuredActionLocation(resolvedStructuredAction);
   const ai = parseRequestAiParams(request);
 
@@ -1201,25 +1260,33 @@ async function resolveAiChatExecution(
     : request.context?.client === 'web'
       ? 'web'
       : 'miniprogram';
+  const resolutionTrace: GenUITracePayload | undefined = suggestionResolution
+    ? {
+        stage: 'suggestions_resolved',
+        detail: {
+          inputText: userText,
+          contextKind: suggestionResolution.contextKind,
+          matchedBy: suggestionResolution.matchedBy,
+          matchedText: suggestionResolution.matchedText,
+          action: suggestionResolution.structuredAction.action,
+        },
+      }
+    : stateResolution
+      ? {
+          stage: 'conversation_state_resolved',
+          detail: {
+            inputText: userText,
+            action: stateResolution.action,
+            source: stateResolution.source || null,
+          },
+        }
+      : undefined;
 
   return {
     conversation,
     userText,
     resolvedStructuredAction,
-    ...(suggestionResolution
-      ? {
-          resolutionTrace: {
-            stage: 'suggestions_resolved',
-            detail: {
-              inputText: userText,
-              contextKind: suggestionResolution.contextKind,
-              matchedBy: suggestionResolution.matchedBy,
-              matchedText: suggestionResolution.matchedText,
-              action: suggestionResolution.structuredAction.action,
-            },
-          },
-        }
-      : {}),
+    ...(resolutionTrace ? { resolutionTrace } : {}),
     defaultExecutionPath: resolvedStructuredAction ? 'structured_action' : 'llm_orchestrated',
     chatRequest: {
       messages: [

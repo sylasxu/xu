@@ -23,6 +23,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { buildActivityDetailPath } from "@/lib/activity-url";
 import { cn } from "@/lib/utils";
 import { readClientToken, readClientUserId } from "@/lib/client-auth";
 
@@ -617,7 +618,7 @@ export function MessageCenterDrawer({
         if (action === "confirm" && payload.activityId) {
           closePendingMatchDetail();
           setOpen(false);
-          window.location.href = `/invite/${payload.activityId}`;
+          window.location.href = buildActivityDetailPath(payload.activityId);
           return;
         }
 
@@ -1257,7 +1258,7 @@ export function MessageCenterDrawer({
                   </span>
                 </div>
                 <p className={cn("mb-3 text-xs leading-5", isDarkMode ? "text-white/42" : "text-black/42")}>
-                  {messageCenter?.ui.chatSummaryDescription || "H5 先提供摘要和跟进入口，完整活动群聊体验目前仍以小程序为主。"}
+                  {messageCenter?.ui.chatSummaryDescription || "这里汇总活动群聊的最近动态，点进详情可以继续讨论和跟进。"}
                 </p>
 
                 {chatActivities.length === 0 ? (

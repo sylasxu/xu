@@ -102,6 +102,12 @@ interface MessageCenterResponse {
   unreadNotificationCount: number;
   totalUnread: number;
   chatActivities: {
+    items: Array<{
+      activityId: string;
+      activityTitle: string;
+      lastMessage: string | null;
+      unreadCount: number;
+    }>;
     totalUnread: number;
   };
 }
@@ -396,6 +402,14 @@ async function getAdminToken(): Promise<string> {
   return response.token;
 }
 
+function decodeTokenPayload(token: string): Record<string, unknown> {
+  const payloadSegment = token.split('.')[1];
+  assert(payloadSegment, 'JWT 缺少 payload 段');
+
+  const normalized = payloadSegment.replace(/-/g, '+').replace(/_/g, '/');
+  const padding = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
+  return JSON.parse(Buffer.from(`${normalized}${padding}`, 'base64').toString('utf8')) as Record<string, unknown>;
+}
 
 async function sleep(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms));
@@ -614,6 +628,14 @@ async function listChatActivities(user: BootstrappedUser) {
     method: 'GET',
     path: `/chat/activities?userId=${user.user.id}&page=1&limit=20`,
     token: user.token,
+  });
+}
+
+async function listChatActivitiesForTarget(targetUserId: string, requesterToken: string) {
+  return requestJson<ChatActivitiesResponse>({
+    method: 'GET',
+    path: `/chat/activities?userId=${targetUserId}&page=1&limit=20`,
+    token: requesterToken,
   });
 }
 
@@ -901,8 +923,19 @@ async function scenarioBasicDiscussionFlow(context: ScenarioContext): Promise<Sc
     const chatActivities = await listChatActivities(joiners[0]);
     assert(chatActivities.items.some((item) => item.activityId === activityId), '群聊列表里看不到新活动');
 
+    const forbiddenChatActivities = await requestError({
+      method: 'GET',
+      path: `/chat/activities?userId=${joiners[0].user.id}&page=1&limit=20`,
+      token: joiners[1].token,
+    });
+    assert(forbiddenChatActivities.status === 403, `跨账号读取群聊摘要状态码异常: ${forbiddenChatActivities.status}`);
+
+    const adminChatActivities = await listChatActivitiesForTarget(joiners[0].user.id, await getAdminToken());
+    assert(adminChatActivities.items.some((item) => item.activityId === activityId), '管理员看不到目标用户群聊摘要');
+
     details.push(`活动 ${activityId} 完成创建、报名、讨论区发言`);
     details.push(`公开人数=${publicActivity.currentParticipants}，消息数=${messages.messages.length}`);
+    details.push('群聊摘要只允许本人或管理员读取');
   });
 
   return { name: 'basic-discussion-flow', passed: true, details };
@@ -1552,6 +1585,16 @@ async function scenarioAiDraftSettingsFormFlow(context: ScenarioContext): Promis
       typeof publishedCard.fields.activityId === 'string' && publishedCard.fields.activityId === activityId,
       `确认发布后 activityId 异常: ${JSON.stringify(publishedCard.fields)}`
     );
+    assert(
+      typeof publishedCard.fields.shareUrl === 'string'
+      && publishedCard.fields.shareUrl.includes(`/activities/${activityId}`)
+      && !publishedCard.fields.shareUrl.includes('/invite/'),
+      `确认发布后 shareUrl 应指向活动详情页: ${JSON.stringify(publishedCard.fields)}`
+    );
+    assert(
+      !Object.prototype.hasOwnProperty.call(publishedCard.fields, 'sharePath'),
+      `确认发布后不应再返回 sharePath: ${JSON.stringify(publishedCard.fields)}`
+    );
 
     const publicActivity = await waitFor(() => getPublicActivity(activityId).catch(() => null), { retries: 6, delayMs: 200 });
     assert(publicActivity, `活动发布后 public 接口不可见: ${activityId}`);
@@ -1584,6 +1627,7 @@ async function scenarioAiDraftSettingsFormFlow(context: ScenarioContext): Promis
 
     details.push(`活动 ${activityId} 支持 edit_draft -> draft_settings form -> save_draft_settings -> confirm_publish`);
     details.push('草稿编辑不再回退成文字问答，确认发布后 public 详情可见且状态变为 active');
+    details.push('发布后的分享协议只返回 /activities 详情链接，不再返回 sharePath');
     details.push(`create_activity 任务已收口为 completed/done，resultOutcome=${publishedTask.resultOutcome}`);
 
     return { name: 'ai-draft-settings-form-flow', passed: true, details };
@@ -1685,9 +1729,16 @@ async function scenarioAiJoinAuthResumeDiscussionFlow(context: ScenarioContext):
     assert(discussionTask, `discussion entered 后未找到 join task: ${JSON.stringify(discussionTasks.items)}`);
     assert(discussionTask.currentStage === 'discussion', `discussion entered 后 stage 应为 discussion: ${JSON.stringify(discussionTask)}`);
 
+    const messageCenter = await getMessageCenter(joiner);
+    assert(
+      messageCenter.chatActivities.items.some((item) => item.activityId === activityId),
+      `报名成功后消息中心缺少群聊摘要: ${JSON.stringify(messageCenter.chatActivities.items)}`
+    );
+
     details.push(`活动 ${activityId} 游客触发 join_activity 后返回 authRequired + pendingAction`);
     details.push('登录后恢复同一动作，返回 open_discussion 并成功写入报名记录');
     details.push('discussion-entered 回写后，task stage 从 joined 推进到 discussion');
+    details.push('消息中心能看到报名活动的群聊摘要');
   }, {
     title: 'H5 挂起恢复验收局',
     maxParticipants: 5,
@@ -1706,6 +1757,20 @@ async function scenarioAiAccessFlow(context: ScenarioContext): Promise<ScenarioR
 
   const authWelcome = await getAiWelcome(user1);
   assert(authWelcome.greeting.includes(user1.user.nickname || ''), `登录欢迎语未带昵称: ${authWelcome.greeting}`);
+
+  const h5UserLogin = await requestJson<LoginResponse>({
+    method: 'POST',
+    path: '/auth/login',
+    payload: {
+      grantType: 'phone_otp',
+      audience: 'user',
+      phone: user1.user.phoneNumber || '',
+      code: ADMIN_CODE,
+    },
+  });
+  const h5UserTokenPayload = decodeTokenPayload(h5UserLogin.token);
+  assert(h5UserTokenPayload.role === 'user', `H5 普通用户登录不应签成 admin: ${JSON.stringify(h5UserTokenPayload)}`);
+  assert(h5UserTokenPayload.phoneNumber === user1.user.phoneNumber, 'H5 普通用户登录 token 缺少手机号');
 
   const anonChat = await postAiChat({ text: '你好，帮我打个招呼' });
   assert(typeof anonChat.conversationId === 'string' && anonChat.conversationId.length > 0, '游客 AI 对话未返回 conversationId');
@@ -1744,6 +1809,7 @@ async function scenarioAiAccessFlow(context: ScenarioContext): Promise<ScenarioR
 
   details.push(`游客 AI 欢迎卡和聊天可用，conversationId=${anonChat.conversationId}`);
   details.push(`登录 AI 会话已持久化，conversationId=${authChat.conversationId}`);
+  details.push('H5 phone audience 登录签发普通 user token');
   details.push('跨账号查看会话和劫持会话都被 403 拦截');
 
   return { name: 'ai-access-flow', passed: true, details };

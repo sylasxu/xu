@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BellRing,
+  ChevronRight,
+  Clock3,
   History,
   LogIn,
   Menu,
@@ -34,6 +36,10 @@ type SidebarDrawerProps = {
     messageCenterLabel: string;
     messageCenterHint: string;
     authContinuationHint: string;
+    currentTasksTitle: string;
+    currentTasksDescriptionAuthenticated: string;
+    currentTasksDescriptionVisitor: string;
+    currentTasksEmpty: string;
     historyTitle: string;
     historyDescriptionAuthenticated: string;
     historyDescriptionVisitor: string;
@@ -44,6 +50,7 @@ type SidebarDrawerProps = {
     composerCapabilityHint: string;
   };
   onSelectConversation: (conversationId: string) => Promise<void>;
+  onSelectTaskAction: (action: SidebarTaskAction) => Promise<void> | void;
   onOpenMessageCenter: () => void;
 };
 
@@ -69,6 +76,38 @@ type ConversationsPayload = {
   total: number;
   hasMore: boolean;
   cursor: string | null;
+};
+
+type SidebarTaskAction = {
+  kind: "structured_action" | "navigate" | "switch_tab";
+  label: string;
+  action?: string;
+  payload?: Record<string, unknown>;
+  source?: string;
+  originalText?: string;
+  url?: string;
+};
+
+type SidebarTaskSnapshot = {
+  id: string;
+  taskType: "join_activity" | "find_partner" | "create_activity";
+  taskTypeLabel: string;
+  currentStage: string;
+  stageLabel: string;
+  status: "active" | "waiting_auth" | "waiting_async_result" | "completed" | "cancelled" | "expired";
+  goalText: string;
+  headline: string;
+  summary: string;
+  updatedAt: string;
+  activityId?: string;
+  activityTitle?: string;
+  primaryAction?: SidebarTaskAction;
+  secondaryAction?: SidebarTaskAction;
+};
+
+type CurrentTasksPayload = {
+  items: SidebarTaskSnapshot[];
+  serverTime: string;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -111,15 +150,18 @@ export function SidebarDrawer({
   activeConversationId = null,
   ui,
   onSelectConversation,
+  onSelectTaskAction,
   onOpenMessageCenter,
 }: SidebarDrawerProps) {
   const [open, setOpen] = useState(false);
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [userProfile, setUserProfile] = useState<SidebarUserProfile | null>(null);
+  const [currentTasks, setCurrentTasks] = useState<SidebarTaskSnapshot[]>([]);
   const [conversations, setConversations] = useState<SidebarConversation[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchValue, setSearchValue] = useState("");
   const [pendingConversationId, setPendingConversationId] = useState<string | null>(null);
+  const [pendingTaskId, setPendingTaskId] = useState<string | null>(null);
 
   const userId = useMemo(() => readClientUserId(authToken), [authToken]);
 
@@ -147,6 +189,7 @@ export function SidebarDrawer({
 
     if (!authToken || !userId) {
       setUserProfile(null);
+      setCurrentTasks([]);
       setConversations([]);
       return;
     }
@@ -196,13 +239,31 @@ export function SidebarDrawer({
 
         return payload as ConversationsPayload;
       }),
+      fetch(`${API_BASE}/ai/tasks/current`, {
+        headers,
+        cache: "no-store",
+        signal: controller.signal,
+      }).then(async (response) => {
+        if (!response.ok) {
+          return null;
+        }
+
+        const payload = (await response.json()) as unknown;
+        if (!isRecord(payload) || !Array.isArray(payload.items)) {
+          return null;
+        }
+
+        return payload as CurrentTasksPayload;
+      }),
     ])
-      .then(([profile, conversationPayload]) => {
+      .then(([profile, conversationPayload, taskPayload]) => {
         setUserProfile(profile);
         setConversations(conversationPayload?.items ?? []);
+        setCurrentTasks(taskPayload?.items ?? []);
       })
       .catch(() => {
         setUserProfile(null);
+        setCurrentTasks([]);
         setConversations([]);
       })
       .finally(() => {
@@ -323,6 +384,133 @@ export function SidebarDrawer({
                 </div>
               ) : null}
             </div>
+          </section>
+
+          <section className="mt-5">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className={cn("text-[15px] font-semibold", isDarkMode ? "text-white/92" : "text-black/88")}>{ui.currentTasksTitle}</p>
+                <p className={cn("mt-1 text-xs", isDarkMode ? "text-white/42" : "text-black/40")}>
+                  {authToken ? ui.currentTasksDescriptionAuthenticated : ui.currentTasksDescriptionVisitor}
+                </p>
+              </div>
+              <Clock3 className={cn("h-4 w-4", isDarkMode ? "text-white/40" : "text-black/36")} />
+            </div>
+
+            {!authToken ? (
+              <div
+                className={cn(
+                  "rounded-[24px] border px-4 py-4 text-sm",
+                  isDarkMode ? "border-white/8 bg-white/[0.02] text-white/60" : "border-black/8 bg-white text-black/60"
+                )}
+              >
+                {ui.currentTasksDescriptionVisitor}
+              </div>
+            ) : loading ? (
+              <div className="space-y-2">
+                {[0, 1].map((item) => (
+                  <div
+                    key={item}
+                    className={cn(
+                      "h-[118px] animate-pulse rounded-[22px] border",
+                      isDarkMode ? "border-white/8 bg-white/[0.03]" : "border-black/8 bg-white"
+                    )}
+                  />
+                ))}
+              </div>
+            ) : currentTasks.length === 0 ? (
+              <div
+                className={cn(
+                  "rounded-[24px] border px-4 py-4 text-sm",
+                  isDarkMode ? "border-white/8 bg-white/[0.02] text-white/60" : "border-black/8 bg-white text-black/60"
+                )}
+              >
+                {ui.currentTasksEmpty}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {currentTasks.map((task) => {
+                  const isPendingTask = pendingTaskId === task.id;
+                  return (
+                    <div
+                      key={task.id}
+                      className={cn(
+                        "rounded-[22px] border px-4 py-3",
+                        isDarkMode ? "border-white/8 bg-white/[0.025]" : "border-black/8 bg-white"
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className={cn("truncate text-sm font-medium", isDarkMode ? "text-white/88" : "text-black/84")}>
+                            {task.headline}
+                          </p>
+                          <p className={cn("mt-1 text-xs", isDarkMode ? "text-white/42" : "text-black/40")}>
+                            {task.taskTypeLabel} · {task.stageLabel}
+                          </p>
+                        </div>
+                        <span
+                          className={cn(
+                            "shrink-0 rounded-full px-2 py-1 text-[11px]",
+                            isDarkMode ? "bg-white/[0.06] text-white/58" : "bg-black/[0.045] text-black/52"
+                          )}
+                        >
+                          {task.stageLabel}
+                        </span>
+                      </div>
+
+                      <p className={cn("mt-3 text-sm leading-6", isDarkMode ? "text-white/68" : "text-black/64")}>
+                        {task.summary}
+                      </p>
+
+                      {task.primaryAction || task.secondaryAction ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {task.primaryAction ? (
+                            <button
+                              type="button"
+                              disabled={disabled || isPendingTask}
+                              onClick={() => {
+                                setPendingTaskId(task.id);
+                                void Promise.resolve(onSelectTaskAction(task.primaryAction!)).finally(() => {
+                                  setPendingTaskId((current) => (current === task.id ? null : current));
+                                });
+                              }}
+                              className={cn(
+                                "inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-medium transition disabled:opacity-45",
+                                isDarkMode ? "bg-white text-[#111111] hover:bg-white/92" : "bg-black text-white hover:bg-black/92"
+                              )}
+                            >
+                              {task.primaryAction.label}
+                              <ChevronRight className="h-3.5 w-3.5" />
+                            </button>
+                          ) : null}
+
+                          {task.secondaryAction ? (
+                            <button
+                              type="button"
+                              disabled={disabled || isPendingTask}
+                              onClick={() => {
+                                setPendingTaskId(task.id);
+                                void Promise.resolve(onSelectTaskAction(task.secondaryAction!)).finally(() => {
+                                  setPendingTaskId((current) => (current === task.id ? null : current));
+                                });
+                              }}
+                              className={cn(
+                                "inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium transition disabled:opacity-45",
+                                isDarkMode
+                                  ? "border-white/10 bg-white/[0.03] text-white/80 hover:bg-white/[0.05]"
+                                  : "border-black/10 bg-black/[0.03] text-black/76 hover:bg-black/[0.045]"
+                              )}
+                            >
+                              {task.secondaryAction.label}
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </section>
 
           <section className="mt-5">

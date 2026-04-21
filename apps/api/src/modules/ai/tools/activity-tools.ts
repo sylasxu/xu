@@ -32,13 +32,18 @@ const activityTypeSchema = t.Union([
   t.Literal('other'),
 ], { description: '活动类型' });
 
+const coordinateInputSchema = t.Object({
+  lng: t.Number({ description: '经度' }),
+  lat: t.Number({ description: '纬度' }),
+}, { description: '位置坐标对象' });
+
 /** 创建草稿参数 */
 const createDraftSchema = t.Object({
   title: t.String({ description: '活动标题，必须包含 Emoji，格式：Emoji + 核心活动 + 状态，最多12字' }),
   type: activityTypeSchema,
   locationName: t.String({ description: '地点名称（POI），如"观音桥北城天街"' }),
   locationHint: t.String({ description: '重庆地形备注：楼层、入口、交通等信息' }),
-  location: t.Tuple([t.Number(), t.Number()], { description: '位置坐标 [lng, lat]' }),
+  location: coordinateInputSchema,
   startAt: t.String({ description: '开始时间，ISO 8601 格式' }),
   maxParticipants: t.Number({ minimum: 2, maximum: 50, description: '最大参与人数' }),
   summary: t.String({ maxLength: 30, description: 'xu 的推荐语，30字内，温暖接地气' }),
@@ -58,7 +63,7 @@ const refineDraftSchema = t.Object({
     type: t.Optional(activityTypeSchema),
     locationName: t.Optional(t.String({ description: '新地点名称' })),
     locationHint: t.Optional(t.String({ description: '新位置备注' })),
-    location: t.Optional(t.Tuple([t.Number(), t.Number()], { description: '新坐标 [lng, lat]' })),
+    location: t.Optional(coordinateInputSchema),
     startAt: t.Optional(t.String({ description: '新开始时间，ISO 8601 格式' })),
     maxParticipants: t.Optional(t.Number({ minimum: 2, maximum: 50, description: '新人数上限' })),
   }, { description: '要更新的字段，只传需要修改的' }),
@@ -72,9 +77,15 @@ const publishActivitySchema = t.Object({
 
 // ============ 类型导出 ============
 
-export type CreateDraftParams = typeof createDraftSchema.static;
+type DraftLocation = [number, number];
+type CreateDraftToolParams = typeof createDraftSchema.static;
+type RefineDraftToolParams = typeof refineDraftSchema.static;
+
+export type CreateDraftParams = Omit<CreateDraftToolParams, 'location'> & { location: DraftLocation };
 export type GetDraftParams = typeof getDraftSchema.static;
-export type RefineDraftParams = typeof refineDraftSchema.static;
+export type RefineDraftParams = Omit<RefineDraftToolParams, 'updates'> & {
+  updates: Omit<RefineDraftToolParams['updates'], 'location'> & { location?: DraftLocation };
+};
 export type PublishActivityParams = typeof publishActivitySchema.static;
 
 interface PublishedActivityCardPayload {
@@ -89,15 +100,10 @@ interface PublishedActivityCardPayload {
   maxParticipants: number;
   currentParticipants: number;
   shareUrl: string;
-  sharePath: string;
 }
 
 function generateShareUrl(activityId: string): string {
-  return `${process.env.WEB_BASE_URL || process.env.NEXT_PUBLIC_WEB_URL || 'https://xu.example'}/activity/${activityId}`;
-}
-
-function generateSharePath(activityId: string): string {
-  return `/subpackages/activity/detail/index?id=${activityId}&share=1`;
+  return `${process.env.WEB_BASE_URL || process.env.NEXT_PUBLIC_WEB_URL || 'https://xu.example'}/activities/${activityId}`;
 }
 
 function buildLoginRequiredResult(action: string) {
@@ -215,12 +221,9 @@ function inferDraftStartAt(description: string, providedStartAt?: string): strin
 
 function inferDraftLocation(payload: Record<string, unknown>): [number, number] {
   const locationValue = payload.location;
-  if (Array.isArray(locationValue) && locationValue.length >= 2) {
-    const lng = Number(locationValue[0]);
-    const lat = Number(locationValue[1]);
-    if (Number.isFinite(lng) && Number.isFinite(lat)) {
-      return [lng, lat];
-    }
+  const explicitLocation = readActionPayloadDraftLocation(locationValue);
+  if (explicitLocation) {
+    return explicitLocation;
   }
 
   const embeddedLocation = payload._location;
@@ -234,6 +237,47 @@ function inferDraftLocation(payload: Record<string, unknown>): [number, number] 
   }
 
   return DEFAULT_DRAFT_LOCATION;
+}
+
+function readActionPayloadDraftLocation(location: unknown): DraftLocation | null {
+  if (Array.isArray(location) && location.length >= 2) {
+    const lng = Number(location[0]);
+    const lat = Number(location[1]);
+    return Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : null;
+  }
+
+  return readToolDraftLocationObject(location);
+}
+
+function readToolDraftLocationObject(location: unknown): DraftLocation | null {
+  if (!location || typeof location !== 'object') {
+    return null;
+  }
+
+  const point = location as { lng?: unknown; lat?: unknown };
+  const lng = Number(point.lng);
+  const lat = Number(point.lat);
+  return Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : null;
+}
+
+function normalizeCreateDraftToolParams(params: CreateDraftToolParams): CreateDraftParams {
+  return {
+    ...params,
+    location: readToolDraftLocationObject(params.location) || DEFAULT_DRAFT_LOCATION,
+  };
+}
+
+function normalizeRefineDraftToolParams(params: RefineDraftToolParams): RefineDraftParams {
+  const { location: rawLocation, ...updates } = params.updates;
+  const location = readToolDraftLocationObject(rawLocation);
+  return {
+    activityId: params.activityId,
+    reason: params.reason,
+    updates: {
+      ...updates,
+      ...(location ? { location } : {}),
+    },
+  };
 }
 
 function inferDraftTitle(type: CreateDraftParams['type'], description: string, providedTitle?: string): string {
@@ -337,14 +381,14 @@ export async function createActivityDraftRecord(userId: string, params: CreateDr
 export function createActivityDraftTool(userId: string | null) {
   return tool({
     description: '创建活动草稿。推断缺失信息（时间默认明天14:00，人数默认4人），不反问。',
-    inputSchema: jsonSchema<CreateDraftParams>(toJsonSchema(createDraftSchema)),
+    inputSchema: jsonSchema<CreateDraftToolParams>(toJsonSchema(createDraftSchema)),
     
-    execute: async (params: CreateDraftParams) => {
+    execute: async (params: CreateDraftToolParams) => {
       if (!userId) {
         return buildLoginRequiredResult('创建活动草稿');
       }
       
-      return createActivityDraftRecord(userId, params);
+      return createActivityDraftRecord(userId, normalizeCreateDraftToolParams(params));
     },
   });
 }
@@ -489,13 +533,14 @@ export async function updateActivityDraftRecord(
 export function refineDraftTool(userId: string | null) {
   return tool({
     description: '修改草稿。只改用户要求的字段，需要 activityId。',
-    inputSchema: jsonSchema<RefineDraftParams>(toJsonSchema(refineDraftSchema)),
+    inputSchema: jsonSchema<RefineDraftToolParams>(toJsonSchema(refineDraftSchema)),
 
-    execute: async ({ activityId, updates, reason }: RefineDraftParams) => {
+    execute: async (params: RefineDraftToolParams) => {
       if (!userId) {
         return buildLoginRequiredResult('修改活动草稿');
       }
 
+      const { activityId, updates, reason } = normalizeRefineDraftToolParams(params);
       return updateActivityDraftRecord(userId, activityId, updates, reason);
     },
   });
@@ -540,7 +585,6 @@ export async function publishActivityRecord(userId: string, activityId: string) 
 
 
     const shareUrl = generateShareUrl(activityId);
-    const sharePath = generateSharePath(activityId);
     const publishedActivityCard = publishedActivity
       ? {
           activityId: publishedActivity.id,
@@ -554,7 +598,6 @@ export async function publishActivityRecord(userId: string, activityId: string) 
           maxParticipants: publishedActivity.maxParticipants,
           currentParticipants: publishedActivity.currentParticipants,
           shareUrl,
-          sharePath,
         } satisfies PublishedActivityCardPayload
       : null;
 

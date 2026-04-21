@@ -37,6 +37,10 @@ const WechatCodeLoginRequest = t.Object(
 const PhoneOtpLoginRequest = t.Object(
   {
     grantType: t.Optional(t.Literal('phone_otp')),
+    audience: t.Optional(t.Union([
+      t.Literal('admin'),
+      t.Literal('user'),
+    ], { description: '登录用途：admin=受保护运维登录，user=H5 普通用户动作闸门登录' })),
     phone: t.String({ pattern: '^1[3-9]\\d{9}$', description: '手机号' }),
     code: t.String({ minLength: 4, maxLength: 6, description: '验证码' }),
   },
@@ -67,6 +71,21 @@ const LoginResponse = t.Object({
   exp: t.Optional(t.Number({ description: 'Token 过期时间戳 (秒)' })),
 });
 
+const AuthGateUi = t.Object({
+  loginTitle: t.String({ description: '登录动作闸门标题' }),
+  bindPhoneTitle: t.String({ description: '绑定手机号动作闸门标题' }),
+  loginDescription: t.String({ description: '登录动作闸门说明' }),
+  bindPhoneDescription: t.String({ description: '绑定手机号动作闸门说明' }),
+  invalidPhoneText: t.String({ description: '手机号校验失败提示' }),
+  missingCodeText: t.String({ description: '验证码缺失提示' }),
+  loginFailedText: t.String({ description: '登录失败兜底提示' }),
+  phonePlaceholder: t.String({ description: '手机号输入框 placeholder' }),
+  codePlaceholder: t.String({ description: '验证码输入框 placeholder' }),
+  submitLabel: t.String({ description: '提交按钮文案' }),
+  submittingLabel: t.String({ description: '提交中按钮文案' }),
+  privacyHint: t.String({ description: '登录弹层底部提示' }),
+});
+
 const TestUsersBootstrapRequest = t.Object({
   phone: t.String({ pattern: '^1[3-9]\\d{9}$', description: '具备运维权限的手机号' }),
   code: t.String({ minLength: 4, maxLength: 6, description: '超级验证码' }),
@@ -90,6 +109,7 @@ export const authModel = new Elysia({ name: 'authModel' })
     'auth.bindPhone': BindPhoneRequest,
     'auth.bindPhoneResponse': BindPhoneResponse,
     'auth.loginResponse': LoginResponse,
+    'auth.gateUi': AuthGateUi,
     'auth.testUsersBootstrap': TestUsersBootstrapRequest,
     'auth.testUsersBootstrapResponse': TestUsersBootstrapResponse,
     'common.error': ErrorResponseSchema,
@@ -105,6 +125,7 @@ export type LoginRequest = Static<typeof LoginRequest>;
 export type BindPhoneRequest = Static<typeof BindPhoneRequest>;
 export type BindPhoneResponse = Static<typeof BindPhoneResponse>;
 export type LoginResponse = Static<typeof LoginResponse>;
+export type AuthGateUi = Static<typeof AuthGateUi>;
 export type TestUsersBootstrapRequest = Static<typeof TestUsersBootstrapRequest>;
 export type TestUsersBootstrapResponse = Static<typeof TestUsersBootstrapResponse>;
 

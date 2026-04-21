@@ -14,6 +14,18 @@ export function readClientToken(): string | null {
   return null;
 }
 
+export function writeClientToken(token: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem("token", token);
+  window.localStorage.setItem("authToken", token);
+  window.localStorage.setItem("accessToken", token);
+  window.dispatchEvent(new Event("storage"));
+  window.dispatchEvent(new Event("xu-auth-updated"));
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -42,4 +54,15 @@ export function readClientUserId(token = readClientToken()): string | null {
 
   const payload = decodeJwtPayload(token);
   return typeof payload?.id === "string" && payload.id.trim() ? payload.id.trim() : null;
+}
+
+export function readClientPhoneNumber(token = readClientToken()): string | null {
+  if (!token) {
+    return null;
+  }
+
+  const payload = decodeJwtPayload(token);
+  return typeof payload?.phoneNumber === "string" && payload.phoneNumber.trim()
+    ? payload.phoneNumber.trim()
+    : null;
 }

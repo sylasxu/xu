@@ -1,12 +1,14 @@
 // Auth Service - 认证相关业务逻辑 (MVP 简化版)
 import { db, users, eq } from '@xu/db';
 import { getJwtSecret } from '../../setup';
+import { getConfigValue } from '../ai/config/config.service';
 import type {
   WechatCodeLoginRequest,
   BindPhoneRequest,
   PhoneOtpLoginRequest,
   TestUsersBootstrapRequest,
   LoginUser,
+  AuthGateUi,
 } from './auth.model';
 
 const TEST_USER_BLUEPRINTS = [
@@ -16,6 +18,21 @@ const TEST_USER_BLUEPRINTS = [
   { phoneNumber: '13800138004', nickname: '测试用户4', wxOpenId: 'test_bootstrap_user_4' },
   { phoneNumber: '13800138005', nickname: '测试用户5', wxOpenId: 'test_bootstrap_user_5' },
 ] as const;
+
+const DEFAULT_AUTH_GATE_UI: AuthGateUi = {
+  loginTitle: '登录后继续',
+  bindPhoneTitle: '用手机号继续',
+  loginDescription: '先确认身份，后续进展和讨论记录会接着保留。',
+  bindPhoneDescription: '这一步需要确认可联系的手机号，完成后会继续刚才的动作。',
+  invalidPhoneText: '请输入 11 位手机号',
+  missingCodeText: '请输入验证码',
+  loginFailedText: '登录失败，请稍后再试',
+  phonePlaceholder: '手机号',
+  codePlaceholder: '验证码',
+  submitLabel: '继续',
+  submittingLabel: '正在继续',
+  privacyHint: '当前使用手机号验证码确认身份，完成后会继续刚才的动作。',
+};
 
 /**
  * 微信登录响应接口
@@ -65,6 +82,54 @@ function getPrivilegedSuperCode(): string {
   }
 
   return code;
+}
+
+function getUserPhoneOtpCode(): string {
+  const code = process.env.WEB_PHONE_OTP_CODE?.trim()
+    || process.env.H5_PHONE_OTP_CODE?.trim()
+    || (process.env.NODE_ENV === 'production' ? undefined : (process.env.ADMIN_SUPER_CODE?.trim() || '9999'));
+
+  if (!code) {
+    throw new Error('H5 手机验证码未配置');
+  }
+
+  return code;
+}
+
+function readAuthGateUiText(source: object, key: keyof AuthGateUi): string | null {
+  const value = Reflect.get(source, key);
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function normalizeAuthGateUi(raw: unknown): AuthGateUi {
+  if (!raw || typeof raw !== 'object') {
+    return DEFAULT_AUTH_GATE_UI;
+  }
+
+  return {
+    loginTitle: readAuthGateUiText(raw, 'loginTitle') ?? DEFAULT_AUTH_GATE_UI.loginTitle,
+    bindPhoneTitle: readAuthGateUiText(raw, 'bindPhoneTitle') ?? DEFAULT_AUTH_GATE_UI.bindPhoneTitle,
+    loginDescription: readAuthGateUiText(raw, 'loginDescription') ?? DEFAULT_AUTH_GATE_UI.loginDescription,
+    bindPhoneDescription: readAuthGateUiText(raw, 'bindPhoneDescription') ?? DEFAULT_AUTH_GATE_UI.bindPhoneDescription,
+    invalidPhoneText: readAuthGateUiText(raw, 'invalidPhoneText') ?? DEFAULT_AUTH_GATE_UI.invalidPhoneText,
+    missingCodeText: readAuthGateUiText(raw, 'missingCodeText') ?? DEFAULT_AUTH_GATE_UI.missingCodeText,
+    loginFailedText: readAuthGateUiText(raw, 'loginFailedText') ?? DEFAULT_AUTH_GATE_UI.loginFailedText,
+    phonePlaceholder: readAuthGateUiText(raw, 'phonePlaceholder') ?? DEFAULT_AUTH_GATE_UI.phonePlaceholder,
+    codePlaceholder: readAuthGateUiText(raw, 'codePlaceholder') ?? DEFAULT_AUTH_GATE_UI.codePlaceholder,
+    submitLabel: readAuthGateUiText(raw, 'submitLabel') ?? DEFAULT_AUTH_GATE_UI.submitLabel,
+    submittingLabel: readAuthGateUiText(raw, 'submittingLabel') ?? DEFAULT_AUTH_GATE_UI.submittingLabel,
+    privacyHint: readAuthGateUiText(raw, 'privacyHint') ?? DEFAULT_AUTH_GATE_UI.privacyHint,
+  };
+}
+
+export async function getAuthGateUi(): Promise<AuthGateUi> {
+  const raw = await getConfigValue<unknown>('ui.auth_gate', DEFAULT_AUTH_GATE_UI);
+  return normalizeAuthGateUi(raw);
 }
 
 function buildPrivilegedRole(): NonNullable<LoginUser['role']> {
@@ -145,9 +210,47 @@ export async function loginWithWechatCode(params: WechatCodeLoginRequest) {
 }
 
 /**
- * 手机号验证码登录（受保护能力）
+ * H5 普通用户手机号验证码登录。
+ *
+ * 当前阶段只负责把 action gate 从 admin 登录语义里拆出来；生产环境必须配置真实验证码校验接入前的
+ * WEB_PHONE_OTP_CODE/H5_PHONE_OTP_CODE，不能复用受保护运维登录。
  */
 export async function loginWithPhoneCode(params: PhoneOtpLoginRequest): Promise<LoginUser> {
+  const { phone, code } = params;
+
+  if (code !== getUserPhoneOtpCode()) {
+    throw new Error('验证码错误');
+  }
+
+  let user = await db
+    .select()
+    .from(users)
+    .where(eq(users.phoneNumber, phone))
+    .limit(1)
+    .then(rows => rows[0]);
+
+  if (!user) {
+    const [newUser] = await db
+      .insert(users)
+      .values({
+        wxOpenId: `web_phone_${phone}`,
+        phoneNumber: phone,
+        nickname: `用户${phone.slice(-4)}`,
+        avatarUrl: null,
+        aiCreateQuotaToday: 3,
+      })
+      .returning();
+
+    user = newUser;
+  }
+
+  return user;
+}
+
+/**
+ * 手机号验证码登录（受保护运维能力）
+ */
+export async function loginWithPrivilegedPhoneCode(params: PhoneOtpLoginRequest): Promise<LoginUser> {
   const { phone, code } = params;
 
   assertPrivilegedSuperCode(phone, code);

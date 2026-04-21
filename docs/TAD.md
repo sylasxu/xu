@@ -140,9 +140,9 @@
 │   │   ├── app/              # App Router 路由
 │   │   │   ├── layout.tsx          # 根布局（全局样式、字体）
 │   │   │   ├── page.tsx            # 首页（重定向到 /chat）
-│   │   │   ├── invite/
+│   │   │   ├── activities/
 │   │   │   │   └── [id]/
-│   │   │   │       └── page.tsx    # SSR 历史兼容分享页（OG Tags + 动态背景）
+│   │   │   │       └── page.tsx    # SSR 活动详情分享态（OG Tags + 动态背景）
 │   │   │   └── chat/
 │   │   │       └── page.tsx        # xu对话（AI SDK Elements）
 │   │   ├── components/       # 组件
@@ -151,16 +151,15 @@
 │   │   │   │   ├── message.tsx
 │   │   │   │   ├── reasoning.tsx
 │   │   │   │   └── prompt-input.tsx
-│   │   │   ├── invite/             # 历史兼容分享页组件
+│   │   │   ├── activity/           # 活动详情分享态组件
 │   │   │   │   ├── theme-background.tsx   # 主题背景渲染器（CSS）
 │   │   │   │   ├── activity-card.tsx      # 活动信息卡片
-│   │   │   │   ├── discussion-preview.tsx # 讨论区预览
-│   │   │   │   └── wechat-redirect.tsx    # 微信跳转引导
+│   │   │   │   ├── discussion-entry-tracker.tsx
+│   │   │   │   └── discussion-runtime-panel.tsx
 │   │   │   └── ui/                 # shadcn/ui 基础组件
 │   │   ├── lib/              # 工具库
 │   │   │   ├── eden.ts             # Eden Treaty 客户端（预留，后续阶段）
 │   │   │   ├── themes.ts           # 预设主题配置（与 API 端同步）
-│   │   │   └── wechat.ts           # 微信环境检测工具
 │   │   ├── next.config.ts
 │   │   ├── package.json
 │   │   ├── tailwind.config.ts
@@ -2817,14 +2816,14 @@ buildDiscussionEntryUrl({ activityId, title, source })
 
 ---
 
-## 6.17 活动详情分享态与历史 invite 承接
+## 6.17 活动详情分享态
 
-产品主轴已经不再围绕“独立邀请函心智”组织。分享出去的活动详情本身应承担邀请职责；`/invite/[id]` 目前仍作为历史兼容路径存在，用于承接已发出的链接与微信外分享访问。
+产品主轴已经不再围绕“独立邀请函心智”组织。分享出去的活动详情本身承担外部分发、报名和讨论承接职责，独立 `/invite/[id]` 路由已移除。
 
 **当前约束**：
 - 活动分享的核心信息源是活动详情：标题、地点、时间、参与人数、讨论区预览与状态信息
-- `/invite/[id]` 当前仍可承担浏览、预览与跳转，但属于兼容路径，不再作为产品主流程的独立中心
-- 非微信环境展示小程序码，微信内使用 URL Scheme / deeplink 承接
+- `/activities/[id]` 是唯一活动详情与分享承接路径
+- H5 活动详情直接承接浏览、报名、报名成功后的 discussion 进入与后续消息中心回流
 - 同一活动的分享页内容允许缓存，优先保证打开速度与分享稳定性
 
 ---
@@ -2942,9 +2941,9 @@ apps/web/
 ├── app/                           # App Router 路由
 │   ├── layout.tsx                 # 根布局（全局样式、字体）
 │   ├── page.tsx                   # 首页（重定向到 /chat）
-│   ├── invite/
+│   ├── activities/
 │   │   └── [id]/
-│   │       └── page.tsx           # 历史兼容分享页（逐步由活动详情分享态吸收）
+│   │       └── page.tsx           # 活动详情分享态（SSR + OG）
 │   └── chat/
 │       └── page.tsx               # xu对话（AI SDK Elements）
 ├── components/
@@ -2953,16 +2952,15 @@ apps/web/
 │   │   ├── message.tsx            # 消息气泡
 │   │   ├── reasoning.tsx          # 思考过程展示
 │   │   └── prompt-input.tsx       # 输入框
-│   ├── invite/                    # 历史兼容分享页组件
+│   ├── activity/                  # 活动详情分享态组件
 │   │   ├── theme-background.tsx   # 主题背景渲染器（CSS）
 │   │   ├── activity-card.tsx      # 活动信息卡片
-│   │   ├── discussion-preview.tsx # 讨论区预览
-│   │   └── wechat-redirect.tsx    # 微信跳转引导
+│   │   ├── discussion-entry-tracker.tsx
+│   │   └── discussion-runtime-panel.tsx
 │   └── ui/                        # shadcn/ui 基础组件
 ├── lib/
 │   ├── eden.ts                    # Eden Treaty 客户端（预留，后续阶段）
-│   ├── themes.ts                  # 预设主题配置（与 API 端同步）
-│   └── wechat.ts                  # 微信环境检测工具
+│   └── themes.ts                  # 预设主题配置（与 API 端同步）
 ├── next.config.ts
 ├── package.json                   # @xu/web
 ├── tailwind.config.ts
@@ -2973,10 +2971,10 @@ apps/web/
 
 | 路由 | 渲染模式 | 认证 | 说明 |
 |------|---------|------|------|
-| `/invite/[id]` | SSR | 无需认证 | 历史兼容分享页，承接已发出的外部链接 |
+| `/activities/[id]` | SSR + CSR | 浏览无需认证，写入动作需认证 | 活动详情分享态，承接外部分发、报名、讨论区入口 |
 | `/chat` | CSR | 无需认证 | H5 首页主路由：状态首页 + 对话主舞台 |
 
-### 6.19.5 历史兼容分享页 (`/invite/[id]`)
+### 6.19.5 活动详情分享态 (`/activities/[id]`)
 
 **SSR 数据流**：
 
@@ -3006,8 +3004,8 @@ Next.js SSR
 │ │ ThemeBackground (主题背景渲染层) │ │
 │ │ ┌─────────────────────────────────┐ │ │
 │ │ │ ActivityCard (活动信息卡片)      │ │ │
-│ │ │ DiscussionPreview (讨论区预览)  │ │ │
-│ │ │ WechatRedirect (微信跳转引导)   │ │ │
+│ │ │ DiscussionRuntimePanel (讨论区) │ │ │
+│ │ │ AuthSheet (报名动作闸门)        │ │ │
 │ │ └─────────────────────────────────┘ │ │
 │ └─────────────────────────────────────┘ │
 └─────────────────────────────────────────┘
@@ -3016,17 +3014,17 @@ Next.js SSR
 **OG Tags 生成**：
 - `og:title` = 活动标题
 - `og:description` = "已有X人报名 · 地点 · 时间"（FOMO 文案）
-- `og:url` = `https://xu.example/invite/{activityId}`
+- `og:url` = `https://xu.example/activities/{activityId}`
 
 **分享页主题背景**：
 - 由 `ThemeBackground` 根据 `ThemeConfig.background.component` 渲染对应背景
 - 当前实现采用轻量 CSS 背景组合，避免引入大体积运行时动效依赖
 - 6 种预设主题：aurora（极光）、party（派对）、minimal（简约）、neon（霓虹）、warm（暖色）、sport（运动）
 
-**微信环境检测与跳转**：
-- 微信内：显示"打开小程序"按钮，使用 URL Scheme 跳转
-- 非微信：显示小程序码供用户扫码
-- 跳转路径：`subpackages/activity/detail/index?id={activityId}`
+**报名与讨论承接**：
+- 游客可以浏览公开详情与最近讨论摘要
+- 报名、进入讨论区等写入动作统一触发 H5 登录/绑定手机号动作闸门
+- 报名成功后统一进入 `join_success -> discussion -> quick starters` 链路
 
 ### 6.19.6 首页主路由 (`/chat`)
 
@@ -3065,7 +3063,7 @@ Next.js SSR
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
-| `/invite/[id]` | ✅ | 历史兼容分享页 + 微信跳转引导 |
+| `/activities/[id]` | ✅ | 活动详情分享态 + 报名/讨论承接 |
 | `/chat` | ✅ | H5 首页主路由（状态首页 + 对话主舞台） |
 | 消息中心 | ✅ | 以 Drawer 形态内嵌在 `/chat`，不单独拆 `/message` 路由 |
 
@@ -3745,7 +3743,7 @@ bun run gen:api         # 生成 Orval SDK
 - **CP-28**: 公开 API 数据安全 - `GET /activities/:id/public` 响应中不得包含 creatorId、location 精确 GPS 坐标、任何用户的 phoneNumber 或 wxOpenId
 - **CP-29**: 报名系统消息一致性 - 每次成功 joinActivity 后，activity_messages 表必须新增一条 `messageType='system'` 的消息；所有已报名参与者（不含新加入者和创建者）必须收到 `new_participant` 通知；创建者必须收到 `join` 通知（保持不变）
 - **CP-30**: Post-Activity 自动完成 - 所有 `status='active'` 且 `startAt + 2h < now` 的活动必须被定时任务更新为 `completed`，且所有参与者必须收到 `post_activity` 通知
-- **CP-31**: SSR 分享页 OG 标签完整性 - 公开分享页（当前兼容实现为 `/invite/:id`）的 SSR 响应 HTML head 中必须包含 `og:title`（活动标题）、`og:description`（包含报名人数信息）、`og:url`（当前页面 URL）
+- **CP-31**: SSR 活动详情分享态 OG 标签完整性 - `/activities/:id` 的 SSR 响应 HTML head 中必须包含 `og:title`（活动标题）、`og:description`（包含报名人数信息）、`og:url`（当前页面 URL）
 
 ### 12.8 AI 核心系统增强
 

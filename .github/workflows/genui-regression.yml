@@ -52,11 +52,11 @@ jobs:
         env:
           API_PORT: "1996"
           API_HOST: "127.0.0.1"
-          DATABASE_URL: "postgres://postgres:password@127.0.0.1:5432/juchang"
+          DATABASE_URL: "postgres://postgres:password@127.0.0.1:5432/xu"
           JWT_SECRET: "ci-jwt-secret"
         run: |
-          bun --cwd apps/api src/index.ts > /tmp/juchang-api.log 2>&1 &
-          echo $! > /tmp/juchang-api.pid
+          bun --cwd apps/api src/index.ts > /tmp/xu-api.log 2>&1 &
+          echo $! > /tmp/xu-api.pid
 
       - name: Wait For API Health
         run: |
@@ -67,7 +67,7 @@ jobs:
             sleep 1
           done
           echo "API server failed to start within 40s"
-          cat /tmp/juchang-api.log || true
+          cat /tmp/xu-api.log || true
           exit 1
 
       - name: Run GenUI Regression (turns/parity/snapshot)
@@ -75,11 +75,11 @@ jobs:
 
       - name: Print API Logs On Failure
         if: failure()
-        run: cat /tmp/juchang-api.log || true
+        run: cat /tmp/xu-api.log || true
 
       - name: Stop API Server
         if: always()
         run: |
-          if [ -f /tmp/juchang-api.pid ]; then
-            kill "$(cat /tmp/juchang-api.pid)" || true
+          if [ -f /tmp/xu-api.pid ]; then
+            kill "$(cat /tmp/xu-api.pid)" || true
           fi

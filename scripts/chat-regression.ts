@@ -84,6 +84,7 @@ const suiteArgIndex = Bun.argv.indexOf('--suite');
 const requestedSuite = suiteArgIndex >= 0 ? Bun.argv[suiteArgIndex + 1] : 'core';
 const regressionSuite = requestedSuite === 'all' || requestedSuite === 'extended' ? requestedSuite : 'core';
 const HTTP_MARKER = '__HTTP_STATUS__:';
+const CURL_TIMEOUT_MS = Number.parseInt(process.env.GENUI_CURL_TIMEOUT_MS || '240000', 10);
 
 const BASE_URL = CHAT_URL.endsWith('/ai/chat')
   ? CHAT_URL.slice(0, -'/ai/chat'.length)
@@ -147,7 +148,7 @@ function getAdminAuthArgs(): string[] {
 function runCurl(args: string[]): HttpResult {
   const result = spawnSync('curl', args, {
     encoding: 'utf8',
-    timeout: 120000,
+    timeout: CURL_TIMEOUT_MS,
     maxBuffer: 1024 * 1024 * 12,
   });
 
@@ -485,6 +486,11 @@ function assertPublishResponse(turn: ResponseEnvelope, label: string, isAuthenti
     const activityId = fields && typeof fields.activityId === 'string' ? fields.activityId : '';
     return activityId.length > 0 && !activityId.startsWith('draft_');
   });
+  const publishedEntityCard = entityCards.find((block) => {
+    const fields = isRecord(block.fields) ? block.fields : null;
+    const activityId = fields && typeof fields.activityId === 'string' ? fields.activityId : '';
+    return activityId.length > 0 && !activityId.startsWith('draft_');
+  });
 
   if (!isAuthenticated) {
     assert(
@@ -497,6 +503,18 @@ function assertPublishResponse(turn: ResponseEnvelope, label: string, isAuthenti
 
   if (alertLevels.includes('success')) {
     assert(hasPublishedEntityCard, `${label}: success publish should include published entity card`);
+    const fields = publishedEntityCard && isRecord(publishedEntityCard.fields) ? publishedEntityCard.fields : null;
+    assert(fields, `${label}: published entity card should include fields`);
+    const activityId = typeof fields.activityId === 'string' ? fields.activityId : '';
+    const shareUrl = typeof fields.shareUrl === 'string' ? fields.shareUrl : '';
+    assert(
+      activityId && shareUrl.includes(`/activities/${activityId}`) && !shareUrl.includes('/invite/'),
+      `${label}: published shareUrl should point to /activities detail page: ${JSON.stringify(fields)}`
+    );
+    assert(
+      !Object.prototype.hasOwnProperty.call(fields, 'sharePath'),
+      `${label}: published entity card should not include sharePath: ${JSON.stringify(fields)}`
+    );
   }
 }
 

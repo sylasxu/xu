@@ -12,6 +12,7 @@ import {
 import {
   ArrowUp,
   ChevronRight,
+  Clock3,
   Moon,
   Plus,
   Sparkles,
@@ -42,7 +43,10 @@ import BorderGlow from "@/components/BorderGlow";
 import { MessageCenterDrawer } from "@/components/chat/message-center-drawer";
 import { SidebarDrawer } from "@/components/chat/sidebar-drawer";
 import Orb from "@/components/Orb";
+import { AuthSheet } from "@/components/auth/auth-sheet";
+import { buildActivityDetailPath } from "@/lib/activity-url";
 import { readClientToken, readClientUserId } from "@/lib/client-auth";
+import { isWelcomeFocusCoveredByCurrentTasks } from "@/lib/runtime-task-focus";
 import { cn } from "@/lib/utils";
 import type {
   GenUIAlertBlock,
@@ -98,6 +102,10 @@ const DEFAULT_SIDEBAR_UI = {
   messageCenterLabel: "消息中心",
   messageCenterHint: "搭子确认 / 活动跟进",
   authContinuationHint: "需要确认搭子或回看结果时，我会帮你继续接上",
+  currentTasksTitle: "现在最需要继续的事",
+  currentTasksDescriptionAuthenticated: "先接住还在推进中的事，再决定要不要翻旧对话。",
+  currentTasksDescriptionVisitor: "登录后，这里会继续接住你没做完的事。",
+  currentTasksEmpty: "当前没有需要继续推进的事，新的进展会先出现在这里。",
   historyTitle: "历史会话",
   historyDescriptionAuthenticated: "继续上次聊到一半的内容",
   historyDescriptionVisitor: "当前设备上的会话会先留在这里",
@@ -240,6 +248,10 @@ type WelcomeUiPayload = {
     messageCenterLabel: string;
     messageCenterHint: string;
     authContinuationHint: string;
+    currentTasksTitle: string;
+    currentTasksDescriptionAuthenticated: string;
+    currentTasksDescriptionVisitor: string;
+    currentTasksEmpty: string;
     historyTitle: string;
     historyDescriptionAuthenticated: string;
     historyDescriptionVisitor: string;
@@ -256,11 +268,40 @@ type WelcomePromptEntry = {
   action?: string;
   params?: Record<string, unknown>;
 };
+
+type RuntimeTaskAction = {
+  kind: "structured_action" | "navigate" | "switch_tab";
+  label: string;
+  action?: string;
+  payload?: Record<string, unknown>;
+  source?: string;
+  originalText?: string;
+  url?: string;
+};
+
+type RuntimeTaskSnapshot = {
+  id: string;
+  taskType: "join_activity" | "find_partner" | "create_activity";
+  taskTypeLabel: string;
+  currentStage: string;
+  stageLabel: string;
+  status: "active" | "waiting_auth" | "waiting_async_result" | "completed" | "cancelled" | "expired";
+  goalText: string;
+  headline: string;
+  summary: string;
+  updatedAt: string;
+  activityId?: string;
+  activityTitle?: string;
+  primaryAction?: RuntimeTaskAction;
+  secondaryAction?: RuntimeTaskAction;
+};
 type WelcomeFocusPayload = {
   type: "post_activity_feedback" | "recruiting_result" | "unfinished_intent";
   label: string;
   prompt: string;
   priority: number;
+  taskId?: string;
+  activityId?: string;
 };
 type StoredConversationMessage = {
   id: string;
@@ -1272,11 +1313,23 @@ function extractWelcomeFocus(payload: unknown): WelcomeFocusPayload | null {
     return null;
   }
 
+  const context = isRecord(focus.context) ? focus.context : null;
+  const taskId =
+    context && typeof context.taskId === "string" && context.taskId.trim()
+      ? context.taskId.trim()
+      : undefined;
+  const activityId =
+    context && typeof context.activityId === "string" && context.activityId.trim()
+      ? context.activityId.trim()
+      : undefined;
+
   return {
     type: focus.type,
     label,
     prompt,
     priority: focus.priority,
+    ...(taskId ? { taskId } : {}),
+    ...(activityId ? { activityId } : {}),
   };
 }
 
@@ -1376,6 +1429,22 @@ function extractWelcomeUi(payload: unknown): WelcomeUiPayload {
         typeof sidebarSource.authContinuationHint === "string" && sidebarSource.authContinuationHint.trim()
           ? sidebarSource.authContinuationHint.trim()
           : DEFAULT_SIDEBAR_UI.authContinuationHint,
+      currentTasksTitle:
+        typeof sidebarSource.currentTasksTitle === "string" && sidebarSource.currentTasksTitle.trim()
+          ? sidebarSource.currentTasksTitle.trim()
+          : DEFAULT_SIDEBAR_UI.currentTasksTitle,
+      currentTasksDescriptionAuthenticated:
+        typeof sidebarSource.currentTasksDescriptionAuthenticated === "string" && sidebarSource.currentTasksDescriptionAuthenticated.trim()
+          ? sidebarSource.currentTasksDescriptionAuthenticated.trim()
+          : DEFAULT_SIDEBAR_UI.currentTasksDescriptionAuthenticated,
+      currentTasksDescriptionVisitor:
+        typeof sidebarSource.currentTasksDescriptionVisitor === "string" && sidebarSource.currentTasksDescriptionVisitor.trim()
+          ? sidebarSource.currentTasksDescriptionVisitor.trim()
+          : DEFAULT_SIDEBAR_UI.currentTasksDescriptionVisitor,
+      currentTasksEmpty:
+        typeof sidebarSource.currentTasksEmpty === "string" && sidebarSource.currentTasksEmpty.trim()
+          ? sidebarSource.currentTasksEmpty.trim()
+          : DEFAULT_SIDEBAR_UI.currentTasksEmpty,
       historyTitle:
         typeof sidebarSource.historyTitle === "string" && sidebarSource.historyTitle.trim()
           ? sidebarSource.historyTitle.trim()
@@ -1430,6 +1499,77 @@ function upsertBlockWithMode(
   return { blocks: nextBlocks, index: nextBlocks.length - 1 };
 }
 
+function readActivityIdFromRuntimeTaskAction(taskAction: RuntimeTaskAction): string | null {
+  const payloadActivityId =
+    isRecord(taskAction.payload) && typeof taskAction.payload.activityId === "string"
+      ? taskAction.payload.activityId.trim()
+      : "";
+  if (payloadActivityId) {
+    return payloadActivityId;
+  }
+
+  if (!taskAction.url) {
+    return null;
+  }
+
+  const queryString = taskAction.url.split("?")[1];
+  if (!queryString) {
+    return null;
+  }
+
+  const parsed = new URLSearchParams(queryString);
+  const activityId = parsed.get("id");
+  return activityId?.trim() || null;
+}
+
+function readEntryFromRuntimeTaskAction(taskAction: RuntimeTaskAction): string | undefined {
+  if (!taskAction.url) {
+    return undefined;
+  }
+
+  const queryString = taskAction.url.split("?")[1];
+  if (!queryString) {
+    return undefined;
+  }
+
+  const parsed = new URLSearchParams(queryString);
+  const entry = parsed.get("entry")?.trim();
+  return entry || undefined;
+}
+
+function readActivityContextOverridesFromTaskAction(
+  taskAction: RuntimeTaskAction
+): ActivityContextOverrides | undefined {
+  if (!isRecord(taskAction.payload)) {
+    return undefined;
+  }
+
+  const activityId =
+    typeof taskAction.payload.activityId === "string" && taskAction.payload.activityId.trim()
+      ? taskAction.payload.activityId.trim()
+      : undefined;
+  const activityMode =
+    taskAction.payload.activityMode === "review" ||
+    taskAction.payload.activityMode === "rebook" ||
+    taskAction.payload.activityMode === "kickoff"
+      ? taskAction.payload.activityMode
+      : undefined;
+  const entry =
+    typeof taskAction.payload.entry === "string" && taskAction.payload.entry.trim()
+      ? taskAction.payload.entry.trim()
+      : undefined;
+
+  if (!activityId && !activityMode && !entry) {
+    return undefined;
+  }
+
+  return {
+    ...(activityId ? { activityId } : {}),
+    ...(activityMode ? { activityMode } : {}),
+    ...(entry ? { entry } : {}),
+  };
+}
+
 export default function ChatPage() {
   const [messages, setMessages] = useState<ChatRecord[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -1440,6 +1580,8 @@ export default function ChatPage() {
   const [welcomeGreeting, setWelcomeGreeting] = useState(DEFAULT_WELCOME_GREETING);
   const [welcomeFocus, setWelcomeFocus] = useState<WelcomeFocusPayload | null>(null);
   const [isWelcomeLoading, setIsWelcomeLoading] = useState(true);
+  const [currentTasks, setCurrentTasks] = useState<RuntimeTaskSnapshot[]>([]);
+  const [isCurrentTasksLoading, setIsCurrentTasksLoading] = useState(false);
   const [welcomeUi, setWelcomeUi] = useState<WelcomeUiPayload>({
     composerPlaceholder: DEFAULT_COMPOSER_PLACEHOLDER,
     bottomQuickActions: DEFAULT_BOTTOM_ACTIONS,
@@ -1461,6 +1603,11 @@ export default function ChatPage() {
   const isSending = status === "submitted";
   const showComposerHint = shouldExpandComposer(input);
   const currentUserId = useMemo(() => readClientUserId(authToken), [authToken]);
+  const visibleCurrentTasks = useMemo(() => currentTasks.slice(0, 2), [currentTasks]);
+  const visibleWelcomeFocus = useMemo(
+    () => (isWelcomeFocusCoveredByCurrentTasks(welcomeFocus, currentTasks) ? null : welcomeFocus),
+    [currentTasks, welcomeFocus]
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1690,6 +1837,51 @@ export default function ChatPage() {
     };
   }, [authToken, clientLocation, welcomeLocationResolved]);
 
+  useEffect(() => {
+    if (!authToken || !currentUserId) {
+      setCurrentTasks([]);
+      setIsCurrentTasksLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setIsCurrentTasksLoading(true);
+
+    void fetch(`${API_BASE}/ai/tasks/current`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = (await response.json()) as unknown;
+        if (!isRecord(payload) || !Array.isArray(payload.items)) {
+          setCurrentTasks([]);
+          return;
+        }
+
+        setCurrentTasks(payload.items as RuntimeTaskSnapshot[]);
+      })
+      .catch(() => {
+        setCurrentTasks([]);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setIsCurrentTasksLoading(false);
+        }
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [authToken, currentUserId]);
+
   const applyCompletionEffectsFromBlocks = useCallback((blocks: GenUIBlock[]) => {
     for (const block of blocks) {
       if (block.type !== "alert") {
@@ -1718,7 +1910,7 @@ export default function ChatPage() {
         const payload = readDiscussionNavigationPayload(meta.navigationPayload);
         if (payload && typeof window !== "undefined") {
           window.setTimeout(() => {
-            window.location.href = `/invite/${payload.activityId}?entry=join_success`;
+            window.location.href = buildActivityDetailPath(payload.activityId, { entry: "join_success" });
           }, 360);
         }
         return;
@@ -1811,12 +2003,13 @@ export default function ChatPage() {
           }));
         };
 
-        const recentMessages = !authToken ? buildRecentMessages(messages) : undefined;
+        const effectiveAuthToken = authToken ?? readClientToken();
+        const recentMessages = !effectiveAuthToken ? buildRecentMessages(messages) : undefined;
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
         };
-        if (authToken) {
-          headers.Authorization = `Bearer ${authToken}`;
+        if (effectiveAuthToken) {
+          headers.Authorization = `Bearer ${effectiveAuthToken}`;
         }
 
         const response = await fetch(`${API_BASE}/ai/chat`, {
@@ -2267,6 +2460,72 @@ export default function ChatPage() {
     [isSending, sendChatRequest]
   );
 
+  const handleRuntimeTaskAction = useCallback(
+    async (taskAction: RuntimeTaskAction) => {
+      if (isSending) {
+        return;
+      }
+
+      if (taskAction.kind === "switch_tab") {
+        const matchId =
+          isRecord(taskAction.payload) && typeof taskAction.payload.matchId === "string"
+            ? taskAction.payload.matchId
+            : null;
+        setMessageCenterFocusMatchId(matchId);
+        setMessageCenterOpenSignal((value) => value + 1);
+        return;
+      }
+
+      if (taskAction.kind === "navigate") {
+        const activityId = readActivityIdFromRuntimeTaskAction(taskAction);
+        if (!activityId || typeof window === "undefined") {
+          return;
+        }
+
+        window.location.href = buildActivityDetailPath(activityId, {
+          entry: readEntryFromRuntimeTaskAction(taskAction),
+        });
+        return;
+      }
+
+      if (taskAction.action === "start_follow_up_chat" && isRecord(taskAction.payload)) {
+        const prompt =
+          typeof taskAction.payload.prompt === "string" && taskAction.payload.prompt.trim()
+            ? taskAction.payload.prompt.trim()
+            : "";
+        if (!prompt) {
+          return;
+        }
+
+        await sendChatRequest(
+          {
+            type: "text",
+            text: prompt,
+          },
+          taskAction.originalText || taskAction.label,
+          readActivityContextOverridesFromTaskAction(taskAction)
+        );
+        return;
+      }
+
+      if (!taskAction.action) {
+        return;
+      }
+
+      await sendChatRequest(
+        {
+          type: "action",
+          action: taskAction.action,
+          actionId: randomId("action"),
+          params: taskAction.payload,
+          displayText: taskAction.originalText || taskAction.label,
+        },
+        taskAction.originalText || taskAction.label
+      );
+    },
+    [isSending, sendChatRequest]
+  );
+
   return (
     <div
       className={cn(
@@ -2306,6 +2565,7 @@ export default function ChatPage() {
               activeConversationId={conversationId}
               ui={welcomeUi.sidebar}
               onSelectConversation={handleSelectConversation}
+              onSelectTaskAction={handleRuntimeTaskAction}
               onOpenMessageCenter={() => {
                 setMessageCenterFocusMatchId(null);
                 setMessageCenterOpenSignal((value) => value + 1);
@@ -2375,19 +2635,43 @@ export default function ChatPage() {
                       <p className={cn("text-xs", isDarkMode ? "text-white/54" : "text-black/52")}>{pendingActionNotice}</p>
                     ) : null}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void resumeStructuredPendingAction();
-                    }}
-                    disabled={isSending}
-                    className={cn(
-                      "shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition disabled:opacity-45",
-                      isDarkMode ? "bg-white text-[#111111] hover:bg-white/92" : "bg-black text-white hover:bg-black/92"
-                    )}
-                  >
-                    {welcomeUi.chatShell.pendingActionResumeLabel}
-                  </button>
+                  {authToken ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void resumeStructuredPendingAction();
+                      }}
+                      disabled={isSending}
+                      className={cn(
+                        "shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition disabled:opacity-45",
+                        isDarkMode ? "bg-white text-[#111111] hover:bg-white/92" : "bg-black text-white hover:bg-black/92"
+                      )}
+                    >
+                      {welcomeUi.chatShell.pendingActionResumeLabel}
+                    </button>
+                  ) : (
+                    <AuthSheet
+                      mode={pendingAgentAction.action.authMode ?? "login"}
+                      isDarkMode={isDarkMode}
+                      reason={pendingAgentAction.message || welcomeUi.chatShell.pendingActionDefaultMessage}
+                      onAuthenticated={async () => {
+                        setAuthToken(readClientToken());
+                        await resumeStructuredPendingAction();
+                      }}
+                      trigger={
+                        <button
+                          type="button"
+                          disabled={isSending}
+                          className={cn(
+                            "shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition disabled:opacity-45",
+                            isDarkMode ? "bg-white text-[#111111] hover:bg-white/92" : "bg-black text-white hover:bg-black/92"
+                          )}
+                        >
+                          {welcomeUi.chatShell.pendingActionResumeLabel}
+                        </button>
+                      }
+                    />
+                  )}
                 </div>
               </section>
             ) : null}
@@ -2448,16 +2732,16 @@ export default function ChatPage() {
                       </div>
                     ) : (
                       <>
-                        {welcomeFocus ? (
+                        {visibleWelcomeFocus ? (
                           <button
                             type="button"
                             onClick={() => {
                               void sendChatRequest(
                                 {
                                   type: "text",
-                                  text: welcomeFocus.prompt,
+                                  text: visibleWelcomeFocus.prompt,
                                 },
-                                welcomeFocus.prompt
+                                visibleWelcomeFocus.prompt
                               );
                             }}
                             className={cn(
@@ -2468,7 +2752,7 @@ export default function ChatPage() {
                             )}
                           >
                             <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", isDarkMode ? "bg-white/42" : "bg-black/36")} />
-                            <span className="truncate">{welcomeFocus.label}</span>
+                            <span className="truncate">{visibleWelcomeFocus.label}</span>
                             <ChevronRight className={cn("h-3 w-3 shrink-0", isDarkMode ? "text-white/24" : "text-black/24")} />
                           </button>
                         ) : null}
@@ -2480,6 +2764,115 @@ export default function ChatPage() {
                   </div>
 
                   <div className="relative z-10 mt-12 space-y-3">
+                    {authToken && (isCurrentTasksLoading || visibleCurrentTasks.length > 0) ? (
+                      <section
+                        className={cn(
+                          "mx-auto mb-4 w-full max-w-[348px] rounded-[28px] border px-4 py-4 text-left",
+                          isDarkMode
+                            ? "border-white/10 bg-white/[0.04] shadow-[0_20px_36px_-30px_rgba(0,0,0,0.78)]"
+                            : "border-black/8 bg-white shadow-[0_18px_36px_-30px_rgba(0,0,0,0.12)]"
+                        )}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className={cn("text-[12px] font-semibold tracking-wide", isDarkMode ? "text-white/54" : "text-black/48")}>
+                              {welcomeUi.sidebar.currentTasksTitle}
+                            </p>
+                            <p className={cn("mt-1 text-xs leading-5", isDarkMode ? "text-white/42" : "text-black/40")}>
+                              {welcomeUi.sidebar.currentTasksDescriptionAuthenticated}
+                            </p>
+                          </div>
+                          <Clock3 className={cn("mt-0.5 h-4 w-4 shrink-0", isDarkMode ? "text-white/34" : "text-black/32")} />
+                        </div>
+
+                        <div className="mt-4 space-y-2.5">
+                          {isCurrentTasksLoading
+                            ? [0, 1].map((item) => (
+                                <div
+                                  key={`empty-task-skeleton-${item}`}
+                                  className={cn(
+                                    "h-[92px] animate-pulse rounded-[22px] border",
+                                    isDarkMode ? "border-white/8 bg-white/[0.03]" : "border-black/8 bg-black/[0.03]"
+                                  )}
+                                />
+                              ))
+                            : visibleCurrentTasks.map((task) => (
+                                <div
+                                  key={task.id}
+                                  className={cn(
+                                    "rounded-[22px] border px-4 py-3",
+                                    isDarkMode ? "border-white/8 bg-white/[0.03]" : "border-black/8 bg-black/[0.025]"
+                                  )}
+                                >
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <p className={cn("truncate text-[15px] font-semibold tracking-[-0.02em]", isDarkMode ? "text-white/88" : "text-black/84")}>
+                                        {task.headline}
+                                      </p>
+                                      <p className={cn("mt-1 text-xs", isDarkMode ? "text-white/40" : "text-black/38")}>
+                                        {task.taskTypeLabel} · {task.stageLabel}
+                                      </p>
+                                    </div>
+                                    <span
+                                      className={cn(
+                                        "shrink-0 rounded-full border px-2.5 py-1 text-[11px]",
+                                        isDarkMode
+                                          ? "border-white/8 bg-white/[0.03] text-white/46"
+                                          : "border-black/8 bg-white text-black/42"
+                                      )}
+                                    >
+                                      {task.stageLabel}
+                                    </span>
+                                  </div>
+
+                                  <p className={cn("mt-3 text-sm leading-6", isDarkMode ? "text-white/66" : "text-black/62")}>
+                                    {task.summary}
+                                  </p>
+
+                                  {task.primaryAction || task.secondaryAction ? (
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                      {task.primaryAction ? (
+                                        <button
+                                          type="button"
+                                          disabled={isSending}
+                                          onClick={() => {
+                                            void handleRuntimeTaskAction(task.primaryAction!);
+                                          }}
+                                          className={cn(
+                                            "inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-medium transition disabled:opacity-45",
+                                            isDarkMode ? "bg-white text-[#111111] hover:bg-white/92" : "bg-black text-white hover:bg-black/92"
+                                          )}
+                                        >
+                                          {task.primaryAction.label}
+                                          <ChevronRight className="h-3.5 w-3.5" />
+                                        </button>
+                                      ) : null}
+
+                                      {task.secondaryAction ? (
+                                        <button
+                                          type="button"
+                                          disabled={isSending}
+                                          onClick={() => {
+                                            void handleRuntimeTaskAction(task.secondaryAction!);
+                                          }}
+                                          className={cn(
+                                            "inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium transition disabled:opacity-45",
+                                            isDarkMode
+                                              ? "border-white/10 bg-white/[0.03] text-white/80 hover:bg-white/[0.05]"
+                                              : "border-black/10 bg-white text-black/76 hover:bg-black/[0.045]"
+                                          )}
+                                        >
+                                          {task.secondaryAction.label}
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              ))}
+                        </div>
+                      </section>
+                    ) : null}
+
                     {isWelcomeLoading
                       ? [0.82, 0.7, 0.76].map((widthRatio, index) => (
                           <div
@@ -3106,8 +3499,7 @@ function isShareEntityCard(block: GenUIEntityCardBlock): boolean {
   const activityId = readStringField(fields, "activityId");
   const hasShareData =
     readStringField(fields, "shareTitle") ||
-    readStringField(fields, "shareUrl") ||
-    readStringField(fields, "sharePath");
+    readStringField(fields, "shareUrl");
 
   return (
     block.dedupeKey === "published_activity" ||
@@ -3134,7 +3526,6 @@ function ShareEntityCardBlock({ block }: { block: GenUIEntityCardBlock }) {
     readStringField(fields, "shareTitle") ||
     `🔥 ${title}，还差${remaining}人，速来！`;
   const shareUrl = readStringField(fields, "shareUrl");
-  const sharePath = readStringField(fields, "sharePath");
 
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
 
@@ -3144,7 +3535,7 @@ function ShareEntityCardBlock({ block }: { block: GenUIEntityCardBlock }) {
       return;
     }
 
-    const copyText = [shareTitle, shareUrl, sharePath ? `小程序路径：${sharePath}` : ""]
+    const copyText = [shareTitle, shareUrl]
       .filter(Boolean)
       .join("\n");
     try {
@@ -3155,7 +3546,7 @@ function ShareEntityCardBlock({ block }: { block: GenUIEntityCardBlock }) {
       setCopyStatus("failed");
       window.setTimeout(() => setCopyStatus("idle"), 1500);
     }
-  }, [sharePath, shareTitle, shareUrl]);
+  }, [shareTitle, shareUrl]);
 
   return (
     <div className="py-1">
@@ -3173,14 +3564,9 @@ function ShareEntityCardBlock({ block }: { block: GenUIEntityCardBlock }) {
         已有 {currentParticipants}/{maxParticipants} 人报名
       </p>
 
-      {(shareUrl || sharePath) && (
+      {shareUrl && (
         <div className="mt-3 space-y-1 px-0 py-0">
-          {shareUrl && (
-            <p className={cn("break-all text-[11px]", isDarkMode ? "text-white/50" : "text-black/48")}>H5: {shareUrl}</p>
-          )}
-          {sharePath && (
-            <p className={cn("break-all text-[11px]", isDarkMode ? "text-white/50" : "text-black/48")}>Mini: {sharePath}</p>
-          )}
+          <p className={cn("break-all text-[11px]", isDarkMode ? "text-white/50" : "text-black/48")}>详情页: {shareUrl}</p>
         </div>
       )}
 
@@ -3205,7 +3591,7 @@ function ShareEntityCardBlock({ block }: { block: GenUIEntityCardBlock }) {
             rel="noreferrer"
             className={cn("rounded-full border px-3 py-1.5 text-xs", isDarkMode ? "border-white/8 bg-white/[0.04] text-white/72 hover:bg-white/[0.08]" : "border-black/8 bg-black/[0.04] text-black/72 hover:bg-black/[0.06]")}
           >
-            打开邀请页
+            打开活动详情
           </a>
         )}
       </div>

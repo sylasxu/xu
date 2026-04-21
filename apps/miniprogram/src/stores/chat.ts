@@ -734,7 +734,6 @@ function mapEntityCardToWidgetPart(block: GenUIEntityCardBlock): WidgetPart {
         currentParticipants: toNumberValue(record.currentParticipants, 1),
         shareTitle: toStringValue(record.shareTitle, ''),
         shareUrl: toStringValue(record.shareUrl, ''),
-        sharePath: toStringValue(record.sharePath, ''),
       },
     }
   }

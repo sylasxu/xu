@@ -1,6 +1,6 @@
 // Chat Controller - 群聊消息接口 (MVP 简化版)
 import { Elysia, t } from 'elysia';
-import { basePlugins, verifyAuth, type ErrorResponse } from '../../setup';
+import { AuthError, basePlugins, verifyAuth, verifySelfOrAdmin, type ErrorResponse } from '../../setup';
 import { chatModel, ChatMessageResponseSchema } from './chat.model';
 import { getChatActivities, getMessages, sendMessage } from './chat.service';
 import { handleWsUpgrade, handleWsMessage, handleWsClose, startHeartbeatChecker } from './chat.ws';
@@ -39,10 +39,16 @@ export const chatController = new Elysia({ prefix: '/chat' })
   .get(
     '/activities',
     async ({ query, set, jwt, headers }) => {
-      const user = await verifyAuth(jwt, headers);
-      if (!user) {
-        set.status = 401;
-        return { code: 401, msg: '未授权' } satisfies ErrorResponse;
+      try {
+        await verifySelfOrAdmin(jwt, headers, query.userId);
+      } catch (error) {
+        if (error instanceof AuthError) {
+          set.status = error.status;
+          return { code: error.status, msg: error.message } satisfies ErrorResponse;
+        }
+
+        set.status = 500;
+        return { code: 500, msg: '权限验证失败' } satisfies ErrorResponse;
       }
 
       return await getChatActivities(query.userId, query);

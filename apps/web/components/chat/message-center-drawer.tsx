@@ -618,7 +618,7 @@ export function MessageCenterDrawer({
         if (action === "confirm" && payload.activityId) {
           closePendingMatchDetail();
           setOpen(false);
-          window.location.href = buildActivityDetailPath(payload.activityId);
+          window.location.href = buildActivityDetailPath(payload.activityId, { entry: "match_confirmed" });
           return;
         }
 

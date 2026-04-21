@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 
 import { readClientToken } from "@/lib/client-auth"
@@ -14,10 +14,29 @@ export function DiscussionEntryTracker({
 }) {
   const searchParams = useSearchParams()
   const entry = searchParams.get("entry")
+  const [authToken, setAuthToken] = useState<string | null>(null)
 
   useEffect(() => {
-    const token = readClientToken()
-    if (!token || !entry) {
+    const syncAuth = () => {
+      setAuthToken(readClientToken())
+    }
+
+    syncAuth()
+    window.addEventListener("focus", syncAuth)
+    window.addEventListener("storage", syncAuth)
+    window.addEventListener("xu-auth-updated", syncAuth)
+    document.addEventListener("visibilitychange", syncAuth)
+
+    return () => {
+      window.removeEventListener("focus", syncAuth)
+      window.removeEventListener("storage", syncAuth)
+      window.removeEventListener("xu-auth-updated", syncAuth)
+      document.removeEventListener("visibilitychange", syncAuth)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!authToken || !entry) {
       return
     }
 
@@ -29,7 +48,7 @@ export function DiscussionEntryTracker({
     void fetch(`${API_BASE}/ai/tasks/discussion-entered`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${authToken}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -47,7 +66,7 @@ export function DiscussionEntryTracker({
       .catch(() => {
         // best effort only
       })
-  }, [activityId, entry])
+  }, [activityId, authToken, entry])
 
   return null
 }

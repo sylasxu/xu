@@ -112,6 +112,25 @@ interface MessageCenterResponse {
   };
 }
 
+interface PendingMatchItem {
+  id: string;
+  activityType: string;
+  typeName: string;
+  locationHint: string;
+  taskId: string | null;
+  isTempOrganizer: boolean;
+}
+
+interface PendingMatchListResponse {
+  items: PendingMatchItem[];
+}
+
+interface PendingMatchConfirmResponse {
+  code: number;
+  msg: string;
+  activityId?: string;
+}
+
 interface WelcomeResponse {
   greeting: string;
   subGreeting?: string;
@@ -676,6 +695,22 @@ async function getMessageCenter(user: BootstrappedUser) {
   return requestJson<MessageCenterResponse>({
     method: 'GET',
     path: `/notifications/message-center?userId=${user.user.id}&notificationPage=1&notificationLimit=10&chatPage=1&chatLimit=10`,
+    token: user.token,
+  });
+}
+
+async function getPendingMatches(user: BootstrappedUser) {
+  return requestJson<PendingMatchListResponse>({
+    method: 'GET',
+    path: `/notifications/pending-matches?userId=${user.user.id}`,
+    token: user.token,
+  });
+}
+
+async function confirmPendingMatch(user: BootstrappedUser, matchId: string) {
+  return requestJson<PendingMatchConfirmResponse>({
+    method: 'POST',
+    path: `/notifications/pending-matches/${matchId}/confirm`,
     token: user.token,
   });
 }
@@ -1441,6 +1476,130 @@ async function scenarioAiPartnerSearchBootstrapFlow(context: ScenarioContext): P
   return { name: 'ai-partner-search-bootstrap-flow', passed: true, details };
 }
 
+async function optInPartnerPoolFromSearch(user: BootstrappedUser, rawInput: string) {
+  const firstTurn = await postAiAction({
+    user,
+    action: 'find_partner',
+    displayText: rawInput,
+    payload: {
+      rawInput,
+      prompt: rawInput,
+    },
+  });
+
+  assert(typeof firstTurn.conversationId === 'string' && firstTurn.conversationId.length > 0, '找搭子首轮未返回 conversationId');
+  assertNoLeakedToolText(firstTurn.response.blocks, '找搭子首轮');
+
+  const searchTurn = await postAiAction({
+    user,
+    action: 'search_partners',
+    conversationId: firstTurn.conversationId,
+    displayText: '先看看有没有合适的人',
+    payload: {
+      rawInput,
+      activityType: 'boardgame',
+      type: 'boardgame',
+      location: '南山',
+      locationName: '南山',
+      locationHint: '南山',
+      timePreference: '周末晚上',
+      description: '想找能稳定赴约、聊天压力别太大的桌游搭子',
+      lat: 29.533009,
+      lng: 106.601556,
+    },
+  });
+
+  assertNoLeakedToolText(searchTurn.response.blocks, '找搭子搜索结果');
+  assert(hasVisibleFeedback(searchTurn.response.blocks), `找搭子搜索后缺少可见反馈: ${JSON.stringify(searchTurn.response.blocks)}`);
+
+  const optInCta = findCtaActionInput(
+    searchTurn.response.blocks,
+    'opt_in_partner_pool',
+    `sandbox_partner_opt_in_${user.user.id.slice(0, 6)}`,
+    '找搭子搜索结果',
+  );
+
+  const optInTurn = await postAiAction({
+    user,
+    action: 'opt_in_partner_pool',
+    conversationId: firstTurn.conversationId,
+    actionId: optInCta.actionId,
+    displayText: optInCta.displayText,
+    payload: {
+      rawInput,
+      activityType: 'boardgame',
+      type: 'boardgame',
+      location: '南山',
+      locationName: '南山',
+      locationHint: '南山',
+      timePreference: '周末晚上',
+      description: '想找能稳定赴约、聊天压力别太大的桌游搭子',
+      lat: 29.533009,
+      lng: 106.601556,
+    },
+  });
+
+  assertNoLeakedToolText(optInTurn.response.blocks, '继续帮我留意');
+  assert(hasVisibleFeedback(optInTurn.response.blocks), `继续帮我留意后缺少反馈: ${JSON.stringify(optInTurn.response.blocks)}`);
+
+  return {
+    conversationId: firstTurn.conversationId,
+    optInTurn,
+  };
+}
+
+async function scenarioPendingMatchConfirmCreatesActivityFlow(context: ScenarioContext): Promise<ScenarioResult> {
+  const [organizer, partner] = context.users;
+  const details: string[] = [];
+  const rawInput = '南山周末桌游搭子，轻松一点就行';
+
+  await optInPartnerPoolFromSearch(organizer, rawInput);
+  await optInPartnerPoolFromSearch(partner, rawInput);
+
+  const organizerPendingMatch = await waitFor(async () => {
+    const pendingMatches = await getPendingMatches(organizer);
+    return pendingMatches.items.find((item) => item.isTempOrganizer) ?? null;
+  }, { retries: 10, delayMs: 250 });
+
+  assert(organizerPendingMatch, '待确认匹配未生成，无法验证消息中心确认链路');
+
+  const confirmResult = await confirmPendingMatch(organizer, organizerPendingMatch.id);
+  assert(confirmResult.code === 200, `确认待确认匹配失败: ${JSON.stringify(confirmResult)}`);
+  assert(typeof confirmResult.activityId === 'string' && confirmResult.activityId.length > 0, `确认待确认匹配未返回 activityId: ${JSON.stringify(confirmResult)}`);
+
+  const activityId = confirmResult.activityId;
+  const publicActivity = await waitFor(() => getPublicActivity(activityId).catch(() => null), { retries: 8, delayMs: 250 });
+  assert(publicActivity, `匹配确认后未查询到公开活动详情: ${activityId}`);
+
+  const organizerMessageCenter = await getMessageCenter(organizer);
+  const partnerMessageCenter = await getMessageCenter(partner);
+  assert(
+    organizerMessageCenter.chatActivities.items.some((item) => item.activityId === activityId),
+    `临时召集人消息中心未出现成局后的群聊摘要: ${JSON.stringify(organizerMessageCenter.chatActivities.items)}`
+  );
+  assert(
+    partnerMessageCenter.chatActivities.items.some((item) => item.activityId === activityId),
+    `匹配成员消息中心未出现成局后的群聊摘要: ${JSON.stringify(partnerMessageCenter.chatActivities.items)}`
+  );
+
+  const organizerTasks = await getAiCurrentTasks(organizer);
+  const partnerTasks = await getAiCurrentTasks(partner);
+  assert(
+    !organizerTasks.items.some((item) => item.taskType === 'find_partner' && item.activityId === activityId),
+    `临时召集人的 find_partner 任务不应继续停留在当前任务列表: ${JSON.stringify(organizerTasks.items)}`
+  );
+  assert(
+    !partnerTasks.items.some((item) => item.taskType === 'find_partner' && item.activityId === activityId),
+    `匹配成员的 find_partner 任务不应继续停留在当前任务列表: ${JSON.stringify(partnerTasks.items)}`
+  );
+
+  details.push(`待确认匹配 ${organizerPendingMatch.id} 已由消息中心确认，创建活动 ${activityId}`);
+  details.push('确认返回 activityId，可直接驱动 H5 跳转到 /activities/[id]?entry=match_confirmed');
+  details.push('成局后双方消息中心都能看到新的群聊摘要，找搭子任务不会继续挂在 current tasks 里');
+
+  return { name: 'pending-match-confirm-creates-activity-flow', passed: true, details };
+}
+
 async function scenarioAiDestinationCompanionFlow(context: ScenarioContext): Promise<ScenarioResult> {
   const [user] = context.users;
   const details: string[] = [];
@@ -2031,6 +2190,7 @@ const coreScenarios = [
   scenarioAiLocationFollowupFlow,
   scenarioAiJoinAuthResumeDiscussionFlow,
   scenarioAiPartnerSearchBootstrapFlow,
+  scenarioPendingMatchConfirmCreatesActivityFlow,
   scenarioAiDestinationCompanionFlow,
   scenarioAiDraftSettingsFormFlow,
   scenarioAiAccessFlow,

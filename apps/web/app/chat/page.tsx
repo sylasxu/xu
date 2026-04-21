@@ -44,10 +44,12 @@ import { MessageCenterDrawer } from "@/components/chat/message-center-drawer";
 import { SidebarDrawer } from "@/components/chat/sidebar-drawer";
 import Orb from "@/components/Orb";
 import { AuthSheet } from "@/components/auth/auth-sheet";
-import { buildActivityDetailPath } from "@/lib/activity-url";
+import { buildActivityDetailPath, resolveActivityEntry } from "@/lib/activity-url";
 import { readClientToken, readClientUserId } from "@/lib/client-auth";
 import { isWelcomeFocusCoveredByCurrentTasks } from "@/lib/runtime-task-focus";
 import { cn } from "@/lib/utils";
+import { HomeStateCard } from "@/components/chat/home-state-card";
+import type { HomeStateTaskSnapshot } from "@/components/chat/home-state-card";
 import type {
   GenUIAlertBlock,
   GenUIBlock,
@@ -165,6 +167,7 @@ type DiscussionNavigationPayload = {
   title?: string;
   startAt?: string;
   locationName?: string;
+  entry?: string;
   source?: string;
 };
 
@@ -461,6 +464,7 @@ function readDiscussionNavigationPayload(value: unknown): DiscussionNavigationPa
     ...(typeof value.title === "string" ? { title: value.title } : {}),
     ...(typeof value.startAt === "string" ? { startAt: value.startAt } : {}),
     ...(typeof value.locationName === "string" ? { locationName: value.locationName } : {}),
+    ...(typeof value.entry === "string" ? { entry: value.entry } : {}),
     ...(typeof value.source === "string" ? { source: value.source } : {}),
   };
 }
@@ -1499,6 +1503,74 @@ function upsertBlockWithMode(
   return { blocks: nextBlocks, index: nextBlocks.length - 1 };
 }
 
+function resolveHomeState(tasks: HomeStateTaskSnapshot[]): { state: "H0" | "H1" | "H2" | "H3" | "H4"; primaryTask: HomeStateTaskSnapshot | null } {
+  if (tasks.length === 0) {
+    return { state: "H0", primaryTask: null };
+  }
+
+  const h3 = tasks.find((t) => t.currentStage === "match_ready");
+  if (h3) {
+    return { state: "H3", primaryTask: h3 };
+  }
+
+  const activeStages = [
+    "explore",
+    "preference_collecting",
+    "draft_collecting",
+    "action_selected",
+    "draft_ready",
+    "joined",
+    "discussion",
+    "published",
+    "intent_posted",
+    "awaiting_match",
+  ];
+  const h2 = tasks.find((t) => t.status === "active" && activeStages.includes(t.currentStage));
+  if (h2) {
+    return { state: "H2", primaryTask: h2 };
+  }
+
+  const h1 = tasks.find((t) => t.status === "waiting_auth");
+  if (h1) {
+    return { state: "H1", primaryTask: h1 };
+  }
+
+  const h4 = tasks.find((t) => t.currentStage === "post_activity");
+  if (h4) {
+    return { state: "H4", primaryTask: h4 };
+  }
+
+  return { state: "H0", primaryTask: null };
+}
+
+function resolveMiniProgramUrlToWeb(url: string): { webUrl: string } | { openMessageCenter: true; matchId?: string } | null {
+  if (url.startsWith("/subpackages/activity/detail/index")) {
+    const queryString = url.split("?")[1];
+    if (!queryString) return null;
+    const parsed = new URLSearchParams(queryString);
+    const activityId = parsed.get("id")?.trim();
+    if (!activityId) return null;
+    const entry = parsed.get("entry")?.trim();
+    return { webUrl: buildActivityDetailPath(activityId, entry ? { entry } : undefined) };
+  }
+
+  if (url.startsWith("/subpackages/activity/discussion/index")) {
+    const queryString = url.split("?")[1];
+    if (!queryString) return null;
+    const parsed = new URLSearchParams(queryString);
+    const activityId = parsed.get("id")?.trim();
+    const entry = parsed.get("entry")?.trim() || "task_runtime_panel";
+    if (!activityId) return null;
+    return { webUrl: buildActivityDetailPath(activityId, { entry }) };
+  }
+
+  if (url === "/pages/message/index" || url.startsWith("/pages/message")) {
+    return { openMessageCenter: true };
+  }
+
+  return null;
+}
+
 function readActivityIdFromRuntimeTaskAction(taskAction: RuntimeTaskAction): string | null {
   const payloadActivityId =
     isRecord(taskAction.payload) && typeof taskAction.payload.activityId === "string"
@@ -1609,6 +1681,8 @@ export default function ChatPage() {
     [currentTasks, welcomeFocus]
   );
 
+  const { state: homeState, primaryTask: primaryHomeTask } = useMemo(() => resolveHomeState(currentTasks), [currentTasks]);
+
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
@@ -1641,14 +1715,59 @@ export default function ChatPage() {
     syncAuth();
     window.addEventListener("focus", syncAuth);
     window.addEventListener("storage", syncAuth);
+    window.addEventListener("xu-auth-updated", syncAuth);
     document.addEventListener("visibilitychange", syncAuth);
 
     return () => {
       window.removeEventListener("focus", syncAuth);
       window.removeEventListener("storage", syncAuth);
+      window.removeEventListener("xu-auth-updated", syncAuth);
       document.removeEventListener("visibilitychange", syncAuth);
     };
   }, []);
+
+  const refreshCurrentTasks = useCallback(
+    async (tokenOverride?: string | null) => {
+      const effectiveToken = tokenOverride ?? authToken ?? readClientToken();
+      const effectiveUserId = readClientUserId(effectiveToken);
+
+      if (!effectiveToken || !effectiveUserId) {
+        setCurrentTasks([]);
+        setIsCurrentTasksLoading(false);
+        return;
+      }
+
+      setIsCurrentTasksLoading(true);
+
+      try {
+        const response = await fetch(`${API_BASE}/ai/tasks/current`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${effectiveToken}`,
+          },
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          setCurrentTasks([]);
+          return;
+        }
+
+        const payload = (await response.json()) as unknown;
+        if (!isRecord(payload) || !Array.isArray(payload.items)) {
+          setCurrentTasks([]);
+          return;
+        }
+
+        setCurrentTasks(payload.items as RuntimeTaskSnapshot[]);
+      } catch {
+        setCurrentTasks([]);
+      } finally {
+        setIsCurrentTasksLoading(false);
+      }
+    },
+    [authToken]
+  );
 
   const handleStartNewConversation = useCallback(() => {
     if (isSending) {
@@ -1838,49 +1957,32 @@ export default function ChatPage() {
   }, [authToken, clientLocation, welcomeLocationResolved]);
 
   useEffect(() => {
-    if (!authToken || !currentUserId) {
-      setCurrentTasks([]);
-      setIsCurrentTasksLoading(false);
+    void refreshCurrentTasks(authToken);
+  }, [authToken, currentUserId, refreshCurrentTasks]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
       return;
     }
 
-    const controller = new AbortController();
-    setIsCurrentTasksLoading(true);
+    const refreshVisibleTasks = () => {
+      if (document.visibilityState === "hidden") {
+        return;
+      }
 
-    void fetch(`${API_BASE}/ai/tasks/current`, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${authToken}`,
-      },
-      cache: "no-store",
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          return;
-        }
+      void refreshCurrentTasks();
+    };
 
-        const payload = (await response.json()) as unknown;
-        if (!isRecord(payload) || !Array.isArray(payload.items)) {
-          setCurrentTasks([]);
-          return;
-        }
-
-        setCurrentTasks(payload.items as RuntimeTaskSnapshot[]);
-      })
-      .catch(() => {
-        setCurrentTasks([]);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) {
-          setIsCurrentTasksLoading(false);
-        }
-      });
+    window.addEventListener("focus", refreshVisibleTasks);
+    window.addEventListener("xu-auth-updated", refreshVisibleTasks);
+    document.addEventListener("visibilitychange", refreshVisibleTasks);
 
     return () => {
-      controller.abort();
+      window.removeEventListener("focus", refreshVisibleTasks);
+      window.removeEventListener("xu-auth-updated", refreshVisibleTasks);
+      document.removeEventListener("visibilitychange", refreshVisibleTasks);
     };
-  }, [authToken, currentUserId]);
+  }, [refreshCurrentTasks]);
 
   const applyCompletionEffectsFromBlocks = useCallback((blocks: GenUIBlock[]) => {
     for (const block of blocks) {
@@ -1909,8 +2011,9 @@ export default function ChatPage() {
       if (meta?.navigationIntent === "open_discussion") {
         const payload = readDiscussionNavigationPayload(meta.navigationPayload);
         if (payload && typeof window !== "undefined") {
+          const entry = resolveActivityEntry(payload.entry, payload.source ?? "join_success");
           window.setTimeout(() => {
-            window.location.href = buildActivityDetailPath(payload.activityId, { entry: "join_success" });
+            window.location.href = buildActivityDetailPath(payload.activityId, { entry });
           }, 360);
         }
         return;
@@ -2348,6 +2451,7 @@ export default function ChatPage() {
         if (completedEnvelope) {
           applyEnvelope(completedEnvelope, false);
           applyCompletionEffectsFromBlocks(completedEnvelope.response.blocks);
+          void refreshCurrentTasks(effectiveAuthToken);
         }
       } catch (error) {
         errorUiChunkStream(error);
@@ -2375,7 +2479,7 @@ export default function ChatPage() {
         setStatus("ready");
       }
     },
-    [applyCompletionEffectsFromBlocks, authToken, clientLocation, conversationId, isSending, messages]
+    [applyCompletionEffectsFromBlocks, authToken, clientLocation, conversationId, isSending, messages, refreshCurrentTasks]
   );
 
   const resumeStructuredPendingAction = useCallback(async () => {
@@ -2471,12 +2575,30 @@ export default function ChatPage() {
           isRecord(taskAction.payload) && typeof taskAction.payload.matchId === "string"
             ? taskAction.payload.matchId
             : null;
+
+        if (taskAction.url) {
+          const resolved = resolveMiniProgramUrlToWeb(taskAction.url);
+          if (resolved && "openMessageCenter" in resolved) {
+            setMessageCenterFocusMatchId(matchId ?? resolved.matchId ?? null);
+            setMessageCenterOpenSignal((value) => value + 1);
+            return;
+          }
+        }
+
         setMessageCenterFocusMatchId(matchId);
         setMessageCenterOpenSignal((value) => value + 1);
         return;
       }
 
       if (taskAction.kind === "navigate") {
+        if (taskAction.url && typeof window !== "undefined") {
+          const resolved = resolveMiniProgramUrlToWeb(taskAction.url);
+          if (resolved && "webUrl" in resolved) {
+            window.location.href = resolved.webUrl;
+            return;
+          }
+        }
+
         const activityId = readActivityIdFromRuntimeTaskAction(taskAction);
         if (!activityId || typeof window === "undefined") {
           return;
@@ -2563,6 +2685,8 @@ export default function ChatPage() {
               disabled={isSending}
               isDarkMode={isDarkMode}
               activeConversationId={conversationId}
+              currentTasks={currentTasks}
+              currentTasksLoading={isCurrentTasksLoading}
               ui={welcomeUi.sidebar}
               onSelectConversation={handleSelectConversation}
               onSelectTaskAction={handleRuntimeTaskAction}
@@ -2609,7 +2733,7 @@ export default function ChatPage() {
           </div>
         </header>
 
-        {pendingAgentAction ? (
+        {pendingAgentAction && homeState !== "H1" ? (
           <div className="shrink-0 space-y-2 px-3 pb-2">
             {pendingAgentAction ? (
               <section
@@ -2655,8 +2779,8 @@ export default function ChatPage() {
                       isDarkMode={isDarkMode}
                       reason={pendingAgentAction.message || welcomeUi.chatShell.pendingActionDefaultMessage}
                       onAuthenticated={async () => {
+                        setPendingActionNotice(null);
                         setAuthToken(readClientToken());
-                        await resumeStructuredPendingAction();
                       }}
                       trigger={
                         <button
@@ -2757,14 +2881,38 @@ export default function ChatPage() {
                           </button>
                         ) : null}
                         <div>
-                          <p className={cn("mx-auto max-w-[320px] text-balance text-[38px] font-semibold leading-[0.98] tracking-[-0.058em]", isDarkMode ? "text-white/97 drop-shadow-[0_2px_14px_rgba(0,0,0,0.42)]" : "text-black/92")}>{welcomeGreeting}</p>
+                          <p className={cn(
+                            "mx-auto max-w-[320px] text-balance font-semibold leading-[0.98] tracking-[-0.058em] transition-all duration-300",
+                            homeState === "H0"
+                              ? "text-[38px]"
+                              : "text-[22px]",
+                            homeState === "H0"
+                              ? isDarkMode
+                                ? "text-white/97 drop-shadow-[0_2px_14px_rgba(0,0,0,0.42)]"
+                                : "text-black/92"
+                              : isDarkMode
+                                ? "text-white/58"
+                                : "text-black/52"
+                          )}>{welcomeGreeting}</p>
                         </div>
                       </>
                     )}
                   </div>
 
-                  <div className="relative z-10 mt-12 space-y-3">
-                    {authToken && (isCurrentTasksLoading || visibleCurrentTasks.length > 0) ? (
+                  {homeState !== "H0" && primaryHomeTask ? (
+                    <div className="relative z-10 mx-auto mt-8 w-full max-w-[348px] px-4">
+                      <HomeStateCard
+                        task={primaryHomeTask}
+                        homeState={homeState}
+                        isDarkMode={isDarkMode}
+                        disabled={isSending}
+                        onAction={handleRuntimeTaskAction}
+                      />
+                    </div>
+                  ) : null}
+
+                  <div className={cn("relative z-10 space-y-3", homeState === "H0" ? "mt-12" : "mt-6")}>
+                    {homeState === "H0" && authToken && (isCurrentTasksLoading || visibleCurrentTasks.length > 0) ? (
                       <section
                         className={cn(
                           "mx-auto mb-4 w-full max-w-[348px] rounded-[28px] border px-4 py-4 text-left",
@@ -2873,7 +3021,7 @@ export default function ChatPage() {
                       </section>
                     ) : null}
 
-                    {isWelcomeLoading
+                    {homeState === "H0" && (isWelcomeLoading
                       ? [0.82, 0.7, 0.76].map((widthRatio, index) => (
                           <div
                             key={`welcome-skeleton-${index}`}
@@ -2945,7 +3093,7 @@ export default function ChatPage() {
                             </span>
                             <ChevronRight className={cn("h-4 w-4 shrink-0", isDarkMode ? "text-white/14" : "text-black/16")} />
                           </button>
-                        ))}
+                        )))}
                   </div>
                 </div>
               </ConversationEmptyState>

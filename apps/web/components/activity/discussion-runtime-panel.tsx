@@ -281,11 +281,13 @@ export function DiscussionRuntimePanel({
     syncAuth()
     window.addEventListener("focus", syncAuth)
     window.addEventListener("storage", syncAuth)
+    window.addEventListener("xu-auth-updated", syncAuth)
     document.addEventListener("visibilitychange", syncAuth)
 
     return () => {
       window.removeEventListener("focus", syncAuth)
       window.removeEventListener("storage", syncAuth)
+      window.removeEventListener("xu-auth-updated", syncAuth)
       document.removeEventListener("visibilitychange", syncAuth)
     }
   }, [syncAuth])

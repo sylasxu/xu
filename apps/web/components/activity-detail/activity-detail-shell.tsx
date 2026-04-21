@@ -10,7 +10,7 @@ import { DiscussionRuntimePanel } from "@/components/activity/discussion-runtime
 import { ThemeBackground } from "@/components/activity/theme-background";
 import { Button } from "@/components/ui/button";
 import { resolveThemeConfig } from "@/lib/themes";
-import { buildActivityDetailPath } from "@/lib/activity-url";
+import { buildActivityDetailPath, resolveActivityEntry } from "@/lib/activity-url";
 import { readClientPhoneNumber, readClientToken, readClientUserId } from "@/lib/client-auth";
 import { cn } from "@/lib/utils";
 
@@ -82,6 +82,12 @@ function isJoinResponse(value: unknown): value is JoinResponse {
 function buildShareText(activity: PublicActivity): string {
   const seats = activity.isFull ? "目前已满员" : `还剩 ${activity.remainingSeats} 个位置`;
   return `${activity.title}\n${activity.locationName} · ${activity.locationHint}\n${seats}\n${window.location.href}`;
+}
+
+function openDiscussionFromDetail(activityId: string, entry?: string): void {
+  window.location.href = buildActivityDetailPath(activityId, {
+    entry: resolveActivityEntry(entry, "join_success"),
+  });
 }
 
 export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
@@ -168,7 +174,7 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
 
   const joinActivity = useCallback(async () => {
     if (isJoined) {
-      window.location.href = buildActivityDetailPath(activity.id, { entry: "join_success" });
+      openDiscussionFromDetail(activity.id, "join_success");
       return;
     }
 
@@ -200,7 +206,7 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
       setNotice(payload.msg);
       await loadViewerDetail();
       if (payload.navigationIntent === "open_discussion") {
-        window.location.href = buildActivityDetailPath(activity.id, { entry: "join_success" });
+        openDiscussionFromDetail(activity.id, "join_success");
       }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "报名失败，请稍后再试");

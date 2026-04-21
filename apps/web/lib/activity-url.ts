@@ -12,3 +12,18 @@ export function buildActivityDetailPath(
   const query = search.toString();
   return `/activities/${encodeURIComponent(activityId)}${query ? `?${query}` : ""}`;
 }
+
+export function resolveActivityEntry(
+  value: unknown,
+  fallback?: string
+): string | undefined {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+
+  if (typeof fallback === "string" && fallback.trim()) {
+    return fallback.trim();
+  }
+
+  return undefined;
+}

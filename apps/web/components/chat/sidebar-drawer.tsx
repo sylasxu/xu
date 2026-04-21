@@ -29,6 +29,8 @@ type SidebarDrawerProps = {
   isDarkMode?: boolean;
   disabled?: boolean;
   activeConversationId?: string | null;
+  currentTasks: SidebarTaskSnapshot[];
+  currentTasksLoading?: boolean;
   ui: {
     title: string;
     authSubtitle: string;
@@ -105,11 +107,6 @@ type SidebarTaskSnapshot = {
   secondaryAction?: SidebarTaskAction;
 };
 
-type CurrentTasksPayload = {
-  items: SidebarTaskSnapshot[];
-  serverTime: string;
-};
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -148,6 +145,8 @@ export function SidebarDrawer({
   isDarkMode = false,
   disabled = false,
   activeConversationId = null,
+  currentTasks,
+  currentTasksLoading = false,
   ui,
   onSelectConversation,
   onSelectTaskAction,
@@ -156,7 +155,6 @@ export function SidebarDrawer({
   const [open, setOpen] = useState(false);
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [userProfile, setUserProfile] = useState<SidebarUserProfile | null>(null);
-  const [currentTasks, setCurrentTasks] = useState<SidebarTaskSnapshot[]>([]);
   const [conversations, setConversations] = useState<SidebarConversation[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchValue, setSearchValue] = useState("");
@@ -173,11 +171,13 @@ export function SidebarDrawer({
     syncAuth();
     window.addEventListener("focus", syncAuth);
     window.addEventListener("storage", syncAuth);
+    window.addEventListener("xu-auth-updated", syncAuth);
     document.addEventListener("visibilitychange", syncAuth);
 
     return () => {
       window.removeEventListener("focus", syncAuth);
       window.removeEventListener("storage", syncAuth);
+      window.removeEventListener("xu-auth-updated", syncAuth);
       document.removeEventListener("visibilitychange", syncAuth);
     };
   }, []);
@@ -189,7 +189,6 @@ export function SidebarDrawer({
 
     if (!authToken || !userId) {
       setUserProfile(null);
-      setCurrentTasks([]);
       setConversations([]);
       return;
     }
@@ -239,31 +238,13 @@ export function SidebarDrawer({
 
         return payload as ConversationsPayload;
       }),
-      fetch(`${API_BASE}/ai/tasks/current`, {
-        headers,
-        cache: "no-store",
-        signal: controller.signal,
-      }).then(async (response) => {
-        if (!response.ok) {
-          return null;
-        }
-
-        const payload = (await response.json()) as unknown;
-        if (!isRecord(payload) || !Array.isArray(payload.items)) {
-          return null;
-        }
-
-        return payload as CurrentTasksPayload;
-      }),
     ])
-      .then(([profile, conversationPayload, taskPayload]) => {
+      .then(([profile, conversationPayload]) => {
         setUserProfile(profile);
         setConversations(conversationPayload?.items ?? []);
-        setCurrentTasks(taskPayload?.items ?? []);
       })
       .catch(() => {
         setUserProfile(null);
-        setCurrentTasks([]);
         setConversations([]);
       })
       .finally(() => {
@@ -406,7 +387,7 @@ export function SidebarDrawer({
               >
                 {ui.currentTasksDescriptionVisitor}
               </div>
-            ) : loading ? (
+            ) : loading || currentTasksLoading ? (
               <div className="space-y-2">
                 {[0, 1].map((item) => (
                   <div

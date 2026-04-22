@@ -123,6 +123,8 @@ const MessageCenterChatItem = t.Object({
   activityImage: t.Union([t.String(), t.Null()]),
   lastMessage: t.Union([t.String(), t.Null()]),
   lastMessageTime: t.Union([t.String(), t.Null()]),
+  lastMessageSenderId: t.Union([t.String(), t.Null()]),
+  lastMessageSenderNickname: t.Union([t.String(), t.Null()]),
   unreadCount: t.Number(),
   isArchived: t.Boolean(),
   participantCount: t.Number(),
@@ -136,12 +138,49 @@ const MessageCenterChatActivities = t.Object({
   totalUnread: t.Number(),
 });
 
+const MessageCenterActionItemAction = t.Object({
+  kind: t.Union([
+    t.Literal('prompt'),
+    t.Literal('open_discussion'),
+    t.Literal('open_activity'),
+  ]),
+  label: t.String({ description: '动作按钮文案' }),
+  prompt: t.Optional(t.String({ description: '需要发回聊天流的提示词' })),
+  activityId: t.Optional(t.String({ format: 'uuid', description: '关联活动 ID' })),
+  activityMode: t.Optional(t.Union([
+    t.Literal('review'),
+    t.Literal('rebook'),
+    t.Literal('kickoff'),
+  ])),
+  entry: t.Optional(t.String({ description: '入口标识' })),
+});
+
+const MessageCenterActionItem = t.Object({
+  id: t.String({ description: '任务卡 ID' }),
+  type: t.Union([
+    t.Literal('post_activity_follow_up'),
+    t.Literal('discussion_reply'),
+    t.Literal('draft_continue'),
+    t.Literal('recruiting_follow_up'),
+  ]),
+  title: t.String({ description: '任务卡标题' }),
+  summary: t.String({ description: '任务卡摘要' }),
+  statusLabel: t.String({ description: '当前状态标签' }),
+  updatedAt: t.String({ description: '最近更新时间 ISO' }),
+  activityId: t.Union([t.String({ format: 'uuid' }), t.Null()], { description: '关联活动 ID' }),
+  badge: t.Optional(t.String({ description: '右上角角标' })),
+  primaryAction: MessageCenterActionItemAction,
+});
+
 const MessageCenterUi = t.Object({
   title: t.String({ description: '消息中心标题' }),
   description: t.String({ description: '消息中心副文案' }),
   visitorTitle: t.String({ description: '未登录占位标题' }),
   visitorDescription: t.String({ description: '未登录占位说明' }),
   summaryTitle: t.String({ description: '未读摘要标题' }),
+  actionInboxSectionTitle: t.String({ description: '待处理任务分区标题' }),
+  actionInboxDescription: t.String({ description: '待处理任务分区说明' }),
+  actionInboxEmpty: t.String({ description: '待处理任务空状态文案' }),
   pendingMatchesTitle: t.String({ description: '待确认匹配分区标题' }),
   pendingMatchesEmpty: t.String({ description: '待确认匹配空状态文案' }),
   requestAuthHint: t.String({ description: '未登录查看消息中心提示' }),
@@ -155,6 +194,9 @@ const MessageCenterUi = t.Object({
   refreshLabel: t.String({ description: '刷新按钮说明' }),
   systemSectionTitle: t.String({ description: '系统跟进分区标题' }),
   systemEmpty: t.String({ description: '系统通知空状态文案' }),
+  feedbackPositiveLabel: t.String({ description: '活动后正向反馈按钮文案' }),
+  feedbackNeutralLabel: t.String({ description: '活动后一般反馈按钮文案' }),
+  feedbackNegativeLabel: t.String({ description: '活动后负向反馈按钮文案' }),
   reviewActionLabel: t.String({ description: '活动复盘按钮文案' }),
   rebookActionLabel: t.String({ description: '活动再约按钮文案' }),
   kickoffActionLabel: t.String({ description: '群聊开场按钮文案' }),
@@ -166,6 +208,7 @@ const MessageCenterUi = t.Object({
 });
 
 const MessageCenterResponse = t.Object({
+  actionItems: t.Array(MessageCenterActionItem),
   systemNotifications: NotificationListResponse,
   pendingMatches: t.Array(MatchPendingItem),
   unreadNotificationCount: t.Number({ description: '通知区未读总数（系统未读 + 待确认匹配）' }),
@@ -211,6 +254,8 @@ export const notificationModel = new Elysia({ name: 'notificationModel' })
     'notification.matchPendingRequestMode': MatchPendingRequestMode,
     'notification.matchPendingDetailResponse': MatchPendingDetailResponse,
     'notification.messageCenterQuery': MessageCenterQuery,
+    'notification.messageCenterActionItemAction': MessageCenterActionItemAction,
+    'notification.messageCenterActionItem': MessageCenterActionItem,
     'notification.messageCenterUi': MessageCenterUi,
     'notification.messageCenterChatItem': MessageCenterChatItem,
     'notification.messageCenterChatActivities': MessageCenterChatActivities,
@@ -235,6 +280,8 @@ export type MatchPendingIcebreaker = Static<typeof MatchPendingIcebreaker>;
 export type MatchPendingRequestMode = Static<typeof MatchPendingRequestMode>;
 export type MatchPendingDetailResponse = Static<typeof MatchPendingDetailResponse>;
 export type MessageCenterQuery = Static<typeof MessageCenterQuery>;
+export type MessageCenterActionItemAction = Static<typeof MessageCenterActionItemAction>;
+export type MessageCenterActionItem = Static<typeof MessageCenterActionItem>;
 export type MessageCenterUi = Static<typeof MessageCenterUi>;
 export type MessageCenterChatItem = Static<typeof MessageCenterChatItem>;
 export type MessageCenterChatActivities = Static<typeof MessageCenterChatActivities>;

@@ -4,6 +4,7 @@ import { verifyToken } from '../auth/auth.service';
 import { validateContent } from '../content-security/content-security.service';
 import * as pool from './connection-pool';
 import { WsErrorCodes } from './chat.model';
+import { createChatMessage } from './chat.service';
 
 // 群聊归档时间：活动开始后 24 小时
 const ARCHIVE_HOURS = 24;
@@ -276,20 +277,12 @@ export async function handleWsMessage(
       return;
     }
 
-    // 持久化消息
-    const [message] = await db
-      .insert(activityMessages)
-      .values({
-        activityId,
-        senderId: userId,
-        parentId,
-        messageType: 'text',
-        content: data.content,
-      })
-      .returning({ id: activityMessages.id, createdAt: activityMessages.createdAt });
-
-    // 获取发送者信息
-    const userInfo = await getUserInfo(userId);
+    const message = await createChatMessage({
+      activityId,
+      userId,
+      content: data.content,
+      parentId,
+    });
 
     // 广播消息
     pool.broadcastToActivity(activityId, {
@@ -299,10 +292,10 @@ export async function handleWsMessage(
         content: data.content,
         senderId: userId,
         parentId,
-        senderNickname: userInfo?.nickname || '匿名用户',
-        senderAvatarUrl: userInfo?.avatarUrl || null,
+        senderNickname: message.senderNickname || '匿名用户',
+        senderAvatarUrl: message.senderAvatarUrl || null,
         type: 'text',
-        createdAt: message.createdAt.toISOString(),
+        createdAt: message.createdAt,
       },
       ts: Date.now(),
     });

@@ -40,6 +40,7 @@ type NotificationType =
   | "activity_reminder";
 
 type MessageCenterResponse = {
+  actionItems: MessageCenterActionItem[];
   systemNotifications: {
     items: SystemNotification[];
     total: number;
@@ -62,6 +63,9 @@ type MessageCenterResponse = {
     visitorTitle: string;
     visitorDescription: string;
     summaryTitle: string;
+    actionInboxSectionTitle: string;
+    actionInboxDescription: string;
+    actionInboxEmpty: string;
     pendingMatchesTitle: string;
     pendingMatchesEmpty: string;
     requestAuthHint: string;
@@ -75,6 +79,9 @@ type MessageCenterResponse = {
     refreshLabel: string;
     systemSectionTitle: string;
     systemEmpty: string;
+    feedbackPositiveLabel: string;
+    feedbackNeutralLabel: string;
+    feedbackNegativeLabel: string;
     reviewActionLabel: string;
     rebookActionLabel: string;
     kickoffActionLabel: string;
@@ -96,6 +103,25 @@ type PendingMatch = {
   locationHint: string;
   confirmDeadline: string;
   isTempOrganizer: boolean;
+};
+
+type MessageCenterActionItem = {
+  id: string;
+  type: "post_activity_follow_up" | "discussion_reply" | "draft_continue" | "recruiting_follow_up";
+  title: string;
+  summary: string;
+  statusLabel: string;
+  updatedAt: string;
+  activityId: string | null;
+  badge?: string;
+  primaryAction: {
+    kind: "prompt" | "open_discussion" | "open_activity";
+    label: string;
+    prompt?: string;
+    activityId?: string;
+    activityMode?: "review" | "rebook" | "kickoff";
+    entry?: string;
+  };
 };
 
 type PendingMatchDetail = {
@@ -145,6 +171,8 @@ type ChatActivity = {
   activityImage: string | null;
   lastMessage: string | null;
   lastMessageTime: string | null;
+  lastMessageSenderId: string | null;
+  lastMessageSenderNickname: string | null;
   unreadCount: number;
   isArchived: boolean;
   participantCount: number;
@@ -165,6 +193,8 @@ type SuccessResponse = {
   code: number;
   msg: string;
 };
+
+type ActivitySelfFeedbackValue = "positive" | "neutral" | "failed";
 
 type DrawerNotice = {
   kind: "success" | "error";
@@ -605,6 +635,23 @@ export function MessageCenterDrawer({
     [requestJson]
   );
 
+  const recordActivitySelfFeedback = useCallback(
+    async (notification: SystemNotification, feedback: ActivitySelfFeedbackValue) => {
+      if (!notification.activityId) {
+        return null;
+      }
+
+      return requestJson<SuccessResponse>("/participants/self-feedback", {
+        method: "POST",
+        body: JSON.stringify({
+          activityId: notification.activityId,
+          feedback,
+        }),
+      });
+    },
+    [requestJson]
+  );
+
   const handlePendingMatchAction = useCallback(
     async (matchId: string, action: "confirm" | "cancel") => {
       const actionKey = `${action}:${matchId}`;
@@ -702,7 +749,79 @@ export function MessageCenterDrawer({
     ]
   );
 
+  const handleQuickFeedback = useCallback(
+    async (notification: SystemNotification, feedback: ActivitySelfFeedbackValue) => {
+      const actionKey = `feedback:${feedback}:${notification.id}`;
+      setPendingActionKey(actionKey);
+      try {
+        if (!notification.isRead) {
+          await markNotificationRead(notification.id);
+        }
+
+        const result = await recordActivitySelfFeedback(notification, feedback);
+        setNotice({
+          kind: "success",
+          text: result?.msg || "已记录这次活动反馈",
+        });
+        await refreshMessageCenter({ silent: true });
+      } catch (requestError) {
+        setNotice({
+          kind: "error",
+          text: requestError instanceof Error ? requestError.message : messageCenter?.ui.followUpFailed || "发起失败，请稍后再试",
+        });
+      } finally {
+        setPendingActionKey(null);
+      }
+    },
+    [markNotificationRead, messageCenter?.ui.followUpFailed, recordActivitySelfFeedback, refreshMessageCenter]
+  );
+
+  const handleActionItem = useCallback(
+    async (item: MessageCenterActionItem) => {
+      const action = item.primaryAction;
+      const actionKey = `task:${item.id}`;
+      setPendingActionKey(actionKey);
+
+      try {
+        if (action.kind === "open_discussion" || action.kind === "open_activity") {
+          const activityId = action.activityId || item.activityId;
+          if (!activityId) {
+            throw new Error(messageCenter?.ui.followUpFailed || "发起失败，请稍后再试");
+          }
+
+          window.location.href = buildActivityDetailPath(activityId, {
+            entry: action.entry || "message_center_action_item",
+          });
+          return;
+        }
+
+        if (action.kind === "prompt" && action.prompt) {
+          setOpen(false);
+          await onSendPrompt(action.prompt, item.title, {
+            ...(action.activityId ? { activityId: action.activityId } : {}),
+            ...(action.activityMode ? { activityMode: action.activityMode } : {}),
+            ...(action.entry ? { entry: action.entry } : {}),
+          });
+          setNotice(null);
+          await refreshMessageCenter({ silent: true });
+          return;
+        }
+
+        throw new Error(messageCenter?.ui.followUpFailed || "发起失败，请稍后再试");
+      } catch (requestError) {
+        setNotice({
+          kind: "error",
+          text: requestError instanceof Error ? requestError.message : messageCenter?.ui.followUpFailed || "发起失败，请稍后再试",
+        });
+      } finally {
+        setPendingActionKey(null);
+      }
+    },
+    [messageCenter?.ui.followUpFailed, onSendPrompt, refreshMessageCenter]
+  );
+
   const pendingMatches = messageCenter?.pendingMatches || [];
+  const actionItems = messageCenter?.actionItems || [];
   const systemNotifications = messageCenter?.systemNotifications.items || [];
   const chatActivities = messageCenter?.chatActivities.items || [];
 
@@ -867,6 +986,79 @@ export function MessageCenterDrawer({
                   <RefreshCw className={cn("h-4 w-4", refreshing ? "animate-spin" : "")} />
                 </button>
               </div>
+
+              <section
+                className={cn(
+                  "rounded-[28px] border px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035),0_18px_42px_-32px_rgba(0,0,0,0.78)]",
+                  isDarkMode ? "border-white/10 bg-white/[0.035]" : "border-black/8 bg-white"
+                )}
+              >
+                <div className="mb-3 flex items-center gap-2">
+                  <Clock3 className="h-4 w-4 text-white/62" />
+                  <p className="text-sm font-semibold">{messageCenter?.ui.actionInboxSectionTitle || "等你处理"}</p>
+                  <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", isDarkMode ? "border border-white/8 bg-white/[0.04] text-white/70" : "border border-black/8 bg-black/[0.03] text-black/70")}>
+                    {actionItems.length}
+                  </span>
+                </div>
+                <p className={cn("mb-3 text-xs leading-5", isDarkMode ? "text-white/42" : "text-black/42")}>
+                  {messageCenter?.ui.actionInboxDescription || "先把最需要你接一下的事摆在上面，点开就能继续原来的那条链路。"}
+                </p>
+
+                {actionItems.length === 0 ? (
+                  <p className={cn("text-sm leading-6", isDarkMode ? "text-white/54" : "text-black/52")}>
+                    {messageCenter?.ui.actionInboxEmpty || "当前没有必须立刻处理的事，新的进展会先出现在这里。"}
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {actionItems.map((item) => {
+                      const actionKey = `task:${item.id}`;
+                      return (
+                        <div
+                          key={item.id}
+                          className={cn(
+                            "rounded-2xl border px-4 py-4",
+                            isDarkMode ? "border-white/8 bg-white/[0.03]" : "border-black/8 bg-black/[0.02]"
+                          )}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-sm font-semibold">{item.title}</p>
+                                <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", isDarkMode ? "border border-white/8 bg-white/[0.04] text-white/70" : "border border-black/8 bg-black/[0.03] text-black/70")}>
+                                  {item.statusLabel}
+                                </span>
+                              </div>
+                              <p className={cn("mt-1 text-xs leading-5", isDarkMode ? "text-white/54" : "text-black/52")}>
+                                {item.summary}
+                              </p>
+                            </div>
+                            {item.badge ? (
+                              <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-black">
+                                {item.badge}
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className={cn("mt-3 flex items-center gap-2 text-xs", isDarkMode ? "text-white/42" : "text-black/42")}>
+                            <Clock3 className="h-3.5 w-3.5" />
+                            {formatRelativeTime(item.updatedAt)}
+                          </div>
+                          <div className="mt-3 flex gap-2">
+                            <button
+                              type="button"
+                              disabled={disabled || Boolean(pendingActionKey)}
+                              onClick={() => void handleActionItem(item)}
+                              className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-2 text-xs font-medium text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {pendingActionKey === actionKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                              {item.primaryAction.label}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
 
               <section
                 className={cn(
@@ -1154,6 +1346,9 @@ export function MessageCenterDrawer({
                       const reviewKey = `review:${notification.id}`;
                       const rebookKey = `rebook:${notification.id}`;
                       const kickoffKey = `kickoff:${notification.id}`;
+                      const positiveFeedbackKey = `feedback:positive:${notification.id}`;
+                      const neutralFeedbackKey = `feedback:neutral:${notification.id}`;
+                      const negativeFeedbackKey = `feedback:failed:${notification.id}`;
                       const canKickoff =
                         (notification.type === "join" || notification.type === "new_participant") &&
                         Boolean(notification.activityId);
@@ -1188,28 +1383,65 @@ export function MessageCenterDrawer({
                           </div>
 
                           {notification.type === "post_activity" ? (
-                            <div className="mt-3 flex gap-2">
-                              <button
-                                type="button"
-                                disabled={disabled || Boolean(pendingActionKey)}
-                                onClick={() => void handleFollowUpPrompt(notification, "review")}
-                                className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-2 text-xs font-medium text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                {pendingActionKey === reviewKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                                {messageCenter?.ui.reviewActionLabel || "去复盘"}
-                              </button>
-                              <button
-                                type="button"
-                                disabled={disabled || Boolean(pendingActionKey)}
-                                onClick={() => void handleFollowUpPrompt(notification, "rebook")}
-                                className={cn(
-                                  "inline-flex items-center gap-1 rounded-full px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
-                                  isDarkMode ? "border border-white/8 bg-white/[0.05] text-white/80 hover:bg-white/[0.08]" : "border border-black/8 bg-black/[0.03] text-black/76 hover:bg-black/[0.05]"
-                                )}
-                              >
-                                {pendingActionKey === rebookKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                                {messageCenter?.ui.rebookActionLabel || "去再约"}
-                              </button>
+                            <div className="mt-3 space-y-2">
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  disabled={disabled || Boolean(pendingActionKey)}
+                                  onClick={() => void handleQuickFeedback(notification, "positive")}
+                                  className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-2 text-xs font-medium text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {pendingActionKey === positiveFeedbackKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                                  {messageCenter?.ui.feedbackPositiveLabel || "挺顺利"}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={disabled || Boolean(pendingActionKey)}
+                                  onClick={() => void handleQuickFeedback(notification, "neutral")}
+                                  className={cn(
+                                    "inline-flex items-center gap-1 rounded-full px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
+                                    isDarkMode ? "border border-white/8 bg-white/[0.05] text-white/80 hover:bg-white/[0.08]" : "border border-black/8 bg-black/[0.03] text-black/76 hover:bg-black/[0.05]"
+                                  )}
+                                >
+                                  {pendingActionKey === neutralFeedbackKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                                  {messageCenter?.ui.feedbackNeutralLabel || "一般"}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={disabled || Boolean(pendingActionKey)}
+                                  onClick={() => void handleQuickFeedback(notification, "failed")}
+                                  className={cn(
+                                    "inline-flex items-center gap-1 rounded-full px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
+                                    isDarkMode ? "border border-white/8 bg-white/[0.05] text-white/80 hover:bg-white/[0.08]" : "border border-black/8 bg-black/[0.03] text-black/76 hover:bg-black/[0.05]"
+                                  )}
+                                >
+                                  {pendingActionKey === negativeFeedbackKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
+                                  {messageCenter?.ui.feedbackNegativeLabel || "没成局"}
+                                </button>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  disabled={disabled || Boolean(pendingActionKey)}
+                                  onClick={() => void handleFollowUpPrompt(notification, "review")}
+                                  className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-2 text-xs font-medium text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {pendingActionKey === reviewKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                                  {messageCenter?.ui.reviewActionLabel || "去复盘"}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={disabled || Boolean(pendingActionKey)}
+                                  onClick={() => void handleFollowUpPrompt(notification, "rebook")}
+                                  className={cn(
+                                    "inline-flex items-center gap-1 rounded-full px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
+                                    isDarkMode ? "border border-white/8 bg-white/[0.05] text-white/80 hover:bg-white/[0.08]" : "border border-black/8 bg-black/[0.03] text-black/76 hover:bg-black/[0.05]"
+                                  )}
+                                >
+                                  {pendingActionKey === rebookKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                                  {messageCenter?.ui.rebookActionLabel || "去再约"}
+                                </button>
+                              </div>
                             </div>
                           ) : canKickoff ? (
                             <div className="mt-3 flex gap-2">

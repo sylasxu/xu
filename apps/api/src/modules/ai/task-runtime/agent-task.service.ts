@@ -48,6 +48,13 @@ export interface CurrentAgentTaskSnapshot {
   secondaryAction?: CurrentAgentTaskAction;
 }
 
+export type CurrentTaskHomeState = 'H0' | 'H1' | 'H2' | 'H3' | 'H4';
+
+export interface CurrentTaskHomeStateSnapshot {
+  homeState: CurrentTaskHomeState;
+  primaryTaskId: string | null;
+}
+
 interface TaskLocationContext {
   name: string;
   lat?: number;
@@ -2611,6 +2618,67 @@ export async function listCurrentAgentTaskSnapshots(userId: string): Promise<Cur
       ...(secondaryAction ? { secondaryAction } : {}),
     };
   });
+}
+
+export function resolveCurrentTaskHomeState(
+  tasks: CurrentAgentTaskSnapshot[],
+): CurrentTaskHomeStateSnapshot {
+  if (tasks.length === 0) {
+    return {
+      homeState: 'H0',
+      primaryTaskId: null,
+    };
+  }
+
+  const h3 = tasks.find((task) => task.currentStage === 'match_ready');
+  if (h3) {
+    return {
+      homeState: 'H3',
+      primaryTaskId: h3.id,
+    };
+  }
+
+  const activeStages = new Set<AgentTaskStage>([
+    'explore',
+    'preference_collecting',
+    'draft_collecting',
+    'action_selected',
+    'draft_ready',
+    'joined',
+    'discussion',
+    'published',
+    'intent_posted',
+    'awaiting_match',
+  ]);
+
+  const h2 = tasks.find((task) => task.status === 'active' && activeStages.has(task.currentStage));
+  if (h2) {
+    return {
+      homeState: 'H2',
+      primaryTaskId: h2.id,
+    };
+  }
+
+  const h1 = tasks.find((task) => task.status === 'waiting_auth');
+  if (h1) {
+    return {
+      homeState: 'H1',
+      primaryTaskId: h1.id,
+    };
+  }
+
+  const h4 = tasks.find((task) => task.currentStage === 'post_activity');
+  if (h4) {
+    return {
+      homeState: 'H4',
+      primaryTaskId: h4.id,
+    };
+  }
+
+  return {
+    homeState: 'H0',
+    primaryTaskId: null,
+  };
 }
 
 export async function resolveOpenJoinTaskForConversation(params: {

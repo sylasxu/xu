@@ -60,6 +60,7 @@ export {
   injectEnhancedWorkingMemory,
   // v4.5 兴趣向量 (MaxSim)
   addInterestVector,
+  clearInterestVectorForActivity,
   getInterestVectors,
   clearInterestVectors,
   calculateMaxSim,

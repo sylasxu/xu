@@ -1,13 +1,16 @@
 // Chat Service - 群聊消息业务逻辑 (v3.3 使用 activityMessages)
-import { db, activityMessages, activities, participants, users, eq, and, gt, count, desc, inArray, sql } from '@xu/db';
+import { db, activityMessages, activities, participants, users, eq, and, gt, count, desc, inArray, lt, sql } from '@xu/db';
 import type {
   ChatActivitiesQuery,
   ChatActivitiesResponse,
   ChatActivityItem,
   ChatMessageResponse,
+  MessageListResponse,
   MessageListQuery,
   SendMessageRequest,
 } from './chat.model';
+import * as pool from './connection-pool';
+import { sendServiceNotificationByUserId } from '../wechat';
 
 // 群聊归档时间：活动开始后 24 小时
 const ARCHIVE_HOURS = 24;
@@ -122,8 +125,11 @@ export async function getChatActivities(
         .select({
           content: activityMessages.content,
           createdAt: activityMessages.createdAt,
+          senderId: activityMessages.senderId,
+          senderNickname: users.nickname,
         })
         .from(activityMessages)
+        .leftJoin(users, eq(activityMessages.senderId, users.id))
         .where(eq(activityMessages.activityId, row.activityId))
         .orderBy(desc(activityMessages.createdAt))
         .limit(1);
@@ -141,6 +147,8 @@ export async function getChatActivities(
         activityId: row.activityId,
         lastMessage: latestMessage?.content || null,
         lastMessageTime: latestMessage?.createdAt?.toISOString() || null,
+        lastMessageSenderId: latestMessage?.senderId || null,
+        lastMessageSenderNickname: latestMessage?.senderNickname || null,
         unreadCount: unreadResult?.unreadCount || 0,
       };
     })
@@ -148,10 +156,18 @@ export async function getChatActivities(
 
   const latestMessageMap = new Map<
     string,
-    { lastMessage: string | null; lastMessageTime: string | null; unreadCount: number }
+    {
+      lastMessage: string | null;
+      lastMessageTime: string | null;
+      lastMessageSenderId: string | null;
+      lastMessageSenderNickname: string | null;
+      unreadCount: number;
+    }
   >(latestMessageRows.map((item) => [item.activityId, {
     lastMessage: item.lastMessage,
     lastMessageTime: item.lastMessageTime,
+    lastMessageSenderId: item.lastMessageSenderId,
+    lastMessageSenderNickname: item.lastMessageSenderNickname,
     unreadCount: item.unreadCount,
   }]));
 
@@ -166,6 +182,8 @@ export async function getChatActivities(
       activityImage: row.creatorAvatarUrl || null,
       lastMessage: latest?.lastMessage || null,
       lastMessageTime: latest?.lastMessageTime || null,
+      lastMessageSenderId: latest?.lastMessageSenderId || null,
+      lastMessageSenderNickname: latest?.lastMessageSenderNickname || null,
       unreadCount,
       isArchived: calculateIsArchived(row.startAt),
       participantCount: participantCountMap.get(row.activityId) || 0,
@@ -182,7 +200,7 @@ export async function getMessages(
   activityId: string, 
   userId: string,
   query: MessageListQuery
-): Promise<{ messages: ChatMessageResponse[]; isArchived: boolean }> {
+): Promise<MessageListResponse> {
   // 检查用户是否为参与者
   const isParticipant = await checkIsParticipant(activityId, userId);
   if (!isParticipant) {
@@ -194,7 +212,22 @@ export async function getMessages(
 
   // 构建查询条件
   const conditions = [eq(activityMessages.activityId, activityId)];
-  
+
+  let beforeMessageCreatedAt: Date | null = null;
+
+  if (query.before) {
+    const [beforeMessage] = await db
+      .select({ createdAt: activityMessages.createdAt })
+      .from(activityMessages)
+      .where(eq(activityMessages.id, query.before))
+      .limit(1);
+
+    if (beforeMessage) {
+      beforeMessageCreatedAt = beforeMessage.createdAt;
+      conditions.push(lt(activityMessages.createdAt, beforeMessage.createdAt));
+    }
+  }
+
   // 如果提供了 since，只获取该消息之后的新消息
   if (query.since) {
     // 先获取 since 消息的创建时间
@@ -227,10 +260,14 @@ export async function getMessages(
     .from(activityMessages)
     .leftJoin(users, eq(activityMessages.senderId, users.id))
     .where(and(...conditions))
-    .orderBy(activityMessages.createdAt)
-    .limit(limit);
+    .orderBy(desc(activityMessages.createdAt))
+    .limit(limit + 1);
 
-  const messages: ChatMessageResponse[] = messageList.map(m => ({
+  const hasMoreHistory = !query.since && messageList.length > limit;
+  const visibleRows = hasMoreHistory ? messageList.slice(0, limit) : messageList;
+  const orderedRows = visibleRows.slice().reverse();
+
+  const messages: ChatMessageResponse[] = orderedRows.map(m => ({
     id: m.id,
     activityId: m.activityId,
     senderId: m.senderId,
@@ -242,10 +279,10 @@ export async function getMessages(
     createdAt: m.createdAt.toISOString(),
   }));
 
-  const latestMessageCreatedAt = messageList.length > 0
-    ? messageList[messageList.length - 1].createdAt
+  const latestMessageCreatedAt = orderedRows.length > 0
+    ? orderedRows[orderedRows.length - 1].createdAt
     : null;
-  if (latestMessageCreatedAt) {
+  if (latestMessageCreatedAt && !beforeMessageCreatedAt) {
     await db
       .update(participants)
       .set({
@@ -259,7 +296,149 @@ export async function getMessages(
       ));
   }
 
-  return { messages, isArchived };
+  return {
+    messages,
+    isArchived,
+    historyCursor: hasMoreHistory ? orderedRows[0]?.id || null : null,
+    hasMoreHistory,
+  };
+}
+
+function toNotificationValue(value: string, maxLength = 20): string {
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  if (!normalized) return '待补充';
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, Math.max(maxLength - 1, 1))}…`;
+}
+
+async function notifyOfflineParticipantsAboutMessage(params: {
+  activityId: string;
+  activityTitle: string;
+  senderId: string;
+  senderName: string;
+  content: string;
+  previousLatestCreatedAt: Date | null;
+}): Promise<void> {
+  const recipients = await db
+    .select({
+      userId: participants.userId,
+      lastReadAt: participants.lastReadAt,
+    })
+    .from(participants)
+    .where(and(
+      eq(participants.activityId, params.activityId),
+      eq(participants.status, 'joined'),
+    ));
+
+  const offlineRecipients = recipients.filter((participant) => {
+    if (participant.userId === params.senderId) {
+      return false;
+    }
+
+    if (pool.isUserOnline(params.activityId, participant.userId)) {
+      return false;
+    }
+
+    if (!params.previousLatestCreatedAt) {
+      return true;
+    }
+
+    return participant.lastReadAt !== null && participant.lastReadAt >= params.previousLatestCreatedAt;
+  });
+
+  if (offlineRecipients.length === 0) {
+    return;
+  }
+
+  const tasks = offlineRecipients.map(async (recipient) => {
+    const result = await sendServiceNotificationByUserId({
+      userId: recipient.userId,
+      scene: 'discussion_reply',
+      pagePath: `subpackages/activity/discussion/index?id=${params.activityId}`,
+      data: {
+        thing1: toNotificationValue(params.activityTitle),
+        thing2: toNotificationValue(`${params.senderName}：${params.content}`, 36),
+      },
+    });
+
+    if (!result.success && !result.skipped) {
+      console.warn('[Chat] failed to send discussion offline reminder', {
+        activityId: params.activityId,
+        userId: recipient.userId,
+        error: result.error,
+      });
+    }
+  });
+
+  await Promise.allSettled(tasks);
+}
+
+export async function createChatMessage(params: {
+  activityId: string;
+  userId: string;
+  content: string;
+  parentId?: string | null;
+}): Promise<{
+  id: string;
+  createdAt: string;
+  senderNickname: string | null;
+  senderAvatarUrl: string | null;
+}> {
+  const [activity, sender, previousLatestMessage] = await Promise.all([
+    db
+      .select({ title: activities.title })
+      .from(activities)
+      .where(eq(activities.id, params.activityId))
+      .limit(1),
+    db
+      .select({ nickname: users.nickname, avatarUrl: users.avatarUrl })
+      .from(users)
+      .where(eq(users.id, params.userId))
+      .limit(1),
+    db
+      .select({ createdAt: activityMessages.createdAt })
+      .from(activityMessages)
+      .where(eq(activityMessages.activityId, params.activityId))
+      .orderBy(desc(activityMessages.createdAt))
+      .limit(1),
+  ]);
+
+  const activityTitle = activity[0]?.title || '活动讨论区';
+  const senderInfo = sender[0] || { nickname: null, avatarUrl: null };
+  const previousLatestCreatedAt = previousLatestMessage[0]?.createdAt || null;
+
+  const [message] = await db
+    .insert(activityMessages)
+    .values({
+      activityId: params.activityId,
+      senderId: params.userId,
+      parentId: params.parentId ?? null,
+      messageType: 'text',
+      content: params.content,
+    })
+    .returning({ id: activityMessages.id, createdAt: activityMessages.createdAt });
+
+  void notifyOfflineParticipantsAboutMessage({
+    activityId: params.activityId,
+    activityTitle,
+    senderId: params.userId,
+    senderName: senderInfo.nickname || '队友',
+    content: params.content,
+    previousLatestCreatedAt,
+  }).catch((error) => {
+    console.error('[Chat] failed to process offline discussion reminder', {
+      activityId: params.activityId,
+      userId: params.userId,
+      error,
+    });
+  });
+
+  return {
+    id: message.id,
+    createdAt: message.createdAt.toISOString(),
+    senderNickname: senderInfo.nickname,
+    senderAvatarUrl: senderInfo.avatarUrl,
+  };
 }
 
 /**
@@ -282,17 +461,12 @@ export async function sendMessage(
     throw new Error('群聊已归档，无法发送消息');
   }
 
-  // 插入消息
-  const [message] = await db
-    .insert(activityMessages)
-    .values({
-      activityId,
-      senderId: userId,
-      parentId: data.parentId ?? null,
-      messageType: 'text',
-      content: data.content,
-    })
-    .returning({ id: activityMessages.id });
+  const message = await createChatMessage({
+    activityId,
+    userId,
+    content: data.content,
+    parentId: data.parentId ?? null,
+  });
 
   return { id: message.id };
 }

@@ -15,6 +15,7 @@ import {
   listUserConversations,
   markJoinTaskDiscussionEntered,
   normalizeAiProviderErrorMessage,
+  resolveCurrentTaskHomeState,
   streamAiChatResponse,
 } from './ai.service';
 import type { GenUIRequest } from '@xu/genui-contract';
@@ -173,8 +174,13 @@ export const aiController = new Elysia({ prefix: '/ai' })
         return { code: 401, msg: '未登录' } satisfies ErrorResponse;
       }
 
+      const items = await listCurrentAgentTaskSnapshots(user.id);
+      const homeState = resolveCurrentTaskHomeState(items);
+
       return {
-        items: await listCurrentAgentTaskSnapshots(user.id),
+        items,
+        homeState: homeState.homeState,
+        primaryTaskId: homeState.primaryTaskId,
         serverTime: new Date().toISOString(),
       };
     },

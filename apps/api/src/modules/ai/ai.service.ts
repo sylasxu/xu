@@ -15,6 +15,7 @@ import {
   users,
   conversations,
   conversationMessages,
+  activityMessages,
   activities,
   participants,
   agentTasks,
@@ -106,6 +107,8 @@ import {
 import { isIdentityMemoryQuestion } from './identity-reply';
 import { applyAiChatResponsePolicies } from './runtime/response-policy';
 import type { AiChatEnvelopeResult } from './runtime/chat-response';
+
+export { resolveCurrentTaskHomeState } from './task-runtime/agent-task.service';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -2343,7 +2346,12 @@ export interface QuickPrompt {
   params?: Record<string, unknown>;
 }
 
-export type WelcomeFocusType = 'post_activity_feedback' | 'recruiting_result' | 'unfinished_intent';
+export type WelcomeFocusType =
+  | 'post_activity_feedback'
+  | 'discussion_reply'
+  | 'draft_continue'
+  | 'recruiting_result'
+  | 'unfinished_intent';
 
 export interface WelcomeFocus {
   type: WelcomeFocusType;
@@ -2885,6 +2893,122 @@ async function selectWelcomeFocus(userId: string, now: Date): Promise<WelcomeFoc
     };
   }
 
+  const discussionBaseRows = await db
+    .select({
+      activityId: activities.id,
+      activityTitle: activities.title,
+      participantLastReadAt: participants.lastReadAt,
+    })
+    .from(participants)
+    .innerJoin(activities, eq(participants.activityId, activities.id))
+    .where(and(
+      eq(participants.userId, userId),
+      eq(participants.status, 'joined'),
+      eq(activities.status, 'active'),
+      gt(activities.startAt, now),
+    ))
+    .orderBy(desc(activities.updatedAt))
+    .limit(8);
+
+  const discussionCandidates = await Promise.all(
+    discussionBaseRows.map(async (row) => {
+      const [latestMessage, unreadResult] = await Promise.all([
+        db
+          .select({
+            senderId: activityMessages.senderId,
+            senderNickname: users.nickname,
+            content: activityMessages.content,
+            createdAt: activityMessages.createdAt,
+          })
+          .from(activityMessages)
+          .leftJoin(users, eq(activityMessages.senderId, users.id))
+          .where(eq(activityMessages.activityId, row.activityId))
+          .orderBy(desc(activityMessages.createdAt))
+          .limit(1),
+        db
+          .select({ unreadCount: sql<number>`count(*)::int` })
+          .from(activityMessages)
+          .where(and(
+            eq(activityMessages.activityId, row.activityId),
+            gt(activityMessages.createdAt, row.participantLastReadAt),
+            sql`${activityMessages.senderId} IS NULL OR ${activityMessages.senderId} <> ${userId}`,
+          )),
+      ]);
+
+      return {
+        activityId: row.activityId,
+        activityTitle: row.activityTitle,
+        lastMessage: latestMessage[0] || null,
+        unreadCount: unreadResult[0]?.unreadCount || 0,
+      };
+    }),
+  );
+
+  const discussionFocus = discussionCandidates
+    .filter((item) => item.unreadCount > 0 && item.lastMessage && item.lastMessage.senderId !== userId)
+    .sort((left, right) => {
+      const leftTime = left.lastMessage?.createdAt?.getTime() || 0;
+      const rightTime = right.lastMessage?.createdAt?.getTime() || 0;
+      return rightTime - leftTime;
+    })[0];
+
+  if (discussionFocus) {
+    const senderPrefix = discussionFocus.lastMessage?.senderNickname
+      ? `${discussionFocus.lastMessage.senderNickname}：`
+      : '';
+    return {
+      type: 'discussion_reply',
+      label: `去接「${clampWelcomeTitle(discussionFocus.activityTitle, 10)}」的讨论`,
+      prompt: discussionFocus.lastMessage?.content || '进入讨论区',
+      priority: 2,
+      context: {
+        activityId: discussionFocus.activityId,
+        activityTitle: discussionFocus.activityTitle,
+        entry: 'welcome_discussion_reply',
+        unreadCount: discussionFocus.unreadCount,
+        summary: discussionFocus.lastMessage?.content
+          ? `${senderPrefix}${discussionFocus.lastMessage.content}`
+          : undefined,
+      },
+    };
+  }
+
+  const [draftTask] = await db
+    .select({
+      taskId: agentTasks.id,
+      currentStage: agentTasks.currentStage,
+      goalText: agentTasks.goalText,
+      activityId: agentTasks.activityId,
+      activityTitle: activities.title,
+    })
+    .from(agentTasks)
+    .leftJoin(activities, eq(agentTasks.activityId, activities.id))
+    .where(and(
+      eq(agentTasks.userId, userId),
+      eq(agentTasks.taskType, 'create_activity'),
+      inArray(agentTasks.status, OPEN_WELCOME_TASK_STATUSES),
+      inArray(agentTasks.currentStage, ['draft_collecting', 'draft_ready']),
+    ))
+    .orderBy(desc(agentTasks.updatedAt))
+    .limit(1);
+
+  if (draftTask) {
+    const title = draftTask.activityTitle || draftTask.goalText;
+    return {
+      type: 'draft_continue',
+      label: draftTask.currentStage === 'draft_ready'
+        ? `确认「${clampWelcomeTitle(title, 10)}」草稿`
+        : `继续完善「${clampWelcomeTitle(title, 10)}」`,
+      prompt: `继续处理：${draftTask.goalText}`,
+      priority: 3,
+      context: {
+        taskId: draftTask.taskId,
+        activityId: draftTask.activityId,
+        activityTitle: title,
+      },
+    };
+  }
+
   const [recruitingActivity] = await db
     .select({
       id: activities.id,
@@ -2908,7 +3032,7 @@ async function selectWelcomeFocus(userId: string, now: Date): Promise<WelcomeFoc
       type: 'recruiting_result',
       label: `「${clampWelcomeTitle(recruitingActivity.title, 10)}」还差 ${remaining} 人`,
       prompt: `继续处理「${recruitingActivity.title}」的招人结果，还差 ${remaining} 人，帮我看看下一步怎么推进。`,
-      priority: 2,
+      priority: 4,
       context: {
         activityId: recruitingActivity.id,
         remaining,
@@ -2944,7 +3068,7 @@ async function selectWelcomeFocus(userId: string, now: Date): Promise<WelcomeFoc
     type: 'unfinished_intent',
     label: buildUnfinishedIntentLabel(unfinishedTask.currentStage, unfinishedTask.status),
     prompt: `继续处理：${unfinishedTask.goalText}`,
-    priority: 3,
+    priority: 5,
     context: {
       taskId: unfinishedTask.taskId,
       taskType: unfinishedTask.taskType,

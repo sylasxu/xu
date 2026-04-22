@@ -22,6 +22,7 @@ import {
   recordCreateTaskPublished,
   recordJoinTaskFulfillmentOutcome,
   recordJoinTaskReviewOutcome,
+  resolveCurrentTaskHomeState,
   syncCreateTaskFromChatResponse,
   syncJoinTaskFromChatResponse,
   syncPartnerTaskFromChatResponse,
@@ -1326,6 +1327,11 @@ describe('Agent Task Runtime Integration', () => {
         taskId,
         matchId,
       },
+    });
+
+    expect(resolveCurrentTaskHomeState(snapshots)).toEqual({
+      homeState: 'H3',
+      primaryTaskId: taskId,
     });
   });
 });

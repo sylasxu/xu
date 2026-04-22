@@ -3,6 +3,7 @@
 import { db, participants, users, activities, activityMessages, eq, and, inArray } from '@xu/db';
 import {
   addInterestVector,
+  clearInterestVectorForActivity,
   markActivityOutcomeRebookTriggered,
   upsertActivityOutcomeMemory,
 } from '../ai/memory';
@@ -367,7 +368,6 @@ export async function recordActivitySelfFeedback(params: {
     .where(and(
       eq(participants.activityId, params.activityId),
       eq(participants.userId, params.userId),
-      eq(participants.status, 'joined'),
     ))
     .limit(1);
 
@@ -381,6 +381,7 @@ export async function recordActivitySelfFeedback(params: {
 
   const summary = buildActivityFeedbackSummary(activity.title, params.feedback, params.reviewSummary);
   const attended = params.feedback === 'failed' ? false : true;
+  const vectorFeedback = params.feedback === 'failed' ? 'negative' : params.feedback;
   const now = new Date();
 
   await upsertActivityOutcomeMemory(params.userId, {
@@ -402,6 +403,8 @@ export async function recordActivitySelfFeedback(params: {
       participatedAt: activity.startAt,
       feedback: 'positive',
     });
+  } else {
+    await clearInterestVectorForActivity(params.userId, params.activityId, vectorFeedback);
   }
 
   await recordJoinTaskFulfillmentOutcome({

@@ -2393,9 +2393,12 @@ runAsyncProcessors([{ processor: extractPreferencesProcessor }], postLLMContext)
 - **活动结果写回 memory**：`apps/api/src/modules/participants/participant.service.ts` 在 `confirm-fulfillment` 后写入 `activityOutcomes`，`/participants/rebook-follow-up` 补充 `rebookTriggered`，并移除报名时的强正反馈向量写入
 - **匹配确认通知卡**：`apps/api/src/modules/notifications/notification.controller.ts` 新增 `/notifications/pending-matches`，小程序 `pages/message/index.ts` 渲染“确认/取消”卡片并通过消息中心承接
 - **post_activity 回流**：小程序 `pages/message/index.ts`、`subpackages/activity/confirm/index.ts` 与 H5 `message-center-drawer.tsx` 在 post_activity / 再约承接时透传 `activityId + followUpMode`，点击后直接触发对话反馈 / 再约 prompt，并将 review 结果回写 `activityOutcomes.reviewSummary`
+- **活动后真实反馈直达化**：新增 `POST /participants/self-feedback`，H5 `message-center-drawer.tsx` 将 `post_activity` 卡片拆成两层动作；第一层直接写回 `挺顺利 / 一般 / 没成局`，第二层保留 `去复盘 / 去再约`
 - **群聊列表接口规范化**：新增 `GET /chat/activities?userId=...`（显式参数，禁止 `my-*` 路由语义），小程序消息页切换为标准接口
 - **未读真实统计收口**：消息中心不再本地累加/清零，统一使用服务端统计；`participants.lastReadAt` 作为读游标，`GET /chat/activities` 返回每个群聊 `unreadCount` 与 `totalUnread`
 - **消息中心聚合接口**：新增 `GET /notifications/message-center?userId=...`，一次返回系统通知、待确认匹配、通知未读与群聊未读，前端消息页改为单接口渲染
+- **讨论区历史分页**：`GET /chat/:activityId/messages` 补充 `before` 游标与 `historyCursor/hasMoreHistory`，H5 `discussion-runtime-panel.tsx` 支持“查看更多历史消息”并保持加载前后的滚动位置
+- **讨论区离线提醒**：讨论区新消息统一走 `createChatMessage` 落库路径；对当前不在线、且从 0 未读变成 1 未读的已报名成员，补发 `discussion_reply` 服务提醒，避免报名成功后协同链路在离线阶段掉线
 
 **核心类型**：
 

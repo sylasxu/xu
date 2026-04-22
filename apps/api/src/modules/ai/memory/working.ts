@@ -1207,6 +1207,45 @@ export async function addInterestVector(
   });
 }
 
+export async function clearInterestVectorForActivity(
+  userId: string,
+  activityId: string,
+  feedback?: InterestVector['feedback'],
+): Promise<void> {
+  const [existing] = await db
+    .select({
+      id: userMemories.id,
+      metadata: userMemories.metadata,
+    })
+    .from(userMemories)
+    .where(
+      sql`${userMemories.userId} = ${userId}
+        AND ${userMemories.memoryType} = 'activity_outcome'
+        AND ${userMemories.metadata}->>'activityId' = ${activityId}`
+    )
+    .limit(1);
+
+  if (!existing) {
+    return;
+  }
+
+  const nextMetadata = {
+    ...(isRecord(existing.metadata) ? existing.metadata : {}),
+    activityId,
+    feedback: feedback ?? null,
+    updatedAt: new Date().toISOString(),
+  };
+
+  await db
+    .update(userMemories)
+    .set({
+      embedding: null,
+      metadata: nextMetadata,
+      updatedAt: new Date(),
+    })
+    .where(eq(userMemories.id, existing.id));
+}
+
 /**
  * 获取用户兴趣向量
  * 

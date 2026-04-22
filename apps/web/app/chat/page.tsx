@@ -49,7 +49,6 @@ import { readClientToken, readClientUserId } from "@/lib/client-auth";
 import { isWelcomeFocusCoveredByCurrentTasks } from "@/lib/runtime-task-focus";
 import { cn } from "@/lib/utils";
 import { HomeStateCard } from "@/components/chat/home-state-card";
-import type { HomeStateTaskSnapshot } from "@/components/chat/home-state-card";
 import type {
   GenUIAlertBlock,
   GenUIBlock,
@@ -298,13 +297,15 @@ type RuntimeTaskSnapshot = {
   primaryAction?: RuntimeTaskAction;
   secondaryAction?: RuntimeTaskAction;
 };
+type RuntimeHomeState = "H0" | "H1" | "H2" | "H3" | "H4";
 type WelcomeFocusPayload = {
-  type: "post_activity_feedback" | "recruiting_result" | "unfinished_intent";
+  type: "post_activity_feedback" | "discussion_reply" | "draft_continue" | "recruiting_result" | "unfinished_intent";
   label: string;
   prompt: string;
   priority: number;
   taskId?: string;
   activityId?: string;
+  entry?: string;
 };
 type StoredConversationMessage = {
   id: string;
@@ -1293,7 +1294,11 @@ function extractWelcomeGreeting(payload: unknown): string {
 }
 
 function isWelcomeFocusType(value: unknown): value is WelcomeFocusPayload["type"] {
-  return value === "post_activity_feedback" || value === "recruiting_result" || value === "unfinished_intent";
+  return value === "post_activity_feedback"
+    || value === "discussion_reply"
+    || value === "draft_continue"
+    || value === "recruiting_result"
+    || value === "unfinished_intent";
 }
 
 function extractWelcomeFocus(payload: unknown): WelcomeFocusPayload | null {
@@ -1326,6 +1331,10 @@ function extractWelcomeFocus(payload: unknown): WelcomeFocusPayload | null {
     context && typeof context.activityId === "string" && context.activityId.trim()
       ? context.activityId.trim()
       : undefined;
+  const entry =
+    context && typeof context.entry === "string" && context.entry.trim()
+      ? context.entry.trim()
+      : undefined;
 
   return {
     type: focus.type,
@@ -1334,6 +1343,7 @@ function extractWelcomeFocus(payload: unknown): WelcomeFocusPayload | null {
     priority: focus.priority,
     ...(taskId ? { taskId } : {}),
     ...(activityId ? { activityId } : {}),
+    ...(entry ? { entry } : {}),
   };
 }
 
@@ -1503,44 +1513,8 @@ function upsertBlockWithMode(
   return { blocks: nextBlocks, index: nextBlocks.length - 1 };
 }
 
-function resolveHomeState(tasks: HomeStateTaskSnapshot[]): { state: "H0" | "H1" | "H2" | "H3" | "H4"; primaryTask: HomeStateTaskSnapshot | null } {
-  if (tasks.length === 0) {
-    return { state: "H0", primaryTask: null };
-  }
-
-  const h3 = tasks.find((t) => t.currentStage === "match_ready");
-  if (h3) {
-    return { state: "H3", primaryTask: h3 };
-  }
-
-  const activeStages = [
-    "explore",
-    "preference_collecting",
-    "draft_collecting",
-    "action_selected",
-    "draft_ready",
-    "joined",
-    "discussion",
-    "published",
-    "intent_posted",
-    "awaiting_match",
-  ];
-  const h2 = tasks.find((t) => t.status === "active" && activeStages.includes(t.currentStage));
-  if (h2) {
-    return { state: "H2", primaryTask: h2 };
-  }
-
-  const h1 = tasks.find((t) => t.status === "waiting_auth");
-  if (h1) {
-    return { state: "H1", primaryTask: h1 };
-  }
-
-  const h4 = tasks.find((t) => t.currentStage === "post_activity");
-  if (h4) {
-    return { state: "H4", primaryTask: h4 };
-  }
-
-  return { state: "H0", primaryTask: null };
+function isRuntimeHomeState(value: unknown): value is RuntimeHomeState {
+  return value === "H0" || value === "H1" || value === "H2" || value === "H3" || value === "H4";
 }
 
 function resolveMiniProgramUrlToWeb(url: string): { webUrl: string } | { openMessageCenter: true; matchId?: string } | null {
@@ -1653,6 +1627,8 @@ export default function ChatPage() {
   const [welcomeFocus, setWelcomeFocus] = useState<WelcomeFocusPayload | null>(null);
   const [isWelcomeLoading, setIsWelcomeLoading] = useState(true);
   const [currentTasks, setCurrentTasks] = useState<RuntimeTaskSnapshot[]>([]);
+  const [homeState, setHomeState] = useState<RuntimeHomeState>("H0");
+  const [primaryTaskId, setPrimaryTaskId] = useState<string | null>(null);
   const [isCurrentTasksLoading, setIsCurrentTasksLoading] = useState(false);
   const [welcomeUi, setWelcomeUi] = useState<WelcomeUiPayload>({
     composerPlaceholder: DEFAULT_COMPOSER_PLACEHOLDER,
@@ -1680,8 +1656,10 @@ export default function ChatPage() {
     () => (isWelcomeFocusCoveredByCurrentTasks(welcomeFocus, currentTasks) ? null : welcomeFocus),
     [currentTasks, welcomeFocus]
   );
-
-  const { state: homeState, primaryTask: primaryHomeTask } = useMemo(() => resolveHomeState(currentTasks), [currentTasks]);
+  const primaryHomeTask = useMemo(
+    () => currentTasks.find((task) => task.id === primaryTaskId) ?? null,
+    [currentTasks, primaryTaskId]
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1745,6 +1723,8 @@ export default function ChatPage() {
 
       if (!effectiveToken || !effectiveUserId) {
         setCurrentTasks([]);
+        setHomeState("H0");
+        setPrimaryTaskId(null);
         setIsCurrentTasksLoading(false);
         return;
       }
@@ -1762,18 +1742,27 @@ export default function ChatPage() {
 
         if (!response.ok) {
           setCurrentTasks([]);
+          setHomeState("H0");
+          setPrimaryTaskId(null);
           return;
         }
 
         const payload = (await response.json()) as unknown;
-        if (!isRecord(payload) || !Array.isArray(payload.items)) {
+        if (!isRecord(payload) || !Array.isArray(payload.items) || !isRuntimeHomeState(payload.homeState)) {
           setCurrentTasks([]);
+          setHomeState("H0");
+          setPrimaryTaskId(null);
           return;
         }
 
-        setCurrentTasks(payload.items as RuntimeTaskSnapshot[]);
+        const nextItems = payload.items as RuntimeTaskSnapshot[];
+        setCurrentTasks(nextItems);
+        setHomeState(payload.homeState);
+        setPrimaryTaskId(typeof payload.primaryTaskId === "string" ? payload.primaryTaskId : null);
       } catch {
         setCurrentTasks([]);
+        setHomeState("H0");
+        setPrimaryTaskId(null);
       } finally {
         setIsCurrentTasksLoading(false);
       }
@@ -2872,6 +2861,13 @@ export default function ChatPage() {
                           <button
                             type="button"
                             onClick={() => {
+                              if (visibleWelcomeFocus.type === "discussion_reply" && visibleWelcomeFocus.activityId) {
+                                window.location.href = buildActivityDetailPath(visibleWelcomeFocus.activityId, {
+                                  entry: visibleWelcomeFocus.entry || "welcome_discussion_reply",
+                                });
+                                return;
+                              }
+
                               void sendChatRequest(
                                 {
                                   type: "text",

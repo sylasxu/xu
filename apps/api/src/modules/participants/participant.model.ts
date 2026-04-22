@@ -57,6 +57,16 @@ const RebookFollowUpRequest = t.Object({
   activityId: t.String({ format: 'uuid', description: '活动 ID' }),
 });
 
+const ActivitySelfFeedbackRequest = t.Object({
+  activityId: t.String({ format: 'uuid', description: '活动 ID' }),
+  feedback: t.Union([
+    t.Literal('positive'),
+    t.Literal('neutral'),
+    t.Literal('failed'),
+  ], { description: '活动后自反馈结果' }),
+  reviewSummary: t.Optional(t.String({ minLength: 1, maxLength: 500, description: '可选复盘摘要' })),
+});
+
 const ActionResponse = t.Object({
   code: t.Number(),
   msg: t.String(),
@@ -108,6 +118,7 @@ export const participantModel = new Elysia({ name: 'participantModel' })
     'participant.confirmFulfillmentRequest': ConfirmFulfillmentRequest,
     'participant.confirmFulfillmentResponse': ConfirmFulfillmentResponse,
     'participant.rebookFollowUpRequest': RebookFollowUpRequest,
+    'participant.activitySelfFeedbackRequest': ActivitySelfFeedbackRequest,
     'participant.actionResponse': ActionResponse,
     'participant.feedbackProblemOption': FeedbackProblemOption,
     'participant.feedbackMetaResponse': FeedbackMetaResponse,
@@ -121,6 +132,7 @@ export type FulfillmentParticipant = Static<typeof FulfillmentParticipantSchema>
 export type ConfirmFulfillmentRequest = Static<typeof ConfirmFulfillmentRequest>;
 export type ConfirmFulfillmentResponse = Static<typeof ConfirmFulfillmentResponse>;
 export type RebookFollowUpRequest = Static<typeof RebookFollowUpRequest>;
+export type ActivitySelfFeedbackRequest = Static<typeof ActivitySelfFeedbackRequest>;
 export type ActionResponse = Static<typeof ActionResponse>;
 export type FeedbackProblemOption = Static<typeof FeedbackProblemOption>;
 export type FeedbackMetaResponse = Static<typeof FeedbackMetaResponse>;

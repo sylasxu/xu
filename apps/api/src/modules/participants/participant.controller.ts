@@ -11,6 +11,7 @@ import {
   getActivityParticipants,
   confirmActivityFulfillment,
   markActivityRebookFollowUp,
+  recordActivitySelfFeedback,
 } from './participant.service';
 import { getConfigValue } from '../ai/config/config.service';
 
@@ -205,6 +206,58 @@ export const participantController = new Elysia({ prefix: '/participants' })
   )
 
   // 记录活动后的再约意愿
+  .post(
+    '/self-feedback',
+    async ({ body, set, jwt, headers }) => {
+      const user = await verifyAuth(jwt, headers);
+      if (!user) {
+        set.status = 401;
+        return { code: 401, msg: '未授权' } satisfies ErrorResponse;
+      }
+
+      try {
+        return await recordActivitySelfFeedback({
+          userId: user.id,
+          activityId: body.activityId,
+          feedback: body.feedback,
+          reviewSummary: typeof body.reviewSummary === 'string' ? body.reviewSummary : undefined,
+        });
+      } catch (error: any) {
+        const message = error?.message || '记录活动反馈失败';
+        if (message === '活动不存在') {
+          set.status = 404;
+        } else if (
+          message === '只有活动发起人或参与成员可以记录这次反馈'
+          || message === '活动还没开始，结束后再来记录反馈吧'
+        ) {
+          set.status = 403;
+        } else {
+          set.status = 500;
+        }
+
+        return {
+          code: set.status,
+          msg: message,
+        } satisfies ErrorResponse;
+      }
+    },
+    {
+      detail: {
+        tags: ['Participants'],
+        summary: '记录活动后的真实反馈',
+        description: '活动结束后由发起人或参与成员记录这次活动的真实反馈结果，用于后续推荐和再约判断。',
+      },
+      body: 'participant.activitySelfFeedbackRequest',
+      response: {
+        200: 'participant.actionResponse',
+        401: 'common.error',
+        403: 'common.error',
+        404: 'common.error',
+        500: 'common.error',
+      },
+    }
+  )
+
   .post(
     '/rebook-follow-up',
     async ({ body, set, jwt, headers }) => {

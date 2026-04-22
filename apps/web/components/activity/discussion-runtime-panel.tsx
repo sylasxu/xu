@@ -70,6 +70,13 @@ type MessageResponse = {
   createdAt: string
 }
 
+type MessageListResponse = {
+  messages: MessageResponse[]
+  isArchived: boolean
+  historyCursor: string | null
+  hasMoreHistory: boolean
+}
+
 type DiscussionRuntimePanelProps = {
   activityId: string
   activityTitle: string
@@ -263,9 +270,14 @@ export function DiscussionRuntimePanel({
   const [input, setInput] = useState("")
   const [notice, setNotice] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
+  const [historyCursor, setHistoryCursor] = useState<string | null>(null)
+  const [hasMoreHistory, setHasMoreHistory] = useState(false)
+  const [loadingHistory, setLoadingHistory] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const pingTimerRef = useRef<number | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const pendingScrollModeRef = useRef<"bottom" | "preserve" | null>("bottom")
+  const preserveScrollSnapshotRef = useRef<{ top: number; height: number } | null>(null)
 
   const quickStarters = useMemo(() => {
     return isJoinSuccessEntry ? getJoinQuickStarters(activityTitle) : []
@@ -297,7 +309,17 @@ export function DiscussionRuntimePanel({
       return
     }
 
-    scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    const container = scrollRef.current
+    if (pendingScrollModeRef.current === "preserve" && preserveScrollSnapshotRef.current) {
+      const snapshot = preserveScrollSnapshotRef.current
+      const delta = container.scrollHeight - snapshot.height
+      container.scrollTop = snapshot.top + delta
+    } else if (pendingScrollModeRef.current === "bottom") {
+      container.scrollTop = container.scrollHeight
+    }
+
+    pendingScrollModeRef.current = null
+    preserveScrollSnapshotRef.current = null
   }, [messages])
 
   const closeSocket = useCallback(() => {
@@ -316,6 +338,8 @@ export function DiscussionRuntimePanel({
     if (!authToken) {
       setLoadState("visitor")
       setMessages(buildInitialMessages(initialMessages))
+      setHistoryCursor(null)
+      setHasMoreHistory(false)
       return
     }
 
@@ -330,7 +354,7 @@ export function DiscussionRuntimePanel({
         },
         cache: "no-store",
       })
-      const payload = (await response.json().catch(() => null)) as unknown
+      const payload = (await response.json().catch(() => null)) as MessageListResponse | unknown
 
       if (!response.ok) {
         const message = isRecord(payload) && typeof payload.msg === "string" ? payload.msg : `请求失败（${response.status}）`
@@ -364,13 +388,77 @@ export function DiscussionRuntimePanel({
         }))
       )
 
+      pendingScrollModeRef.current = "bottom"
       setMessages(parsedMessages)
+      setHistoryCursor(typeof payload.historyCursor === "string" ? payload.historyCursor : null)
+      setHasMoreHistory(payload.hasMoreHistory === true)
       setLoadState("ready")
     } catch (error) {
       setLoadState("error")
       setNotice(error instanceof Error ? error.message : "讨论消息加载失败")
     }
   }, [activityId, authToken, initialMessages])
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!authToken || !historyCursor || loadingHistory || loadState !== "ready") {
+      return
+    }
+
+    setLoadingHistory(true)
+    setNotice(null)
+
+    try {
+      const container = scrollRef.current
+      if (container) {
+        preserveScrollSnapshotRef.current = {
+          top: container.scrollTop,
+          height: container.scrollHeight,
+        }
+      }
+
+      const response = await fetch(
+        `${API_BASE}/chat/${activityId}/messages?limit=30&before=${encodeURIComponent(historyCursor)}`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+          },
+          cache: "no-store",
+        }
+      )
+      const payload = (await response.json().catch(() => null)) as MessageListResponse | unknown
+
+      if (!response.ok || !isRecord(payload) || !Array.isArray(payload.messages)) {
+        preserveScrollSnapshotRef.current = null
+        throw new Error(isRecord(payload) && typeof payload.msg === "string" ? payload.msg : "历史消息加载失败")
+      }
+
+      const olderMessages = toRuntimeMessages(
+        payload.messages.filter(isRecord).map((item) => ({
+          id: typeof item.id === "string" ? item.id : "",
+          activityId: typeof item.activityId === "string" ? item.activityId : activityId,
+          senderId: typeof item.senderId === "string" ? item.senderId : null,
+          senderNickname: typeof item.senderNickname === "string" ? item.senderNickname : null,
+          senderAvatarUrl: typeof item.senderAvatarUrl === "string" ? item.senderAvatarUrl : null,
+          type: typeof item.type === "string" ? item.type : "text",
+          content: typeof item.content === "string" ? item.content : "",
+          createdAt: typeof item.createdAt === "string" ? item.createdAt : new Date().toISOString(),
+        }))
+      )
+
+      pendingScrollModeRef.current = "preserve"
+      setMessages((current) => {
+        const knownIds = new Set(current.map((message) => message.id))
+        return [...olderMessages.filter((message) => !knownIds.has(message.id)), ...current]
+      })
+      setHistoryCursor(typeof payload.historyCursor === "string" ? payload.historyCursor : null)
+      setHasMoreHistory(payload.hasMoreHistory === true)
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "历史消息加载失败")
+    } finally {
+      setLoadingHistory(false)
+    }
+  }, [activityId, authToken, historyCursor, loadState, loadingHistory])
 
   useEffect(() => {
     void loadMessages()
@@ -412,11 +500,13 @@ export function DiscussionRuntimePanel({
       }
 
       if (parsed.type === "history") {
+        pendingScrollModeRef.current = "bottom"
         setMessages(parsed.data)
         return
       }
 
       if (parsed.type === "message") {
+        pendingScrollModeRef.current = "bottom"
         setMessages((current) => mergeMessageList(current, parsed.data))
         return
       }
@@ -565,6 +655,21 @@ export function DiscussionRuntimePanel({
           isReadOnly ? "border-slate-200 bg-slate-50/80" : "border-[#e5e9ff] bg-[#fbfcff]"
         )}
       >
+        {loadState === "ready" && hasMoreHistory ? (
+          <div className="flex justify-center pb-1">
+            <button
+              type="button"
+              onClick={() => {
+                void loadOlderMessages()
+              }}
+              disabled={loadingHistory}
+              className="inline-flex items-center gap-2 rounded-full border border-[#dfe4ff] bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-[#f8faff] disabled:opacity-50"
+            >
+              {loadingHistory ? "正在加载更早消息…" : "查看更多历史消息"}
+            </button>
+          </div>
+        ) : null}
+
         {messages.length === 0 ? (
           <div className="rounded-xl bg-white px-3 py-5 text-center text-sm text-slate-500">
             {loadState === "ready" ? "还没有讨论消息，你可以先来开个场。" : "暂时还没有可展示的讨论内容。"}

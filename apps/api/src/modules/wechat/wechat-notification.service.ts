@@ -4,6 +4,7 @@ import { clearTokenCache, getAccessToken } from '../content-security';
 type ServiceNotificationScene =
   | 'post_activity'
   | 'activity_reminder'
+  | 'discussion_reply'
   | 'match_reassigned'
   | 'partner_connect_request'
   | 'partner_group_up_request';
@@ -60,6 +61,19 @@ const SCENE_CONFIGS: Record<ServiceNotificationScene, SceneConfig> = {
   activity_reminder: {
     templateIdEnvKeys: ['WECHAT_NOTIFY_TEMPLATE_ID_ACTIVITY_REMINDER', 'WECHAT_TEMPLATE_ID_ACTIVITY_REMINDER'],
     pageEnvKeys: ['WECHAT_NOTIFY_PAGE_ACTIVITY_REMINDER'],
+    defaultPage: 'pages/message/index',
+  },
+  discussion_reply: {
+    templateIdEnvKeys: [
+      'WECHAT_NOTIFY_TEMPLATE_ID_DISCUSSION_REPLY',
+      'WECHAT_TEMPLATE_ID_DISCUSSION_REPLY',
+      'WECHAT_NOTIFY_TEMPLATE_ID_ACTIVITY_REMINDER',
+      'WECHAT_TEMPLATE_ID_ACTIVITY_REMINDER',
+    ],
+    pageEnvKeys: [
+      'WECHAT_NOTIFY_PAGE_DISCUSSION_REPLY',
+      'WECHAT_NOTIFY_PAGE_ACTIVITY_REMINDER',
+    ],
     defaultPage: 'pages/message/index',
   },
   match_reassigned: {

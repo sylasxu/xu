@@ -27,7 +27,15 @@ export const ChatMessageResponseSchema = t.Object({
 // 消息列表查询参数
 const MessageListQuery = t.Object({
   since: t.Optional(t.String({ description: '上次获取的最后一条消息ID，用于增量获取' })),
+  before: t.Optional(t.String({ description: '最早一条消息ID，用于加载更早历史消息' })),
   limit: t.Optional(t.Number({ minimum: 1, maximum: 100, default: 50, description: '获取数量' })),
+});
+
+const MessageListResponse = t.Object({
+  messages: t.Array(ChatMessageResponseSchema),
+  isArchived: t.Boolean({ description: '群聊是否已归档' }),
+  historyCursor: t.Union([t.String(), t.Null()], { description: '下一页更早历史消息游标' }),
+  hasMoreHistory: t.Boolean({ description: '是否还有更早历史消息' }),
 });
 
 // 聊天活动列表查询参数（显式 userId）
@@ -44,6 +52,8 @@ const ChatActivityItemSchema = t.Object({
   activityImage: t.Union([t.String(), t.Null()]),
   lastMessage: t.Union([t.String(), t.Null()]),
   lastMessageTime: t.Union([t.String(), t.Null()]),
+  lastMessageSenderId: t.Union([t.String(), t.Null()]),
+  lastMessageSenderNickname: t.Union([t.String(), t.Null()]),
   unreadCount: t.Number(),
   isArchived: t.Boolean(),
   participantCount: t.Number(),
@@ -129,6 +139,7 @@ export const chatModel = new Elysia({ name: 'chatModel' })
   .model({
     'chat.messageResponse': ChatMessageResponseSchema,
     'chat.messageListQuery': MessageListQuery,
+    'chat.messageListResponse': MessageListResponse,
     'chat.activitiesQuery': ChatActivitiesQuery,
     'chat.activityItem': ChatActivityItemSchema,
     'chat.activitiesResponse': ChatActivitiesResponse,
@@ -144,6 +155,7 @@ export const chatModel = new Elysia({ name: 'chatModel' })
 // 导出 TS 类型
 export type ChatMessageResponse = Static<typeof ChatMessageResponseSchema>;
 export type MessageListQuery = Static<typeof MessageListQuery>;
+export type MessageListResponse = Static<typeof MessageListResponse>;
 export type ChatActivitiesQuery = Static<typeof ChatActivitiesQuery>;
 export type ChatActivityItem = Static<typeof ChatActivityItemSchema>;
 export type ChatActivitiesResponse = Static<typeof ChatActivitiesResponse>;

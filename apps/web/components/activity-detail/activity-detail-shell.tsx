@@ -1,12 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Loader2, MessageCircle, Plus, Share2, UserPlus } from "lucide-react";
+import { ArrowLeft, Check, Loader2, MessageCircle, Plus, Share2, UserPlus } from "lucide-react";
 
 import { AuthSheet } from "@/components/auth/auth-sheet";
 import { ActivityCard, type PublicActivity } from "@/components/activity/activity-card";
 import { DiscussionEntryTracker } from "@/components/activity/discussion-entry-tracker";
 import { DiscussionRuntimePanel } from "@/components/activity/discussion-runtime-panel";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { ThemeBackground } from "@/components/activity/theme-background";
 import { Button } from "@/components/ui/button";
 import { resolveThemeConfig } from "@/lib/themes";
@@ -25,6 +34,33 @@ type ActivityDetail = {
   canJoin: boolean;
   isFull: boolean;
   remainingSeats: number;
+};
+
+type ParticipantInfo = {
+  id: string;
+  userId: string;
+  status: string;
+  joinedAt: string | null;
+  user: {
+    id: string;
+    nickname: string | null;
+    avatarUrl: string | null;
+  } | null;
+};
+
+type FulfillmentDraftParticipant = {
+  userId: string;
+  nickname: string;
+  avatarUrl: string | null;
+  fulfilled: boolean;
+};
+
+type FulfillmentResponse = {
+  activityId: string;
+  attendedCount: number;
+  noShowCount: number;
+  totalSubmitted: number;
+  msg: string;
 };
 
 type JoinResponse = {
@@ -76,6 +112,32 @@ function isJoinResponse(value: unknown): value is JoinResponse {
       value.joinResult === "waitlisted" ||
       value.joinResult === "closed") &&
     (value.navigationIntent === "open_discussion" || value.navigationIntent === "stay_on_detail")
+  );
+}
+
+function isParticipantInfo(value: unknown): value is ParticipantInfo {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.userId === "string" &&
+    typeof value.status === "string" &&
+    (typeof value.joinedAt === "string" || value.joinedAt === null) &&
+    (value.user === null ||
+      (isRecord(value.user) &&
+        typeof value.user.id === "string" &&
+        (typeof value.user.nickname === "string" || value.user.nickname === null) &&
+        (typeof value.user.avatarUrl === "string" || value.user.avatarUrl === null)))
+  );
+}
+
+function isFulfillmentResponse(value: unknown): value is FulfillmentResponse {
+  return (
+    isRecord(value) &&
+    typeof value.activityId === "string" &&
+    typeof value.attendedCount === "number" &&
+    typeof value.noShowCount === "number" &&
+    typeof value.totalSubmitted === "number" &&
+    typeof value.msg === "string"
   );
 }
 
@@ -133,6 +195,11 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
   const [authOpen, setAuthOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [shareStatus, setShareStatus] = useState<"idle" | "copied" | "failed">("idle");
+  const [fulfillmentOpen, setFulfillmentOpen] = useState(false);
+  const [fulfillmentLoading, setFulfillmentLoading] = useState(false);
+  const [fulfillmentSubmitting, setFulfillmentSubmitting] = useState(false);
+  const [fulfillmentParticipants, setFulfillmentParticipants] = useState<FulfillmentDraftParticipant[]>([]);
+  const [fulfillmentNotice, setFulfillmentNotice] = useState<string | null>(null);
 
   const themeConfig = useMemo(
     () => resolveThemeConfig(activity.theme, activity.themeConfig as Parameters<typeof resolveThemeConfig>[1], activity.type),
@@ -197,6 +264,8 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
   const remainingSeats = detail?.remainingSeats ?? activity.remainingSeats;
   const isJoined = joinState === "joined" || joinState === "creator";
   const isWaitlisted = joinState === "waitlisted";
+  const canConfirmFulfillment = joinState === "creator" && activity.status === "completed";
+  const noShowCount = fulfillmentParticipants.filter((participant) => !participant.fulfilled).length;
 
   const joinLabel = isJoined
     ? "进入讨论区"
@@ -206,7 +275,49 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
         ? "报名加入"
         : "暂不可报名";
 
+  const loadFulfillmentParticipants = useCallback(async () => {
+    setFulfillmentLoading(true);
+    setFulfillmentNotice(null);
+    try {
+      const response = await fetch(`${API_BASE}/participants/activity/${activity.id}`, {
+        method: "GET",
+        cache: "no-store",
+      });
+      const payload = (await response.json().catch(() => null)) as unknown;
+      if (!response.ok || !Array.isArray(payload)) {
+        throw new Error(readApiError(payload, "参与者列表加载失败"));
+      }
+
+      const nextParticipants = payload
+        .filter(isParticipantInfo)
+        .filter((participant) => participant.status === "joined")
+        .map((participant) => ({
+          userId: participant.userId,
+          nickname: participant.user?.nickname?.trim() || "未命名成员",
+          avatarUrl: participant.user?.avatarUrl ?? null,
+          fulfilled: true,
+        }));
+
+      if (nextParticipants.length === 0) {
+        throw new Error("当前还没有可确认的报名成员");
+      }
+
+      setFulfillmentParticipants(nextParticipants);
+    } catch (error) {
+      setFulfillmentParticipants([]);
+      setFulfillmentNotice(error instanceof Error ? error.message : "参与者列表加载失败");
+    } finally {
+      setFulfillmentLoading(false);
+    }
+  }, [activity.id]);
+
   const joinActivity = useCallback(async () => {
+    if (canConfirmFulfillment) {
+      setFulfillmentOpen(true);
+      void loadFulfillmentParticipants();
+      return;
+    }
+
     if (isJoined) {
       openDiscussionFromDetail(activity.id, "join_success");
       return;
@@ -247,7 +358,65 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
     } finally {
       setJoining(false);
     }
-  }, [activity.id, isJoined, loadViewerDetail]);
+  }, [activity.id, canConfirmFulfillment, isJoined, loadFulfillmentParticipants, loadViewerDetail]);
+
+  const toggleFulfillmentParticipant = useCallback((userId: string) => {
+    setFulfillmentParticipants((current) =>
+      current.map((participant) =>
+        participant.userId === userId
+          ? { ...participant, fulfilled: !participant.fulfilled }
+          : participant,
+      ),
+    );
+  }, []);
+
+  const submitFulfillment = useCallback(async () => {
+    const token = readClientToken();
+    if (!token) {
+      setAuthOpen(true);
+      return;
+    }
+
+    if (fulfillmentParticipants.length === 0) {
+      setFulfillmentNotice("当前还没有可确认的报名成员");
+      return;
+    }
+
+    setFulfillmentSubmitting(true);
+    setFulfillmentNotice(null);
+    try {
+      const response = await fetch(`${API_BASE}/participants/confirm-fulfillment`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          activityId: activity.id,
+          participants: fulfillmentParticipants.map((participant) => ({
+            userId: participant.userId,
+            fulfilled: participant.fulfilled,
+          })),
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as unknown;
+      if (!response.ok || !isFulfillmentResponse(payload)) {
+        const message = readApiError(payload, `履约确认失败（${response.status}）`);
+        if (response.status === 401) {
+          setAuthOpen(true);
+        }
+        throw new Error(message);
+      }
+
+      setFulfillmentOpen(false);
+      setNotice(payload.msg);
+      await loadViewerDetail();
+    } catch (error) {
+      setFulfillmentNotice(error instanceof Error ? error.message : "履约确认失败，请稍后再试");
+    } finally {
+      setFulfillmentSubmitting(false);
+    }
+  }, [activity.id, fulfillmentParticipants, loadViewerDetail]);
 
   const copyShareText = useCallback(async () => {
     if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
@@ -308,10 +477,24 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
           <div className="mb-3 flex items-center justify-between gap-3 px-1">
             <div>
               <p className="text-sm font-semibold text-white/92">
-                {isJoined ? "你已经在局里" : isWaitlisted ? "你在候补里" : canJoin ? "这场还可以加入" : "这场暂不可加入"}
+                {canConfirmFulfillment
+                  ? "这场已经结束，先把真实到场情况确认一下"
+                  : isJoined
+                    ? "你已经在局里"
+                    : isWaitlisted
+                      ? "你在候补里"
+                      : canJoin
+                        ? "这场还可以加入"
+                        : "这场暂不可加入"}
               </p>
               <p className="mt-1 text-xs text-white/44">
-                {loadingDetail ? "正在同步你的参与状态" : canJoin ? `剩余 ${remainingSeats} 个位置` : "可以先分享给朋友或回到首页继续找局"}
+                {loadingDetail
+                  ? "正在同步你的参与状态"
+                  : canConfirmFulfillment
+                    ? "默认全部标记为到场，有未到场再取消勾选。"
+                    : canJoin
+                      ? `剩余 ${remainingSeats} 个位置`
+                      : "可以先分享给朋友或回到首页继续找局"}
               </p>
             </div>
             {notice ? <p className="max-w-[168px] text-right text-xs text-white/58">{notice}</p> : null}
@@ -323,11 +506,19 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
               onClick={() => {
                 void joinActivity();
               }}
-              disabled={joining || (!canJoin && !isJoined)}
+              disabled={joining || fulfillmentSubmitting || (!canJoin && !isJoined && !canConfirmFulfillment)}
               className="h-12 rounded-2xl bg-white text-sm font-semibold text-black hover:bg-white/90"
             >
-              {joining ? <Loader2 className="h-4 w-4 animate-spin" /> : isJoined ? <MessageCircle className="h-4 w-4" /> : <UserPlus className="h-4 w-4" />}
-              {joinLabel}
+              {joining || fulfillmentSubmitting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : canConfirmFulfillment ? (
+                <Check className="h-4 w-4" />
+              ) : isJoined ? (
+                <MessageCircle className="h-4 w-4" />
+              ) : (
+                <UserPlus className="h-4 w-4" />
+              )}
+              {canConfirmFulfillment ? "履约确认" : joinLabel}
             </Button>
             <Button
               type="button"
@@ -374,6 +565,106 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
         reason="报名和讨论区需要先确认身份，完成后会继续刚才这一步。"
         trigger={<button type="button" className="hidden" aria-hidden="true" />}
       />
+
+      <Dialog open={fulfillmentOpen} onOpenChange={setFulfillmentOpen}>
+        <DialogContent className="max-w-md border-zinc-900 bg-zinc-950 text-zinc-50">
+          <DialogHeader>
+            <DialogTitle>履约确认</DialogTitle>
+            <DialogDescription className="text-zinc-400">
+              把这场局真实到场情况记下来，后面的再约和推荐才会更准。
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-zinc-200">
+              <p className="font-medium text-white/92">{activity.title}</p>
+              <p className="mt-1 text-xs text-white/45">
+                默认都算到场。如果有人放鸽子，点一下切成“未到场”。
+              </p>
+            </div>
+
+            <ScrollArea className="max-h-72 rounded-2xl border border-white/10 bg-black/20">
+              <div className="space-y-2 p-3">
+                {fulfillmentLoading ? (
+                  <div className="flex items-center justify-center py-8 text-sm text-white/52">
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    正在加载报名成员
+                  </div>
+                ) : fulfillmentParticipants.length === 0 ? (
+                  <div className="py-8 text-center text-sm text-white/45">
+                    {fulfillmentNotice || "当前没有可确认的报名成员。"}
+                  </div>
+                ) : (
+                  fulfillmentParticipants.map((participant) => (
+                    <button
+                      key={participant.userId}
+                      type="button"
+                      onClick={() => {
+                        toggleFulfillmentParticipant(participant.userId);
+                      }}
+                      className={cn(
+                        "flex w-full items-center justify-between rounded-2xl border px-3 py-3 text-left transition",
+                        participant.fulfilled
+                          ? "border-emerald-400/30 bg-emerald-400/10"
+                          : "border-rose-400/30 bg-rose-400/10",
+                      )}
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-white/92">{participant.nickname}</p>
+                        <p className="mt-1 text-xs text-white/45">
+                          {participant.fulfilled ? "已到场" : "未到场"}
+                        </p>
+                      </div>
+                      <span
+                        className={cn(
+                          "inline-flex min-w-[72px] items-center justify-center rounded-full px-3 py-1 text-xs font-medium",
+                          participant.fulfilled
+                            ? "bg-emerald-300/16 text-emerald-100"
+                            : "bg-rose-300/16 text-rose-100",
+                        )}
+                      >
+                        {participant.fulfilled ? "到场" : "未到场"}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </ScrollArea>
+
+            <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-xs text-white/58">
+              {noShowCount > 0
+                ? `你标记了 ${noShowCount} 人未到场。提交后，这些真实结果会写回后续推荐和再约判断。`
+                : "当前全部标记为到场。提交后，系统会把这次成局结果记下来。"}
+            </div>
+
+            {fulfillmentNotice ? (
+              <p className="text-sm text-amber-200">{fulfillmentNotice}</p>
+            ) : null}
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setFulfillmentOpen(false)}
+              className="border-white/10 bg-transparent text-white hover:bg-white/8 hover:text-white"
+            >
+              稍后再说
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                void submitFulfillment();
+              }}
+              disabled={fulfillmentLoading || fulfillmentSubmitting || fulfillmentParticipants.length === 0}
+              className="bg-white text-black hover:bg-white/90"
+            >
+              {fulfillmentSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+              提交履约结果
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

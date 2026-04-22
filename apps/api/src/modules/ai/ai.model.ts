@@ -187,8 +187,18 @@ const CurrentTaskSnapshotSchema = t.Object({
   secondaryAction: t.Optional(CurrentTaskActionSchema),
 });
 
+const CurrentTaskHomeStateSchema = t.Union([
+  t.Literal('H0'),
+  t.Literal('H1'),
+  t.Literal('H2'),
+  t.Literal('H3'),
+  t.Literal('H4'),
+]);
+
 const CurrentTasksResponseSchema = t.Object({
   items: t.Array(CurrentTaskSnapshotSchema),
+  homeState: CurrentTaskHomeStateSchema,
+  primaryTaskId: t.Union([t.String({ minLength: 1 }), t.Null()]),
   serverTime: t.String({ minLength: 1 }),
 });
 
@@ -476,6 +486,8 @@ const WelcomePendingActivity = t.Object({
 const WelcomeFocus = t.Object({
   type: t.Union([
     t.Literal('post_activity_feedback'),
+    t.Literal('discussion_reply'),
+    t.Literal('draft_continue'),
     t.Literal('recruiting_result'),
     t.Literal('unfinished_intent'),
   ], { description: '首页焦点类型' }),

@@ -1,6 +1,7 @@
 // Notification Service - 通知与消息中心业务逻辑
-import { db, notifications, users, participants, intentMatches, partnerIntents, matchMessages, agentTasks, eq, count, and, desc, inArray, sql } from '@xu/db';
+import { db, notifications, users, participants, intentMatches, partnerIntents, matchMessages, agentTasks, activities, eq, count, and, desc, gt, inArray, sql } from '@xu/db';
 import type {
+  MessageCenterActionItem,
   MessageCenterQuery,
   MessageCenterResponse,
   MessageCenterUi,
@@ -41,6 +42,9 @@ const DEFAULT_MESSAGE_CENTER_UI: MessageCenterUi = {
   visitorTitle: '这里会接住后续进展',
   visitorDescription: '待确认搭子、活动后跟进和群聊未读，都会整理到这里。',
   summaryTitle: '未读总数',
+  actionInboxSectionTitle: '等你处理',
+  actionInboxDescription: '先把最需要你接一下的事摆在上面，点开就能继续原来的那条链路。',
+  actionInboxEmpty: '当前没有必须立刻处理的事，新的进展会先出现在这里。',
   pendingMatchesTitle: '待确认搭子',
   pendingMatchesEmpty: '当前没有待确认匹配，新的搭子撮合到了会先出现在这里。',
   requestAuthHint: '请先登录后再查看消息中心',
@@ -54,6 +58,9 @@ const DEFAULT_MESSAGE_CENTER_UI: MessageCenterUi = {
   refreshLabel: '刷新消息中心',
   systemSectionTitle: '系统跟进',
   systemEmpty: '暂无系统通知，活动进度有变化会第一时间出现在这里。',
+  feedbackPositiveLabel: '挺顺利',
+  feedbackNeutralLabel: '一般',
+  feedbackNegativeLabel: '没成局',
   reviewActionLabel: '去复盘',
   rebookActionLabel: '去再约',
   kickoffActionLabel: '让 AI 帮我写开场白',
@@ -85,6 +92,9 @@ function normalizeMessageCenterUi(raw: unknown): MessageCenterUi {
     visitorTitle: readNonEmptyString(value.visitorTitle) ?? DEFAULT_MESSAGE_CENTER_UI.visitorTitle,
     visitorDescription: readNonEmptyString(value.visitorDescription) ?? DEFAULT_MESSAGE_CENTER_UI.visitorDescription,
     summaryTitle: readNonEmptyString(value.summaryTitle) ?? DEFAULT_MESSAGE_CENTER_UI.summaryTitle,
+    actionInboxSectionTitle: readNonEmptyString(value.actionInboxSectionTitle) ?? DEFAULT_MESSAGE_CENTER_UI.actionInboxSectionTitle,
+    actionInboxDescription: readNonEmptyString(value.actionInboxDescription) ?? DEFAULT_MESSAGE_CENTER_UI.actionInboxDescription,
+    actionInboxEmpty: readNonEmptyString(value.actionInboxEmpty) ?? DEFAULT_MESSAGE_CENTER_UI.actionInboxEmpty,
     pendingMatchesTitle: readNonEmptyString(value.pendingMatchesTitle) ?? DEFAULT_MESSAGE_CENTER_UI.pendingMatchesTitle,
     pendingMatchesEmpty: readNonEmptyString(value.pendingMatchesEmpty) ?? DEFAULT_MESSAGE_CENTER_UI.pendingMatchesEmpty,
     requestAuthHint: readNonEmptyString(value.requestAuthHint) ?? DEFAULT_MESSAGE_CENTER_UI.requestAuthHint,
@@ -98,6 +108,9 @@ function normalizeMessageCenterUi(raw: unknown): MessageCenterUi {
     refreshLabel: readNonEmptyString(value.refreshLabel) ?? DEFAULT_MESSAGE_CENTER_UI.refreshLabel,
     systemSectionTitle: readNonEmptyString(value.systemSectionTitle) ?? DEFAULT_MESSAGE_CENTER_UI.systemSectionTitle,
     systemEmpty: readNonEmptyString(value.systemEmpty) ?? DEFAULT_MESSAGE_CENTER_UI.systemEmpty,
+    feedbackPositiveLabel: readNonEmptyString(value.feedbackPositiveLabel) ?? DEFAULT_MESSAGE_CENTER_UI.feedbackPositiveLabel,
+    feedbackNeutralLabel: readNonEmptyString(value.feedbackNeutralLabel) ?? DEFAULT_MESSAGE_CENTER_UI.feedbackNeutralLabel,
+    feedbackNegativeLabel: readNonEmptyString(value.feedbackNegativeLabel) ?? DEFAULT_MESSAGE_CENTER_UI.feedbackNegativeLabel,
     reviewActionLabel: readNonEmptyString(value.reviewActionLabel) ?? DEFAULT_MESSAGE_CENTER_UI.reviewActionLabel,
     rebookActionLabel: readNonEmptyString(value.rebookActionLabel) ?? DEFAULT_MESSAGE_CENTER_UI.rebookActionLabel,
     kickoffActionLabel: readNonEmptyString(value.kickoffActionLabel) ?? DEFAULT_MESSAGE_CENTER_UI.kickoffActionLabel,
@@ -557,8 +570,13 @@ export async function getMessageCenterData(
 
   const unreadNotificationCount = (unreadCountResult.count || 0) + pendingMatchesResult.items.length;
   const totalUnread = unreadNotificationCount + (chatActivities.totalUnread || 0);
+  const actionItems = await buildMessageCenterActionItems({
+    userId,
+    chatActivities,
+  });
 
   return {
+    actionItems,
     systemNotifications,
     pendingMatches: pendingMatchesResult.items,
     unreadNotificationCount,
@@ -706,6 +724,171 @@ async function findLatestPartnerTaskIdForMatch(params: {
     .limit(1);
 
   return task?.id;
+}
+
+async function buildMessageCenterActionItems(params: {
+  userId: string;
+  chatActivities: Awaited<ReturnType<typeof getChatActivities>>;
+}): Promise<MessageCenterActionItem[]> {
+  const now = new Date();
+  const items: MessageCenterActionItem[] = [];
+
+  const [postActivityTask, draftTask, recruitingActivity] = await Promise.all([
+    db
+      .select({
+        id: agentTasks.id,
+        goalText: agentTasks.goalText,
+        updatedAt: agentTasks.updatedAt,
+        activityId: agentTasks.activityId,
+        activityTitle: activities.title,
+      })
+      .from(agentTasks)
+      .innerJoin(activities, eq(agentTasks.activityId, activities.id))
+      .where(and(
+        eq(agentTasks.userId, params.userId),
+        eq(agentTasks.taskType, 'join_activity'),
+        eq(agentTasks.currentStage, 'post_activity'),
+        inArray(agentTasks.status, OPEN_TASK_STATUSES),
+      ))
+      .orderBy(desc(agentTasks.updatedAt))
+      .limit(1),
+    db
+      .select({
+        id: agentTasks.id,
+        goalText: agentTasks.goalText,
+        updatedAt: agentTasks.updatedAt,
+        currentStage: agentTasks.currentStage,
+        activityId: agentTasks.activityId,
+        activityTitle: activities.title,
+      })
+      .from(agentTasks)
+      .leftJoin(activities, eq(agentTasks.activityId, activities.id))
+      .where(and(
+        eq(agentTasks.userId, params.userId),
+        eq(agentTasks.taskType, 'create_activity'),
+        inArray(agentTasks.status, OPEN_TASK_STATUSES),
+        inArray(agentTasks.currentStage, ['draft_collecting', 'draft_ready']),
+      ))
+      .orderBy(desc(agentTasks.updatedAt))
+      .limit(1),
+    db
+      .select({
+        id: activities.id,
+        title: activities.title,
+        currentParticipants: activities.currentParticipants,
+        maxParticipants: activities.maxParticipants,
+        updatedAt: activities.updatedAt,
+      })
+      .from(activities)
+      .where(and(
+        eq(activities.creatorId, params.userId),
+        eq(activities.status, 'active'),
+        gt(activities.startAt, now),
+        sql`${activities.currentParticipants} < ${activities.maxParticipants}`,
+      ))
+      .orderBy(sql`${activities.startAt} ASC`)
+      .limit(1),
+  ]);
+
+  const postActivity = postActivityTask[0];
+  if (postActivity?.activityId) {
+    const activityTitle = postActivity.activityTitle || '这场活动';
+    items.push({
+      id: `post-activity:${postActivity.id}`,
+      type: 'post_activity_follow_up',
+      title: `补一下「${activityTitle}」的活动结果`,
+      summary: '这场活动已经进入收尾阶段，先补真实反馈，再决定要不要复盘或继续再约。',
+      statusLabel: '活动后',
+      updatedAt: postActivity.updatedAt.toISOString(),
+      activityId: postActivity.activityId,
+      primaryAction: {
+        kind: 'prompt',
+        label: '去补反馈',
+        prompt: `继续处理：${postActivity.goalText}`,
+        activityId: postActivity.activityId,
+        activityMode: 'review',
+        entry: 'message_center_post_activity',
+      },
+    });
+  }
+
+  const discussionItems = params.chatActivities.items
+    .filter((item) => !item.isArchived && item.unreadCount > 0 && item.lastMessageSenderId !== params.userId)
+    .sort((left, right) => {
+      const leftTime = left.lastMessageTime ? new Date(left.lastMessageTime).getTime() : 0;
+      const rightTime = right.lastMessageTime ? new Date(right.lastMessageTime).getTime() : 0;
+      return rightTime - leftTime;
+    })
+    .slice(0, 2);
+
+  for (const chat of discussionItems) {
+    const senderPrefix = chat.lastMessageSenderNickname ? `${chat.lastMessageSenderNickname}：` : '';
+    items.push({
+      id: `discussion:${chat.activityId}`,
+      type: 'discussion_reply',
+      title: `「${chat.activityTitle}」里有人在等你回应`,
+      summary: chat.lastMessage
+        ? `${senderPrefix}${chat.lastMessage}`
+        : '这场活动还在继续聊，现在进去就能顺着上次那件事接着办。',
+      statusLabel: '讨论中',
+      updatedAt: chat.lastMessageTime || new Date().toISOString(),
+      activityId: chat.activityId,
+      badge: `${chat.unreadCount} 条未读`,
+      primaryAction: {
+        kind: 'open_discussion',
+        label: '进入讨论区',
+        activityId: chat.activityId,
+        entry: 'message_center_discussion_reply',
+      },
+    });
+  }
+
+  const draft = draftTask[0];
+  if (draft) {
+    const activityTitle = draft.activityTitle || '这场局';
+    const isDraftReady = draft.currentStage === 'draft_ready';
+    items.push({
+      id: `draft:${draft.id}`,
+      type: 'draft_continue',
+      title: isDraftReady ? `「${activityTitle}」草稿已经可以确认` : `继续完善「${activityTitle}」`,
+      summary: isDraftReady
+        ? '草稿已经整理得差不多了，现在回去确认一下，就能把这场局发出去。'
+        : '这场局还在整理细节，继续补一下时间、地点或人数就能更快发出来。',
+      statusLabel: isDraftReady ? '草稿待确认' : '继续做草稿',
+      updatedAt: draft.updatedAt.toISOString(),
+      activityId: draft.activityId ?? null,
+      primaryAction: {
+        kind: 'prompt',
+        label: isDraftReady ? '继续确认' : '继续看草稿',
+        prompt: `继续处理：${draft.goalText}`,
+        ...(draft.activityId ? { activityId: draft.activityId } : {}),
+        entry: 'message_center_draft_continue',
+      },
+    });
+  }
+
+  const recruiting = recruitingActivity[0];
+  if (recruiting) {
+    const remaining = Math.max(recruiting.maxParticipants - recruiting.currentParticipants, 0);
+    items.push({
+      id: `recruiting:${recruiting.id}`,
+      type: 'recruiting_follow_up',
+      title: `「${recruiting.title}」还差 ${remaining} 人`,
+      summary: '这场局已经发出去了，接下来更适合继续补人、顺一顺文案，或者看看要不要换个推进方式。',
+      statusLabel: '继续招人',
+      updatedAt: recruiting.updatedAt.toISOString(),
+      activityId: recruiting.id,
+      primaryAction: {
+        kind: 'prompt',
+        label: '继续推进',
+        prompt: `继续处理「${recruiting.title}」的招人结果，还差 ${remaining} 人，帮我看看下一步怎么推进。`,
+        activityId: recruiting.id,
+        entry: 'message_center_recruiting_follow_up',
+      },
+    });
+  }
+
+  return items;
 }
 
 /**

@@ -322,7 +322,7 @@ export function askPreferenceTool(_userId: string | null) {
   type AskPreferenceParams = typeof askPreferenceSchema.static;
   
   return tool({
-    description: '询问偏好。探索意图但信息不完整时用，最多2次，调用后停止等待回复。',
+    description: '询问偏好。当用户想探索附近活动但没有提供具体位置信息时，必须调用此工具询问位置。调用后停止等待回复。',
     inputSchema: jsonSchema<AskPreferenceParams>(toJsonSchema(askPreferenceSchema)),
     
     execute: async (params: AskPreferenceParams) => {

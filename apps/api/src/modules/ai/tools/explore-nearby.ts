@@ -245,7 +245,7 @@ export function buildExploreNearbyResult(params: {
  */
 export const exploreNearbyTool = createToolFactory<ExploreNearbyParams, ExploreData>({
   name: 'exploreNearby',
-  description: '探索附近活动。支持语义搜索，返回匹配度最高的活动列表。',
+  description: '探索附近活动。搜索中心点(center)是必需参数，必须包含用户明确指定的位置（如"观音桥"）。如果用户没有提供具体位置信息，不要调用此工具，而是调用 askPreference 询问位置。',
   parameters: exploreNearbySchema,
   
   execute: async ({ center, semanticQuery, type, radius = 5 }, context) => {

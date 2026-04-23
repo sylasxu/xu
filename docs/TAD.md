@@ -24,6 +24,7 @@
 3. **Spec-Coding 契约驱动**：Elysia TypeBox 定义路由契约，Orval 自动生成客户端 SDK
 4. **服务每个人**：不只服务群主（Creator），也服务参与者（Joiner）
 5. **Result-Driven**：每一行代码都服务于 [PRD: 核心业务流程] 的结果达成与痛点消除 (详见 6.13)
+6. **Scenario-First Acceptance**：主流程验收优先看“真实用户目标 + 真实场景分支”是否跑通；默认通过 `regression-scenario-matrix + artifact + coverage` 判断最近一次是否真正覆盖到产品主域，而不是只看单测数量或代码改动规模
 
 ---
 
@@ -3693,6 +3694,25 @@ bun run dev --filter=@xu/web  # 仅启动 Web
 # 代码生成
 bun run gen:api         # 生成 Orval SDK
 ```
+
+### 11.1 场景验收与覆盖报告
+
+主流程相关改动完成后，默认按“用户场景验收”而不是“只看接口通没通”来判断是否收口。
+
+```bash
+bun run regression:matrix
+bun run regression:flow
+bun run regression:protocol
+bun run regression:identity-memory
+bun run regression:coverage
+```
+
+约束：
+
+- `regression-scenario-matrix` 是当前回归场景真源；每个主流程脚本都应尽量映射到明确的 `domain / userGoal / prdSections`
+- `sandbox-regression`、`chat-regression`、`identity-memory-regression` 必须输出结构化 artifact，供后续复盘“最近一次到底跑到了哪些真实场景”
+- 评估主流程是否完成时，优先回答“哪些产品主域最近一次已被 artifact 覆盖”，而不是只回答“有多少测试通过”
+- `five-user-smoke` 保留为人工联调 / 演示工具，不作为默认发布门禁主依据
 
 ---
 

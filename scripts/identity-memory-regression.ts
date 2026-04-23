@@ -7,6 +7,8 @@
  */
 
 import { readAiChatEnvelope } from './ai-chat-sse';
+import { writeRegressionArtifact } from './regression-artifact';
+import { findScenarioMatrixEntry } from './regression-scenario-matrix';
 
 const CHAT_URL = process.env.GENUI_CHAT_API_URL || 'http://127.0.0.1:1996/ai/chat';
 
@@ -48,6 +50,7 @@ function getTextContent(envelope: ResponseEnvelope): string {
 }
 
 async function main(): Promise<void> {
+  const startedAt = new Date();
   console.log(`Testing identity question against ${CHAT_URL} ...\n`);
 
   const envelope = await postChat({ type: 'text', text: '你知道我是谁吗' });
@@ -75,7 +78,47 @@ async function main(): Promise<void> {
     throw new Error('REGRESSION: AI reply is too short, possibly hitting an old hardcoded path.');
   }
 
+  const completedAt = new Date();
+  const matrixEntry = findScenarioMatrixEntry('identity-memory');
+  const artifactPath = await writeRegressionArtifact({
+    runner: 'identity-memory-regression',
+    suite: 'core',
+    startedAt: startedAt.toISOString(),
+    completedAt: completedAt.toISOString(),
+    durationMs: completedAt.getTime() - startedAt.getTime(),
+    scenarioCount: 1,
+    passedCount: 1,
+    failedCount: 0,
+    scenarios: [
+      {
+        id: 'identity-memory',
+        passed: true,
+        details: [
+          `reply=${text}`,
+          `traceId=${envelope.traceId}`,
+        ],
+        matrix: matrixEntry
+          ? {
+              runner: matrixEntry.runner,
+              layer: matrixEntry.layer,
+              suite: matrixEntry.suite,
+              domain: matrixEntry.domain,
+              branchLength: matrixEntry.branchLength,
+              userGoal: matrixEntry.userGoal,
+              prdSections: matrixEntry.prdSections,
+              primarySurface: matrixEntry.primarySurface,
+              scenarioType: matrixEntry.scenarioType,
+            }
+          : null,
+      },
+    ],
+    metadata: {
+      baseUrl: CHAT_URL,
+    },
+  });
+
   console.log('\nIdentity memory regression passed.');
+  console.log(`Artifact: ${artifactPath}`);
 }
 
 main().catch((error) => {

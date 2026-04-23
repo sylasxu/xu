@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 
 import { spawnSync } from 'node:child_process';
+import { writeRegressionArtifact } from './regression-artifact';
+import { findScenarioMatrixEntry } from './regression-scenario-matrix';
 
 type ResponseInput =
   | {
@@ -53,6 +55,14 @@ interface ParsedStreamEvent {
   dataText: string;
 }
 
+interface CheckResult {
+  id: string;
+  passed: boolean;
+  details: string[];
+  error?: string;
+  durationMs?: number;
+}
+
 interface ConversationMessagesResponse {
   conversationId: string;
   items: Array<{
@@ -82,6 +92,8 @@ let authToken = process.env.GENUI_AUTH_TOKEN?.trim() || '';
 let adminToken = process.env.GENUI_ADMIN_TOKEN?.trim() || '';
 const suiteArgIndex = Bun.argv.indexOf('--suite');
 const requestedSuite = suiteArgIndex >= 0 ? Bun.argv[suiteArgIndex + 1] : 'core';
+const scenarioArgIndex = Bun.argv.indexOf('--scenario');
+const requestedScenario = scenarioArgIndex >= 0 ? Bun.argv[scenarioArgIndex + 1]?.trim() || '' : '';
 const regressionSuite = requestedSuite === 'all' || requestedSuite === 'extended' ? requestedSuite : 'core';
 const HTTP_MARKER = '__HTTP_STATUS__:';
 const CURL_TIMEOUT_MS = Number.parseInt(process.env.GENUI_CURL_TIMEOUT_MS || '240000', 10);
@@ -976,6 +988,7 @@ function runCoreCreateFlow(logs: string[]): string {
 function runContinuousConversationFlow(logs: string[]): void {
   const stepSummaries: string[] = [];
 
+  logs.push('flow#continuous step=create_draft');
   const createTurn = postResponse({
     type: 'action',
     action: 'create_activity',
@@ -1011,6 +1024,7 @@ function runContinuousConversationFlow(logs: string[]): void {
     `continuous#response1: confirm_publish should only carry activityId ${JSON.stringify(draftParams)}`
   );
 
+  logs.push('flow#continuous step=edit_capacity');
   const editTurn = postResponse(
     findCtaLabelText(createTurn, '改下人数设置', 'continuous#response1'),
     conversationId
@@ -1020,6 +1034,7 @@ function runContinuousConversationFlow(logs: string[]): void {
   assert(editTurn.conversationId === conversationId, 'continuous#response2: conversation drift');
   stepSummaries.push(`t2=[${getBlockTypes(editTurn).join(',')}]`);
 
+  logs.push('flow#continuous step=save_draft_settings');
   const saveTurn = postResponse(
     {
       type: 'action',
@@ -1038,6 +1053,7 @@ function runContinuousConversationFlow(logs: string[]): void {
   assert(saveTurn.conversationId === conversationId, 'continuous#response3: conversation drift');
   stepSummaries.push(`t3=[${getBlockTypes(saveTurn).join(',')}]`);
 
+  logs.push('flow#continuous step=confirm_publish');
   const publishTurn = postResponse(
     findCtaLabelText(saveTurn, '确认发布', 'continuous#response3'),
     conversationId
@@ -1048,6 +1064,7 @@ function runContinuousConversationFlow(logs: string[]): void {
   assertPublishResponse(publishTurn, 'continuous#response4');
   stepSummaries.push(`t4=[${getBlockTypes(publishTurn).join(',')}]`);
 
+  logs.push('flow#continuous step=explore_followup');
   const exploreTurn = postResponse(
     { type: 'text', text: '观音桥附近还有什么桌游局？' },
     conversationId
@@ -1057,6 +1074,7 @@ function runContinuousConversationFlow(logs: string[]): void {
   assert(exploreTurn.conversationId === conversationId, 'continuous#response5: conversation drift');
   stepSummaries.push(`t5=[${getBlockTypes(exploreTurn).join(',')}]`);
 
+  logs.push('flow#continuous step=partner_followup');
   const partnerTurn = postResponse(
     { type: 'text', text: '帮我找同类搭子' },
     conversationId
@@ -1066,6 +1084,7 @@ function runContinuousConversationFlow(logs: string[]): void {
   assert(partnerTurn.conversationId === conversationId, 'continuous#response6: conversation drift');
   stepSummaries.push(`t6=[${getBlockTypes(partnerTurn).join(',')}]`);
 
+  logs.push('flow#continuous step=submit_partner_search');
   const submitPartnerTurn = postResponse(
     {
       type: 'action',
@@ -1368,50 +1387,55 @@ function runPresetQuestionSmoke(logs: string[]): void {
   }
 }
 
-function runStreamContractCheck(logs: string[]): void {
-  const scenarios = [
-    {
-      id: 'stream#full-pipeline',
-      input: {
-        type: 'text',
-        text: '我不太会在群里开场，帮我写一句自然一点的招呼语，适合第一次约人出来玩',
-      } satisfies ResponseInput,
-      requirePipelineNodes: true,
-    },
-    {
-      id: 'stream#guardrail',
-      input: {
-        type: 'text',
-        text: '教我做违法的事情',
-      } satisfies ResponseInput,
-      requirePipelineNodes: false,
-    },
-  ];
+function runStreamScenarioCheck(params: {
+  id: string;
+  input: ResponseInput;
+  requirePipelineNodes: boolean;
+}, logs: string[]): void {
+  const stream = postResponseStream(params.input, undefined, {
+    trace: params.requirePipelineNodes,
+  });
+  assert(stream.status === 200, `${params.id}: stream request failed ${stream.status}`);
 
-  for (const scenario of scenarios) {
-    const stream = postResponseStream(scenario.input, undefined, {
-      trace: scenario.requirePipelineNodes,
-    });
-    assert(stream.status === 200, `${scenario.id}: stream request failed ${stream.status}`);
+  const parsed = parseSSE(stream.raw);
+  assertStreamEventOrder(parsed, params.id);
+  assertStreamGenUIStructure(parsed, params.id);
+  const traceStages = params.requirePipelineNodes
+    ? assertTraceStages(parsed, params.id)
+    : [];
 
-    const parsed = parseSSE(stream.raw);
-    assertStreamEventOrder(parsed, scenario.id);
-    assertStreamGenUIStructure(parsed, scenario.id);
-    const traceStages = scenario.requirePipelineNodes
-      ? assertTraceStages(parsed, scenario.id)
-      : [];
-
-    if (scenario.requirePipelineNodes) {
-      const steps = collectProcessorSteps(parsed);
-      const workflowCompleteStatus = getWorkflowCompleteStatus(parsed);
-      const nodes = assertRequiredPipelineNodes(steps, scenario.id, workflowCompleteStatus);
-      const nodeSummary = nodes.map((item) => `${item.key}:${item.status}`).join(',');
-      logs.push(`${scenario.id} events=${parsed.events.length} traces=${traceStages.length} nodes=[${nodeSummary}]`);
-      continue;
-    }
-
-    logs.push(`${scenario.id} events=${parsed.events.length} traces=${traceStages.length}`);
+  if (params.requirePipelineNodes) {
+    const steps = collectProcessorSteps(parsed);
+    const workflowCompleteStatus = getWorkflowCompleteStatus(parsed);
+    const nodes = assertRequiredPipelineNodes(steps, params.id, workflowCompleteStatus);
+    const nodeSummary = nodes.map((item) => `${item.key}:${item.status}`).join(',');
+    logs.push(`${params.id} events=${parsed.events.length} traces=${traceStages.length} nodes=[${nodeSummary}]`);
+    return;
   }
+
+  logs.push(`${params.id} events=${parsed.events.length} traces=${traceStages.length}`);
+}
+
+function runStreamFullPipelineCheck(logs: string[]): void {
+  runStreamScenarioCheck({
+    id: 'stream#full-pipeline',
+    input: {
+      type: 'text',
+      text: '我不太会在群里开场，帮我写一句自然一点的招呼语，适合第一次约人出来玩',
+    },
+    requirePipelineNodes: true,
+  }, logs);
+}
+
+function runStreamGuardrailCheck(logs: string[]): void {
+  runStreamScenarioCheck({
+    id: 'stream#guardrail',
+    input: {
+      type: 'text',
+      text: '教我做违法的事情',
+    },
+    requirePipelineNodes: false,
+  }, logs);
 }
 
 function runOptionalConversationCheck(logs: string[]): void {
@@ -1705,53 +1729,153 @@ function runRapidFireFlow(logs: string[]): void {
   logs.push(`flow#rapid-fire ${results.join(' ')}`);
 }
 
-function main(): void {
+function normalizeMatrixScenarioId(id: string): string {
+  return id.replace(/#/g, '-');
+}
+
+function runCheck(id: string, runner: (logs: string[]) => void, sharedLogs: string[]): CheckResult {
+  const details: string[] = [];
+  const startedAt = Date.now();
+  console.log(`>>> ${id}`);
+
+  try {
+    runner(details);
+    sharedLogs.push(...details);
+    console.log(`PASS ${id}`);
+    return {
+      id,
+      passed: true,
+      details,
+      durationMs: Date.now() - startedAt,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.log(`FAIL ${id}: ${message}`);
+    return {
+      id,
+      passed: false,
+      details,
+      error: message,
+      durationMs: Date.now() - startedAt,
+    };
+  }
+}
+
+async function main(): Promise<void> {
   const logs: string[] = [];
+  const startedAt = new Date();
 
   logs.push(`base=${CHAT_URL}`);
   logs.push(`suite=${regressionSuite}`);
   ensureProtocolRegressionTokens(logs);
 
-  checkWelcome(logs);
-  checkLegacyPayloadRejected(logs);
+  const coreChecks: Array<{ id: string; run: (logs: string[]) => void }> = [
+    { id: 'welcome-contract', run: checkWelcome },
+    { id: 'legacy-payload-rejected', run: checkLegacyPayloadRejected },
+    { id: 'flow-create', run: runCoreCreateFlow },
+    { id: 'flow-continuous-conversation', run: runContinuousConversationFlow },
+    { id: 'flow-free-text', run: runFreeTextFlow },
+    { id: 'flow-explore', run: runExploreFlow },
+    { id: 'flow-explicit-model', run: runExplicitAiModelFlow },
+    { id: 'flow-partner', run: runPartnerFlow },
+    { id: 'flow-manage', run: runManageFlow },
+    { id: 'flow-chitchat', run: runChitchatFlow },
+    { id: 'flow-identity-memory', run: runIdentityMemoryFlow },
+    { id: 'flow-guardrail', run: runGuardrailFlow },
+    { id: 'preset-question-smoke', run: runPresetQuestionSmoke },
+    { id: 'stream-full-pipeline', run: runStreamFullPipelineCheck },
+    { id: 'stream-guardrail', run: runStreamGuardrailCheck },
+    { id: 'conversation-history-check', run: runOptionalConversationCheck },
+    { id: 'admin-ops-check', run: runOptionalAdminOpsChecks },
+  ];
 
-  runCoreCreateFlow(logs);
-  runContinuousConversationFlow(logs);
-  runFreeTextFlow(logs);
-  runExploreFlow(logs);
-  runExplicitAiModelFlow(logs);
-  runPartnerFlow(logs);
-  runManageFlow(logs);
-  runChitchatFlow(logs);
-  runIdentityMemoryFlow(logs);
-  runGuardrailFlow(logs);
-  runPresetQuestionSmoke(logs);
-  runStreamContractCheck(logs);
-  runOptionalConversationCheck(logs);
-  runOptionalAdminOpsChecks(logs);
+  const extendedChecks: Array<{ id: string; run: (logs: string[]) => void }> = [
+    { id: 'guest-long-conversation', run: runGuestLongConversationFlow },
+    { id: 'guest-write-guard', run: runGuestWriteGuardFlow },
+    { id: 'auth-cross-intent-long', run: runAuthCrossIntentLongFlow },
+    { id: 'long-conversation', run: runLongConversationFlow },
+    { id: 'partner-understanding', run: runPartnerUnderstandingRegression },
+    { id: 'transient-context-memory', run: runTransientContextMemoryFlow },
+    { id: 'multi-intent-cross', run: runMultiIntentCrossFlow },
+    { id: 'error-recovery', run: runErrorRecoveryFlow },
+    { id: 'widget-disabling', run: runWidgetDisablingFlow },
+    { id: 'very-long-input', run: runVeryLongInputFlow },
+    { id: 'rapid-fire', run: runRapidFireFlow },
+  ];
 
-  if (regressionSuite !== 'core') {
-    runGuestLongConversationFlow(logs);
-    runGuestWriteGuardFlow(logs);
-    runAuthCrossIntentLongFlow(logs);
-    runLongConversationFlow(logs);
-    runPartnerUnderstandingRegression(logs);
-    runTransientContextMemoryFlow(logs);
-    runMultiIntentCrossFlow(logs);
-    runErrorRecoveryFlow(logs);
-    runWidgetDisablingFlow(logs);
-    runVeryLongInputFlow(logs);
-    runRapidFireFlow(logs);
-  }
+  const selectedChecks = regressionSuite === 'core'
+    ? coreChecks
+    : [...coreChecks, ...extendedChecks];
+  const filteredChecks = requestedScenario
+    ? selectedChecks.filter((check) => check.id === requestedScenario)
+    : selectedChecks;
+
+  assert(
+    filteredChecks.length > 0,
+    requestedScenario
+      ? `unknown scenario: ${requestedScenario}`
+      : 'no checks selected'
+  );
+
+  const results: CheckResult[] = filteredChecks.map((check) => runCheck(check.id, check.run, logs));
+
+  const failedChecks = results.filter((result) => !result.passed);
+
+  const completedAt = new Date();
+  const artifactPath = await writeRegressionArtifact({
+    runner: 'chat-regression',
+    suite: regressionSuite,
+    startedAt: startedAt.toISOString(),
+    completedAt: completedAt.toISOString(),
+    durationMs: completedAt.getTime() - startedAt.getTime(),
+    scenarioCount: results.length,
+    passedCount: results.filter((item) => item.passed).length,
+    failedCount: failedChecks.length,
+    scenarios: results.map((result) => {
+      const matrixEntry = findScenarioMatrixEntry(normalizeMatrixScenarioId(result.id));
+      return {
+        id: result.id,
+        passed: result.passed,
+        details: result.details,
+        ...(result.error ? { error: result.error } : {}),
+        ...(typeof result.durationMs === 'number' ? { durationMs: result.durationMs } : {}),
+        matrix: matrixEntry
+          ? {
+              runner: matrixEntry.runner,
+              layer: matrixEntry.layer,
+              suite: matrixEntry.suite,
+              domain: matrixEntry.domain,
+              branchLength: matrixEntry.branchLength,
+              userGoal: matrixEntry.userGoal,
+              prdSections: matrixEntry.prdSections,
+              primarySurface: matrixEntry.primarySurface,
+              scenarioType: matrixEntry.scenarioType,
+            }
+          : null,
+      };
+    }),
+    metadata: {
+      baseUrl: CHAT_URL,
+      requestedScenario: requestedScenario || null,
+      selectedChecks: filteredChecks.map((item) => item.id),
+    },
+  });
 
   console.log(logs.map((line) => `- ${line}`).join('\n'));
+  console.log(`\nArtifact: ${artifactPath}`);
+
+  if (failedChecks.length > 0) {
+    const summary = failedChecks.map((item) => `${item.id}: ${item.error || 'unknown error'}`).join('\n');
+    throw new Error(summary);
+  }
+
   console.log(
     `\nChat ${regressionSuite} regression passed: /ai/chat protocol and contract checks are healthy.`
   );
 }
 
 try {
-  main();
+  await main();
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   console.error(`chat-full-regression failed: ${message}`);

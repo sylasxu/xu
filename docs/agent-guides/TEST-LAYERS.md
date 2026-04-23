@@ -149,6 +149,61 @@ bun run release:gate
 - [chat-regression.ts](../../scripts/chat-regression.ts)：协议与流式回归层
 - [flow-regression.ts](../../scripts/flow-regression.ts)：流程回归统一入口
 - [release-gate.ts](../../scripts/release-gate.ts)：发布门禁统一入口
+- [regression-scenario-matrix.ts](../../scripts/regression-scenario-matrix.ts)：PRD 场景矩阵真源（场景 id -> 主域 / 分支长度 / 对应 PRD）
+- [scenario-matrix-report.ts](../../scripts/scenario-matrix-report.ts)：输出当前场景矩阵概览
+- [identity-memory-regression.ts](../../scripts/identity-memory-regression.ts)：身份记忆专项回归（同样输出 artifact）
+
+## 产物与矩阵
+
+这里的判断标准要固定下来：
+
+- 主流程验收优先看“真实用户目标场景是否跑通”，不是先看测试条数
+- 同一个需求如果只补了单测、却没有覆盖对应的用户旅程回归，不算真正验收完成
+- `matrix + artifact + coverage` 的组合，目标是回答“最近一次到底跑到了哪些产品域、哪些分支”，而不是制造新的测试术语
+
+```bash
+bun run regression:matrix
+```
+
+用途：
+
+- 查看当前回归脚本已经登记了哪些产品场景
+- 按 `layer / domain / suite / branchLength` 快速盘点覆盖面
+- 作为后续补 PRD 场景与覆盖率报告的真源入口
+
+`sandbox-regression`、`chat-regression` 和 `identity-memory-regression` 现在都会额外输出结构化 artifact 到：
+
+```bash
+.artifacts/regression/sandbox-regression/
+.artifacts/regression/chat-regression/
+.artifacts/regression/identity-memory-regression/
+```
+
+artifact 包含：
+
+- 本次运行的 suite、开始/结束时间、总耗时
+- 每个 scenario 的 pass/fail、耗时、details、error
+- 对应的矩阵元信息：`domain / userGoal / prdSections / branchLength / primarySurface`
+
+这层的目标不是替代终端日志，而是把“跑过了哪些产品场景”沉淀成可复盘产物。
+
+覆盖报告入口：
+
+```bash
+bun run regression:coverage
+```
+
+用途：
+
+- 汇总矩阵里按 `domain / runner` 登记的场景数
+- 对照最近一次 `sandbox-regression` / `chat-regression` / `identity-memory-regression` artifact
+- 快速看“哪些主域最近一次跑到了，哪些还没跑到”
+
+当前这份 coverage 还是第一版：
+
+- 它能回答“最近一次 artifact 触达了哪些 domain”
+- 还不能回答“PRD 全量覆盖率百分比”
+- 后续继续补 persona / state seed / H5 黑盒后，再升级成真正的产品覆盖报告
 
 ## 使用建议
 

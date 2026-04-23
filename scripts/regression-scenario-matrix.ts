@@ -1,0 +1,356 @@
+export type RegressionLayer = 'flow' | 'protocol' | 'memory' | 'manual';
+export type RegressionSuite = 'core' | 'extended';
+export type RegressionDomain =
+  | 'join_activity'
+  | 'create_activity'
+  | 'find_partner'
+  | 'resume_task'
+  | 'discussion'
+  | 'message_center'
+  | 'post_activity'
+  | 'guardrails'
+  | 'identity_memory'
+  | 'protocol_contract';
+export type BranchLength = 'short' | 'long';
+
+export interface ScenarioMatrixEntry {
+  id: string;
+  runner: string;
+  layer: RegressionLayer;
+  suite: RegressionSuite;
+  domain: RegressionDomain;
+  branchLength: BranchLength;
+  userGoal: string;
+  prdSections: string[];
+  primarySurface: 'h5' | 'miniprogram' | 'shared' | 'api';
+  scenarioType: 'happy_path' | 'branch' | 'recovery' | 'guardrail' | 'contract';
+  notes?: string;
+}
+
+const scenarioMatrixEntries: ScenarioMatrixEntry[] = [
+  {
+    id: 'basic-discussion-flow',
+    runner: 'sandbox-regression',
+    layer: 'flow',
+    suite: 'core',
+    domain: 'discussion',
+    branchLength: 'short',
+    userGoal: '报名成功后进入讨论区并看到真实协作消息',
+    prdSections: ['6.2 join_activity', '8.3 活动讨论区'],
+    primarySurface: 'shared',
+    scenarioType: 'happy_path',
+  },
+  {
+    id: 'capacity-limit',
+    runner: 'sandbox-regression',
+    layer: 'flow',
+    suite: 'core',
+    domain: 'join_activity',
+    branchLength: 'short',
+    userGoal: '活动满员时得到正确限制反馈',
+    prdSections: ['6.2 join_activity', '8.2 活动详情'],
+    primarySurface: 'shared',
+    scenarioType: 'branch',
+  },
+  {
+    id: 'duplicate-and-rejoin',
+    runner: 'sandbox-regression',
+    layer: 'flow',
+    suite: 'core',
+    domain: 'join_activity',
+    branchLength: 'short',
+    userGoal: '退出后还能重新报名，不出现状态错乱',
+    prdSections: ['6.2 join_activity'],
+    primarySurface: 'shared',
+    scenarioType: 'recovery',
+  },
+  {
+    id: 'permission-guards',
+    runner: 'sandbox-regression',
+    layer: 'flow',
+    suite: 'core',
+    domain: 'guardrails',
+    branchLength: 'short',
+    userGoal: '游客 / 未绑手机在关键动作上被正确拦截',
+    prdSections: ['认证闸门', 'Visitor-First + Action-Gated Auth'],
+    primarySurface: 'shared',
+    scenarioType: 'guardrail',
+  },
+  {
+    id: 'cancel-visibility',
+    runner: 'sandbox-regression',
+    layer: 'flow',
+    suite: 'core',
+    domain: 'join_activity',
+    branchLength: 'short',
+    userGoal: '活动取消后公开面与参与状态保持一致',
+    prdSections: ['8.2 活动详情'],
+    primarySurface: 'shared',
+    scenarioType: 'branch',
+  },
+  {
+    id: 'notifications-flow',
+    runner: 'sandbox-regression',
+    layer: 'flow',
+    suite: 'core',
+    domain: 'message_center',
+    branchLength: 'short',
+    userGoal: '消息中心能承接群聊和系统进展',
+    prdSections: ['8.4 消息中心'],
+    primarySurface: 'shared',
+    scenarioType: 'happy_path',
+  },
+  {
+    id: 'post-activity-follow-up-flow',
+    runner: 'sandbox-regression',
+    layer: 'flow',
+    suite: 'core',
+    domain: 'post_activity',
+    branchLength: 'short',
+    userGoal: '活动结束后能直接写回真实反馈并继续下一步',
+    prdSections: ['6.2 活动后续上', '8.4 消息中心'],
+    primarySurface: 'shared',
+    scenarioType: 'happy_path',
+  },
+  {
+    id: 'ai-explore-without-location-flow',
+    runner: 'sandbox-regression',
+    layer: 'flow',
+    suite: 'core',
+    domain: 'join_activity',
+    branchLength: 'short',
+    userGoal: '没有定位时仍能被 AI 正确追问并继续找局',
+    prdSections: ['状态首页', '找局主链'],
+    primarySurface: 'shared',
+    scenarioType: 'branch',
+  },
+  {
+    id: 'ai-location-followup-flow',
+    runner: 'sandbox-regression',
+    layer: 'flow',
+    suite: 'core',
+    domain: 'join_activity',
+    branchLength: 'short',
+    userGoal: '定位补全后能继续推荐附近活动',
+    prdSections: ['状态首页', '找局主链'],
+    primarySurface: 'shared',
+    scenarioType: 'recovery',
+  },
+  {
+    id: 'ai-join-auth-resume-discussion-flow',
+    runner: 'sandbox-regression',
+    layer: 'flow',
+    suite: 'core',
+    domain: 'resume_task',
+    branchLength: 'short',
+    userGoal: '报名动作被 auth gate 挂起后，登录能恢复并进入讨论区',
+    prdSections: ['6.2 join_activity', '8.3 活动讨论区'],
+    primarySurface: 'shared',
+    scenarioType: 'recovery',
+  },
+  {
+    id: 'ai-partner-search-bootstrap-flow',
+    runner: 'sandbox-regression',
+    layer: 'flow',
+    suite: 'core',
+    domain: 'find_partner',
+    branchLength: 'short',
+    userGoal: '找搭子先返回即时搜索结果，再决定是否继续留意',
+    prdSections: ['即时搜索 + 明确下一步 + 可选异步意向池'],
+    primarySurface: 'shared',
+    scenarioType: 'happy_path',
+  },
+  {
+    id: 'pending-match-confirm-creates-activity-flow',
+    runner: 'sandbox-regression',
+    layer: 'flow',
+    suite: 'core',
+    domain: 'find_partner',
+    branchLength: 'short',
+    userGoal: '匹配确认后能顺滑进入成局链路',
+    prdSections: ['找搭子主链', '8.4 消息中心'],
+    primarySurface: 'shared',
+    scenarioType: 'happy_path',
+  },
+  {
+    id: 'ai-destination-companion-flow',
+    runner: 'sandbox-regression',
+    layer: 'flow',
+    suite: 'core',
+    domain: 'find_partner',
+    branchLength: 'short',
+    userGoal: '带目的地约伴时，AI 能理解并给出可执行下一步',
+    prdSections: ['找搭子主链'],
+    primarySurface: 'shared',
+    scenarioType: 'happy_path',
+  },
+  {
+    id: 'ai-draft-settings-form-flow',
+    runner: 'sandbox-regression',
+    layer: 'flow',
+    suite: 'core',
+    domain: 'create_activity',
+    branchLength: 'short',
+    userGoal: '发局草稿设置表单能完整补齐并确认发布',
+    prdSections: ['create_activity 主链'],
+    primarySurface: 'shared',
+    scenarioType: 'happy_path',
+  },
+  {
+    id: 'ai-access-flow',
+    runner: 'sandbox-regression',
+    layer: 'flow',
+    suite: 'core',
+    domain: 'resume_task',
+    branchLength: 'short',
+    userGoal: '首页 welcome / chat 基础承接与访问权限正确',
+    prdSections: ['状态首页', 'Visitor-First'],
+    primarySurface: 'shared',
+    scenarioType: 'guardrail',
+  },
+  {
+    id: 'ai-long-conversation-flow',
+    runner: 'sandbox-regression',
+    layer: 'flow',
+    suite: 'extended',
+    domain: 'create_activity',
+    branchLength: 'long',
+    userGoal: '长对话里持续完成发局链路',
+    prdSections: ['create_activity 主链'],
+    primarySurface: 'shared',
+    scenarioType: 'happy_path',
+  },
+  {
+    id: 'ai-transient-context-flow',
+    runner: 'sandbox-regression',
+    layer: 'flow',
+    suite: 'extended',
+    domain: 'resume_task',
+    branchLength: 'long',
+    userGoal: '短暂上下文切换后仍能接住当前任务',
+    prdSections: ['状态首页', '任务运行时'],
+    primarySurface: 'shared',
+    scenarioType: 'recovery',
+  },
+  {
+    id: 'ai-multi-intent-cross-flow',
+    runner: 'sandbox-regression',
+    layer: 'flow',
+    suite: 'extended',
+    domain: 'resume_task',
+    branchLength: 'long',
+    userGoal: '跨意图切换时不丢主任务',
+    prdSections: ['状态首页', '任务运行时'],
+    primarySurface: 'shared',
+    scenarioType: 'branch',
+  },
+  {
+    id: 'ai-anonymous-long-flow',
+    runner: 'sandbox-regression',
+    layer: 'flow',
+    suite: 'extended',
+    domain: 'guardrails',
+    branchLength: 'long',
+    userGoal: '游客长链对话不误入需要登录的写入链路',
+    prdSections: ['Visitor-First + Action-Gated Auth'],
+    primarySurface: 'shared',
+    scenarioType: 'guardrail',
+  },
+  {
+    id: 'ai-error-recovery-flow',
+    runner: 'sandbox-regression',
+    layer: 'flow',
+    suite: 'extended',
+    domain: 'resume_task',
+    branchLength: 'long',
+    userGoal: '错误恢复后还能继续推进当前链路',
+    prdSections: ['任务运行时'],
+    primarySurface: 'shared',
+    scenarioType: 'recovery',
+  },
+  {
+    id: 'ai-rapid-fire-flow',
+    runner: 'sandbox-regression',
+    layer: 'flow',
+    suite: 'extended',
+    domain: 'protocol_contract',
+    branchLength: 'long',
+    userGoal: '快速连发时对话状态和流式协议不乱',
+    prdSections: ['/ai/chat 统一协议'],
+    primarySurface: 'shared',
+    scenarioType: 'contract',
+  },
+  {
+    id: 'stream-full-pipeline',
+    runner: 'chat-regression',
+    layer: 'protocol',
+    suite: 'core',
+    domain: 'protocol_contract',
+    branchLength: 'short',
+    userGoal: 'SSE 顺序、GenUI block 结构、trace 节点都正确',
+    prdSections: ['/ai/chat 统一协议'],
+    primarySurface: 'api',
+    scenarioType: 'contract',
+  },
+  {
+    id: 'stream-guardrail',
+    runner: 'chat-regression',
+    layer: 'protocol',
+    suite: 'core',
+    domain: 'guardrails',
+    branchLength: 'short',
+    userGoal: '违规请求在流式协议下稳定拦截',
+    prdSections: ['Guardrails', '/ai/chat 统一协议'],
+    primarySurface: 'api',
+    scenarioType: 'guardrail',
+  },
+  {
+    id: 'identity-memory',
+    runner: 'identity-memory-regression',
+    layer: 'memory',
+    suite: 'core',
+    domain: 'identity_memory',
+    branchLength: 'short',
+    userGoal: '身份类问题不会被错误当成画像事实',
+    prdSections: ['Memory', '真实结果驱动 Memory'],
+    primarySurface: 'api',
+    scenarioType: 'guardrail',
+  },
+  {
+    id: 'five-user-smoke',
+    runner: 'five-user-smoke',
+    layer: 'manual',
+    suite: 'core',
+    domain: 'discussion',
+    branchLength: 'short',
+    userGoal: '五人局创建、报名、讨论区基础链路可手动联调',
+    prdSections: ['create_activity 主链', '8.3 活动讨论区'],
+    primarySurface: 'shared',
+    scenarioType: 'happy_path',
+    notes: '人工联调与演示工具，不进入默认发布门禁',
+  },
+];
+
+export function listScenarioMatrix(): ScenarioMatrixEntry[] {
+  return [...scenarioMatrixEntries];
+}
+
+export function findScenarioMatrixEntry(id: string): ScenarioMatrixEntry | null {
+  return scenarioMatrixEntries.find((entry) => entry.id === id) ?? null;
+}
+
+export function summarizeScenarioMatrix(entries: ScenarioMatrixEntry[]) {
+  const byLayer = new Map<RegressionLayer, number>();
+  const byDomain = new Map<RegressionDomain, number>();
+
+  for (const entry of entries) {
+    byLayer.set(entry.layer, (byLayer.get(entry.layer) ?? 0) + 1);
+    byDomain.set(entry.domain, (byDomain.get(entry.domain) ?? 0) + 1);
+  }
+
+  return {
+    total: entries.length,
+    byLayer: Object.fromEntries(byLayer),
+    byDomain: Object.fromEntries(byDomain),
+  };
+}

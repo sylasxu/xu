@@ -3,6 +3,8 @@
 import { agentTasks, and, db, desc, eq, inArray, partnerIntents, userMemories } from '@xu/db';
 import { app } from '../apps/api/src/index';
 import { readAiChatEnvelope } from './ai-chat-sse';
+import { writeRegressionArtifact } from './regression-artifact';
+import { findScenarioMatrixEntry } from './regression-scenario-matrix';
 
 interface ApiError {
   code?: number;
@@ -235,6 +237,7 @@ interface ScenarioResult {
   passed: boolean;
   details: string[];
   error?: string;
+  durationMs?: number;
 }
 
 interface ScenarioContext {
@@ -2206,6 +2209,7 @@ const extendedScenarios = [
 ];
 
 async function main() {
+  const startedAt = new Date();
   const users = await bootstrapUsers();
   await cleanupSandboxPartnerIntents(users);
   await cleanupSandboxAgentTasks(users);
@@ -2233,16 +2237,24 @@ async function main() {
   for (const scenario of selectedScenarios) {
     const scenarioName = scenario.name.replace(/^scenario/, '').replace(/([A-Z])/g, '-$1').toLowerCase().replace(/^-/, '');
     console.log(`\n>>> ${scenarioName}`);
+    const scenarioStartedAt = Date.now();
     try {
       const result = await scenario(context);
-      results.push(result);
+      const durationMs = Date.now() - scenarioStartedAt;
+      results.push({ ...result, durationMs });
       console.log(`PASS ${result.name}`);
       for (const detail of result.details) {
         console.log(`- ${detail}`);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      results.push({ name: scenarioName, passed: false, details: [], error: message });
+      results.push({
+        name: scenarioName,
+        passed: false,
+        details: [],
+        error: message,
+        durationMs: Date.now() - scenarioStartedAt,
+      });
       console.log(`FAIL ${scenarioName}`);
       console.log(`- ${message}`);
     }
@@ -2255,6 +2267,49 @@ async function main() {
       console.log(`  ${result.error}`);
     }
   }
+
+  const completedAt = new Date();
+  const artifactPath = await writeRegressionArtifact({
+    runner: 'sandbox-regression',
+    suite: scenarioSuite,
+    startedAt: startedAt.toISOString(),
+    completedAt: completedAt.toISOString(),
+    durationMs: completedAt.getTime() - startedAt.getTime(),
+    scenarioCount: results.length,
+    passedCount: results.filter((item) => item.passed).length,
+    failedCount: results.filter((item) => !item.passed).length,
+    scenarios: results.map((result) => {
+      const matrixEntry = findScenarioMatrixEntry(result.name);
+      return {
+        id: result.name,
+        passed: result.passed,
+        details: result.details,
+        ...(result.error ? { error: result.error } : {}),
+        ...(typeof result.durationMs === 'number' ? { durationMs: result.durationMs } : {}),
+        matrix: matrixEntry
+          ? {
+              runner: matrixEntry.runner,
+              layer: matrixEntry.layer,
+              suite: matrixEntry.suite,
+              domain: matrixEntry.domain,
+              branchLength: matrixEntry.branchLength,
+              userGoal: matrixEntry.userGoal,
+              prdSections: matrixEntry.prdSections,
+              primarySurface: matrixEntry.primarySurface,
+              scenarioType: matrixEntry.scenarioType,
+            }
+          : null,
+      };
+    }),
+    metadata: {
+      requestedSuite,
+      scenarioFilter,
+      selectedScenarioNames: selectedScenarios.map((scenario) =>
+        scenario.name.replace(/^scenario/, '').replace(/([A-Z])/g, '-$1').toLowerCase().replace(/^-/, '')
+      ),
+    },
+  });
+  console.log(`Artifact: ${artifactPath}`);
 
   const failed = results.filter((item) => !item.passed);
   if (failed.length > 0) {

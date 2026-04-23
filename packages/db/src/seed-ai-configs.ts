@@ -48,11 +48,6 @@ const welcomeUiConfig = {
     { icon: '🎉', text: '想组个周五晚的局', prompt: '想组个周五晚的局' },
   ],
   bottomQuickActions: ['快速组局', '找搭子', '附近活动', '我的草稿'],
-  profileHints: {
-    low: '多聊一点，我会更懂你的偏好',
-    medium: '我正在记住你的习惯',
-    high: '你的偏好已经比较清楚，可以直接让我来安排',
-  },
   chatShell: {
     composerHint: '也可以直接说地方、时间、类型或你想找的人',
     pendingActionTitle: '待恢复动作',
@@ -70,23 +65,13 @@ const welcomeUiConfig = {
   },
   sidebar: {
     title: 'xu',
-    authSubtitle: '会话与后续进展会持续同步',
-    visitorSubtitle: '先聊当前这一轮，需要时再同步记录',
     messageCenterLabel: '消息中心',
-    messageCenterHint: '搭子确认 / 活动跟进',
-    authContinuationHint: '需要确认搭子或回看结果时，我会帮你继续接上',
     currentTasksTitle: '现在最需要继续的事',
-    currentTasksDescriptionAuthenticated: '先接住还在推进中的事，再决定要不要翻旧对话。',
-    currentTasksDescriptionVisitor: '登录后，这里会继续接住你没做完的事。',
     currentTasksEmpty: '当前没有需要继续推进的事，新的进展会先出现在这里。',
     historyTitle: '历史会话',
-    historyDescriptionAuthenticated: '继续上次聊到一半的内容',
-    historyDescriptionVisitor: '当前设备上的会话会先留在这里',
     searchPlaceholder: '搜索历史会话',
-    visitorHistoryHint: '访客模式下可以直接开始聊天，但不会在这里展示云端会话记录。',
     emptySearchResult: '没有找到匹配的历史会话。',
     emptyHistory: '还没有历史会话，发起第一条消息后这里就会出现。',
-    composerCapabilityHint: '当前输入区已只保留文本发送，没有语音和附件入口。',
   },
 };
 
@@ -237,7 +222,7 @@ const aiConfigSeeds = [
     configKey: 'welcome.ui',
     configValue: welcomeUiConfig,
     category: 'welcome',
-    description: 'Welcome UI 下发配置（快捷入口、底部按钮、画像提示文案）',
+    description: 'Welcome UI 下发配置（快捷入口、底部按钮）',
   },
   {
     configKey: 'ui.message_center',

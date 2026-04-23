@@ -213,15 +213,6 @@ const UI_CONFIGS: readonly ConfigFormDef[] = [
       },
       {
         kind: 'fields',
-        title: '画像提示',
-        fields: [
-          { kind: 'text', path: 'profileHints.low', label: '低完成度提示', description: '适合刚开始使用、画像信息很少的时候。' },
-          { kind: 'text', path: 'profileHints.medium', label: '中完成度提示', description: '适合聊过几轮，但还没很稳定的时候。' },
-          { kind: 'text', path: 'profileHints.high', label: '高完成度提示', description: '适合偏好已经比较清楚时。' },
-        ],
-      },
-      {
-        kind: 'fields',
         title: '对话壳层',
         fields: [
           { kind: 'text', path: 'chatShell.composerHint', label: '输入辅助提示', description: '输入框附近的轻提示，不要太长。', wide: true },
@@ -248,19 +239,11 @@ const UI_CONFIGS: readonly ConfigFormDef[] = [
         title: '侧边栏',
         fields: [
           { kind: 'text', path: 'sidebar.title', label: '标题', description: '侧边栏顶部品牌名称。' },
-          { kind: 'text', path: 'sidebar.authSubtitle', label: '已登录副标题', description: '登录用户看到的承接语气。', wide: true },
-          { kind: 'text', path: 'sidebar.visitorSubtitle', label: '访客副标题', description: '访客模式下的轻说明。', wide: true },
           { kind: 'text', path: 'sidebar.messageCenterLabel', label: '消息中心标题' },
-          { kind: 'text', path: 'sidebar.messageCenterHint', label: '消息中心提示', description: '标题旁边的简短提示。' },
-          { kind: 'textarea', path: 'sidebar.authContinuationHint', label: '已登录承接说明', description: '解释 xu 会如何继续接住后续进展。', wide: true },
           { kind: 'text', path: 'sidebar.historyTitle', label: '历史会话标题' },
-          { kind: 'text', path: 'sidebar.historyDescriptionAuthenticated', label: '已登录历史说明', wide: true },
-          { kind: 'text', path: 'sidebar.historyDescriptionVisitor', label: '访客历史说明', wide: true },
           { kind: 'text', path: 'sidebar.searchPlaceholder', label: '搜索占位' },
-          { kind: 'textarea', path: 'sidebar.visitorHistoryHint', label: '访客记录说明', wide: true },
           { kind: 'text', path: 'sidebar.emptySearchResult', label: '搜索空状态' },
           { kind: 'text', path: 'sidebar.emptyHistory', label: '历史空状态' },
-          { kind: 'textarea', path: 'sidebar.composerCapabilityHint', label: '输入能力提示', description: '说明当前仅支持文本输入等能力边界。', wide: true },
         ],
       },
     ],

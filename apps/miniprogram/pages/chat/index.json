@@ -12,7 +12,6 @@
     "widget-skeleton": "/components/widget-skeleton/index",
     "agent-task-panel": "/components/agent-task-panel/index",
     "auth-sheet": "/components/auth-sheet/index",
-    "share-guide": "/components/share-guide/index",
     "network-status": "/components/network-status/index"
   }
 }

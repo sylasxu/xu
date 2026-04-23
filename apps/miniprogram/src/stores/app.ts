@@ -37,9 +37,8 @@ interface AppState {
   isReady: boolean
   currentTabIndex: number
   
-  // UI 状态控制 (中间态组件)
+  // UI 状态控制
   isAuthSheetVisible: boolean
-  isShareGuideVisible: boolean
   aiThinkingState: AIThinkingState
   
   // 待执行操作（手机号绑定成功后继续执行）
@@ -47,13 +46,6 @@ interface AppState {
 
   // 消息中心聚焦意图（例如从任务面板直接打开某条待确认匹配）
   messageCenterFocus: MessageCenterFocusIntent | null
-  
-  // 分享引导数据
-  shareGuideData: {
-    activityId?: string
-    title?: string
-    locationName?: string
-  } | null
   
   // Actions
   setSystemInfo: (info: WechatMiniprogram.SystemInfo) => void
@@ -64,8 +56,6 @@ interface AppState {
   // UI 状态控制 Actions
   showAuthSheet: (pendingAction?: StructuredPendingAction) => void
   hideAuthSheet: () => void
-  showShareGuide: (data: { activityId?: string; title?: string; locationName?: string }) => void
-  hideShareGuide: () => void
   setAIThinkingState: (state: AIThinkingState) => void
   setPendingAction: (pendingAction: StructuredPendingAction | null) => void
   clearPendingAction: () => void
@@ -84,11 +74,9 @@ export const useAppStore = createStore<AppState>()(
     
     // UI 状态初始值
     isAuthSheetVisible: false,
-    isShareGuideVisible: false,
     aiThinkingState: 'idle',
     pendingAction: null,
     messageCenterFocus: null,
-    shareGuideData: null,
 
     // 设置系统信息
     setSystemInfo: (info) => {
@@ -131,22 +119,6 @@ export const useAppStore = createStore<AppState>()(
     hideAuthSheet: () => {
       set((state) => {
         state.isAuthSheetVisible = false
-      })
-    },
-    
-    // 显示分享引导蒙层
-    showShareGuide: (data) => {
-      set((state) => {
-        state.isShareGuideVisible = true
-        state.shareGuideData = data
-      })
-    },
-    
-    // 隐藏分享引导蒙层
-    hideShareGuide: () => {
-      set((state) => {
-        state.isShareGuideVisible = false
-        state.shareGuideData = null
       })
     },
     

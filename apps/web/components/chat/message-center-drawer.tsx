@@ -26,6 +26,7 @@ import {
 import { buildActivityDetailPath } from "@/lib/activity-url";
 import { cn } from "@/lib/utils";
 import { readClientToken, readClientUserId } from "@/lib/client-auth";
+import { DISCUSSION_STATE_UPDATED_EVENT } from "@/lib/discussion-state-events";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:1996";
 
@@ -174,6 +175,7 @@ type ChatActivity = {
   lastMessageSenderId: string | null;
   lastMessageSenderNickname: string | null;
   unreadCount: number;
+  responseNeeded: boolean;
   isArchived: boolean;
   participantCount: number;
 };
@@ -528,6 +530,44 @@ export function MessageCenterDrawer({
     }
 
     void refreshMessageCenter();
+  }, [open, refreshMessageCenter]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const refreshIfVisible = () => {
+      if (document.visibilityState === "hidden") {
+        return;
+      }
+
+      void refreshMessageCenter({ silent: true });
+    };
+
+    window.addEventListener("focus", refreshIfVisible);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+
+    return () => {
+      window.removeEventListener("focus", refreshIfVisible);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+    };
+  }, [open, refreshMessageCenter]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const refreshFromDiscussion = () => {
+      void refreshMessageCenter({ silent: true });
+    };
+
+    window.addEventListener(DISCUSSION_STATE_UPDATED_EVENT, refreshFromDiscussion);
+
+    return () => {
+      window.removeEventListener(DISCUSSION_STATE_UPDATED_EVENT, refreshFromDiscussion);
+    };
   }, [open, refreshMessageCenter]);
 
 
@@ -1509,9 +1549,18 @@ export function MessageCenterDrawer({
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <p className="text-sm font-semibold">{chat.activityTitle}</p>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-sm font-semibold">{chat.activityTitle}</p>
+                              {chat.responseNeeded ? (
+                                <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-black">
+                                  等你回应
+                                </span>
+                              ) : null}
+                            </div>
                             <p className={cn("mt-1 text-xs leading-5", isDarkMode ? "text-white/54" : "text-black/52")}>
-                              {chat.lastMessage || messageCenter?.ui.chatSummaryFallbackMessage || "还没人说话，发句开场吧"}
+                              {chat.lastMessage
+                                ? `${chat.lastMessageSenderNickname ? `${chat.lastMessageSenderNickname}：` : ""}${chat.lastMessage}`
+                                : messageCenter?.ui.chatSummaryFallbackMessage || "还没人说话，发句开场吧"}
                             </p>
                           </div>
                           {chat.unreadCount > 0 ? (

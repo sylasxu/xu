@@ -3,6 +3,7 @@
  * 基于 WebSocket 的实时通讯
  */
 import { postAiTasksDiscussionEntered } from '../../../src/api/endpoints/ai/ai'
+import { requestWechatNotificationSubscription } from '../../../src/services/wechat-notification-subscription'
 import { useDiscussionStore, type ConnectionStatus, type DiscussionMessage } from '../../../src/stores/discussion'
 import { getJoinGuideTitle, getJoinQuickStarters } from '../../../src/utils/join-flow'
 import { useUserStore } from '../../../src/stores/user'
@@ -24,13 +25,6 @@ interface DiscussionPageData {
   joinGuideTitle: string
   joinGuideHint: string
   quickStarters: string[]
-  taskStageTitle: string
-  taskStageHint: string
-  statusChipPrimary: string
-  statusChipSecondary: string
-  statusActionHint: string
-  stagePrimaryActionLabel: string
-  stageSecondaryActionLabel: string
 }
 
 interface DiscussionPageOptions {
@@ -90,6 +84,7 @@ const INITIAL_ERROR: string | null = null
 const INITIAL_UNSUBSCRIBE: (() => void) | null = null
 const INITIAL_REPORTED_ENTRY = false
 const INITIAL_ENTRY = ''
+const INITIAL_SUBSCRIBE_REQUESTED = false
 
 Page<DiscussionPageData, WechatMiniprogram.Page.CustomOption>({
   data: {
@@ -109,19 +104,13 @@ Page<DiscussionPageData, WechatMiniprogram.Page.CustomOption>({
     joinGuideTitle: '',
     joinGuideHint: '先打个招呼吧，大家更容易接住你。',
     quickStarters: [],
-    taskStageTitle: '当前进度：讨论中',
-    taskStageHint: '这场局已经进入协作阶段，活动后我还会继续帮你承接结果。',
-    statusChipPrimary: '讨论协作中',
-    statusChipSecondary: '等待大家继续接话',
-    statusActionHint: '先确认时间地点，再把这场局慢慢聊热。',
-    stagePrimaryActionLabel: '查看活动详情',
-    stageSecondaryActionLabel: '回主场',
   },
 
   // Store 订阅取消函数
   _unsubscribe: INITIAL_UNSUBSCRIBE,
   _hasReportedDiscussionEntry: INITIAL_REPORTED_ENTRY,
   _entry: INITIAL_ENTRY,
+  _hasRequestedSubscribePrompt: INITIAL_SUBSCRIBE_REQUESTED,
 
   onLoad(options: DiscussionPageOptions) {
     const activityId = options.id || options.activityId
@@ -146,16 +135,6 @@ Page<DiscussionPageData, WechatMiniprogram.Page.CustomOption>({
       showJoinGuide: isJoinSuccessEntry,
       joinGuideTitle: isJoinSuccessEntry ? getJoinGuideTitle(title) : '',
       quickStarters: isJoinSuccessEntry ? getJoinQuickStarters(title) : [],
-      taskStageTitle: isJoinSuccessEntry ? '当前进度：报名完成，已进入讨论' : '当前进度：讨论中',
-      taskStageHint: isJoinSuccessEntry
-        ? '刚才报的这场局已经接上了，接下来先破冰、再协作，活动后我还会继续跟进。'
-        : '这场局现在已经进入讨论协作阶段，活动后我还会继续帮你跟进结果。',
-    })
-    this.syncStatusBanner({
-      showJoinGuide: isJoinSuccessEntry,
-      isArchived: false,
-      isConnected: false,
-      messages: [],
     })
 
     // 订阅 store 变化
@@ -213,12 +192,6 @@ Page<DiscussionPageData, WechatMiniprogram.Page.CustomOption>({
         hasMore: state.hasMore,
         isConnected: state.connectionStatus === 'connected',
       })
-      this.syncStatusBanner({
-        showJoinGuide: this.data.showJoinGuide,
-        isArchived: state.isArchived,
-        isConnected: state.connectionStatus === 'connected',
-        messages,
-      })
 
       // 显示错误提示
       if (state.error && state.error !== this.data.error) {
@@ -252,10 +225,30 @@ Page<DiscussionPageData, WechatMiniprogram.Page.CustomOption>({
       return
     }
 
+    void this._requestWechatNotificationSubscribe()
     void this._reportDiscussionEntered()
 
     const store = useDiscussionStore.getState()
     store.connect(this.data.activityId, token)
+  },
+
+  async _requestWechatNotificationSubscribe() {
+    if (this._hasRequestedSubscribePrompt) {
+      return
+    }
+
+    const userId = useUserStore.getState().user?.id || null
+    const isJoinSuccessEntry = this._entry === 'join_success'
+    const scenes = isJoinSuccessEntry
+      ? ['discussion_reply', 'activity_reminder', 'post_activity'] as const
+      : ['discussion_reply', 'post_activity'] as const
+
+    this._hasRequestedSubscribePrompt = true
+    await requestWechatNotificationSubscription({
+      scenes: [...scenes],
+      userId,
+      source: isJoinSuccessEntry ? 'join_success' : 'discussion_first_open',
+    })
   },
 
   async _reportDiscussionEntered() {
@@ -340,72 +333,4 @@ Page<DiscussionPageData, WechatMiniprogram.Page.CustomOption>({
     // 可以用于实现"回到底部"按钮等功能
   },
 
-  syncStatusBanner(context: {
-    showJoinGuide: boolean
-    isArchived: boolean
-    isConnected: boolean
-    messages: DiscussionPageData['messages']
-  }) {
-    let statusChipPrimary = '讨论协作中'
-    let statusChipSecondary = context.isConnected ? '已连上当前讨论区' : '正在恢复讨论连接'
-    let statusActionHint = '先确认时间地点，再把这场局慢慢聊热。'
-    let stagePrimaryActionLabel = '查看活动详情'
-    let stageSecondaryActionLabel = '回主场'
-
-    if (context.showJoinGuide) {
-      statusChipPrimary = '刚加入，先破冰'
-      statusChipSecondary = '先发一句，大家更容易接住你'
-      statusActionHint = '先挑一句快捷开场，别让刚加入的热度掉下去。'
-    } else if (context.isArchived) {
-      statusChipPrimary = '讨论已归档'
-      statusChipSecondary = '现在只能查看历史消息'
-      statusActionHint = '如果还要继续约，建议回主场重新发起下一步。'
-    } else if (context.messages.length === 0) {
-      statusChipPrimary = '等待开场'
-      statusChipSecondary = context.isConnected ? '当前还没人发第一句' : '连接恢复后就能开始聊'
-      statusActionHint = '第一句最重要，先把时间、地点或想法说清楚。'
-    }
-
-    if (this._entry === 'message_center' || this._entry === 'message_center_focus') {
-      stagePrimaryActionLabel = '回活动详情确认'
-      stageSecondaryActionLabel = '处理下一条续办'
-    } else if (this._entry === 'activity_detail') {
-      stagePrimaryActionLabel = '回活动详情'
-      stageSecondaryActionLabel = '回主场继续问'
-    } else if (this._entry === 'join_success') {
-      stagePrimaryActionLabel = '看看活动详情'
-      stageSecondaryActionLabel = '回主场继续找'
-    }
-
-    this.setData({
-      statusChipPrimary,
-      statusChipSecondary,
-      statusActionHint,
-      stagePrimaryActionLabel,
-      stageSecondaryActionLabel,
-    })
-  },
-
-  onOpenActivityDetail() {
-    if (!this.data.activityId) {
-      return
-    }
-
-    wx.navigateTo({
-      url: `/subpackages/activity/detail/index?id=${this.data.activityId}`,
-    })
-  },
-
-  onBackToFlowHub() {
-    if (this._entry === 'message_center' || this._entry === 'message_center_focus') {
-      wx.switchTab({
-        url: '/pages/message/index',
-      })
-      return
-    }
-
-    wx.switchTab({
-      url: '/pages/chat/index',
-    })
-  },
 })

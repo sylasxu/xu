@@ -6,13 +6,11 @@
       greeting="{{dashboardGreeting}}"
       subGreeting="{{dashboardSubGreeting}}"
       sections="{{dashboardSections}}"
-      socialProfile="{{dashboardSocialProfile}}"
       quickPrompts="{{dashboardQuickPrompts}}"
       ui="{{dashboardUi}}"
       bind:activitytap="onDashboardActivityTap"
       bind:prompttap="onDashboardPromptTap"
       bind:quickitemtap="onDashboardQuickItemTap"
-      bind:preferencetap="onDashboardPreferenceTap"
       bind:viewall="onDashboardViewAll"
     />
   </block>

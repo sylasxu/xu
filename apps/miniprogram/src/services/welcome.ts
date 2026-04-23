@@ -1,7 +1,7 @@
 /**
  * 智能欢迎卡片服务
  * Requirements: 1.1, 1.2, 1.3, 1.4, 1.5
- * v4.4 重构: 增加社交档案和快捷入口
+ * v4.4 重构: 增加快捷入口
  *
  * 调用 /ai/welcome API 获取个性化欢迎卡片数据
  */
@@ -13,14 +13,12 @@ import type {
   AiWelcomeResponseQuickPromptsItem,
   AiWelcomeResponseSectionsItem,
   AiWelcomeResponseSectionsItemItemsItem,
-  AiWelcomeResponseSocialProfile,
   GetAiWelcomeParams,
 } from '../api/model';
 
 export type QuickItem = AiWelcomeResponseSectionsItemItemsItem;
 export type QuickItemType = QuickItem['type'];
 export type WelcomeSection = AiWelcomeResponseSectionsItem;
-export type SocialProfile = AiWelcomeResponseSocialProfile;
 export type WelcomePendingActivity = AiWelcomeResponsePendingActivitiesItem;
 export type QuickPrompt = AiWelcomeResponseQuickPromptsItem;
 export type WelcomeResponse = AiWelcomeResponse;

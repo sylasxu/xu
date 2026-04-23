@@ -46,6 +46,10 @@ import Orb from "@/components/Orb";
 import { AuthSheet } from "@/components/auth/auth-sheet";
 import { buildActivityDetailPath, resolveActivityEntry } from "@/lib/activity-url";
 import { readClientToken, readClientUserId } from "@/lib/client-auth";
+import {
+  DISCUSSION_STATE_UPDATED_EVENT,
+  readDiscussionStateUpdate,
+} from "@/lib/discussion-state-events";
 import { isWelcomeFocusCoveredByCurrentTasks } from "@/lib/runtime-task-focus";
 import { cn } from "@/lib/utils";
 import { HomeStateCard } from "@/components/chat/home-state-card";
@@ -83,11 +87,6 @@ const DEFAULT_BOTTOM_ACTIONS: string[] = [
   "附近活动",
   "我的草稿",
 ];
-const DEFAULT_PROFILE_HINTS = {
-  low: "多聊一点，我会更懂你的偏好",
-  medium: "我正在记住你的习惯",
-  high: "你的偏好已经比较清楚，可以直接让我来安排",
-};
 const DEFAULT_CHAT_SHELL_UI = {
   composerHint: "也可以直接说地方、时间、类型或你想找的人",
   pendingActionTitle: "待恢复动作",
@@ -98,23 +97,13 @@ const DEFAULT_CHAT_SHELL_UI = {
 };
 const DEFAULT_SIDEBAR_UI = {
   title: "xu",
-  authSubtitle: "会话与后续进展会持续同步",
-  visitorSubtitle: "先聊当前这一轮，需要时再同步记录",
   messageCenterLabel: "消息中心",
-  messageCenterHint: "搭子确认 / 活动跟进",
-  authContinuationHint: "需要确认搭子或回看结果时，我会帮你继续接上",
   currentTasksTitle: "现在最需要继续的事",
-  currentTasksDescriptionAuthenticated: "先接住还在推进中的事，再决定要不要翻旧对话。",
-  currentTasksDescriptionVisitor: "登录后，这里会继续接住你没做完的事。",
   currentTasksEmpty: "当前没有需要继续推进的事，新的进展会先出现在这里。",
   historyTitle: "历史会话",
-  historyDescriptionAuthenticated: "继续上次聊到一半的内容",
-  historyDescriptionVisitor: "当前设备上的会话会先留在这里",
   searchPlaceholder: "搜索历史会话",
-  visitorHistoryHint: "访客模式下可以直接开始聊天，但不会在这里展示云端会话记录。",
   emptySearchResult: "没有找到匹配的历史会话。",
   emptyHistory: "还没有历史会话，发起第一条消息后这里就会出现。",
-  composerCapabilityHint: "当前输入区已只保留文本发送，没有语音和附件入口。",
 };
 const COMPOSER_EXPAND_THRESHOLD = 10;
 const PENDING_AGENT_ACTION_STORAGE_KEY = "xu:web:pending-agent-action";
@@ -230,11 +219,6 @@ type ChatStreamChunk = UIMessageChunk<ChatStreamMessageMetadata, ChatStreamDataT
 type WelcomeUiPayload = {
   composerPlaceholder: string;
   bottomQuickActions: string[];
-  profileHints: {
-    low: string;
-    medium: string;
-    high: string;
-  };
   chatShell: {
     composerHint: string;
     pendingActionTitle: string;
@@ -245,23 +229,13 @@ type WelcomeUiPayload = {
   };
   sidebar: {
     title: string;
-    authSubtitle: string;
-    visitorSubtitle: string;
     messageCenterLabel: string;
-    messageCenterHint: string;
-    authContinuationHint: string;
     currentTasksTitle: string;
-    currentTasksDescriptionAuthenticated: string;
-    currentTasksDescriptionVisitor: string;
     currentTasksEmpty: string;
     historyTitle: string;
-    historyDescriptionAuthenticated: string;
-    historyDescriptionVisitor: string;
     searchPlaceholder: string;
-    visitorHistoryHint: string;
     emptySearchResult: string;
     emptyHistory: string;
-    composerCapabilityHint: string;
   };
 };
 type WelcomePromptEntry = {
@@ -1352,7 +1326,6 @@ function extractWelcomeUi(payload: unknown): WelcomeUiPayload {
     return {
       composerPlaceholder: DEFAULT_COMPOSER_PLACEHOLDER,
       bottomQuickActions: DEFAULT_BOTTOM_ACTIONS,
-      profileHints: DEFAULT_PROFILE_HINTS,
       chatShell: DEFAULT_CHAT_SHELL_UI,
       sidebar: DEFAULT_SIDEBAR_UI,
     };
@@ -1363,22 +1336,6 @@ function extractWelcomeUi(payload: unknown): WelcomeUiPayload {
         .map((item) => (typeof item === "string" ? item.trim() : ""))
         .filter(Boolean)
     : [];
-
-  const hintsSource = isRecord(payload.ui.profileHints) ? payload.ui.profileHints : {};
-  const profileHints = {
-    low:
-      typeof hintsSource.low === "string" && hintsSource.low.trim()
-        ? hintsSource.low.trim()
-        : DEFAULT_PROFILE_HINTS.low,
-    medium:
-      typeof hintsSource.medium === "string" && hintsSource.medium.trim()
-        ? hintsSource.medium.trim()
-        : DEFAULT_PROFILE_HINTS.medium,
-    high:
-      typeof hintsSource.high === "string" && hintsSource.high.trim()
-        ? hintsSource.high.trim()
-        : DEFAULT_PROFILE_HINTS.high,
-  };
 
   const composerPlaceholder =
     typeof payload.ui.composerPlaceholder === "string" &&
@@ -1391,7 +1348,6 @@ function extractWelcomeUi(payload: unknown): WelcomeUiPayload {
   return {
     composerPlaceholder,
     bottomQuickActions: actions.length ? actions : DEFAULT_BOTTOM_ACTIONS,
-    profileHints,
     chatShell: {
       composerHint:
         typeof chatShellSource.composerHint === "string" && chatShellSource.composerHint.trim()
@@ -1423,38 +1379,14 @@ function extractWelcomeUi(payload: unknown): WelcomeUiPayload {
         typeof sidebarSource.title === "string" && sidebarSource.title.trim()
           ? sidebarSource.title.trim()
           : DEFAULT_SIDEBAR_UI.title,
-      authSubtitle:
-        typeof sidebarSource.authSubtitle === "string" && sidebarSource.authSubtitle.trim()
-          ? sidebarSource.authSubtitle.trim()
-          : DEFAULT_SIDEBAR_UI.authSubtitle,
-      visitorSubtitle:
-        typeof sidebarSource.visitorSubtitle === "string" && sidebarSource.visitorSubtitle.trim()
-          ? sidebarSource.visitorSubtitle.trim()
-          : DEFAULT_SIDEBAR_UI.visitorSubtitle,
       messageCenterLabel:
         typeof sidebarSource.messageCenterLabel === "string" && sidebarSource.messageCenterLabel.trim()
           ? sidebarSource.messageCenterLabel.trim()
           : DEFAULT_SIDEBAR_UI.messageCenterLabel,
-      messageCenterHint:
-        typeof sidebarSource.messageCenterHint === "string" && sidebarSource.messageCenterHint.trim()
-          ? sidebarSource.messageCenterHint.trim()
-          : DEFAULT_SIDEBAR_UI.messageCenterHint,
-      authContinuationHint:
-        typeof sidebarSource.authContinuationHint === "string" && sidebarSource.authContinuationHint.trim()
-          ? sidebarSource.authContinuationHint.trim()
-          : DEFAULT_SIDEBAR_UI.authContinuationHint,
       currentTasksTitle:
         typeof sidebarSource.currentTasksTitle === "string" && sidebarSource.currentTasksTitle.trim()
           ? sidebarSource.currentTasksTitle.trim()
           : DEFAULT_SIDEBAR_UI.currentTasksTitle,
-      currentTasksDescriptionAuthenticated:
-        typeof sidebarSource.currentTasksDescriptionAuthenticated === "string" && sidebarSource.currentTasksDescriptionAuthenticated.trim()
-          ? sidebarSource.currentTasksDescriptionAuthenticated.trim()
-          : DEFAULT_SIDEBAR_UI.currentTasksDescriptionAuthenticated,
-      currentTasksDescriptionVisitor:
-        typeof sidebarSource.currentTasksDescriptionVisitor === "string" && sidebarSource.currentTasksDescriptionVisitor.trim()
-          ? sidebarSource.currentTasksDescriptionVisitor.trim()
-          : DEFAULT_SIDEBAR_UI.currentTasksDescriptionVisitor,
       currentTasksEmpty:
         typeof sidebarSource.currentTasksEmpty === "string" && sidebarSource.currentTasksEmpty.trim()
           ? sidebarSource.currentTasksEmpty.trim()
@@ -1463,22 +1395,10 @@ function extractWelcomeUi(payload: unknown): WelcomeUiPayload {
         typeof sidebarSource.historyTitle === "string" && sidebarSource.historyTitle.trim()
           ? sidebarSource.historyTitle.trim()
           : DEFAULT_SIDEBAR_UI.historyTitle,
-      historyDescriptionAuthenticated:
-        typeof sidebarSource.historyDescriptionAuthenticated === "string" && sidebarSource.historyDescriptionAuthenticated.trim()
-          ? sidebarSource.historyDescriptionAuthenticated.trim()
-          : DEFAULT_SIDEBAR_UI.historyDescriptionAuthenticated,
-      historyDescriptionVisitor:
-        typeof sidebarSource.historyDescriptionVisitor === "string" && sidebarSource.historyDescriptionVisitor.trim()
-          ? sidebarSource.historyDescriptionVisitor.trim()
-          : DEFAULT_SIDEBAR_UI.historyDescriptionVisitor,
       searchPlaceholder:
         typeof sidebarSource.searchPlaceholder === "string" && sidebarSource.searchPlaceholder.trim()
           ? sidebarSource.searchPlaceholder.trim()
           : DEFAULT_SIDEBAR_UI.searchPlaceholder,
-      visitorHistoryHint:
-        typeof sidebarSource.visitorHistoryHint === "string" && sidebarSource.visitorHistoryHint.trim()
-          ? sidebarSource.visitorHistoryHint.trim()
-          : DEFAULT_SIDEBAR_UI.visitorHistoryHint,
       emptySearchResult:
         typeof sidebarSource.emptySearchResult === "string" && sidebarSource.emptySearchResult.trim()
           ? sidebarSource.emptySearchResult.trim()
@@ -1487,10 +1407,6 @@ function extractWelcomeUi(payload: unknown): WelcomeUiPayload {
         typeof sidebarSource.emptyHistory === "string" && sidebarSource.emptyHistory.trim()
           ? sidebarSource.emptyHistory.trim()
           : DEFAULT_SIDEBAR_UI.emptyHistory,
-      composerCapabilityHint:
-        typeof sidebarSource.composerCapabilityHint === "string" && sidebarSource.composerCapabilityHint.trim()
-          ? sidebarSource.composerCapabilityHint.trim()
-          : DEFAULT_SIDEBAR_UI.composerCapabilityHint,
     },
   };
 }
@@ -1633,7 +1549,6 @@ export default function ChatPage() {
   const [welcomeUi, setWelcomeUi] = useState<WelcomeUiPayload>({
     composerPlaceholder: DEFAULT_COMPOSER_PLACEHOLDER,
     bottomQuickActions: DEFAULT_BOTTOM_ACTIONS,
-    profileHints: DEFAULT_PROFILE_HINTS,
     chatShell: DEFAULT_CHAT_SHELL_UI,
     sidebar: DEFAULT_SIDEBAR_UI,
   });
@@ -1647,6 +1562,7 @@ export default function ChatPage() {
   const [isDarkMode, setIsDarkMode] = useState(true);
   const hasResumedPendingActionRef = useRef(false);
   const requestedWelcomeKeyRef = useRef<string | null>(null);
+  const lastHandledDiscussionUpdateAtRef = useRef(0);
 
   const isSending = status === "submitted";
   const showComposerHint = shouldExpandComposer(input);
@@ -1769,6 +1685,44 @@ export default function ChatPage() {
     },
     [authToken]
   );
+
+  const refreshWelcomeSnapshot = useCallback(async () => {
+    if (!welcomeLocationResolved) {
+      return;
+    }
+
+    const currentAuthToken = authToken ?? readClientToken();
+    const welcomeUrl = new URL(`${API_BASE}/ai/welcome`);
+    if (clientLocation) {
+      welcomeUrl.searchParams.set("lat", String(clientLocation.lat));
+      welcomeUrl.searchParams.set("lng", String(clientLocation.lng));
+    }
+
+    try {
+      const response = await fetch(welcomeUrl.toString(), {
+        method: "GET",
+        ...(currentAuthToken
+          ? { headers: { Authorization: `Bearer ${currentAuthToken}` } }
+          : {}),
+      });
+      if (!response.ok) {
+        return;
+      }
+
+      const payload = (await response.json()) as unknown;
+      const prompts = extractWelcomePrompts(payload);
+      if (prompts.length > 0) {
+        setQuickPrompts(prompts);
+      }
+      setWelcomeGreeting(extractWelcomeGreeting(payload));
+      setWelcomeFocus(extractWelcomeFocus(payload));
+      setWelcomeUi(extractWelcomeUi(payload));
+    } catch {
+      // keep current welcome snapshot
+    } finally {
+      setIsWelcomeLoading(false);
+    }
+  }, [authToken, clientLocation, welcomeLocationResolved]);
 
   const handleStartNewConversation = useCallback(() => {
     if (isSending) {
@@ -1984,6 +1938,34 @@ export default function ChatPage() {
       document.removeEventListener("visibilitychange", refreshVisibleTasks);
     };
   }, [refreshCurrentTasks]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const refreshFromDiscussion = () => {
+      const latestDiscussionUpdate = readDiscussionStateUpdate();
+      if (!latestDiscussionUpdate) {
+        return;
+      }
+
+      if (latestDiscussionUpdate.updatedAt <= lastHandledDiscussionUpdateAtRef.current) {
+        return;
+      }
+
+      lastHandledDiscussionUpdateAtRef.current = latestDiscussionUpdate.updatedAt;
+      void refreshCurrentTasks();
+      void refreshWelcomeSnapshot();
+    };
+
+    refreshFromDiscussion();
+    window.addEventListener(DISCUSSION_STATE_UPDATED_EVENT, refreshFromDiscussion);
+
+    return () => {
+      window.removeEventListener(DISCUSSION_STATE_UPDATED_EVENT, refreshFromDiscussion);
+    };
+  }, [refreshCurrentTasks, refreshWelcomeSnapshot]);
 
   const applyCompletionEffectsFromBlocks = useCallback((blocks: GenUIBlock[]) => {
     for (const block of blocks) {
@@ -2933,9 +2915,6 @@ export default function ChatPage() {
                           <div className="min-w-0">
                             <p className={cn("text-[12px] font-semibold tracking-wide", isDarkMode ? "text-white/54" : "text-black/48")}>
                               {welcomeUi.sidebar.currentTasksTitle}
-                            </p>
-                            <p className={cn("mt-1 text-xs leading-5", isDarkMode ? "text-white/42" : "text-black/40")}>
-                              {welcomeUi.sidebar.currentTasksDescriptionAuthenticated}
                             </p>
                           </div>
                           <Clock3 className={cn("mt-0.5 h-4 w-4 shrink-0", isDarkMode ? "text-white/34" : "text-black/32")} />

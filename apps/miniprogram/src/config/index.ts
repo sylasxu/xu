@@ -36,6 +36,22 @@ export const ADMIN_CONFIG = {
 }
 
 /**
+ * 微信订阅通知配置
+ *
+ * 注意：
+ * - 小程序侧不能读取服务端环境变量，因此模板 ID 需要显式填在这里
+ * - 空字符串表示当前环境还未配置，对应场景会自动跳过授权申请
+ */
+export const WECHAT_NOTIFY_CONFIG = {
+  TEMPLATE_IDS: {
+    activity_reminder: '_rUIQvfF95KC6IJRIctfsVe9fZz3QZ9mbYdmXhEZFDQ',
+    discussion_reply: '',
+    post_activity: '',
+  },
+  SUBSCRIBE_PROMPT_COOLDOWN_MS: 7 * 24 * 60 * 60 * 1000,
+}
+
+/**
  * 地图配置 (零成本方案 - 仅使用微信原生 API)
  * 
  * 微信原生 API 不需要 Key：

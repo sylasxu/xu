@@ -52,6 +52,7 @@ import { generateText } from 'ai';
 import { checkRateLimit } from './guardrails/rate-limiter';
 // 辅助函数（从独立模块导入）
 import { getUserNickname } from '../users/user.service';
+import { getDiscussionReplySignals } from '../chat/chat.service';
 import { reverseGeocode } from './utils/geo';
 // Observability
 import { createLogger } from './observability/logger';
@@ -2365,18 +2366,12 @@ export interface WelcomeResponse {
   greeting: string;
   subGreeting?: string;
   sections: WelcomeSection[];
-  socialProfile?: SocialProfile | undefined;
   pendingActivities?: WelcomePendingActivity[] | undefined;
   welcomeFocus?: WelcomeFocus | undefined;
   quickPrompts: QuickPrompt[];
   ui?: {
     composerPlaceholder: string;
     bottomQuickActions: string[];
-    profileHints: {
-      low: string;
-      medium: string;
-      high: string;
-    };
     chatShell?: {
       composerHint: string;
       pendingActionTitle: string;
@@ -2385,25 +2380,15 @@ export interface WelcomeResponse {
       pendingActionBindPhoneHint: string;
       pendingActionResumeLabel: string;
     };
-  sidebar?: {
+    sidebar?: {
       title: string;
-      authSubtitle: string;
-      visitorSubtitle: string;
       messageCenterLabel: string;
-      messageCenterHint: string;
-      authContinuationHint: string;
       currentTasksTitle: string;
-      currentTasksDescriptionAuthenticated: string;
-      currentTasksDescriptionVisitor: string;
       currentTasksEmpty: string;
       historyTitle: string;
-      historyDescriptionAuthenticated: string;
-      historyDescriptionVisitor: string;
       searchPlaceholder: string;
-      visitorHistoryHint: string;
       emptySearchResult: string;
       emptyHistory: string;
-      composerCapabilityHint: string;
     };
   };
 }
@@ -2467,11 +2452,6 @@ interface WelcomeUiConfig {
   }>;
   quickPrompts: QuickPrompt[];
   bottomQuickActions: string[];
-  profileHints: {
-    low: string;
-    medium: string;
-    high: string;
-  };
   chatShell: {
     composerHint: string;
     pendingActionTitle: string;
@@ -2489,23 +2469,13 @@ interface WelcomeUiConfig {
   };
   sidebar: {
     title: string;
-    authSubtitle: string;
-    visitorSubtitle: string;
     messageCenterLabel: string;
-    messageCenterHint: string;
-    authContinuationHint: string;
     currentTasksTitle: string;
-    currentTasksDescriptionAuthenticated: string;
-    currentTasksDescriptionVisitor: string;
     currentTasksEmpty: string;
     historyTitle: string;
-    historyDescriptionAuthenticated: string;
-    historyDescriptionVisitor: string;
     searchPlaceholder: string;
-    visitorHistoryHint: string;
     emptySearchResult: string;
     emptyHistory: string;
-    composerCapabilityHint: string;
   };
 }
 
@@ -2551,11 +2521,6 @@ const DEFAULT_WELCOME_UI_CONFIG: WelcomeUiConfig = {
     { icon: '✨', text: '想组个周五晚的局', prompt: '想组个周五晚的局' },
   ],
   bottomQuickActions: ['快速组局', '找搭子', '附近活动', '我的草稿'],
-  profileHints: {
-    low: '多聊一点，我会更懂你的偏好',
-    medium: '我正在记住你的习惯',
-    high: '你的偏好已经比较清楚，可以直接让我来安排',
-  },
   chatShell: {
     composerHint: '也可以直接说地方、时间、类型或你想找的人',
     pendingActionTitle: '待恢复动作',
@@ -2573,23 +2538,13 @@ const DEFAULT_WELCOME_UI_CONFIG: WelcomeUiConfig = {
   },
   sidebar: {
     title: 'xu',
-    authSubtitle: '会话与后续进展会持续同步',
-    visitorSubtitle: '先聊当前这一轮，需要时再同步记录',
     messageCenterLabel: '消息中心',
-    messageCenterHint: '搭子确认 / 活动跟进',
-    authContinuationHint: '需要确认搭子或回看结果时，我会帮你继续接上',
     currentTasksTitle: '现在最需要继续的事',
-    currentTasksDescriptionAuthenticated: '先接住还在推进中的事，再决定要不要翻旧对话。',
-    currentTasksDescriptionVisitor: '登录后，这里会继续接住你没做完的事。',
     currentTasksEmpty: '当前没有需要继续推进的事，新的进展会先出现在这里。',
     historyTitle: '历史会话',
-    historyDescriptionAuthenticated: '继续上次聊到一半的内容',
-    historyDescriptionVisitor: '当前设备上的会话会先留在这里',
     searchPlaceholder: '搜索历史会话',
-    visitorHistoryHint: '访客模式下可以直接开始聊天，但不会在这里展示云端会话记录。',
     emptySearchResult: '没有找到匹配的历史会话。',
     emptyHistory: '还没有历史会话，发起第一条消息后这里就会出现。',
-    composerCapabilityHint: '当前输入区已只保留文本发送，没有语音和附件入口。',
   },
 };
 
@@ -2648,7 +2603,6 @@ function normalizeWelcomeUiConfig(raw: unknown): WelcomeUiConfig {
 
   const sectionTitlesInput = isRecord(raw.sectionTitles) ? raw.sectionTitles : null;
   const exploreTemplatesInput = isRecord(raw.exploreTemplates) ? raw.exploreTemplates : null;
-  const profileHintsInput = isRecord(raw.profileHints) ? raw.profileHints : null;
 
   const suggestionItems = Array.isArray(raw.suggestionItems)
     ? raw.suggestionItems
@@ -2702,12 +2656,6 @@ function normalizeWelcomeUiConfig(raw: unknown): WelcomeUiConfig {
       .filter(Boolean)
     : [];
 
-  const profileHints = {
-    low: getNonEmptyString(profileHintsInput?.low) ?? DEFAULT_WELCOME_UI_CONFIG.profileHints.low,
-    medium: getNonEmptyString(profileHintsInput?.medium) ?? DEFAULT_WELCOME_UI_CONFIG.profileHints.medium,
-    high: getNonEmptyString(profileHintsInput?.high) ?? DEFAULT_WELCOME_UI_CONFIG.profileHints.high,
-  };
-
   const sectionTitles = {
     suggestions: getNonEmptyString(sectionTitlesInput?.suggestions) ?? DEFAULT_WELCOME_UI_CONFIG.sectionTitles.suggestions,
     explore: getNonEmptyString(sectionTitlesInput?.explore) ?? DEFAULT_WELCOME_UI_CONFIG.sectionTitles.explore,
@@ -2729,7 +2677,6 @@ function normalizeWelcomeUiConfig(raw: unknown): WelcomeUiConfig {
     suggestionItems: suggestionItems.length ? suggestionItems : DEFAULT_WELCOME_UI_CONFIG.suggestionItems,
     quickPrompts: quickPrompts.length ? quickPrompts : DEFAULT_WELCOME_UI_CONFIG.quickPrompts,
     bottomQuickActions: bottomQuickActions.length ? bottomQuickActions : DEFAULT_WELCOME_UI_CONFIG.bottomQuickActions,
-    profileHints,
     chatShell: {
       composerHint: getNonEmptyString(chatShellInput?.composerHint) ?? DEFAULT_WELCOME_UI_CONFIG.chatShell.composerHint,
       pendingActionTitle: getNonEmptyString(chatShellInput?.pendingActionTitle) ?? DEFAULT_WELCOME_UI_CONFIG.chatShell.pendingActionTitle,
@@ -2747,23 +2694,13 @@ function normalizeWelcomeUiConfig(raw: unknown): WelcomeUiConfig {
     },
     sidebar: {
       title: getNonEmptyString(sidebarInput?.title) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.title,
-      authSubtitle: getNonEmptyString(sidebarInput?.authSubtitle) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.authSubtitle,
-      visitorSubtitle: getNonEmptyString(sidebarInput?.visitorSubtitle) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.visitorSubtitle,
       messageCenterLabel: getNonEmptyString(sidebarInput?.messageCenterLabel) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.messageCenterLabel,
-      messageCenterHint: getNonEmptyString(sidebarInput?.messageCenterHint) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.messageCenterHint,
-      authContinuationHint: getNonEmptyString(sidebarInput?.authContinuationHint) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.authContinuationHint,
       currentTasksTitle: getNonEmptyString(sidebarInput?.currentTasksTitle) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.currentTasksTitle,
-      currentTasksDescriptionAuthenticated: getNonEmptyString(sidebarInput?.currentTasksDescriptionAuthenticated) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.currentTasksDescriptionAuthenticated,
-      currentTasksDescriptionVisitor: getNonEmptyString(sidebarInput?.currentTasksDescriptionVisitor) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.currentTasksDescriptionVisitor,
       currentTasksEmpty: getNonEmptyString(sidebarInput?.currentTasksEmpty) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.currentTasksEmpty,
       historyTitle: getNonEmptyString(sidebarInput?.historyTitle) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.historyTitle,
-      historyDescriptionAuthenticated: getNonEmptyString(sidebarInput?.historyDescriptionAuthenticated) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.historyDescriptionAuthenticated,
-      historyDescriptionVisitor: getNonEmptyString(sidebarInput?.historyDescriptionVisitor) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.historyDescriptionVisitor,
       searchPlaceholder: getNonEmptyString(sidebarInput?.searchPlaceholder) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.searchPlaceholder,
-      visitorHistoryHint: getNonEmptyString(sidebarInput?.visitorHistoryHint) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.visitorHistoryHint,
       emptySearchResult: getNonEmptyString(sidebarInput?.emptySearchResult) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.emptySearchResult,
       emptyHistory: getNonEmptyString(sidebarInput?.emptyHistory) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.emptyHistory,
-      composerCapabilityHint: getNonEmptyString(sidebarInput?.composerCapabilityHint) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.composerCapabilityHint,
     },
   };
 }
@@ -2893,81 +2830,27 @@ async function selectWelcomeFocus(userId: string, now: Date): Promise<WelcomeFoc
     };
   }
 
-  const discussionBaseRows = await db
-    .select({
-      activityId: activities.id,
-      activityTitle: activities.title,
-      participantLastReadAt: participants.lastReadAt,
-    })
-    .from(participants)
-    .innerJoin(activities, eq(participants.activityId, activities.id))
-    .where(and(
-      eq(participants.userId, userId),
-      eq(participants.status, 'joined'),
-      eq(activities.status, 'active'),
-      gt(activities.startAt, now),
-    ))
-    .orderBy(desc(activities.updatedAt))
-    .limit(8);
-
-  const discussionCandidates = await Promise.all(
-    discussionBaseRows.map(async (row) => {
-      const [latestMessage, unreadResult] = await Promise.all([
-        db
-          .select({
-            senderId: activityMessages.senderId,
-            senderNickname: users.nickname,
-            content: activityMessages.content,
-            createdAt: activityMessages.createdAt,
-          })
-          .from(activityMessages)
-          .leftJoin(users, eq(activityMessages.senderId, users.id))
-          .where(eq(activityMessages.activityId, row.activityId))
-          .orderBy(desc(activityMessages.createdAt))
-          .limit(1),
-        db
-          .select({ unreadCount: sql<number>`count(*)::int` })
-          .from(activityMessages)
-          .where(and(
-            eq(activityMessages.activityId, row.activityId),
-            gt(activityMessages.createdAt, row.participantLastReadAt),
-            sql`${activityMessages.senderId} IS NULL OR ${activityMessages.senderId} <> ${userId}`,
-          )),
-      ]);
-
-      return {
-        activityId: row.activityId,
-        activityTitle: row.activityTitle,
-        lastMessage: latestMessage[0] || null,
-        unreadCount: unreadResult[0]?.unreadCount || 0,
-      };
-    }),
-  );
-
-  const discussionFocus = discussionCandidates
-    .filter((item) => item.unreadCount > 0 && item.lastMessage && item.lastMessage.senderId !== userId)
-    .sort((left, right) => {
-      const leftTime = left.lastMessage?.createdAt?.getTime() || 0;
-      const rightTime = right.lastMessage?.createdAt?.getTime() || 0;
-      return rightTime - leftTime;
-    })[0];
+  const [discussionFocus] = await getDiscussionReplySignals({
+    userId,
+    limit: 1,
+  });
 
   if (discussionFocus) {
-    const senderPrefix = discussionFocus.lastMessage?.senderNickname
-      ? `${discussionFocus.lastMessage.senderNickname}：`
+    const senderPrefix = discussionFocus.lastMessageSenderNickname
+      ? `${discussionFocus.lastMessageSenderNickname}：`
       : '';
     return {
       type: 'discussion_reply',
       label: `去接「${clampWelcomeTitle(discussionFocus.activityTitle, 10)}」的讨论`,
-      prompt: discussionFocus.lastMessage?.content || '进入讨论区',
+      prompt: discussionFocus.lastMessage || '进入讨论区',
       priority: 2,
       context: {
         activityId: discussionFocus.activityId,
         activityTitle: discussionFocus.activityTitle,
         entry: 'welcome_discussion_reply',
         unreadCount: discussionFocus.unreadCount,
-        summary: discussionFocus.lastMessage?.content
-          ? `${senderPrefix}${discussionFocus.lastMessage.content}`
+        summary: discussionFocus.lastMessage
+          ? `${senderPrefix}${discussionFocus.lastMessage}`
           : undefined,
       },
     };
@@ -3104,15 +2987,14 @@ export async function getWelcomeCard(
   const sections: WelcomeSection[] = [];
   const now = new Date();
 
-  // 社交档案（已登录用户）
-  let socialProfile: { joinedActivities: number; hostedActivities: number; preferenceCompleteness: number } | undefined;
+  // 已登录用户的状态判断
+  let preferenceCompleteness: number | null = null;
   let pendingActivities: WelcomePendingActivity[] = [];
   let hasDraftActivity = false;
   let welcomeFocus: WelcomeFocus | undefined;
 
   if (userId) {
-    const [activityStats, profile, selectedWelcomeFocus] = await Promise.all([
-      getUserActivityStats(userId),
+    const [profile, selectedWelcomeFocus] = await Promise.all([
       getEnhancedUserProfile(userId),
       selectWelcomeFocus(userId, now),
     ]);
@@ -3121,12 +3003,6 @@ export async function getWelcomeCard(
     const preferencesCount = profile.preferences.length;
     const locationsCount = profile.frequentLocations.length;
     const preferenceCompleteness = Math.min(100, preferencesCount * 15 + locationsCount * 10);
-
-    socialProfile = {
-      joinedActivities: activityStats.joinedActivities,
-      hostedActivities: activityStats.hostedActivities,
-      preferenceCompleteness,
-    };
 
     const [draftRows, activeRows] = await Promise.all([
       db
@@ -3236,7 +3112,7 @@ export async function getWelcomeCard(
     subGreeting = welcomeCopy.stateSubGreetings.hasDraft;
   } else if (pendingActivities.length > 0) {
     subGreeting = renderTemplate(welcomeCopy.stateSubGreetings.pendingActivities, { count: String(pendingActivities.length) });
-  } else if (socialProfile && socialProfile.preferenceCompleteness < 30) {
+  } else if (preferenceCompleteness !== null && preferenceCompleteness < 30) {
     subGreeting = welcomeCopy.stateSubGreetings.lowPreference;
   } else if (location) {
     subGreeting = welcomeCopy.stateSubGreetings.nearbyExplore;
@@ -3254,14 +3130,12 @@ export async function getWelcomeCard(
     greeting,
     subGreeting,
     sections,
-    socialProfile,
     pendingActivities,
     welcomeFocus,
     quickPrompts,
     ui: {
       composerPlaceholder: welcomeUi.composerPlaceholder,
       bottomQuickActions: welcomeUi.bottomQuickActions,
-      profileHints: welcomeUi.profileHints,
       chatShell: welcomeUi.chatShell,
       sidebar: welcomeUi.sidebar,
     },

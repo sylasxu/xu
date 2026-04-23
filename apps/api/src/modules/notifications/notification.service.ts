@@ -11,7 +11,7 @@ import type {
   NotificationListResponse,
   UnreadCountResponse,
 } from './notification.model';
-import { getChatActivities } from '../chat/chat.service';
+import { getChatActivities, getDiscussionReplySignals } from '../chat/chat.service';
 import { sendServiceNotificationByUserId, type ServiceNotificationScene } from '../wechat';
 import { confirmMatch as confirmPendingMatchService, cancelMatch as cancelPendingMatchService } from '../ai/tools/partner-match';
 import { getConfigValue } from '../ai/config/config.service';
@@ -733,7 +733,7 @@ async function buildMessageCenterActionItems(params: {
   const now = new Date();
   const items: MessageCenterActionItem[] = [];
 
-  const [postActivityTask, draftTask, recruitingActivity] = await Promise.all([
+  const [postActivityTask, draftTask, recruitingActivity, discussionSignals] = await Promise.all([
     db
       .select({
         id: agentTasks.id,
@@ -788,6 +788,10 @@ async function buildMessageCenterActionItems(params: {
       ))
       .orderBy(sql`${activities.startAt} ASC`)
       .limit(1),
+    getDiscussionReplySignals({
+      userId: params.userId,
+      limit: 2,
+    }),
   ]);
 
   const postActivity = postActivityTask[0];
@@ -812,16 +816,7 @@ async function buildMessageCenterActionItems(params: {
     });
   }
 
-  const discussionItems = params.chatActivities.items
-    .filter((item) => !item.isArchived && item.unreadCount > 0 && item.lastMessageSenderId !== params.userId)
-    .sort((left, right) => {
-      const leftTime = left.lastMessageTime ? new Date(left.lastMessageTime).getTime() : 0;
-      const rightTime = right.lastMessageTime ? new Date(right.lastMessageTime).getTime() : 0;
-      return rightTime - leftTime;
-    })
-    .slice(0, 2);
-
-  for (const chat of discussionItems) {
+  for (const chat of discussionSignals) {
     const senderPrefix = chat.lastMessageSenderNickname ? `${chat.lastMessageSenderNickname}：` : '';
     items.push({
       id: `discussion:${chat.activityId}`,

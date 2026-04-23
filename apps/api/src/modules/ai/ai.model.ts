@@ -501,7 +501,6 @@ const WelcomeResponse = t.Object({
   greeting: t.String({ description: '问候语' }),
   subGreeting: t.Optional(t.String({ description: '副标题' })),
   sections: t.Array(WelcomeSection, { description: '分组列表' }),
-  socialProfile: t.Optional(SocialProfile),
   pendingActivities: t.Optional(t.Array(WelcomePendingActivity, { description: '待参加活动列表（最多 3 个）' })),
   welcomeFocus: t.Optional(WelcomeFocus),
   quickPrompts: t.Array(t.Object({
@@ -514,11 +513,6 @@ const WelcomeResponse = t.Object({
   ui: t.Optional(t.Object({
     composerPlaceholder: t.String({ description: '输入框占位文案' }),
     bottomQuickActions: t.Array(t.String(), { description: '底部快捷操作标签' }),
-    profileHints: t.Object({
-      low: t.String({ description: '偏好完善度较低时文案' }),
-      medium: t.String({ description: '偏好完善度中等时文案' }),
-      high: t.String({ description: '偏好完善度较高时文案' }),
-    }),
     chatShell: t.Optional(t.Object({
       composerHint: t.String({ description: '输入框下方提示文案' }),
       pendingActionTitle: t.String({ description: '待恢复动作标题' }),
@@ -536,23 +530,13 @@ const WelcomeResponse = t.Object({
     })),
     sidebar: t.Optional(t.Object({
       title: t.String({ description: '侧边栏标题' }),
-      authSubtitle: t.String({ description: '已登录副文案' }),
-      visitorSubtitle: t.String({ description: '未登录副文案' }),
       messageCenterLabel: t.String({ description: '消息中心入口标题' }),
-      messageCenterHint: t.String({ description: '消息中心入口说明' }),
-      authContinuationHint: t.String({ description: '未登录承接提示' }),
       currentTasksTitle: t.String({ description: '当前任务分区标题' }),
-      currentTasksDescriptionAuthenticated: t.String({ description: '已登录当前任务分区说明' }),
-      currentTasksDescriptionVisitor: t.String({ description: '未登录当前任务分区说明' }),
       currentTasksEmpty: t.String({ description: '当前任务空状态文案' }),
       historyTitle: t.String({ description: '历史会话标题' }),
-      historyDescriptionAuthenticated: t.String({ description: '已登录历史会话说明' }),
-      historyDescriptionVisitor: t.String({ description: '未登录历史会话说明' }),
       searchPlaceholder: t.String({ description: '历史会话搜索占位' }),
-      visitorHistoryHint: t.String({ description: '访客模式会话说明' }),
       emptySearchResult: t.String({ description: '搜索无结果文案' }),
       emptyHistory: t.String({ description: '空历史文案' }),
-      composerCapabilityHint: t.String({ description: '输入能力说明' }),
     })),
   })),
 });

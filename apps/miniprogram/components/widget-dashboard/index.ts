@@ -1,11 +1,10 @@
 /**
  * Widget Dashboard 组件
  * Requirements: 3.2, 3.3, 3.4, 3.5, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 7.0
- * v4.4 重构: 增加社交档案卡片和快捷入口
+ * v4.4 重构: 增加快捷入口
  * 
  * 进场欢迎卡片
  * - 动态问候语（API 返回）
- * - 社交档案卡片（参与/发起统计 + 偏好完善引导）
  * - 快捷入口（预设 Prompt）
  * - 分组快捷操作（draft/suggestions/explore）
  * - 待参加活动列表（最多 3 个）
@@ -14,7 +13,6 @@
 import type {
   QuickItem,
   QuickPrompt,
-  SocialProfile,
   WelcomePendingActivity,
   WelcomeResponse,
   WelcomeSection,
@@ -30,10 +28,7 @@ interface WidgetDashboardData {
   displayActivities: Activity[];
   hasActivities: boolean;
   hasSections: boolean;
-  // v4.4 新增
-  displaySocialProfile: SocialProfile | null;
   displayQuickPrompts: QuickPrompt[];
-  hasSocialProfile: boolean;
   hasQuickPrompts: boolean;
   displayUi: WelcomeUi | null;
 }
@@ -44,34 +39,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
-
-function readNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
-function readSocialProfile(value: unknown): SocialProfile | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-
-  const joinedActivities = readNumber(value.joinedActivities);
-  const hostedActivities = readNumber(value.hostedActivities);
-  const preferenceCompleteness = readNumber(value.preferenceCompleteness);
-
-  if (
-    joinedActivities === null ||
-    hostedActivities === null ||
-    preferenceCompleteness === null
-  ) {
-    return null;
-  }
-
-  return {
-    joinedActivities,
-    hostedActivities,
-    preferenceCompleteness,
-  };
 }
 
 function readQuickPrompt(value: unknown): QuickPrompt | null {
@@ -146,24 +113,14 @@ function readWelcomeUi(value: unknown): WelcomeUi | null {
   const bottomQuickActions = Array.isArray(value.bottomQuickActions)
     ? value.bottomQuickActions.filter((item): item is string => typeof item === 'string')
     : [];
-  const profileHints = isRecord(value.profileHints) ? value.profileHints : null;
 
-  if (!composerPlaceholder || !profileHints) {
-    return null;
-  }
-
-  const low = readString(profileHints.low);
-  const medium = readString(profileHints.medium);
-  const high = readString(profileHints.high);
-
-  if (!low || !medium || !high) {
+  if (!composerPlaceholder) {
     return null;
   }
 
   return {
     composerPlaceholder,
     bottomQuickActions,
-    profileHints: { low, medium, high },
   };
 }
 
@@ -174,9 +131,7 @@ const WIDGET_DASHBOARD_DATA: WidgetDashboardData = {
   displayActivities: [],
   hasActivities: false,
   hasSections: false,
-  displaySocialProfile: null,
   displayQuickPrompts: [],
-  hasSocialProfile: false,
   hasQuickPrompts: false,
   displayUi: null,
 };
@@ -212,11 +167,6 @@ Component({
       type: Array,
       value: [],
     },
-    // v4.4: 社交档案
-    socialProfile: {
-      type: Object,
-      value: {},
-    },
     // v4.4: 快捷入口
     quickPrompts: {
       type: Array,
@@ -249,14 +199,6 @@ Component({
       this.setData({
         displaySections: resolvedSections,
         hasSections: resolvedSections.length > 0,
-      });
-    },
-    // v4.4 新增
-    'socialProfile': function(profile: SocialProfile | null) {
-      const resolvedProfile = readSocialProfile(profile);
-      this.setData({
-        displaySocialProfile: resolvedProfile,
-        hasSocialProfile: resolvedProfile !== null,
       });
     },
     'quickPrompts': function(prompts: unknown) {
@@ -326,10 +268,6 @@ Component({
      */
     onQuickPromptTap(e: WechatMiniprogram.CustomEvent<{ prompt: string; text: string }>) {
       this.triggerEvent('prompttap', { prompt: e.detail.prompt });
-    },
-
-    onPreferenceTap() {
-      this.triggerEvent('preferencetap');
     },
   },
 });

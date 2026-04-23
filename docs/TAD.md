@@ -76,12 +76,11 @@
 │   │   │   ├── login/        # 登录页
 │   │   │   └── setting/      # 设置页
 │   │   │       └── preference/ # 偏好设置页
-│   │   ├── components/       # 公共组件 (37 个)
+│   │   ├── components/       # 公共组件 (35 个)
 │   │   │   ├── custom-navbar/    # 自定义导航栏
 │   │   │   ├── ai-dock/          # 超级输入坞
 │   │   │   ├── chat-stream/      # 对话流容器
-│   │   │   ├── widget-dashboard/ # 进场欢迎卡片（含社交档案）
-│   │   │   ├── social-profile-card/ # 社交档案卡片
+│   │   │   ├── widget-dashboard/ # 进场欢迎卡片
 │   │   │   ├── quick-prompts/    # 快捷入口组件
 │   │   │   ├── hot-chips/        # 热词胶囊组件
 │   │   │   ├── widget-draft/     # 意图解析卡片
@@ -94,7 +93,6 @@
 │   │   │   ├── widget-skeleton/  # 卡片骨架屏
 │   │   │   ├── thinking-bubble/  # AI 思考气泡
 │   │   │   ├── auth-sheet/       # 半屏授权弹窗
-│   │   │   ├── share-guide/      # 分享引导蒙层
 │   │   │   ├── activity-preview-sheet/ # 活动预览浮层
 │   │   │   └── ...               # 其他组件
 │   │   ├── src/
@@ -490,6 +488,7 @@ export const agentTaskEvents = pgTable('agent_task_events', {
 - `activity_messages` / discussion 负责协作消息，`agent_task_events` 负责关键阶段与结果事件
 - `notifications.taskId` 用于把 `post_activity`、`activity_reminder`、`match_reassigned` 这类异步结果重新挂回对应任务，而不是让通知成为孤立入口
 - 小程序消息中心读取到 `notifications.taskId` 与 `pendingMatches.taskId` 后，应优先恢复对应 open task；只有任务已结束或不存在时，才回退到活动详情等普通页面跳转
+- 微信服务通知与消息中心必须共享同一套任务语义：服务通知负责离线触达，消息中心负责站内收口，二者不能演变成两套互不认识的后续系统
 - 游客浏览仍可继续，但持久化任务 ownership 从已认证用户开始
 - `/ai/chat` 在文本续聊时优先读取当前 `conversationId` 对应的 active task context，再决定是否走 `explore_nearby / ask_preference / find_partner / save_draft_settings / confirm_publish / create_activity`，regex / 历史消息仅作为兜底
 
@@ -2400,6 +2399,62 @@ runAsyncProcessors([{ processor: extractPreferencesProcessor }], postLLMContext)
 - **消息中心聚合接口**：新增 `GET /notifications/message-center?userId=...`，一次返回系统通知、待确认匹配、通知未读与群聊未读，前端消息页改为单接口渲染
 - **讨论区历史分页**：`GET /chat/:activityId/messages` 补充 `before` 游标与 `historyCursor/hasMoreHistory`，H5 `discussion-runtime-panel.tsx` 支持“查看更多历史消息”并保持加载前后的滚动位置
 - **讨论区离线提醒**：讨论区新消息统一走 `createChatMessage` 落库路径；对当前不在线、且从 0 未读变成 1 未读的已报名成员，补发 `discussion_reply` 服务提醒，避免报名成功后协同链路在离线阶段掉线
+- **讨论承接状态收口**：H5 讨论区在成功加载消息、发送消息、收到新消息后，通过轻量 discussion-state 事件主动刷新 `/chat` welcome focus 与消息中心，降低“已经接手但首页仍催我”的滞后感
+
+#### 通知模块当前实现判断
+
+当前实现已经具备“可发送、可承接、可挂回任务”的基础能力，但仍属于第一阶段产品化：
+
+- **已落地能力**
+  - `apps/api/src/modules/wechat/wechat-notification.service.ts` 已支持 `post_activity / activity_reminder / discussion_reply / match_reassigned / partner_connect_request / partner_group_up_request`
+  - 小程序 `pages/message/index.ts` 与 H5 `message-center-drawer.tsx` 已形成统一的站内承接面
+  - `discussion_reply` 已具备离线提醒与讨论区深链承接，`post_activity` 已具备真实结果直写与 follow-up 入口
+- **仍需继续补强**
+  - 通知模板字段、落地页动作与文案语气仍需按主场景统一，不应继续按单个接口零散生长
+  - 小程序订阅授权时机仍需明确产品化设计，否则服务通知能力无法稳定转化成真实触达
+  - 指标不应只停留在“发送成功”，还需补齐点击、进入承接页、动作完成、结果闭环等漏斗
+
+#### 通知模块主场景约束
+
+当前阶段，通知模块优先只围绕 3 条高价值主链持续打磨：
+
+1. `activity_reminder`
+目标是把活动开始前的掉线参与者拉回到场景中。
+
+2. `discussion_reply`
+目标是保证报名成功后的协同链不断线，避免“进了活动但没跟上讨论”。
+
+3. `post_activity`
+目标是把真实结果、复盘、再约和 memory 写回收束到同一条后续链路。
+
+#### 微信通知实现约束
+
+微信通知当前仅将 `activity_reminder / discussion_reply / post_activity` 视为第一优先级强触达场景；其余 scene 可以继续保留发送能力，但不应先于这 3 条主链扩张产品复杂度。
+
+**订阅授权时机约束**：
+
+- `discussion_reply`：报名成功后进入讨论区或 join-success 承接页时申请
+- `activity_reminder`：报名成功后申请；若用户当下未授权，可在活动开始前的详情/讨论区再申请一次
+- `post_activity`：报名成功后或活动进行中的 discussion 承接页申请
+- 禁止在首页空态、泛浏览态、无明确任务归属时主动申请微信订阅
+
+**模板字段约束**：
+
+- `activity_reminder`：固定映射为“活动标题 + 开始时间 + 地点”
+- `discussion_reply`：固定映射为“活动标题 + 回复人/摘要”
+- `post_activity`：固定映射为“活动标题 + 结束提示 + 下一步轻提示”
+- 字段长度需要在发送前统一裁切与清洗，避免每个调用方自行决定模板填充方式
+
+**Deep Link 约束**：
+
+- `activity_reminder`：默认跳到活动详情或讨论区，且首屏必须能直接继续安排到场
+- `discussion_reply`：默认跳到 `subpackages/activity/discussion/index?id={activityId}`
+- `post_activity`：默认跳到消息中心或活动后承接页，但首屏必须直接出现反馈动作，不允许只展示一条普通通知列表
+
+**降级约束**：
+
+- 未拿到订阅授权、缺少模板 ID、缺少 `wxOpenId` 或微信凭证时，服务通知可跳过，但消息中心承接必须继续成立
+- 发送成功不等于完成；后续分析至少要覆盖 send / open / landed / acted 四层漏斗
 
 **核心类型**：
 
@@ -3029,6 +3084,7 @@ Next.js SSR
 - 游客可以浏览公开详情与最近讨论摘要
 - 报名、进入讨论区等写入动作统一触发 H5 登录/绑定手机号动作闸门
 - 报名成功后统一进入 `join_success -> discussion -> quick starters` 链路
+- H5 承担“当下立即继续”的承接职责；若要解决活动开始前提醒、讨论区离线回复、活动后补反馈等离线召回，应优先通过小程序订阅通知完成
 
 ### 6.19.6 首页主路由 (`/chat`)
 
@@ -3039,6 +3095,7 @@ Next.js SSR
 - 支持在同一 assistant 气泡内渲染文本 + 结构化 block
 - 与小程序共享同一产品哲学，在小程序不可用时也能独立承接主流程
 - 当前实现包含消息中心抽屉、侧边抽屉与状态首页承接，不再把 H5 定义为“无消息中心的游客降级页”
+- H5 不承担微信订阅通知能力；需要“离线后还能叫回来”的链路，统一由小程序承担强触达，H5 只负责用户回到站内后的恢复与继续推进
 - 页面视觉采用 **首页空态 / 任务主舞台** 双态结构：
   - **首页空态**：暗色舞台 + Hero/状态承接 + 快捷入口 + 底部输入框
   - **任务主舞台**：纯黑或近纯黑背景 + transcript + GenUI card 主导

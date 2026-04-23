@@ -144,10 +144,4 @@
     bind:viewpolicy="onAuthSheetViewPolicy"
   />
   
-  <!-- 分享引导蒙层 -->
-  <share-guide 
-    show="{{isShareGuideVisible}}"
-    title="{{shareGuideTitle}}"
-    locationName="{{shareGuideLocationName}}"
-  />
 </view>

@@ -6,7 +6,6 @@ interface WidgetPartDataState {
   dashboardSubGreeting: string;
   dashboardSections: Record<string, unknown>[];
   dashboardActivities: Record<string, unknown>[];
-  dashboardSocialProfile: Record<string, unknown>;
   dashboardQuickPrompts: Record<string, unknown>[];
   dashboardUi: Record<string, unknown>;
   askPreferenceDisabled: boolean;
@@ -52,7 +51,6 @@ Component({
     dashboardSubGreeting: '',
     dashboardSections: [],
     dashboardActivities: [],
-    dashboardSocialProfile: {},
     dashboardQuickPrompts: [],
     dashboardUi: {},
     askPreferenceDisabled: false,
@@ -91,9 +89,6 @@ Component({
       const dashboardSubGreeting = typeof partData.subGreeting === 'string' ? partData.subGreeting : ''
       const dashboardSections = Array.isArray(partData.sections) ? partData.sections as Record<string, unknown>[] : []
       const dashboardActivities = Array.isArray(partData.activities) ? partData.activities as Record<string, unknown>[] : []
-      const dashboardSocialProfile = partData.socialProfile && typeof partData.socialProfile === 'object'
-        ? partData.socialProfile as Record<string, unknown>
-        : {}
       const dashboardQuickPrompts = Array.isArray(partData.quickPrompts) ? partData.quickPrompts as Record<string, unknown>[] : []
       const dashboardUi = partData.ui && typeof partData.ui === 'object'
         ? partData.ui as Record<string, unknown>
@@ -105,7 +100,6 @@ Component({
         dashboardSubGreeting,
         dashboardSections,
         dashboardActivities,
-        dashboardSocialProfile,
         dashboardQuickPrompts,
         dashboardUi,
         askPreferenceDisabled: disabled,

@@ -6,10 +6,8 @@ import {
   ChevronRight,
   Clock3,
   History,
-  LogIn,
   Menu,
   Search,
-  Sparkles,
   UserRound,
 } from "lucide-react";
 
@@ -33,23 +31,13 @@ type SidebarDrawerProps = {
   currentTasksLoading?: boolean;
   ui: {
     title: string;
-    authSubtitle: string;
-    visitorSubtitle: string;
     messageCenterLabel: string;
-    messageCenterHint: string;
-    authContinuationHint: string;
     currentTasksTitle: string;
-    currentTasksDescriptionAuthenticated: string;
-    currentTasksDescriptionVisitor: string;
     currentTasksEmpty: string;
     historyTitle: string;
-    historyDescriptionAuthenticated: string;
-    historyDescriptionVisitor: string;
     searchPlaceholder: string;
-    visitorHistoryHint: string;
     emptySearchResult: string;
     emptyHistory: string;
-    composerCapabilityHint: string;
   };
   onSelectConversation: (conversationId: string) => Promise<void>;
   onSelectTaskAction: (action: SidebarTaskAction) => Promise<void> | void;
@@ -269,11 +257,7 @@ export function SidebarDrawer({
   }, [conversations, searchValue]);
 
   const displayName = userProfile?.nickname?.trim() || (userId ? `用户 ${userId.slice(0, 6)}` : "访客模式");
-  const secondaryLabel = userProfile?.phoneNumber?.trim()
-    ? userProfile.phoneNumber
-    : authToken
-      ? ui.authSubtitle
-      : ui.visitorSubtitle;
+  const secondaryLabel = userProfile?.phoneNumber?.trim() ?? "";
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -328,7 +312,9 @@ export function SidebarDrawer({
               )}
               <div className="min-w-0">
                 <p className={cn("truncate text-[17px] font-semibold", isDarkMode ? "text-white/94" : "text-black/90")}>{displayName}</p>
-                <p className={cn("mt-1 text-xs", isDarkMode ? "text-white/48" : "text-black/46")}>{secondaryLabel}</p>
+                {secondaryLabel ? (
+                  <p className={cn("mt-1 text-xs", isDarkMode ? "text-white/48" : "text-black/46")}>{secondaryLabel}</p>
+                ) : null}
               </div>
             </div>
 
@@ -350,44 +336,20 @@ export function SidebarDrawer({
                   <BellRing className="h-4 w-4" />
                   {ui.messageCenterLabel}
                 </span>
-                <span className={cn("text-xs", isDarkMode ? "text-white/40" : "text-black/38")}>{ui.messageCenterHint}</span>
               </button>
-
-              {!authToken ? (
-                <div
-                  className={cn(
-                    "flex items-center gap-2 rounded-[20px] border px-3.5 py-3 text-sm",
-                    isDarkMode ? "border-white/8 bg-white/[0.02] text-white/70" : "border-black/8 bg-black/[0.02] text-black/68"
-                  )}
-                >
-                  <LogIn className="h-4 w-4" />
-                  {ui.authContinuationHint}
-                </div>
-              ) : null}
             </div>
           </section>
 
-          <section className="mt-5">
+          {authToken ? (
+            <section className="mt-5">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
                 <p className={cn("text-[15px] font-semibold", isDarkMode ? "text-white/92" : "text-black/88")}>{ui.currentTasksTitle}</p>
-                <p className={cn("mt-1 text-xs", isDarkMode ? "text-white/42" : "text-black/40")}>
-                  {authToken ? ui.currentTasksDescriptionAuthenticated : ui.currentTasksDescriptionVisitor}
-                </p>
               </div>
               <Clock3 className={cn("h-4 w-4", isDarkMode ? "text-white/40" : "text-black/36")} />
             </div>
 
-            {!authToken ? (
-              <div
-                className={cn(
-                  "rounded-[24px] border px-4 py-4 text-sm",
-                  isDarkMode ? "border-white/8 bg-white/[0.02] text-white/60" : "border-black/8 bg-white text-black/60"
-                )}
-              >
-                {ui.currentTasksDescriptionVisitor}
-              </div>
-            ) : loading || currentTasksLoading ? (
+            {loading || currentTasksLoading ? (
               <div className="space-y-2">
                 {[0, 1].map((item) => (
                   <div
@@ -492,50 +454,38 @@ export function SidebarDrawer({
                 })}
               </div>
             )}
-          </section>
+            </section>
+          ) : null}
 
-          <section className="mt-5">
+          {authToken ? (
+            <section className="mt-5">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
                 <p className={cn("text-[15px] font-semibold", isDarkMode ? "text-white/92" : "text-black/88")}>{ui.historyTitle}</p>
-                <p className={cn("mt-1 text-xs", isDarkMode ? "text-white/42" : "text-black/40")}>
-                  {authToken ? ui.historyDescriptionAuthenticated : ui.historyDescriptionVisitor}
-                </p>
               </div>
               <History className={cn("h-4 w-4", isDarkMode ? "text-white/40" : "text-black/36")} />
             </div>
 
-            {authToken ? (
-              <div
+            <div
+              className={cn(
+                "mb-3 flex items-center gap-2 rounded-[18px] border px-3 py-2.5",
+                isDarkMode ? "border-white/8 bg-white/[0.03]" : "border-black/8 bg-white"
+              )}
+            >
+              <Search className={cn("h-4 w-4", isDarkMode ? "text-white/36" : "text-black/34")} />
+              <input
+                type="text"
+                value={searchValue}
+                onChange={(event) => setSearchValue(event.target.value)}
+                placeholder={ui.searchPlaceholder}
                 className={cn(
-                  "mb-3 flex items-center gap-2 rounded-[18px] border px-3 py-2.5",
-                  isDarkMode ? "border-white/8 bg-white/[0.03]" : "border-black/8 bg-white"
+                  "min-w-0 flex-1 bg-transparent text-sm outline-none",
+                  isDarkMode ? "text-white/84 placeholder:text-white/26" : "text-black/84 placeholder:text-black/26"
                 )}
-              >
-                <Search className={cn("h-4 w-4", isDarkMode ? "text-white/36" : "text-black/34")} />
-                <input
-                  type="text"
-                  value={searchValue}
-                  onChange={(event) => setSearchValue(event.target.value)}
-                  placeholder={ui.searchPlaceholder}
-                  className={cn(
-                    "min-w-0 flex-1 bg-transparent text-sm outline-none",
-                    isDarkMode ? "text-white/84 placeholder:text-white/26" : "text-black/84 placeholder:text-black/26"
-                  )}
-                />
-              </div>
-            ) : null}
+              />
+            </div>
 
-            {!authToken ? (
-              <div
-                className={cn(
-                  "rounded-[24px] border px-4 py-4 text-sm",
-                  isDarkMode ? "border-white/8 bg-white/[0.02] text-white/60" : "border-black/8 bg-white text-black/60"
-                )}
-              >
-                {ui.visitorHistoryHint}
-              </div>
-            ) : loading ? (
+            {loading ? (
               <div className="space-y-2">
                 {[0, 1, 2].map((item) => (
                   <div
@@ -605,14 +555,9 @@ export function SidebarDrawer({
                 })}
               </div>
             )}
-          </section>
+            </section>
+          ) : null}
 
-          <div className="mt-5 flex items-center gap-2 rounded-[20px] border px-3.5 py-3">
-            <Sparkles className={cn("h-4 w-4", isDarkMode ? "text-white/40" : "text-black/36")} />
-            <p className={cn("text-xs leading-5", isDarkMode ? "text-white/46" : "text-black/44")}>
-              {ui.composerCapabilityHint}
-            </p>
-          </div>
         </div>
       </DialogContent>
     </Dialog>

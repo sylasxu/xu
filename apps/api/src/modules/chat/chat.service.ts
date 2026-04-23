@@ -15,6 +15,17 @@ import { sendServiceNotificationByUserId } from '../wechat';
 // 群聊归档时间：活动开始后 24 小时
 const ARCHIVE_HOURS = 24;
 
+export interface DiscussionReplySignal {
+  activityId: string;
+  activityTitle: string;
+  lastMessage: string | null;
+  lastMessageTime: string | null;
+  lastMessageSenderId: string | null;
+  lastMessageSenderNickname: string | null;
+  unreadCount: number;
+  responseNeeded: boolean;
+}
+
 function calculateIsArchived(startAt: Date): boolean {
   const archiveTime = new Date(startAt.getTime() + ARCHIVE_HOURS * 60 * 60 * 1000);
   return new Date() > archiveTime;
@@ -121,27 +132,47 @@ export async function getChatActivities(
 
   const latestMessageRows = await Promise.all(
     baseRows.map(async (row) => {
-      const [latestMessage] = await db
-        .select({
-          content: activityMessages.content,
-          createdAt: activityMessages.createdAt,
-          senderId: activityMessages.senderId,
-          senderNickname: users.nickname,
-        })
-        .from(activityMessages)
-        .leftJoin(users, eq(activityMessages.senderId, users.id))
-        .where(eq(activityMessages.activityId, row.activityId))
-        .orderBy(desc(activityMessages.createdAt))
-        .limit(1);
+      const [latestMessageRows, latestSelfMessageRows, unreadRows] = await Promise.all([
+        db
+          .select({
+            content: activityMessages.content,
+            createdAt: activityMessages.createdAt,
+            senderId: activityMessages.senderId,
+            senderNickname: users.nickname,
+          })
+          .from(activityMessages)
+          .leftJoin(users, eq(activityMessages.senderId, users.id))
+          .where(eq(activityMessages.activityId, row.activityId))
+          .orderBy(desc(activityMessages.createdAt))
+          .limit(1),
+        db
+          .select({ createdAt: activityMessages.createdAt })
+          .from(activityMessages)
+          .where(and(
+            eq(activityMessages.activityId, row.activityId),
+            eq(activityMessages.senderId, userId),
+          ))
+          .orderBy(desc(activityMessages.createdAt))
+          .limit(1),
+        db
+          .select({ unreadCount: count() })
+          .from(activityMessages)
+          .where(and(
+            eq(activityMessages.activityId, row.activityId),
+            gt(activityMessages.createdAt, row.participantLastReadAt),
+            sql`${activityMessages.senderId} IS NULL OR ${activityMessages.senderId} <> ${userId}`
+          )),
+      ]);
 
-      const [unreadResult] = await db
-        .select({ unreadCount: count() })
-        .from(activityMessages)
-        .where(and(
-          eq(activityMessages.activityId, row.activityId),
-          gt(activityMessages.createdAt, row.participantLastReadAt),
-          sql`${activityMessages.senderId} IS NULL OR ${activityMessages.senderId} <> ${userId}`
-        ));
+      const latestMessage = latestMessageRows[0] || null;
+      const latestSelfMessageCreatedAt = latestSelfMessageRows[0]?.createdAt || null;
+      const latestMessageCreatedAt = latestMessage?.createdAt || null;
+      const unreadCount = unreadRows[0]?.unreadCount || 0;
+      const responseNeeded = Boolean(
+        latestMessageCreatedAt
+        && latestMessage?.senderId !== userId
+        && (latestSelfMessageCreatedAt === null || latestSelfMessageCreatedAt < latestMessageCreatedAt)
+      );
 
       return {
         activityId: row.activityId,
@@ -149,7 +180,8 @@ export async function getChatActivities(
         lastMessageTime: latestMessage?.createdAt?.toISOString() || null,
         lastMessageSenderId: latestMessage?.senderId || null,
         lastMessageSenderNickname: latestMessage?.senderNickname || null,
-        unreadCount: unreadResult?.unreadCount || 0,
+        unreadCount,
+        responseNeeded,
       };
     })
   );
@@ -162,6 +194,7 @@ export async function getChatActivities(
       lastMessageSenderId: string | null;
       lastMessageSenderNickname: string | null;
       unreadCount: number;
+      responseNeeded: boolean;
     }
   >(latestMessageRows.map((item) => [item.activityId, {
     lastMessage: item.lastMessage,
@@ -169,6 +202,7 @@ export async function getChatActivities(
     lastMessageSenderId: item.lastMessageSenderId,
     lastMessageSenderNickname: item.lastMessageSenderNickname,
     unreadCount: item.unreadCount,
+    responseNeeded: item.responseNeeded,
   }]));
 
   let totalUnread = 0;
@@ -185,12 +219,43 @@ export async function getChatActivities(
       lastMessageSenderId: latest?.lastMessageSenderId || null,
       lastMessageSenderNickname: latest?.lastMessageSenderNickname || null,
       unreadCount,
+      responseNeeded: latest?.responseNeeded || false,
       isArchived: calculateIsArchived(row.startAt),
       participantCount: participantCountMap.get(row.activityId) || 0,
     };
   });
 
   return { items, total, page, totalPages, totalUnread };
+}
+
+export async function getDiscussionReplySignals(params: {
+  userId: string;
+  limit?: number;
+}): Promise<DiscussionReplySignal[]> {
+  const chatActivities = await getChatActivities(params.userId, {
+    userId: params.userId,
+    page: 1,
+    limit: Math.max(params.limit ?? 10, 1),
+  });
+
+  return chatActivities.items
+    .filter((item) => !item.isArchived && item.unreadCount > 0 && item.responseNeeded)
+    .map((item) => ({
+      activityId: item.activityId,
+      activityTitle: item.activityTitle,
+      lastMessage: item.lastMessage,
+      lastMessageTime: item.lastMessageTime,
+      lastMessageSenderId: item.lastMessageSenderId,
+      lastMessageSenderNickname: item.lastMessageSenderNickname,
+      unreadCount: item.unreadCount,
+      responseNeeded: item.responseNeeded,
+    }))
+    .sort((left, right) => {
+      const leftTime = left.lastMessageTime ? new Date(left.lastMessageTime).getTime() : 0;
+      const rightTime = right.lastMessageTime ? new Date(right.lastMessageTime).getTime() : 0;
+      return rightTime - leftTime;
+    })
+    .slice(0, params.limit ?? 10);
 }
 
 /**

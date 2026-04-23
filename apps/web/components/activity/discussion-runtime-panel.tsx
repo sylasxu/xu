@@ -5,6 +5,7 @@ import { Send, Sparkles, Users, Wifi, WifiOff } from "lucide-react"
 import { useSearchParams } from "next/navigation"
 
 import { readClientToken, readClientUserId } from "@/lib/client-auth"
+import { markDiscussionStateUpdated } from "@/lib/discussion-state-events"
 import { cn } from "@/lib/utils"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:1996"
@@ -393,6 +394,10 @@ export function DiscussionRuntimePanel({
       setHistoryCursor(typeof payload.historyCursor === "string" ? payload.historyCursor : null)
       setHasMoreHistory(payload.hasMoreHistory === true)
       setLoadState("ready")
+      markDiscussionStateUpdated({
+        activityId,
+        reason: "messages_loaded",
+      })
     } catch (error) {
       setLoadState("error")
       setNotice(error instanceof Error ? error.message : "讨论消息加载失败")
@@ -508,6 +513,10 @@ export function DiscussionRuntimePanel({
       if (parsed.type === "message") {
         pendingScrollModeRef.current = "bottom"
         setMessages((current) => mergeMessageList(current, parsed.data))
+        markDiscussionStateUpdated({
+          activityId,
+          reason: "message_received",
+        })
         return
       }
 
@@ -568,6 +577,10 @@ export function DiscussionRuntimePanel({
       }
 
       setInput("")
+      markDiscussionStateUpdated({
+        activityId,
+        reason: "message_sent",
+      })
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "发送失败，请稍后再试")
     } finally {

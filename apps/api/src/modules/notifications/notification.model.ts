@@ -126,6 +126,7 @@ const MessageCenterChatItem = t.Object({
   lastMessageSenderId: t.Union([t.String(), t.Null()]),
   lastMessageSenderNickname: t.Union([t.String(), t.Null()]),
   unreadCount: t.Number(),
+  responseNeeded: t.Boolean(),
   isArchived: t.Boolean(),
   participantCount: t.Number(),
 });

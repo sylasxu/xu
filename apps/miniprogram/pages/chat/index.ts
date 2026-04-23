@@ -21,7 +21,6 @@ import {
   getUserLocation,
   type QuickItem,
   type QuickPrompt,
-  type SocialProfile,
 } from '../../src/services/welcome'
 import { getAiTasksCurrent } from '../../src/api/endpoints/ai/ai'
 import type {
@@ -39,27 +38,12 @@ import type {
 const DEFAULT_COMPOSER_PLACEHOLDER = '你想找什么活动？'
 const DEFAULT_WELCOME_GREETING = '晚上好，朋友！'
 const DEFAULT_WELCOME_SUB_GREETING = '附近有新局，想直接看看吗？'
-const DEFAULT_WELCOME_PROFILE_HINTS = {
-  low: '多聊一点，我会更懂你的偏好',
-  medium: '我正在记住你的习惯',
-  high: '你的偏好已经比较清楚，可以直接让我来安排',
-}
 const DEFAULT_RUNTIME_STATUS_UI = {
   networkOfflineText: '网络连接已断开',
   networkRetryText: '重试',
   networkRestoredToast: '网络已恢复',
   widgetErrorMessage: '出了点问题',
   widgetErrorRetryText: '重试',
-}
-const DEFAULT_WELCOME_SOCIAL_PROFILE: SocialProfile = {
-  joinedActivities: 0,
-  hostedActivities: 0,
-  preferenceCompleteness: 0,
-}
-type WelcomeProfileHints = {
-  low: string
-  medium: string
-  high: string
 }
 const DEFAULT_WELCOME_QUICK_PROMPTS: QuickPrompt[] = [
   { icon: '#', text: '周末附近有什么活动', prompt: '周末附近有什么活动' },
@@ -78,15 +62,9 @@ interface PageData {
   userNickname: string
   inputValue: string
   isAuthSheetVisible: boolean
-  isShareGuideVisible: boolean
-  shareGuideData: { activityId?: string; title?: string; mapUrl?: string } | null
-  shareGuideTitle: string
-  shareGuideLocationName: string
   isWelcomeState: boolean
   welcomeGreeting: string
   welcomeSubGreeting: string
-  welcomeSocialProfile: SocialProfile | null
-  welcomeProfileHints: WelcomeProfileHints | null
   welcomeQuickPrompts: QuickPrompt[]
   
   // 欢迎卡片 (v3.10 新结构)
@@ -357,15 +335,9 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     userNickname: '搭子',
     inputValue: '',
     isAuthSheetVisible: false,
-    isShareGuideVisible: false,
-    shareGuideData: null,
-    shareGuideTitle: '',
-    shareGuideLocationName: '',
     isWelcomeState: true,
     welcomeGreeting: DEFAULT_WELCOME_GREETING,
     welcomeSubGreeting: DEFAULT_WELCOME_SUB_GREETING,
-    welcomeSocialProfile: DEFAULT_WELCOME_SOCIAL_PROFILE,
-    welcomeProfileHints: DEFAULT_WELCOME_PROFILE_HINTS,
     welcomeQuickPrompts: DEFAULT_WELCOME_QUICK_PROMPTS,
     composerPlaceholder: DEFAULT_COMPOSER_PLACEHOLDER,
     networkOfflineText: DEFAULT_RUNTIME_STATUS_UI.networkOfflineText,
@@ -442,18 +414,10 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     const appStore = useAppStore.getState()
     this.setData({
       isAuthSheetVisible: appStore.isAuthSheetVisible,
-      isShareGuideVisible: appStore.isShareGuideVisible,
-      shareGuideData: appStore.shareGuideData,
-      shareGuideTitle: typeof appStore.shareGuideData?.title === 'string' ? appStore.shareGuideData.title : '',
-      shareGuideLocationName: typeof appStore.shareGuideData?.locationName === 'string' ? appStore.shareGuideData.locationName : '',
     })
     this.unsubscribeApp = useAppStore.subscribe((state) => {
       this.setData({
         isAuthSheetVisible: state.isAuthSheetVisible,
-        isShareGuideVisible: state.isShareGuideVisible,
-        shareGuideData: state.shareGuideData,
-        shareGuideTitle: typeof state.shareGuideData?.title === 'string' ? state.shareGuideData.title : '',
-        shareGuideLocationName: typeof state.shareGuideData?.locationName === 'string' ? state.shareGuideData.locationName : '',
       })
     })
   },
@@ -585,8 +549,6 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
           typeof welcomeData.subGreeting === 'string' && welcomeData.subGreeting.trim()
             ? welcomeData.subGreeting.trim()
             : DEFAULT_WELCOME_SUB_GREETING,
-        welcomeSocialProfile: welcomeData.socialProfile ?? DEFAULT_WELCOME_SOCIAL_PROFILE,
-        welcomeProfileHints: welcomeData.ui?.profileHints ?? DEFAULT_WELCOME_PROFILE_HINTS,
         welcomeQuickPrompts:
           Array.isArray(welcomeData.quickPrompts) && welcomeData.quickPrompts.length > 0
             ? welcomeData.quickPrompts
@@ -605,8 +567,6 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
         isWelcomeState: true,
         welcomeGreeting: DEFAULT_WELCOME_GREETING,
         welcomeSubGreeting: DEFAULT_WELCOME_SUB_GREETING,
-        welcomeSocialProfile: DEFAULT_WELCOME_SOCIAL_PROFILE,
-        welcomeProfileHints: DEFAULT_WELCOME_PROFILE_HINTS,
         welcomeQuickPrompts: DEFAULT_WELCOME_QUICK_PROMPTS,
       })
     }

@@ -150,6 +150,85 @@
   }
 }
 
+// ==================== 任务收件箱 ====================
+
+.action-inbox-list {
+  padding: 0;
+}
+
+.action-inbox-item {
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+  padding: 28rpx 32rpx;
+  border-bottom: 1rpx solid var(--border-card, rgba(0, 0, 0, 0.04));
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &:active {
+    background: var(--bg-hover, rgba(0, 0, 0, 0.02));
+  }
+}
+
+.action-inbox-item__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+}
+
+.action-inbox-item__meta {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  font-size: 22rpx;
+}
+
+.action-inbox-item__status,
+.action-inbox-item__badge {
+  padding: 6rpx 12rpx;
+  border-radius: 999rpx;
+  color: var(--color-primary, #5B75FB);
+  background: var(--icon-bg-blue, rgba(91, 117, 251, 0.1));
+}
+
+.action-inbox-item__badge {
+  color: var(--color-amber, #F59E0B);
+  background: var(--icon-bg-amber, rgba(251, 191, 36, 0.15));
+}
+
+.action-inbox-item__time {
+  color: var(--text-tertiary, #9CA3AF);
+}
+
+.action-inbox-item__title {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: var(--text-main, #1F2937);
+}
+
+.action-inbox-item__summary {
+  font-size: 25rpx;
+  line-height: 1.6;
+  color: var(--text-secondary, #6B7280);
+}
+
+.action-inbox-item__action {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8rpx;
+  padding: 14rpx 18rpx;
+  border-radius: 999rpx;
+  color: var(--color-primary, #5B75FB);
+  background: var(--icon-bg-blue, rgba(91, 117, 251, 0.1));
+  font-size: 24rpx;
+  font-weight: 500;
+}
+
 // ==================== 通知列表 ====================
 
 .notification-list {
@@ -451,6 +530,26 @@
   .notification-icon {
     background: rgba(255, 255, 255, 0.1);
   }
+
+  .action-inbox-item {
+    border-bottom-color: rgba(255, 255, 255, 0.05);
+
+    &:active {
+      background: rgba(255, 255, 255, 0.05);
+    }
+  }
+
+  .action-inbox-item__title {
+    color: var(--text-main-dark, #F1F5F9);
+  }
+
+  .action-inbox-item__summary {
+    color: var(--text-secondary-dark, #94A3B8);
+  }
+
+  .action-inbox-item__time {
+    color: var(--text-tertiary-dark, #64748B);
+  }
   
   .notification-title {
     color: var(--text-main-dark, #F1F5F9);
@@ -570,6 +669,10 @@
   border: 1rpx solid rgba(91, 117, 251, 0.12);
 }
 
+.match-detail-section--reason {
+  background: linear-gradient(180deg, rgba(91, 117, 251, 0.08), rgba(16, 185, 129, 0.05));
+}
+
 .match-detail-card__header,
 .match-detail-section__head,
 .match-detail-member__header {
@@ -653,6 +756,19 @@
   padding: 20rpx;
   border-radius: 24rpx;
   background: rgba(91, 117, 251, 0.08);
+}
+
+.match-detail-deadline-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 10rpx;
+  margin-top: 18rpx;
+  padding: 18rpx;
+  border-radius: 22rpx;
+  font-size: 23rpx;
+  line-height: 1.6;
+  color: var(--text-secondary, #6B7280);
+  background: rgba(251, 191, 36, 0.12);
 }
 
 .match-detail-members {

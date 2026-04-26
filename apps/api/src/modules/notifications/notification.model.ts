@@ -96,6 +96,9 @@ const MatchPendingDetailResponse = t.Object({
     description: '当前需要谁来推进',
   }),
   nextActionText: t.String({ description: '当前下一步提示' }),
+  matchReasonTitle: t.String({ description: '匹配理由标题' }),
+  matchReasonText: t.String({ description: '匹配理由说明' }),
+  deadlineHint: t.String({ description: '确认截止前的处理提示' }),
   members: t.Array(MatchPendingMember, { description: '匹配成员摘要' }),
   icebreaker: t.Union([MatchPendingIcebreaker, t.Null()], { description: '最近一条系统破冰文案' }),
 });
@@ -159,6 +162,7 @@ const MessageCenterActionItemAction = t.Object({
 const MessageCenterActionItem = t.Object({
   id: t.String({ description: '任务卡 ID' }),
   type: t.Union([
+    t.Literal('activity_reminder'),
     t.Literal('post_activity_follow_up'),
     t.Literal('discussion_reply'),
     t.Literal('draft_continue'),
@@ -169,6 +173,7 @@ const MessageCenterActionItem = t.Object({
   statusLabel: t.String({ description: '当前状态标签' }),
   updatedAt: t.String({ description: '最近更新时间 ISO' }),
   activityId: t.Union([t.String({ format: 'uuid' }), t.Null()], { description: '关联活动 ID' }),
+  notificationId: t.Optional(t.String({ format: 'uuid', description: '关联通知 ID，用于点击承接后标记已读' })),
   badge: t.Optional(t.String({ description: '右上角角标' })),
   primaryAction: MessageCenterActionItemAction,
 });

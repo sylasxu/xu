@@ -130,6 +130,51 @@ function getIntentTypeName(activityType: string, sportType?: string | null): str
   return ACTIVITY_TYPE_NAMES[activityType] || activityType;
 }
 
+function buildPendingMatchReasonText(params: {
+  requestMode: 'auto_match' | 'connect' | 'group_up';
+  locationHint: string;
+  commonTags: string[];
+  members: Array<{ timePreference: string | null }>;
+}): string {
+  const tagText = params.commonTags.length > 0
+    ? `共同偏好里有 ${params.commonTags.slice(0, 3).join('、')}`
+    : '没有明显冲突的偏好';
+  const timeText = params.members
+    .map((member) => member.timePreference?.trim())
+    .find((value): value is string => Boolean(value));
+  const timeHint = timeText ? `，时间上都能接近「${timeText}」` : '';
+
+  if (params.requestMode === 'connect') {
+    return `这次不是随机推荐：对方已经对你的找搭子表达做了回应，活动区域在 ${params.locationHint}，${tagText}${timeHint}。`;
+  }
+
+  if (params.requestMode === 'group_up') {
+    return `这次是从“能不能一起组局”的意图里接出来的：活动区域在 ${params.locationHint}，${tagText}${timeHint}。`;
+  }
+
+  return `我把你们放在一起，是因为活动区域集中在 ${params.locationHint}，${tagText}${timeHint}，并且当前没有看到明显冲突。`;
+}
+
+function buildPendingMatchDeadlineHint(params: {
+  requestMode: 'auto_match' | 'connect' | 'group_up';
+  nextActionOwner: 'self' | 'organizer';
+  organizerNickname: string;
+}): string {
+  if (params.nextActionOwner === 'self') {
+    if (params.requestMode === 'connect') {
+      return '截止前同意后，我会继续把这条搭子邀请往成局推进；如果这次不合适，取消后你的原意向不会被直接判定完成。';
+    }
+
+    if (params.requestMode === 'group_up') {
+      return '截止前同意后，我会把这条组局邀请继续推进成活动；如果这次不合适，取消后仍可继续留意别的搭子。';
+    }
+
+    return '截止前确认后会直接转成活动，大家就能进入活动详情和讨论区继续协同；暂不成局时，相关意向会回到可继续等待的状态。';
+  }
+
+  return `现在主要等 ${params.organizerNickname} 处理。你不用重新发起，确认后这条找搭子任务会继续往活动协同走。`;
+}
+
 function toTemplateValue(value: string, maxLength = 20): string {
   const normalized = value.replace(/\s+/g, ' ').trim();
   if (!normalized) return '待补充';
@@ -476,6 +521,22 @@ export async function getPendingMatchDetail(
       ? '这是你刚才那条找搭子任务的新进展。现在需要你来拍板，确认后会直接成局，大家就能继续去活动里协同。'
       : `这是你刚才那条找搭子任务的新进展。现在等 ${organizerNickname} 拍板，确认后会直接成局，你先看看信息和破冰建议就行。`;
   })();
+  const locationHint = resolvePendingMatchLocationHint({
+    scenarioType: match.scenarioType,
+    destinationText: match.destinationText,
+    centerLocationHint: match.centerLocationHint,
+  });
+  const matchReasonText = buildPendingMatchReasonText({
+    requestMode,
+    locationHint,
+    commonTags: Array.isArray(match.commonTags) ? match.commonTags : [],
+    members,
+  });
+  const deadlineHint = buildPendingMatchDeadlineHint({
+    requestMode,
+    nextActionOwner,
+    organizerNickname,
+  });
   const firstSportType = memberRows
     .map((row) => row.metaData?.sportType)
     .find((value) => typeof value === 'string' && value.trim().length > 0);
@@ -487,17 +548,16 @@ export async function getPendingMatchDetail(
     requestMode,
     matchScore: match.matchScore,
     commonTags: Array.isArray(match.commonTags) ? match.commonTags : [],
-    locationHint: resolvePendingMatchLocationHint({
-      scenarioType: match.scenarioType,
-      destinationText: match.destinationText,
-      centerLocationHint: match.centerLocationHint,
-    }),
+    locationHint,
     confirmDeadline: match.confirmDeadline.toISOString(),
     isTempOrganizer: match.tempOrganizerId === userId,
     organizerUserId: match.tempOrganizerId,
     organizerNickname: organizer?.nickname || null,
     nextActionOwner,
     nextActionText,
+    matchReasonTitle: '为什么是这次匹配',
+    matchReasonText,
+    deadlineHint,
     members,
     icebreaker: icebreakerRow
       ? {
@@ -733,7 +793,26 @@ async function buildMessageCenterActionItems(params: {
   const now = new Date();
   const items: MessageCenterActionItem[] = [];
 
-  const [postActivityTask, draftTask, recruitingActivity, discussionSignals] = await Promise.all([
+  const [activityReminderNotification, postActivityTask, draftTask, recruitingActivity, discussionSignals] = await Promise.all([
+    db
+      .select({
+        id: notifications.id,
+        content: notifications.content,
+        createdAt: notifications.createdAt,
+        activityId: activities.id,
+        activityTitle: activities.title,
+        locationName: activities.locationName,
+      })
+      .from(notifications)
+      .innerJoin(activities, eq(notifications.activityId, activities.id))
+      .where(and(
+        eq(notifications.userId, params.userId),
+        eq(notifications.type, 'activity_reminder'),
+        eq(notifications.isRead, false),
+        eq(activities.status, 'active'),
+      ))
+      .orderBy(desc(notifications.createdAt))
+      .limit(1),
     db
       .select({
         id: agentTasks.id,
@@ -793,6 +872,28 @@ async function buildMessageCenterActionItems(params: {
       limit: 2,
     }),
   ]);
+
+  const reminder = activityReminderNotification[0];
+  if (reminder) {
+    const locationText = reminder.locationName ? `地点在 ${reminder.locationName}` : '点进讨论区看看出发安排';
+    items.push({
+      id: `activity-reminder:${reminder.id}`,
+      type: 'activity_reminder',
+      title: `「${reminder.activityTitle}」快开始了`,
+      summary: reminder.content || `${locationText}，现在适合确认时间、路线和集合信息。`,
+      statusLabel: '快开始',
+      updatedAt: reminder.createdAt.toISOString(),
+      activityId: reminder.activityId,
+      notificationId: reminder.id,
+      badge: '出发前',
+      primaryAction: {
+        kind: 'open_discussion',
+        label: '看讨论安排',
+        activityId: reminder.activityId,
+        entry: 'message_center_activity_reminder',
+      },
+    });
+  }
 
   const postActivity = postActivityTask[0];
   if (postActivity?.activityId) {
@@ -1061,7 +1162,7 @@ export async function notifyPostActivity(
     }),
     serviceNotification: {
       scene: 'post_activity',
-      pagePath: `subpackages/activity/detail/index?id=${activityId}`,
+      pagePath: `pages/message/index?focus=post_activity&activityId=${activityId}`,
       data: {
         thing1: toTemplateValue(activityTitle),
         thing2: toTemplateValue('活动结束了，来聊聊感受吧'),
@@ -1105,7 +1206,7 @@ export async function notifyActivityReminder(
     }),
     serviceNotification: {
       scene: 'activity_reminder',
-      pagePath: `subpackages/activity/detail/index?id=${activityId}`,
+      pagePath: `subpackages/activity/discussion/index?id=${activityId}&entry=activity_reminder`,
       data: {
         thing1: toTemplateValue(activityTitle),
         thing2: toTemplateValue(`${locationName}，1 小时后开始`),

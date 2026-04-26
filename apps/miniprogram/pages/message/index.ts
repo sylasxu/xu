@@ -12,8 +12,10 @@ import {
   postNotificationsPendingMatchesByIdConfirm,
 } from '../../src/api/endpoints/notifications/notifications';
 import type {
+  NotificationMessageCenterResponseActionItemsItem,
   NotificationMessageCenterResponsePendingMatchesItem,
   NotificationMessageCenterResponseSystemNotificationsItemsItemType,
+  NotificationMessageCenterResponseUi,
 } from '../../src/api/model';
 import { useUserStore } from '../../src/stores/user';
 import { useChatStore } from '../../src/stores/chat';
@@ -53,6 +55,28 @@ interface ChatItem {
   participantCount: number;
 }
 
+type ActionItemPrimaryAction = {
+  kind: 'prompt' | 'open_discussion' | 'open_activity';
+  label: string;
+  prompt?: string;
+  activityId?: string;
+  activityMode?: 'review' | 'rebook' | 'kickoff';
+  entry?: string;
+}
+
+interface ActionItemView {
+  id: string;
+  type: string;
+  title: string;
+  summary: string;
+  statusLabel: string;
+  updatedAt: string;
+  activityId: string;
+  notificationId: string;
+  badge: string;
+  primaryAction: ActionItemPrimaryAction;
+}
+
 type PendingMatchRequestMode = 'auto_match' | 'connect' | 'group_up';
 
 interface PendingMatchDetailMemberView {
@@ -82,6 +106,9 @@ interface PendingMatchDetailView {
   organizerDisplayName: string;
   nextActionOwner: 'self' | 'organizer';
   nextActionText: string;
+  matchReasonTitle: string;
+  matchReasonText: string;
+  deadlineHint: string;
   members: PendingMatchDetailMemberView[];
   icebreaker: {
     content: string;
@@ -91,19 +118,26 @@ interface PendingMatchDetailView {
 }
 
 interface FocusCardView {
-  kind: 'match_pending' | 'chat' | 'notification' | 'empty';
+  kind: 'action_item' | 'match_pending' | 'chat' | 'notification' | 'empty';
   title: string;
   hint: string;
   actionLabel: string;
+  actionItemId?: string;
   matchId?: string;
   activityId?: string;
 }
 
 interface MessagePageData {
+  actionItems: ActionItemView[];
   notifications: SystemNotification[];
   chatList: ChatItem[];
   loading: boolean;
   notificationExpanded: boolean;
+  actionInboxSectionTitle: string;
+  actionInboxDescription: string;
+  actionInboxEmpty: string;
+  systemSectionTitle: string;
+  systemEmpty: string;
   summaryTitle: string;
   summaryHint: string;
   focusCard: FocusCardView | null;
@@ -213,10 +247,16 @@ function normalizeNotificationActivityTitle(title: string): string {
 
 Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
   data: {
+    actionItems: [],
     notifications: [],
     chatList: [],
     loading: true,
     notificationExpanded: true,
+    actionInboxSectionTitle: '等你处理',
+    actionInboxDescription: '先把最需要你接一下的事摆在上面，点开就能继续原来的那条链路。',
+    actionInboxEmpty: '当前没有必须立刻处理的事，新的进展会先出现在这里。',
+    systemSectionTitle: '系统跟进',
+    systemEmpty: '暂无系统通知，活动进度有变化会第一时间出现在这里。',
     summaryTitle: '你现在还没有待续办的事情',
     summaryHint: '一旦有人回应你的找搭子，或者某场活动继续推进，这里会第一时间接住。',
     focusCard: null,
@@ -264,11 +304,17 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
       const messageCenterData = await this.loadMessageCenterData();
 
       this.setData({
+        actionItems: messageCenterData.actionItems,
         notifications: messageCenterData.notifications,
         chatList: messageCenterData.chatList,
-        summaryTitle: this.buildSummaryTitle(messageCenterData.notifications, messageCenterData.chatList),
-        summaryHint: this.buildSummaryHint(messageCenterData.notifications, messageCenterData.chatList),
-        focusCard: this.buildFocusCard(messageCenterData.notifications, messageCenterData.chatList),
+        actionInboxSectionTitle: messageCenterData.ui.actionInboxSectionTitle,
+        actionInboxDescription: messageCenterData.ui.actionInboxDescription,
+        actionInboxEmpty: messageCenterData.ui.actionInboxEmpty,
+        systemSectionTitle: messageCenterData.ui.systemSectionTitle,
+        systemEmpty: messageCenterData.ui.systemEmpty,
+        summaryTitle: this.buildSummaryTitle(messageCenterData.actionItems, messageCenterData.notifications, messageCenterData.chatList),
+        summaryHint: this.buildSummaryHint(messageCenterData.actionItems, messageCenterData.notifications, messageCenterData.chatList),
+        focusCard: this.buildFocusCard(messageCenterData.actionItems, messageCenterData.notifications, messageCenterData.chatList),
         unreadNotificationCount: messageCenterData.unreadNotificationCount,
         totalUnreadCount: messageCenterData.totalUnreadCount,
         loading: false,
@@ -287,18 +333,22 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
   },
 
   async loadMessageCenterData(): Promise<{
+    actionItems: ActionItemView[];
     notifications: SystemNotification[];
     chatList: ChatItem[];
     unreadNotificationCount: number;
     totalUnreadCount: number;
+    ui: NotificationMessageCenterResponseUi;
   }> {
     const userId = this.getCurrentUserId();
     if (!userId) {
       return {
+        actionItems: [],
         notifications: [],
         chatList: [],
         unreadNotificationCount: 0,
         totalUnreadCount: 0,
+        ui: this.readMessageCenterUi(null),
       };
     }
 
@@ -313,6 +363,7 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
       throw new Error(response.data.msg || '消息中心加载失败');
     }
 
+    const actionItems = response.data.actionItems.map((item) => this.mapActionItem(item));
     const systemNotifications = response.data.systemNotifications.items.map((item) => {
       const createdAtRaw = toStringValue(item.createdAt);
       return {
@@ -348,10 +399,71 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     });
 
     return {
+      actionItems,
       notifications: [...pendingMatches, ...systemNotifications],
       chatList,
       unreadNotificationCount: response.data.unreadNotificationCount || 0,
       totalUnreadCount: response.data.totalUnread || 0,
+      ui: this.readMessageCenterUi(response.data.ui),
+    };
+  },
+
+  readMessageCenterUi(ui: NotificationMessageCenterResponseUi | null): NotificationMessageCenterResponseUi {
+    return {
+      title: ui?.title || '消息中心',
+      description: ui?.description || '',
+      visitorTitle: ui?.visitorTitle || '',
+      visitorDescription: ui?.visitorDescription || '',
+      summaryTitle: ui?.summaryTitle || '',
+      actionInboxSectionTitle: ui?.actionInboxSectionTitle || '等你处理',
+      actionInboxDescription: ui?.actionInboxDescription || '先把最需要你接一下的事摆在上面，点开就能继续原来的那条链路。',
+      actionInboxEmpty: ui?.actionInboxEmpty || '当前没有必须立刻处理的事，新的进展会先出现在这里。',
+      pendingMatchesTitle: ui?.pendingMatchesTitle || '',
+      pendingMatchesEmpty: ui?.pendingMatchesEmpty || '',
+      requestAuthHint: ui?.requestAuthHint || '',
+      loadFailedText: ui?.loadFailedText || '加载失败',
+      markReadSuccess: ui?.markReadSuccess || '',
+      markReadFailed: ui?.markReadFailed || '',
+      pendingDetailAuthHint: ui?.pendingDetailAuthHint || '',
+      pendingDetailLoadFailed: ui?.pendingDetailLoadFailed || '',
+      actionFailed: ui?.actionFailed || '',
+      followUpFailed: ui?.followUpFailed || '发起失败，请稍后再试',
+      refreshLabel: ui?.refreshLabel || '',
+      systemSectionTitle: ui?.systemSectionTitle || '系统跟进',
+      systemEmpty: ui?.systemEmpty || '暂无系统通知，活动进度有变化会第一时间出现在这里。',
+      feedbackPositiveLabel: ui?.feedbackPositiveLabel || '',
+      feedbackNeutralLabel: ui?.feedbackNeutralLabel || '',
+      feedbackNegativeLabel: ui?.feedbackNegativeLabel || '',
+      reviewActionLabel: ui?.reviewActionLabel || '',
+      rebookActionLabel: ui?.rebookActionLabel || '',
+      kickoffActionLabel: ui?.kickoffActionLabel || '',
+      markReadActionLabel: ui?.markReadActionLabel || '',
+      chatSummarySectionTitle: ui?.chatSummarySectionTitle || '',
+      chatSummaryDescription: ui?.chatSummaryDescription || '',
+      chatSummaryEmpty: ui?.chatSummaryEmpty || '',
+      chatSummaryFallbackMessage: ui?.chatSummaryFallbackMessage || '',
+    };
+  },
+
+  mapActionItem(item: NotificationMessageCenterResponseActionItemsItem): ActionItemView {
+    return {
+      id: item.id,
+      type: item.type,
+      title: item.title,
+      summary: item.summary,
+      statusLabel: item.statusLabel,
+      updatedAt: this.formatTime(item.updatedAt),
+      activityId: item.activityId || '',
+      notificationId: item.notificationId || '',
+      badge: item.badge || '',
+      primaryAction: {
+        kind: item.primaryAction.kind,
+        label: item.primaryAction.label,
+        ...(item.primaryAction.prompt ? { prompt: item.primaryAction.prompt } : {}),
+        ...(item.primaryAction.activityId ? { activityId: item.primaryAction.activityId } : {}),
+        ...(item.primaryAction.activityMode ? { activityMode: item.primaryAction.activityMode } : {}),
+        ...(item.primaryAction.entry ? { entry: item.primaryAction.entry } : {}),
+      },
     };
   },
 
@@ -460,7 +572,11 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     return map[type] || '你有一条新通知';
   },
 
-  buildSummaryTitle(notifications: SystemNotification[], chatList: ChatItem[]): string {
+  buildSummaryTitle(actionItems: ActionItemView[], notifications: SystemNotification[], chatList: ChatItem[]): string {
+    if (actionItems.length > 0) {
+      return `现在有 ${actionItems.length} 件事等你接一下`;
+    }
+
     const pendingMatches = notifications.filter((item) => item.type === 'match_pending').length;
     const unreadNotifications = notifications.filter((item) => !item.read).length;
     const activeChats = chatList.filter((item) => !item.isArchived).length;
@@ -484,7 +600,11 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     return '你现在还没有待续办的事情';
   },
 
-  buildSummaryHint(notifications: SystemNotification[], chatList: ChatItem[]): string {
+  buildSummaryHint(actionItems: ActionItemView[], notifications: SystemNotification[], chatList: ChatItem[]): string {
+    if (actionItems.length > 0) {
+      return '这些都挂在原来的任务上，点开就能继续，不用重新说一遍。';
+    }
+
     const pendingOrganizer = notifications.some((item) => item.type === 'match_pending' && item.isTempOrganizer);
     const pendingResponse = notifications.some((item) => item.type === 'match_pending' && !item.isTempOrganizer);
     const activeChats = chatList.filter((item) => !item.isArchived).length;
@@ -504,7 +624,19 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     return '一旦有人回应你的找搭子，或者某场活动继续推进，这里会第一时间接住。';
   },
 
-  buildFocusCard(notifications: SystemNotification[], chatList: ChatItem[]): FocusCardView | null {
+  buildFocusCard(actionItems: ActionItemView[], notifications: SystemNotification[], chatList: ChatItem[]): FocusCardView | null {
+    const actionItem = actionItems[0];
+    if (actionItem) {
+      return {
+        kind: 'action_item',
+        title: actionItem.title,
+        hint: actionItem.summary,
+        actionLabel: actionItem.primaryAction.label,
+        actionItemId: actionItem.id,
+        activityId: actionItem.activityId || undefined,
+      };
+    }
+
     const matchNotification = notifications.find((item) => item.type === 'match_pending' && !!item.matchId);
     if (matchNotification?.matchId) {
       return {
@@ -558,6 +690,9 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
       organizerDisplayName: detail.organizerNickname || '召集人',
       nextActionOwner: detail.nextActionOwner,
       nextActionText: detail.nextActionText,
+      matchReasonTitle: detail.matchReasonTitle,
+      matchReasonText: detail.matchReasonText,
+      deadlineHint: detail.deadlineHint,
       members: detail.members.map((member) => {
         const nickname = member.nickname || (member.isTempOrganizer ? '召集人' : '匹配成员');
         return {
@@ -691,7 +826,47 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     this.setData({ notificationExpanded: !this.data.notificationExpanded });
   },
 
+  openActionItem(actionItem: ActionItemView) {
+    const action = actionItem.primaryAction;
+    const activityId = action.activityId || actionItem.activityId;
+
+    if (action.kind === 'open_discussion') {
+      if (actionItem.notificationId) {
+        void this.markNotificationRead(actionItem.notificationId, false);
+      }
+      this.openDiscussion(activityId, action.entry || 'message_center_action_item');
+      return;
+    }
+
+    if (action.kind === 'open_activity') {
+      if (actionItem.notificationId) {
+        void this.markNotificationRead(actionItem.notificationId, false);
+      }
+      this.openActivityDetail(activityId);
+      return;
+    }
+
+    if (action.kind === 'prompt' && action.prompt) {
+      this.openChatWithPrompt(action.prompt, {
+        ...(activityId ? { activityId } : {}),
+        ...(action.activityMode ? { activityMode: action.activityMode } : {}),
+        ...(action.entry ? { entry: action.entry } : {}),
+      });
+      return;
+    }
+
+    wx.showToast({ title: '这条进展暂时没法继续', icon: 'none' });
+  },
+
   openFocusCard(focusCard: FocusCardView) {
+    if (focusCard.kind === 'action_item' && focusCard.actionItemId) {
+      const actionItem = this.data.actionItems.find((item) => item.id === focusCard.actionItemId);
+      if (actionItem) {
+        this.openActionItem(actionItem);
+      }
+      return Promise.resolve();
+    }
+
     if (focusCard.kind === 'match_pending' && focusCard.matchId) {
       return this.openPendingMatchDetail(focusCard.matchId);
     }
@@ -714,6 +889,20 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
       return;
     }
     await this.openFocusCard(focusCard);
+  },
+
+  onActionItemTap(e: WechatMiniprogram.TouchEvent) {
+    const { id } = e.currentTarget.dataset as { id?: string };
+    if (!id) {
+      return;
+    }
+
+    const actionItem = this.data.actionItems.find((item) => item.id === id);
+    if (!actionItem) {
+      return;
+    }
+
+    this.openActionItem(actionItem);
   },
 
   async openNotificationContinuation(notification: {

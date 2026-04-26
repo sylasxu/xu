@@ -2419,13 +2419,13 @@ runAsyncProcessors([{ processor: extractPreferencesProcessor }], postLLMContext)
 当前阶段，通知模块优先只围绕 3 条高价值主链持续打磨：
 
 1. `activity_reminder`
-目标是把活动开始前的掉线参与者拉回到场景中。
+目标是把活动开始前的掉线参与者拉回到场景中。当前实现中，未读 `activity_reminder` 会被提升为消息中心 `actionItems` 顶部任务卡，动作固定为进入活动协同入口；微信服务通知 deep link 默认直达讨论区。
 
 2. `discussion_reply`
-目标是保证报名成功后的协同链不断线，避免“进了活动但没跟上讨论”。
+目标是保证报名成功后的协同链不断线，避免“进了活动但没跟上讨论”。当前实现中，讨论区未读信号会进入消息中心 `actionItems`，动作为进入讨论区继续回应。
 
 3. `post_activity`
-目标是把真实结果、复盘、再约和 memory 写回收束到同一条后续链路。
+目标是把真实结果、复盘、再约和 memory 写回收束到同一条后续链路。当前实现中，`post_activity` 会进入消息中心活动后承接层，支持快速反馈、复盘和再约，并回写 activity outcome memory。
 
 #### 微信通知实现约束
 

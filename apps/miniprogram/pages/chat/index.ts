@@ -38,6 +38,8 @@ import type {
 const DEFAULT_COMPOSER_PLACEHOLDER = '你想找什么活动？'
 const DEFAULT_WELCOME_GREETING = '晚上好，朋友！'
 const DEFAULT_WELCOME_SUB_GREETING = '附近有新局，想直接看看吗？'
+const DEFAULT_TASK_PANEL_EYEBROW = '继续帮你接着办'
+const DEFAULT_TASK_PANEL_TITLE = '刚才那件事，我还在继续推进'
 const DEFAULT_RUNTIME_STATUS_UI = {
   networkOfflineText: '网络连接已断开',
   networkRetryText: '重试',
@@ -74,8 +76,15 @@ interface PageData {
   networkRestoredToast: string
   widgetErrorMessage: string
   widgetErrorRetryText: string
+  homeState: RuntimeHomeState
+  primaryTaskId: string | null
   currentTasks: ChatTaskItem[]
+  secondaryTaskCount: number
+  taskPanelEyebrow: string
+  taskPanelTitle: string
 }
+
+type RuntimeHomeState = 'H0' | 'H1' | 'H2' | 'H3' | 'H4'
 
 type ChatTaskAction = {
   kind: 'structured_action' | 'navigate' | 'switch_tab'
@@ -238,6 +247,37 @@ function readStructuredPendingAction(value: unknown): StructuredPendingAction | 
   }
 }
 
+function readHomeState(value: unknown): RuntimeHomeState {
+  switch (value) {
+    case 'H1':
+    case 'H2':
+    case 'H3':
+    case 'H4':
+      return value
+    default:
+      return 'H0'
+  }
+}
+
+function pickPrimaryTask(
+  tasks: ChatTaskItem[],
+  primaryTaskId: string | null,
+  homeState: RuntimeHomeState
+): ChatTaskItem | null {
+  if (homeState === 'H0' || tasks.length === 0) {
+    return null
+  }
+
+  if (primaryTaskId) {
+    const matchedTask = tasks.find((task) => task.id === primaryTaskId)
+    if (matchedTask) {
+      return matchedTask
+    }
+  }
+
+  return tasks[0] || null
+}
+
 function readLocationPair(value: unknown): [number, number] | null {
   if (!Array.isArray(value) || value.length < 2) {
     return null;
@@ -345,7 +385,12 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     networkRestoredToast: DEFAULT_RUNTIME_STATUS_UI.networkRestoredToast,
     widgetErrorMessage: DEFAULT_RUNTIME_STATUS_UI.widgetErrorMessage,
     widgetErrorRetryText: DEFAULT_RUNTIME_STATUS_UI.widgetErrorRetryText,
+    homeState: 'H0',
+    primaryTaskId: null,
     currentTasks: [],
+    secondaryTaskCount: 0,
+    taskPanelEyebrow: DEFAULT_TASK_PANEL_EYEBROW,
+    taskPanelTitle: DEFAULT_TASK_PANEL_TITLE,
   },
 
   unsubscribeChat: INITIAL_UNSUBSCRIBE,
@@ -470,26 +515,54 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
   async loadCurrentTasks() {
     const userStore = useUserStore.getState()
     if (!userStore.token || !userStore.user) {
-      this.setData({ currentTasks: [] })
+      this.setData({
+        homeState: 'H0',
+        primaryTaskId: null,
+        currentTasks: [],
+        secondaryTaskCount: 0,
+        taskPanelEyebrow: DEFAULT_TASK_PANEL_EYEBROW,
+        taskPanelTitle: DEFAULT_TASK_PANEL_TITLE,
+      })
       return
     }
 
     try {
       const response = await getAiTasksCurrent()
       if (response.status !== 200) {
-        this.setData({ currentTasks: [] })
+        this.setData({
+          homeState: 'H0',
+          primaryTaskId: null,
+          currentTasks: [],
+          secondaryTaskCount: 0,
+          taskPanelEyebrow: DEFAULT_TASK_PANEL_EYEBROW,
+          taskPanelTitle: DEFAULT_TASK_PANEL_TITLE,
+        })
         return
       }
 
-      const currentTasks = (response.data.items || [])
+      const allTasks = (response.data.items || [])
         .map((item) => readCurrentTask(item))
         .filter((item): item is ChatTaskItem => item !== null)
-        .slice(0, 2)
+      const homeState = readHomeState(response.data.homeState)
+      const primaryTaskId = readString(response.data.primaryTaskId)
+      const primaryTask = pickPrimaryTask(allTasks, primaryTaskId, homeState)
 
-      this.setData({ currentTasks })
+      this.setData({
+        homeState,
+        primaryTaskId: primaryTask?.id || null,
+        currentTasks: primaryTask ? [primaryTask] : [],
+        secondaryTaskCount: Math.max(0, allTasks.length - (primaryTask ? 1 : 0)),
+      })
     } catch (error) {
       console.error('[Chat] Failed to load current tasks:', error)
-      this.setData({ currentTasks: [] })
+      this.setData({
+        homeState: 'H0',
+        primaryTaskId: null,
+        currentTasks: [],
+        secondaryTaskCount: 0,
+        taskPanelEyebrow: DEFAULT_TASK_PANEL_EYEBROW,
+        taskPanelTitle: DEFAULT_TASK_PANEL_TITLE,
+      })
     }
   },
 
@@ -532,6 +605,10 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
         typeof runtimeStatus?.widgetErrorRetryText === 'string' && runtimeStatus.widgetErrorRetryText.trim()
           ? runtimeStatus.widgetErrorRetryText.trim()
           : DEFAULT_RUNTIME_STATUS_UI.widgetErrorRetryText
+      const taskPanelTitle =
+        typeof welcomeData.ui?.sidebar?.currentTasksTitle === 'string' && welcomeData.ui.sidebar.currentTasksTitle.trim()
+          ? welcomeData.ui.sidebar.currentTasksTitle.trim()
+          : DEFAULT_TASK_PANEL_TITLE
 
       this.setData({
         composerPlaceholder,
@@ -540,6 +617,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
         networkRestoredToast,
         widgetErrorMessage,
         widgetErrorRetryText,
+        taskPanelTitle,
         isWelcomeState: true,
         welcomeGreeting:
           typeof welcomeData.greeting === 'string' && welcomeData.greeting.trim()

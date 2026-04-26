@@ -36,4 +36,8 @@
       </view>
     </view>
   </view>
+
+  <view wx:if="{{secondaryCount > 0}}" class="agent-task-panel__secondary">
+    <text>还有 {{secondaryCount}} 件进展在消息中心</text>
+  </view>
 </view>

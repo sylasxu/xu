@@ -90,6 +90,10 @@ Component({
       type: Array,
       value: [],
     },
+    secondaryCount: {
+      type: Number,
+      value: 0,
+    },
   },
 
   methods: {

@@ -36,6 +36,9 @@ export interface PendingMatchDetailResponse {
   organizerNickname: string | null;
   nextActionOwner: 'self' | 'organizer';
   nextActionText: string;
+  matchReasonTitle: string;
+  matchReasonText: string;
+  deadlineHint: string;
   members: PendingMatchDetailMember[];
   icebreaker: PendingMatchDetailIcebreaker | null;
 }

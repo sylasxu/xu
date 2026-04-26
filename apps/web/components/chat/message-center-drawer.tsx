@@ -108,12 +108,13 @@ type PendingMatch = {
 
 type MessageCenterActionItem = {
   id: string;
-  type: "post_activity_follow_up" | "discussion_reply" | "draft_continue" | "recruiting_follow_up";
+  type: "activity_reminder" | "post_activity_follow_up" | "discussion_reply" | "draft_continue" | "recruiting_follow_up";
   title: string;
   summary: string;
   statusLabel: string;
   updatedAt: string;
   activityId: string | null;
+  notificationId?: string;
   badge?: string;
   primaryAction: {
     kind: "prompt" | "open_discussion" | "open_activity";
@@ -139,6 +140,9 @@ type PendingMatchDetail = {
   organizerNickname: string | null;
   nextActionOwner: "self" | "organizer";
   nextActionText: string;
+  matchReasonTitle: string;
+  matchReasonText: string;
+  deadlineHint: string;
   members: Array<{
     userId: string;
     nickname: string | null;
@@ -829,6 +833,10 @@ export function MessageCenterDrawer({
             throw new Error(messageCenter?.ui.followUpFailed || "发起失败，请稍后再试");
           }
 
+          if (item.notificationId) {
+            await markNotificationRead(item.notificationId);
+          }
+
           window.location.href = buildActivityDetailPath(activityId, {
             entry: action.entry || "message_center_action_item",
           });
@@ -857,7 +865,7 @@ export function MessageCenterDrawer({
         setPendingActionKey(null);
       }
     },
-    [messageCenter?.ui.followUpFailed, onSendPrompt, refreshMessageCenter]
+    [markNotificationRead, messageCenter?.ui.followUpFailed, onSendPrompt, refreshMessageCenter]
   );
 
   const pendingMatches = messageCenter?.pendingMatches || [];
@@ -1189,6 +1197,19 @@ export function MessageCenterDrawer({
                         >
                           <p className="text-sm font-semibold">下一步怎么做</p>
                           <p className={cn("mt-2 text-xs leading-6", isDarkMode ? "text-white/54" : "text-black/52")}>{pendingMatchDetail.nextActionText}</p>
+                        </div>
+
+                        <div
+                          className={cn(
+                            "rounded-2xl border px-4 py-4",
+                            isDarkMode ? "border-white/8 bg-white/[0.035]" : "border-black/8 bg-black/[0.025]"
+                          )}
+                        >
+                          <p className="text-sm font-semibold">{pendingMatchDetail.matchReasonTitle}</p>
+                          <p className={cn("mt-2 text-xs leading-6", isDarkMode ? "text-white/60" : "text-black/58")}>{pendingMatchDetail.matchReasonText}</p>
+                          <div className={cn("mt-3 rounded-2xl px-3 py-3 text-xs leading-6", isDarkMode ? "bg-white/[0.04] text-white/58" : "bg-black/[0.03] text-black/58")}>
+                            {pendingMatchDetail.deadlineHint}
+                          </div>
                         </div>
 
                         {pendingMatchDetail.icebreaker ? (

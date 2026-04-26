@@ -43,6 +43,50 @@
       </view>
     </view>
 
+    <!-- 任务收件箱 -->
+    <view class="section-card">
+      <view class="section-header">
+        <view class="section-title">
+          <view class="section-icon section-icon--blue">
+            <t-icon name="check-circle" size="36rpx" />
+          </view>
+          <view class="section-title__copy">
+            <text>{{actionInboxSectionTitle}}</text>
+            <text class="section-title__desc">{{actionInboxDescription}}</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="action-inbox-list">
+        <block wx:if="{{actionItems.length > 0}}">
+          <view
+            wx:for="{{actionItems}}"
+            wx:key="id"
+            class="action-inbox-item"
+            data-id="{{item.id}}"
+            bind:tap="onActionItemTap"
+          >
+            <view class="action-inbox-item__main">
+              <view class="action-inbox-item__meta">
+                <text class="action-inbox-item__status">{{item.statusLabel}}</text>
+                <text wx:if="{{item.badge}}" class="action-inbox-item__badge">{{item.badge}}</text>
+                <text class="action-inbox-item__time">{{item.updatedAt}}</text>
+              </view>
+              <text class="action-inbox-item__title">{{item.title}}</text>
+              <text class="action-inbox-item__summary">{{item.summary}}</text>
+            </view>
+            <view class="action-inbox-item__action">
+              <text>{{item.primaryAction.label}}</text>
+              <t-icon name="chevron-right" size="30rpx" color="#5B75FB" />
+            </view>
+          </view>
+        </block>
+        <view wx:else class="empty-state">
+          <text>{{actionInboxEmpty}}</text>
+        </view>
+      </view>
+    </view>
+
     <!-- 系统通知区域 -->
     <view class="section-card">
       <view 
@@ -54,7 +98,7 @@
               <t-icon name="notification" size="36rpx" />
             </view>
           <view class="section-title__copy">
-            <text>结果更新</text>
+            <text>{{systemSectionTitle}}</text>
             <text class="section-title__desc">谁回应了、谁在等你拍板，都先在这里处理</text>
           </view>
           <t-badge
@@ -132,7 +176,7 @@
           </view>
         </block>
         <view wx:else class="empty-state">
-          <text>暂无系统通知</text>
+          <text>{{systemEmpty}}</text>
         </view>
       </view>
     </view>
@@ -276,6 +320,15 @@
         <view class="match-detail-section">
           <text class="match-detail-section__title">现在是什么状态</text>
           <text class="match-detail-section__text">{{selectedMatchDetail.nextActionText}}</text>
+        </view>
+
+        <view class="match-detail-section match-detail-section--reason">
+          <text class="match-detail-section__title">{{selectedMatchDetail.matchReasonTitle}}</text>
+          <text class="match-detail-section__text">{{selectedMatchDetail.matchReasonText}}</text>
+          <view class="match-detail-deadline-hint">
+            <t-icon name="time" size="28rpx" color="#F59E0B" />
+            <text>{{selectedMatchDetail.deadlineHint}}</text>
+          </view>
         </view>
 
         <view wx:if="{{selectedMatchDetail.icebreaker}}" class="match-detail-section">

@@ -38,6 +38,16 @@
         <view class="welcome-hero__spark"></view>
       </view>
 
+      <agent-task-panel
+        wx:if="{{currentTasks.length > 0}}"
+        class="welcome-task-panel"
+        eyebrow="{{taskPanelEyebrow}}"
+        title="{{taskPanelTitle}}"
+        tasks="{{currentTasks}}"
+        secondaryCount="{{secondaryTaskCount}}"
+        bind:actiontap="onAgentTaskActionTap"
+      />
+
       <quick-prompts
         prompts="{{welcomeQuickPrompts}}"
         bind:prompttap="onWelcomePromptTap"
@@ -54,7 +64,10 @@
   >
     <agent-task-panel
       wx:if="{{currentTasks.length > 0}}"
+      eyebrow="{{taskPanelEyebrow}}"
+      title="{{taskPanelTitle}}"
       tasks="{{currentTasks}}"
+      secondaryCount="{{secondaryTaskCount}}"
       bind:actiontap="onAgentTaskActionTap"
     />
     

@@ -27,6 +27,12 @@
     flex-direction: column;
     gap: @spacing-3;
   }
+
+  &__secondary {
+    padding: @spacing-3 @spacing-1 0;
+    font-size: @text-xs;
+    color: var(--text-secondary, @text-secondary);
+  }
 }
 
 .agent-task-card {
@@ -113,6 +119,10 @@
 
     &__title {
       color: var(--text-main, @text-main-dark);
+    }
+
+    &__secondary {
+      color: var(--text-secondary-dark, @text-secondary-dark);
     }
   }
 

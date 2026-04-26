@@ -198,6 +198,12 @@ type MatchActionResponse = {
 type SuccessResponse = {
   code: number;
   msg: string;
+  nextAction?: {
+    label: string;
+    prompt: string;
+    activityMode: "review" | "rebook";
+    entry: string;
+  };
 };
 
 type ActivitySelfFeedbackValue = "positive" | "neutral" | "failed";
@@ -208,6 +214,9 @@ type DrawerNotice = {
   prompt?: {
     label: string;
     text: string;
+    activityId?: string;
+    activityMode?: "review" | "rebook" | "kickoff";
+    entry?: string;
   };
 };
 
@@ -680,15 +689,15 @@ export function MessageCenterDrawer({
   );
 
   const recordActivitySelfFeedback = useCallback(
-    async (notification: SystemNotification, feedback: ActivitySelfFeedbackValue) => {
-      if (!notification.activityId) {
+    async (activityId: string | null, feedback: ActivitySelfFeedbackValue) => {
+      if (!activityId) {
         return null;
       }
 
       return requestJson<SuccessResponse>("/participants/self-feedback", {
         method: "POST",
         body: JSON.stringify({
-          activityId: notification.activityId,
+          activityId,
           feedback,
         }),
       });
@@ -802,10 +811,21 @@ export function MessageCenterDrawer({
           await markNotificationRead(notification.id);
         }
 
-        const result = await recordActivitySelfFeedback(notification, feedback);
+        const result = await recordActivitySelfFeedback(notification.activityId, feedback);
         setNotice({
           kind: "success",
           text: result?.msg || "已记录这次活动反馈",
+          ...(result?.nextAction
+            ? {
+                prompt: {
+                  label: result.nextAction.label,
+                  text: result.nextAction.prompt,
+                  activityId: notification.activityId || undefined,
+                  activityMode: result.nextAction.activityMode,
+                  entry: result.nextAction.entry,
+                },
+              }
+            : {}),
         });
         await refreshMessageCenter({ silent: true });
       } catch (requestError) {
@@ -818,6 +838,44 @@ export function MessageCenterDrawer({
       }
     },
     [markNotificationRead, messageCenter?.ui.followUpFailed, recordActivitySelfFeedback, refreshMessageCenter]
+  );
+
+  const handleActionItemFeedback = useCallback(
+    async (item: MessageCenterActionItem, feedback: ActivitySelfFeedbackValue) => {
+      if (!item.activityId) {
+        return;
+      }
+
+      const actionKey = `task-feedback:${feedback}:${item.id}`;
+      setPendingActionKey(actionKey);
+      try {
+        const result = await recordActivitySelfFeedback(item.activityId, feedback);
+        setNotice({
+          kind: "success",
+          text: result?.msg || "已记录这次活动反馈",
+          ...(result?.nextAction
+            ? {
+                prompt: {
+                  label: result.nextAction.label,
+                  text: result.nextAction.prompt,
+                  activityId: item.activityId,
+                  activityMode: result.nextAction.activityMode,
+                  entry: result.nextAction.entry,
+                },
+              }
+            : {}),
+        });
+        await refreshMessageCenter({ silent: true });
+      } catch (requestError) {
+        setNotice({
+          kind: "error",
+          text: requestError instanceof Error ? requestError.message : messageCenter?.ui.followUpFailed || "发起失败，请稍后再试",
+        });
+      } finally {
+        setPendingActionKey(null);
+      }
+    },
+    [messageCenter?.ui.followUpFailed, recordActivitySelfFeedback, refreshMessageCenter]
   );
 
   const handleActionItem = useCallback(
@@ -945,23 +1003,15 @@ export function MessageCenterDrawer({
                       <button
                         type="button"
                         disabled={disabled || pendingActionKey === `kickoff:${prompt.label}`}
-                        onClick={() =>
-                          void handleFollowUpPrompt(
-                            {
-                              id: prompt.label,
-                              userId: "",
-                              type: "post_activity",
-                              title: "",
-                              content: null,
-                              activityId: null,
-                              isRead: true,
-                              createdAt: new Date().toISOString(),
-                            },
-                            "kickoff",
-                            prompt,
-                            { skipMarkRead: true }
-                          )
-                        }
+                        onClick={() => {
+                          setOpen(false);
+                          void onSendPrompt(prompt.text, prompt.label, {
+                            ...(prompt.activityId ? { activityId: prompt.activityId } : {}),
+                            ...(prompt.activityMode ? { activityMode: prompt.activityMode } : {}),
+                            ...(prompt.entry ? { entry: prompt.entry } : {}),
+                          });
+                          setNotice(null);
+                        }}
                         className={cn(
                           "mt-3 inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-medium transition",
                           isDarkMode ? "border border-white/8 bg-white/[0.05] text-white/82 hover:bg-white/[0.08]" : "border border-black/8 bg-white text-black/78 hover:bg-black/[0.03]"
@@ -1060,6 +1110,7 @@ export function MessageCenterDrawer({
                   <div className="space-y-3">
                     {actionItems.map((item) => {
                       const actionKey = `task:${item.id}`;
+                      const isPostActivityItem = item.type === "post_activity_follow_up";
                       return (
                         <div
                           key={item.id}
@@ -1101,6 +1152,48 @@ export function MessageCenterDrawer({
                               {item.primaryAction.label}
                             </button>
                           </div>
+                          {isPostActivityItem ? (
+                            <div className="mt-3 space-y-2">
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  disabled={disabled || Boolean(pendingActionKey)}
+                                  onClick={() => void handleActionItemFeedback(item, "positive")}
+                                  className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-2 text-xs font-medium text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {pendingActionKey === `task-feedback:positive:${item.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                                  {messageCenter?.ui.feedbackPositiveLabel || "挺顺利"}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={disabled || Boolean(pendingActionKey)}
+                                  onClick={() => void handleActionItemFeedback(item, "neutral")}
+                                  className={cn(
+                                    "inline-flex items-center gap-1 rounded-full px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
+                                    isDarkMode ? "border border-white/8 bg-white/[0.05] text-white/80 hover:bg-white/[0.08]" : "border border-black/8 bg-black/[0.03] text-black/76 hover:bg-black/[0.05]"
+                                  )}
+                                >
+                                  {pendingActionKey === `task-feedback:neutral:${item.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                                  {messageCenter?.ui.feedbackNeutralLabel || "一般"}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={disabled || Boolean(pendingActionKey)}
+                                  onClick={() => void handleActionItemFeedback(item, "failed")}
+                                  className={cn(
+                                    "inline-flex items-center gap-1 rounded-full px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
+                                    isDarkMode ? "border border-white/8 bg-white/[0.05] text-white/80 hover:bg-white/[0.08]" : "border border-black/8 bg-black/[0.03] text-black/76 hover:bg-black/[0.05]"
+                                  )}
+                                >
+                                  {pendingActionKey === `task-feedback:failed:${item.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
+                                  {messageCenter?.ui.feedbackNegativeLabel || "没成局"}
+                                </button>
+                              </div>
+                              <p className={cn("text-[11px] leading-5", isDarkMode ? "text-white/38" : "text-black/38")}>
+                                先点真实反馈，我会把这次结果写进记忆，再给下一步建议。
+                              </p>
+                            </div>
+                          ) : null}
                         </div>
                       );
                     })}

@@ -11,6 +11,7 @@ import type {
 } from './chat.model';
 import * as pool from './connection-pool';
 import { sendServiceNotificationByUserId } from '../wechat';
+import { buildDiscussionReplyTouchpoint, toTemplateValue } from '../notifications/notification-touchpoints';
 
 // 群聊归档时间：活动开始后 24 小时
 const ARCHIVE_HOURS = 24;
@@ -369,13 +370,6 @@ export async function getMessages(
   };
 }
 
-function toNotificationValue(value: string, maxLength = 20): string {
-  const normalized = value.replace(/\s+/g, ' ').trim();
-  if (!normalized) return '待补充';
-  if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, Math.max(maxLength - 1, 1))}…`;
-}
-
 async function notifyOfflineParticipantsAboutMessage(params: {
   activityId: string;
   activityTitle: string;
@@ -416,13 +410,19 @@ async function notifyOfflineParticipantsAboutMessage(params: {
   }
 
   const tasks = offlineRecipients.map(async (recipient) => {
+    const touchpoint = buildDiscussionReplyTouchpoint({
+      activityId: params.activityId,
+      activityTitle: params.activityTitle,
+      senderName: params.senderName,
+      content: params.content,
+    });
     const result = await sendServiceNotificationByUserId({
       userId: recipient.userId,
       scene: 'discussion_reply',
-      pagePath: `subpackages/activity/discussion/index?id=${params.activityId}`,
+      pagePath: touchpoint.pagePath,
       data: {
-        thing1: toNotificationValue(params.activityTitle),
-        thing2: toNotificationValue(`${params.senderName}：${params.content}`, 36),
+        thing1: toTemplateValue(params.activityTitle),
+        thing2: toTemplateValue(touchpoint.serviceHint, 36),
       },
     });
 

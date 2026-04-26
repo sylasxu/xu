@@ -20,7 +20,7 @@ import type {
 import { useUserStore } from '../../src/stores/user';
 import { useChatStore } from '../../src/stores/chat';
 import { useAppStore } from '../../src/stores/app';
-import { postActivityRebookFollowUp } from '../../src/services/activity-outcome';
+import { postActivityRebookFollowUp, postActivitySelfFeedback } from '../../src/services/activity-outcome';
 import { getPendingMatchDetail, type PendingMatchDetailResponse } from '../../src/services/pending-match';
 
 type NotificationType = NotificationMessageCenterResponseSystemNotificationsItemsItemType | 'match_pending';
@@ -790,6 +790,48 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     }
   },
 
+  async recordPostActivityFeedback(activityId: string, feedback: 'positive' | 'neutral' | 'failed') {
+    if (!activityId) {
+      return;
+    }
+
+    try {
+      const response = await postActivitySelfFeedback({ activityId, feedback });
+      if (response.status !== 200) {
+        throw new Error(getErrorMessage(response.data, '记录活动反馈失败'));
+      }
+
+      const nextAction = 'nextAction' in response.data ? response.data.nextAction : undefined;
+      wx.showToast({ title: response.data.msg || '已记录反馈', icon: 'none' });
+      await this.loadData();
+
+      if (nextAction?.prompt) {
+        wx.showModal({
+          title: nextAction.label,
+          content: '要不要顺手让 xu 帮你把下一步也整理出来？',
+          confirmText: '继续',
+          cancelText: '先不用',
+          success: (result) => {
+            if (!result.confirm) {
+              return;
+            }
+            this.openChatWithPrompt(nextAction.prompt, {
+              activityId,
+              activityMode: nextAction.activityMode,
+              entry: nextAction.entry,
+            });
+          },
+        });
+      }
+    } catch (error) {
+      console.error('记录活动反馈失败', error);
+      wx.showToast({
+        title: error instanceof Error ? error.message : '记录反馈失败',
+        icon: 'none',
+      });
+    }
+  },
+
   setupWebSocket() {
     const socket = getAppInstance().globalData?.socket;
     if (!socket) return;
@@ -829,6 +871,11 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
   openActionItem(actionItem: ActionItemView) {
     const action = actionItem.primaryAction;
     const activityId = action.activityId || actionItem.activityId;
+
+    if (actionItem.type === 'post_activity_follow_up') {
+      this.promptPostActivityAction(activityId, actionItem.title);
+      return;
+    }
 
     if (action.kind === 'open_discussion') {
       if (actionItem.notificationId) {
@@ -1040,13 +1087,25 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
 
   promptPostActivityAction(activityId: string, title: string) {
     wx.showActionSheet({
-      itemList: ['先做复盘', '去再约'],
+      itemList: ['挺顺利，记下来', '一般，记下来', '没成局，记下来', '先做复盘', '去再约'],
       success: ({ tapIndex }) => {
         if (tapIndex === 0) {
-          this.startFeedbackReview(activityId, title);
+          void this.recordPostActivityFeedback(activityId, 'positive');
           return;
         }
         if (tapIndex === 1) {
+          void this.recordPostActivityFeedback(activityId, 'neutral');
+          return;
+        }
+        if (tapIndex === 2) {
+          void this.recordPostActivityFeedback(activityId, 'failed');
+          return;
+        }
+        if (tapIndex === 3) {
+          this.startFeedbackReview(activityId, title);
+          return;
+        }
+        if (tapIndex === 4) {
           void this.startRebookFromNotification(activityId, title);
         }
       },

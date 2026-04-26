@@ -4,6 +4,7 @@ import {
   activities,
   agentTaskEvents,
   agentTasks,
+  and,
   conversations,
   conversationMessages,
   db,
@@ -53,6 +54,17 @@ interface ChatTurnResponse {
   conversationId: string;
   turn: {
     blocks: GenUIBlock[];
+  };
+}
+
+interface ActivityOutcomeActionResponse {
+  code: number;
+  msg: string;
+  nextAction?: {
+    label: string;
+    prompt: string;
+    activityMode: 'review' | 'rebook';
+    entry: string;
   };
 }
 
@@ -904,6 +916,59 @@ describe('Agent Task Runtime Integration', () => {
     expect(events.filter((event) => event.eventType === 'outcome_recorded')).toHaveLength(1);
     expect(events.filter((event) => event.eventType === 'task_completed')).toHaveLength(1);
     expect(response.turn.blocks.some((block) => block.type === 'cta-group')).toBe(true);
+  });
+
+  it('returns a next action when post-activity quick feedback writes memory', async () => {
+    expect(testUser).toBeDefined();
+
+    const activityId = randomUUID();
+
+    await db.insert(activities).values({
+      id: activityId,
+      creatorId: testUser!.user.id,
+      title: '快速反馈下一步测试局',
+      description: '验证 post_activity 快速反馈写回 memory 后返回下一步建议',
+      location: { x: 106.52988, y: 29.58567 },
+      locationName: '观音桥',
+      address: '观音桥步行街',
+      locationHint: '地铁站附近',
+      startAt: new Date('2026-03-16T20:00:00+08:00'),
+      type: 'food',
+      maxParticipants: 4,
+      currentParticipants: 1,
+      status: 'completed',
+    });
+    createdActivityIds.add(activityId);
+
+    const response = await requestJson<ActivityOutcomeActionResponse>({
+      method: 'POST',
+      path: '/participants/self-feedback',
+      token: testUser!.token,
+      payload: {
+        activityId,
+        feedback: 'positive',
+      },
+    });
+
+    expect(response.code).toBe(200);
+    expect(response.nextAction).toMatchObject({
+      label: '顺着这次再约',
+      activityMode: 'rebook',
+      entry: 'post_activity_feedback_next_action',
+    });
+    expect(response.nextAction?.prompt).toContain(activityId);
+
+    const memories = await db
+      .select()
+      .from(userMemories)
+      .where(and(
+        eq(userMemories.userId, testUser!.user.id),
+        eq(userMemories.memoryType, 'activity_outcome'),
+        sql`${userMemories.metadata}->>'activityId' = ${activityId}`,
+      ));
+
+    expect(memories).toHaveLength(1);
+    expect(memories[0]?.content).toContain('挺顺利');
   });
 
   it('resumes the same create task after auth gate and promotes it to draft_ready', async () => {

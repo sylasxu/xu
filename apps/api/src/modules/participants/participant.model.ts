@@ -67,9 +67,20 @@ const ActivitySelfFeedbackRequest = t.Object({
   reviewSummary: t.Optional(t.String({ minLength: 1, maxLength: 500, description: '可选复盘摘要' })),
 });
 
+const ActivityOutcomeNextAction = t.Object({
+  label: t.String({ description: '建议下一步按钮文案' }),
+  prompt: t.String({ description: '建议发回 AI 对话的提示词' }),
+  activityMode: t.Union([
+    t.Literal('review'),
+    t.Literal('rebook'),
+  ], { description: '活动后承接模式' }),
+  entry: t.String({ description: '入口标识' }),
+});
+
 const ActionResponse = t.Object({
   code: t.Number(),
   msg: t.String(),
+  nextAction: t.Optional(ActivityOutcomeNextAction),
 });
 
 const FeedbackProblemOption = t.Object({
@@ -120,6 +131,7 @@ export const participantModel = new Elysia({ name: 'participantModel' })
     'participant.rebookFollowUpRequest': RebookFollowUpRequest,
     'participant.activitySelfFeedbackRequest': ActivitySelfFeedbackRequest,
     'participant.actionResponse': ActionResponse,
+    'participant.activityOutcomeNextAction': ActivityOutcomeNextAction,
     'participant.feedbackProblemOption': FeedbackProblemOption,
     'participant.feedbackMetaResponse': FeedbackMetaResponse,
     'participant.idParams': IdParams,
@@ -134,6 +146,7 @@ export type ConfirmFulfillmentResponse = Static<typeof ConfirmFulfillmentRespons
 export type RebookFollowUpRequest = Static<typeof RebookFollowUpRequest>;
 export type ActivitySelfFeedbackRequest = Static<typeof ActivitySelfFeedbackRequest>;
 export type ActionResponse = Static<typeof ActionResponse>;
+export type ActivityOutcomeNextAction = Static<typeof ActivityOutcomeNextAction>;
 export type FeedbackProblemOption = Static<typeof FeedbackProblemOption>;
 export type FeedbackMetaResponse = Static<typeof FeedbackMetaResponse>;
 export type IdParams = Static<typeof IdParams>;

@@ -337,6 +337,40 @@ function buildActivityFeedbackSummary(activityTitle: string, feedback: ActivityF
   }
 }
 
+function buildActivityOutcomeNextAction(params: {
+  activityTitle: string;
+  activityId: string;
+  feedback: ActivityFeedbackValue;
+}): ActionResponse['nextAction'] {
+  const activityHint = `「${params.activityTitle}」`;
+  const activityRef = `（activityId: ${params.activityId}）`;
+
+  if (params.feedback === 'positive') {
+    return {
+      label: '顺着这次再约',
+      prompt: `这次${activityHint}${activityRef}挺顺利，帮我顺着这次体验快速再约一场：保留合适的活动类型、给个新时间建议，并生成一段可直接发出去的邀约文案。`,
+      activityMode: 'rebook',
+      entry: 'post_activity_feedback_next_action',
+    };
+  }
+
+  if (params.feedback === 'neutral') {
+    return {
+      label: '复盘哪里能改',
+      prompt: `这次${activityHint}${activityRef}体验一般，帮我复盘：哪里卡住了、下次怎么改、如果要再组一场应该调整哪些条件。`,
+      activityMode: 'review',
+      entry: 'post_activity_feedback_next_action',
+    };
+  }
+
+  return {
+    label: '换个方式再组',
+    prompt: `这次${activityHint}${activityRef}没成局，帮我换个推进方式：分析可能原因，给一个更容易成局的新方案，并写一段不尴尬的重新邀约文案。`,
+    activityMode: 'review',
+    entry: 'post_activity_feedback_next_action',
+  };
+}
+
 export async function recordActivitySelfFeedback(params: {
   userId: string;
   activityId: string;
@@ -414,6 +448,17 @@ export async function recordActivitySelfFeedback(params: {
     summary,
   });
 
+  console.info('[NotificationFunnel]', {
+    step: 'acted',
+    scene: 'post_activity',
+    userId: params.userId,
+    activityId: params.activityId,
+    detail: {
+      feedback: params.feedback,
+      attended,
+    },
+  });
+
   return {
     code: 200,
     msg: params.feedback === 'positive'
@@ -421,6 +466,11 @@ export async function recordActivitySelfFeedback(params: {
       : params.feedback === 'neutral'
         ? '已记下这次体验一般，后面会帮你避开类似问题'
         : '已记下这次没成局，后面会帮你换个推进方式',
+    nextAction: buildActivityOutcomeNextAction({
+      activityTitle: activity.title,
+      activityId: params.activityId,
+      feedback: params.feedback,
+    }),
   };
 }
 

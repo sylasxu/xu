@@ -165,7 +165,7 @@
               </t-button>
             </view>
             <view wx:elif="{{item.type === 'post_activity'}}" class="notification-tag">
-              复盘 / 再约
+              反馈 / 复盘 / 再约
             </view>
             <view wx:elif="{{item.type === 'match_pending' && !item.isTempOrganizer}}" class="notification-tag">
               {{item.pendingWaitLabel}}

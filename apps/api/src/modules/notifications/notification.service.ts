@@ -15,6 +15,11 @@ import { getChatActivities, getDiscussionReplySignals } from '../chat/chat.servi
 import { sendServiceNotificationByUserId, type ServiceNotificationScene } from '../wechat';
 import { confirmMatch as confirmPendingMatchService, cancelMatch as cancelPendingMatchService } from '../ai/tools/partner-match';
 import { getConfigValue } from '../ai/config/config.service';
+import {
+  buildActivityReminderTouchpoint,
+  buildPostActivityTouchpoint,
+  toTemplateValue,
+} from './notification-touchpoints';
 
 // 通知类型枚举值
 const NOTIFICATION_TYPES = ['join', 'quit', 'activity_start', 'completed', 'cancelled', 'new_participant', 'post_activity', 'activity_reminder'] as const;
@@ -35,6 +40,26 @@ const SPORT_TYPE_NAMES: Record<string, string> = {
   swimming: '游泳',
   cycling: '骑行',
 };
+
+function recordNotificationFunnelStep(params: {
+  step: 'send' | 'open' | 'landed' | 'acted';
+  scene: string;
+  userId: string;
+  activityId?: string | null;
+  notificationId?: string | null;
+  taskId?: string | null;
+  detail?: Record<string, unknown>;
+}): void {
+  console.info('[NotificationFunnel]', {
+    step: params.step,
+    scene: params.scene,
+    userId: params.userId,
+    activityId: params.activityId ?? null,
+    notificationId: params.notificationId ?? null,
+    taskId: params.taskId ?? null,
+    detail: params.detail ?? {},
+  });
+}
 
 const DEFAULT_MESSAGE_CENTER_UI: MessageCenterUi = {
   title: '消息中心',
@@ -175,13 +200,6 @@ function buildPendingMatchDeadlineHint(params: {
   return `现在主要等 ${params.organizerNickname} 处理。你不用重新发起，确认后这条找搭子任务会继续往活动协同走。`;
 }
 
-function toTemplateValue(value: string, maxLength = 20): string {
-  const normalized = value.replace(/\s+/g, ' ').trim();
-  if (!normalized) return '待补充';
-  if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, Math.max(maxLength - 1, 1))}…`;
-}
-
 function buildIntentSummary(params: {
   rawInput?: string;
   tags?: string[];
@@ -283,6 +301,17 @@ export async function markAsRead(id: string, userId: string): Promise<boolean> {
     })
     .where(and(eq(notifications.id, id), eq(notifications.userId, userId)))
     .returning();
+
+  if (updated) {
+    recordNotificationFunnelStep({
+      step: 'open',
+      scene: updated.type,
+      userId,
+      activityId: updated.activityId,
+      notificationId: updated.id,
+      taskId: updated.taskId,
+    });
+  }
 
   return !!updated;
 }
@@ -635,6 +664,20 @@ export async function getMessageCenterData(
     chatActivities,
   });
 
+  for (const item of actionItems) {
+    recordNotificationFunnelStep({
+      step: 'landed',
+      scene: item.type,
+      userId,
+      activityId: item.activityId,
+      notificationId: item.notificationId ?? null,
+      detail: {
+        actionLabel: item.primaryAction.label,
+        statusLabel: item.statusLabel,
+      },
+    });
+  }
+
   return {
     actionItems,
     systemNotifications,
@@ -695,6 +738,18 @@ async function dispatchNotificationWithFallback(params: DispatchNotificationPara
   const { groupOpenId = null, serviceNotification, ...notificationPayload } = params;
   const notification = await createNotification(notificationPayload);
   const strategy = decideNotificationStrategy(groupOpenId);
+  recordNotificationFunnelStep({
+    step: 'send',
+    scene: notificationPayload.type,
+    userId: notificationPayload.userId,
+    activityId: notificationPayload.activityId,
+    notificationId: notification.id,
+    taskId: notificationPayload.taskId,
+    detail: {
+      strategy,
+      serviceScene: serviceNotification?.scene,
+    },
+  });
 
   if (strategy !== 'service_notification' || !serviceNotification) {
     return notification;
@@ -888,7 +943,7 @@ async function buildMessageCenterActionItems(params: {
       badge: '出发前',
       primaryAction: {
         kind: 'open_discussion',
-        label: '看讨论安排',
+        label: '确认到场安排',
         activityId: reminder.activityId,
         entry: 'message_center_activity_reminder',
       },
@@ -902,13 +957,13 @@ async function buildMessageCenterActionItems(params: {
       id: `post-activity:${postActivity.id}`,
       type: 'post_activity_follow_up',
       title: `补一下「${activityTitle}」的活动结果`,
-      summary: '这场活动已经进入收尾阶段，先补真实反馈，再决定要不要复盘或继续再约。',
+      summary: '这场活动已经进入收尾阶段：先点真实反馈，再用复盘或再约把结果变成下一次更懂你的建议。',
       statusLabel: '活动后',
       updatedAt: postActivity.updatedAt.toISOString(),
       activityId: postActivity.activityId,
       primaryAction: {
         kind: 'prompt',
-        label: '去补反馈',
+        label: '补反馈 / 再约',
         prompt: `继续处理：${postActivity.goalText}`,
         activityId: postActivity.activityId,
         activityMode: 'review',
@@ -1142,6 +1197,10 @@ export async function notifyPostActivity(
   activityId: string,
   activityTitle: string,
 ) {
+  const touchpoint = buildPostActivityTouchpoint({
+    activityId,
+    activityTitle,
+  });
   const joinedParticipants = await db
     .select({ userId: participants.userId })
     .from(participants)
@@ -1153,8 +1212,8 @@ export async function notifyPostActivity(
   const tasks = joinedParticipants.map(async (p) => dispatchNotificationWithFallback({
     userId: p.userId,
     type: 'post_activity',
-    title: `活动后反馈：${activityTitle}`,
-    content: `「${activityTitle}」结束了，来聊聊感受吧～`,
+    title: touchpoint.title,
+    content: touchpoint.content,
     activityId,
     taskId: await findLatestOpenJoinTaskIdForActivity({
       userId: p.userId,
@@ -1162,10 +1221,10 @@ export async function notifyPostActivity(
     }),
     serviceNotification: {
       scene: 'post_activity',
-      pagePath: `pages/message/index?focus=post_activity&activityId=${activityId}`,
+      pagePath: touchpoint.pagePath,
       data: {
         thing1: toTemplateValue(activityTitle),
-        thing2: toTemplateValue('活动结束了，来聊聊感受吧'),
+        thing2: toTemplateValue(touchpoint.serviceHint),
       },
     },
   }));
@@ -1186,6 +1245,11 @@ export async function notifyActivityReminder(
   activityTitle: string,
   locationName: string,
 ) {
+  const touchpoint = buildActivityReminderTouchpoint({
+    activityId,
+    activityTitle,
+    locationName,
+  });
   const joinedParticipants = await db
     .select({ userId: participants.userId })
     .from(participants)
@@ -1197,8 +1261,8 @@ export async function notifyActivityReminder(
   const tasks = joinedParticipants.map(async (p) => dispatchNotificationWithFallback({
     userId: p.userId,
     type: 'activity_reminder',
-    title: '活动马上开始啦！',
-    content: `「${activityTitle}」还有 1 小时开始，地点：${locationName}`,
+    title: touchpoint.title,
+    content: touchpoint.content,
     activityId,
     taskId: await findLatestOpenJoinTaskIdForActivity({
       userId: p.userId,
@@ -1206,10 +1270,10 @@ export async function notifyActivityReminder(
     }),
     serviceNotification: {
       scene: 'activity_reminder',
-      pagePath: `subpackages/activity/discussion/index?id=${activityId}&entry=activity_reminder`,
+      pagePath: touchpoint.pagePath,
       data: {
         thing1: toTemplateValue(activityTitle),
-        thing2: toTemplateValue(`${locationName}，1 小时后开始`),
+        thing2: toTemplateValue(touchpoint.serviceHint),
       },
     },
   }));

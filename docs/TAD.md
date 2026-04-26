@@ -2394,6 +2394,7 @@ runAsyncProcessors([{ processor: extractPreferencesProcessor }], postLLMContext)
 - **匹配确认通知卡**：`apps/api/src/modules/notifications/notification.controller.ts` 新增 `/notifications/pending-matches`，小程序 `pages/message/index.ts` 渲染“确认/取消”卡片并通过消息中心承接
 - **post_activity 回流**：小程序 `pages/message/index.ts`、`subpackages/activity/confirm/index.ts` 与 H5 `message-center-drawer.tsx` 在 post_activity / 再约承接时透传 `activityId + followUpMode`，点击后直接触发对话反馈 / 再约 prompt，并将 review 结果回写 `activityOutcomes.reviewSummary`
 - **活动后真实反馈直达化**：新增 `POST /participants/self-feedback`，H5 `message-center-drawer.tsx` 将 `post_activity` 卡片拆成两层动作；第一层直接写回 `挺顺利 / 一般 / 没成局`，第二层保留 `去复盘 / 去再约`
+- **活动后下一步建议**：`POST /participants/self-feedback` 返回 `nextAction`，基于真实反馈给出复盘或再约 prompt；H5 和小程序可以直接把这条建议续回 `/chat`
 - **群聊列表接口规范化**：新增 `GET /chat/activities?userId=...`（显式参数，禁止 `my-*` 路由语义），小程序消息页切换为标准接口
 - **未读真实统计收口**：消息中心不再本地累加/清零，统一使用服务端统计；`participants.lastReadAt` 作为读游标，`GET /chat/activities` 返回每个群聊 `unreadCount` 与 `totalUnread`
 - **消息中心聚合接口**：新增 `GET /notifications/message-center?userId=...`，一次返回系统通知、待确认匹配、通知未读与群聊未读，前端消息页改为单接口渲染
@@ -2413,6 +2414,7 @@ runAsyncProcessors([{ processor: extractPreferencesProcessor }], postLLMContext)
   - 通知模板字段、落地页动作与文案语气仍需按主场景统一，不应继续按单个接口零散生长
   - 小程序订阅授权时机仍需明确产品化设计，否则服务通知能力无法稳定转化成真实触达
   - 指标不应只停留在“发送成功”，还需补齐点击、进入承接页、动作完成、结果闭环等漏斗
+  - 当前先通过结构化 `NotificationFunnel` 日志记录 `send / open / landed / acted` 四层事件，后续可再落独立统计表或 Admin 看板
 
 #### 通知模块主场景约束
 
@@ -2444,6 +2446,7 @@ runAsyncProcessors([{ processor: extractPreferencesProcessor }], postLLMContext)
 - `discussion_reply`：固定映射为“活动标题 + 回复人/摘要”
 - `post_activity`：固定映射为“活动标题 + 结束提示 + 下一步轻提示”
 - 字段长度需要在发送前统一裁切与清洗，避免每个调用方自行决定模板填充方式
+- 三条主通知的站内标题、正文、服务通知字段和默认落地页统一由通知触点构造函数生成，避免 H5、小程序和发送器各写一套语义
 
 **Deep Link 约束**：
 

@@ -12,11 +12,15 @@ interface PartnerSearchResultItem {
   avatarInitial: string
   avatarUrl?: string
   type: string
+  scenarioLabel?: string
   locationName: string
   locationHint?: string
   timePreference?: string
   summary?: string
   matchReason?: string
+  matchHighlights: string[]
+  compatibilitySummary?: string
+  privacyHint?: string
   score?: number
   tags?: string[]
   actions: ActionItem[]
@@ -26,6 +30,10 @@ interface SearchSummary {
   locationHint: string
   timeHint?: string
   count: number
+  scenarioLabel?: string
+  stageLabel?: string
+  privacyHint?: string
+  memoryHints?: string[]
 }
 
 interface GlobalAction {
@@ -97,11 +105,15 @@ function readPartnerSearchResultItem(value: unknown, index: number): PartnerSear
     avatarInitial: title.slice(0, 1) || '搭',
     avatarUrl: readString(value.avatarUrl) || undefined,
     type: readString(value.type) || '搭子',
+    scenarioLabel: readString(value.scenarioLabel) || undefined,
     locationName: readString(value.locationName) || '待沟通',
     locationHint: readString(value.locationHint) || undefined,
     timePreference: readString(value.timePreference) || undefined,
     summary: readString(value.summary) || undefined,
     matchReason: readString(value.matchReason) || undefined,
+    matchHighlights: readTags(value.matchHighlights),
+    compatibilitySummary: readString(value.compatibilitySummary) || undefined,
+    privacyHint: readString(value.privacyHint) || undefined,
     score: readNumber(value.score),
     tags: readTags(value.tags),
     actions: Array.isArray(value.actions)

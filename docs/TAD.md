@@ -2656,17 +2656,21 @@ sequenceDiagram
     - `activityType` 必须处于同一大类
     - `timePreference` 尽量重叠，并保留原始自由文本作为摘要和后续追问依据
     - `areaText/locationHint` 文本归一后尽量相近；重庆片区白名单只作为标准化增强，不再作为理解入口
+    - 对登录用户可读取 Working Memory 作为弱信号：常去片区可作为缺省位置补充，社交/时间偏好与真实活动结果可进入搜索说明与排序提示
+    - 本轮请求显式给出的地点、时间、场景优先级高于 Memory；Memory 不能覆盖用户当前输入
     - `status` 必须为 `active` 或候选对外开放
 
 2.  **精排 (Rank)**：
     - **场景一致性**：`local_partner / destination_companion / fill_seat` 优先匹配同类
     - **语义相似度**：基于 `textarea description` 与内部标签做向量检索 / rerank
     - **时间重叠度**：计算两个意向的时间窗口交集
+    - **记忆弱加权**：Working Memory 中的常用地点、社交偏好、时间偏好、正向活动结果只能作为 tie-breaker 或解释线索，不能突破场景、认证、隐私边界
     - **偏好兼容度**：性别 / 年龄等显式约束存在时参与排序或过滤
     - **距离/区域可达性**：本地搭子优先看片区可达性；目的地同行优先看 `destinationText + timeText + activityText`
 
 3.  **握手协议 (Handshake Protocol)**：
     - 搜索结果页只返回匿名化候选摘要，不返回联系方式
+    - 搜索返回的 `searchSummary` 应包含 `stageLabel / scenarioLabel / locationHint / timeHint / count / memoryHints / privacyHint`，候选项应包含 `scenarioLabel / matchHighlights / compatibilitySummary / privacyHint`
     - `connect_partner / request_partner_group_up / opt_in_partner_pool` 才进入认证闸门
     - 在 `Matched` 状态之前，API **绝对不返回** 对方的 `phoneNumber` 或 `wxId`。
 

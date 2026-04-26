@@ -15,6 +15,7 @@ import { confirmMatch, cancelMatch, createManualPartnerMatch } from '../tools/pa
 import { buildCreateDraftParamsFromActionPayload, createActivityDraftRecord, publishActivityRecord, updateActivityDraftRecord } from '../tools/activity-tools';
 import { createPartnerIntent, ensureSearchDrivenPartnerIntent, searchPartnerCandidates } from '../tools/partner-tools';
 import { buildExploreNearbyResult, type ExploreResultItem } from '../tools/explore-nearby';
+import { getEnhancedUserProfile, type EnhancedUserProfile } from '../memory';
 import {
   buildPartnerAskPreferencePayload,
   buildPartnerIntentFormPayload,
@@ -48,6 +49,53 @@ function getPartnerSearchTargetLabel(activityType: string, sportType?: string): 
   }
 
   return `${getPartnerActivityTypeLabel(activityType)}搭子`;
+}
+
+function buildPartnerSearchMemoryHints(
+  profile: EnhancedUserProfile | null,
+  params: {
+    activityType: string;
+    locationHint: string;
+  }
+): string[] {
+  if (!profile) {
+    return [];
+  }
+
+  const hints: string[] = [];
+  const frequentLocation = profile.frequentLocations
+    .map((location) => location.trim())
+    .find((location) => location.length > 0);
+  if (frequentLocation && (!params.locationHint || params.locationHint.includes(frequentLocation) || frequentLocation.includes(params.locationHint))) {
+    hints.push(`常去${frequentLocation}`);
+  }
+
+  const socialPreference = profile.preferences
+    .filter((preference) => preference.sentiment === 'like' && preference.category === 'social')
+    .sort((left, right) => right.confidence - left.confidence)
+    .map((preference) => preference.value.trim())
+    .find((value) => value.length > 0);
+  if (socialPreference) {
+    hints.push(`偏好${socialPreference}`);
+  }
+
+  const timePreference = profile.preferences
+    .filter((preference) => preference.sentiment === 'like' && preference.category === 'time')
+    .sort((left, right) => right.confidence - left.confidence)
+    .map((preference) => preference.value.trim())
+    .find((value) => value.length > 0);
+  if (timePreference) {
+    hints.push(`常选${timePreference}`);
+  }
+
+  const positiveOutcome = (profile.activityOutcomes || [])
+    .filter((outcome) => outcome.attended === true || outcome.rebookTriggered)
+    .find((outcome) => outcome.activityType === params.activityType || Boolean(outcome.reviewSummary?.trim()));
+  if (positiveOutcome) {
+    hints.push(`参考最近顺利的「${positiveOutcome.activityTitle}」`);
+  }
+
+  return hints.slice(0, 3);
 }
 
 function mergeExploreResultsWithNearbyFallback(params: {
@@ -1364,15 +1412,15 @@ function buildPartnerSearchCardActions(params: {
   searchPayload: Record<string, unknown>;
 }): Array<{ label: string; action: string; params: Record<string, unknown> }> {
   const connectLabel = params.scenarioType === 'destination_companion'
-    ? (params.userId ? '发起同去邀约' : '登录后发起同去邀约')
+    ? (params.userId ? '发起同去邀约' : '登录后搭一下')
     : params.scenarioType === 'fill_seat'
-      ? (params.userId ? '发起补位邀约' : '登录后发起补位邀约')
-      : (params.userId ? '发起搭子邀请' : '登录后发起搭子邀请');
+      ? (params.userId ? '发起补位邀约' : '登录后搭一下')
+      : (params.userId ? '发起搭子邀请' : '登录后搭一下');
   const groupUpLabel = params.scenarioType === 'destination_companion'
-    ? (params.userId ? '让我帮你问要不要一起去' : '登录后让我帮你问要不要一起去')
+    ? (params.userId ? '让 xu 帮我问问' : '登录后让 xu 帮我问问')
     : params.scenarioType === 'fill_seat'
-      ? (params.userId ? '让我帮你问能不能补位' : '登录后让我帮你问能不能补位')
-      : (params.userId ? '让我帮你问能不能组局' : '登录后让我帮你问能不能组局');
+      ? (params.userId ? '让 xu 帮我问问' : '登录后让 xu 帮我问问')
+      : (params.userId ? '让 xu 帮我问问' : '登录后让 xu 帮我问问');
 
   return [
     {
@@ -1400,7 +1448,7 @@ function buildPartnerSearchCardActions(params: {
       },
     },
     {
-      label: params.userId ? '这轮没有就继续帮我留意' : '登录后继续帮我留意',
+      label: params.userId ? '继续帮我留意' : '登录后继续帮我留意',
       action: 'opt_in_partner_pool',
       params: params.searchPayload,
     },
@@ -1493,37 +1541,49 @@ async function handleSearchPartners(
   userId: string | null
 ): Promise<StructuredActionResult> {
   const normalized = normalizePartnerSearchPayload(payload);
+  const profile = userId ? await getEnhancedUserProfile(userId) : null;
+  const memoryLocation = profile?.frequentLocations
+    .map((location) => location.trim())
+    .find((location) => location.length > 0);
+  const locationHint = normalized.locationHint || memoryLocation || '';
 
   if (normalized.activityType === 'sports' && !normalized.sportType) {
     return { success: false, error: '还差一个运动类型，补完我就能开始搜索' };
   }
 
-  if (!normalized.locationHint) {
+  if (!locationHint) {
     return { success: false, error: '还差一个方便区域，填完我就能帮你开始搜索' };
   }
+
+  const memoryHints = buildPartnerSearchMemoryHints(profile, {
+    activityType: normalized.activityType,
+    locationHint,
+  });
 
   const searchPayload = {
     rawInput: normalized.rawInput,
     activityType: normalized.activityType,
     ...(normalized.sportType ? { sportType: normalized.sportType } : {}),
-    location: normalized.locationHint,
+    location: locationHint,
     ...(normalized.timeRange ? { timeRange: normalized.timeRange } : {}),
     ...(normalized.description ? { description: normalized.description } : {}),
     ...(normalized.preferredGender ? { preferredGender: normalized.preferredGender } : {}),
     ...(normalized.preferredAgeRange ? { preferredAgeRange: normalized.preferredAgeRange } : {}),
+    ...(memoryHints.length > 0 ? { memoryHints } : {}),
   };
 
   const searchDescription = normalized.description
     || normalized.rawInput
-    || `${normalized.locationHint}${normalized.activityType}搭子`;
+    || `${locationHint}${normalized.activityType}搭子`;
+  const memorySearchText = memoryHints.length > 0 ? ` ${memoryHints.join(' ')}` : '';
 
   const searchResult = await searchPartnerCandidates(userId, {
     rawInput: normalized.rawInput,
     activityType: normalized.activityType,
     ...(normalized.sportType ? { sportType: normalized.sportType } : {}),
-    locationHint: normalized.locationHint,
+    locationHint,
     ...(normalized.timePreference ? { timePreference: normalized.timePreference } : {}),
-    description: searchDescription,
+    description: `${searchDescription}${memorySearchText}`.trim(),
     ...(normalized.preferredGender ? { preferredGender: normalized.preferredGender } : {}),
     ...(normalized.preferredAgeRange ? { preferredAgeRange: normalized.preferredAgeRange } : {}),
   });
@@ -1540,6 +1600,7 @@ async function handleSearchPartners(
     searchSummary: {
       ...searchResult.searchSummary,
       count: searchResult.total,
+      ...(memoryHints.length > 0 ? { memoryHints } : {}),
     },
     primaryAction: {
       label: searchResult.nextAction.label,
@@ -1560,11 +1621,16 @@ async function handleSearchPartners(
         title: item.nickname,
         avatarUrl: item.avatarUrl,
       type: item.typeName,
+      scenarioType: item.scenarioType,
+      scenarioLabel: item.scenarioLabel,
       locationName: item.locationHint,
       locationHint: item.locationHint,
       timePreference: item.timePreference || '时间待沟通',
       summary: item.summary,
       matchReason: item.matchReason,
+      matchHighlights: item.matchHighlights,
+      compatibilitySummary: item.compatibilitySummary,
+      privacyHint: item.privacyHint,
       score: item.score,
       tags: item.tags,
       actions: buildPartnerSearchCardActions({
@@ -1585,13 +1651,13 @@ async function handleSearchPartners(
     data: {
       activityType: normalized.activityType,
       type: normalized.activityType,
-      locationName: normalized.locationHint,
+      locationName: locationHint,
       searchPayload,
       partnerSearchResults,
       message: buildPartnerSearchResultMessage({
         scenarioType: searchResult.searchSummary.scenarioType,
         hasResults: searchResult.items.length > 0,
-        locationHint: normalized.locationHint,
+        locationHint,
         targetLabel: getPartnerSearchTargetLabel(normalized.activityType, normalized.sportType),
       }),
     },

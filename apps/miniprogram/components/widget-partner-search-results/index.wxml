@@ -8,9 +8,15 @@
   </view>
 
   <view wx:if="{{renderSearchSummary}}" class="meta-wrap" style="margin-bottom: 20rpx;">
+    <text wx:if="{{renderSearchSummary.stageLabel}}" class="meta-chip meta-chip--stage">{{renderSearchSummary.stageLabel}}</text>
+    <text wx:if="{{renderSearchSummary.scenarioLabel}}" class="meta-chip">{{renderSearchSummary.scenarioLabel}}</text>
     <text class="meta-chip">{{renderSearchSummary.locationHint || '附近'}}</text>
     <text wx:if="{{renderSearchSummary.timeHint}}" class="meta-chip meta-chip--soft">{{renderSearchSummary.timeHint}}</text>
     <text class="meta-chip meta-chip--soft">先搜到 {{renderSearchSummary.count}} 位</text>
+  </view>
+  <view wx:if="{{renderSearchSummary && renderSearchSummary.memoryHints && renderSearchSummary.memoryHints.length > 0}}" class="memory-hints">
+    <text class="memory-hints__label">按你的习惯加权</text>
+    <text wx:for="{{renderSearchSummary.memoryHints}}" wx:for-item="hint" wx:key="*this" class="memory-hints__chip">{{hint}}</text>
   </view>
 
   <view wx:if="{{renderResults.length > 0}}" class="swiper-shell">
@@ -37,6 +43,7 @@
               <view class="user-copy">
                 <view class="user-copy__row">
                   <text class="type-chip">{{result.type}}</text>
+                  <text wx:if="{{result.scenarioLabel}}" class="type-chip type-chip--scenario">{{result.scenarioLabel}}</text>
                   <text wx:if="{{result.score}}" class="score-chip">匹配 {{result.score}}%</text>
                 </view>
                 <text class="user-name">{{result.title}}</text>
@@ -50,10 +57,16 @@
           </view>
 
           <text class="summary">{{result.summary || result.matchReason || result.locationHint || '先看看这位搭子的描述，顺眼的话就继续下一步。'}}</text>
+          <text wx:if="{{result.compatibilitySummary}}" class="compatibility">{{result.compatibilitySummary}}</text>
+
+          <view wx:if="{{result.matchHighlights && result.matchHighlights.length > 0}}" class="highlight-wrap">
+            <text wx:for="{{result.matchHighlights}}" wx:for-item="highlight" wx:key="*this" class="highlight-chip">{{highlight}}</text>
+          </view>
 
           <view wx:if="{{result.tags && result.tags.length > 0}}" class="tag-wrap">
             <text wx:for="{{result.tags}}" wx:for-item="tag" wx:key="*this" class="tag-chip">{{tag}}</text>
           </view>
+          <text wx:if="{{result.privacyHint}}" class="privacy-hint">{{result.privacyHint}}</text>
 
           <view wx:if="{{result.actions.length > 0}}" class="action-wrap">
             <button

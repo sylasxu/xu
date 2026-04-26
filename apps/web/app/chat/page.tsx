@@ -3793,6 +3793,7 @@ function ResultCarouselCard({
   const isDarkMode = useChatTheme();
   const title = readStringField(item, "title", `结果 ${index + 1}`);
   const type = readStringField(item, "type");
+  const scenarioLabel = readStringField(item, "scenarioLabel");
   const locationName = readStringField(item, "locationName", "附近");
   const startAt = renderFieldValue(item.startAt);
   const avatarUrl = readStringField(item, "avatarUrl");
@@ -3813,12 +3814,21 @@ function ResultCarouselCard({
         .filter((tag): tag is string => typeof tag === "string" && tag.trim().length > 0)
         .slice(0, 3)
     : [];
+  const matchHighlights = Array.isArray(item.matchHighlights)
+    ? item.matchHighlights
+        .filter((highlight): highlight is string => typeof highlight === "string" && highlight.trim().length > 0)
+        .slice(0, 3)
+    : [];
+  const compatibilitySummary = readStringField(item, "compatibilitySummary");
+  const privacyHint = readStringField(item, "privacyHint");
   const hiddenKeys = new Set([
     "id",
     "partnerIntentId",
     "candidateUserId",
     "title",
     "type",
+    "scenarioType",
+    "scenarioLabel",
     "avatarUrl",
     "locationName",
     "locationHint",
@@ -3831,6 +3841,9 @@ function ResultCarouselCard({
     "summary",
     "description",
     "matchReason",
+    "matchHighlights",
+    "compatibilitySummary",
+    "privacyHint",
     "reason",
     "tags",
     "actions",
@@ -3867,6 +3880,11 @@ function ResultCarouselCard({
           {type ? (
             <div className={cn("mb-2 inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]", isDarkMode ? "border-white/8 bg-white/[0.03] text-white/56" : "border-black/8 bg-black/[0.03] text-black/50")}>
               {type}
+            </div>
+          ) : null}
+          {partnerMode && scenarioLabel ? (
+            <div className={cn("mb-2 ml-2 inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]", isDarkMode ? "border-emerald-300/10 bg-emerald-300/10 text-emerald-100/80" : "border-emerald-700/10 bg-emerald-600/10 text-emerald-700")}>
+              {scenarioLabel}
             </div>
           ) : null}
           <h3 className={cn("text-[15px] font-semibold leading-6", isDarkMode ? "text-white/92" : "text-black/88")}>{title}</h3>
@@ -3911,6 +3929,28 @@ function ResultCarouselCard({
           左右滑动看看其他结果，选到顺眼的我们再继续。
         </p>
       )}
+
+      {partnerMode && compatibilitySummary ? (
+        <p className={cn("mt-2 text-xs leading-5", isDarkMode ? "text-white/46" : "text-black/46")}>{compatibilitySummary}</p>
+      ) : null}
+
+      {partnerMode && matchHighlights.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {matchHighlights.map((highlight) => (
+            <span
+              key={highlight}
+              className={cn(
+                "rounded-full border px-2.5 py-1 text-[11px]",
+                isDarkMode
+                  ? "border-emerald-300/10 bg-emerald-300/10 text-emerald-100/70"
+                  : "border-emerald-700/10 bg-emerald-600/10 text-emerald-700"
+              )}
+            >
+              {highlight}
+            </span>
+          ))}
+        </div>
+      ) : null}
 
       <div className="mt-4 space-y-2">
         {currentParticipants !== undefined && maxParticipants !== undefined ? (
@@ -3959,6 +3999,10 @@ function ResultCarouselCard({
             </span>
           ))}
         </div>
+      ) : null}
+
+      {partnerMode && privacyHint ? (
+        <p className={cn("mt-3 text-xs leading-5", isDarkMode ? "text-white/38" : "text-black/38")}>{privacyHint}</p>
       ) : null}
 
       {partnerMode && actions.length > 0 ? (
@@ -4157,6 +4201,93 @@ function ListBlockGlobalActions({
   );
 }
 
+function readStringArrayField(fields: Record<string, unknown>, key: string, limit = 4): string[] {
+  const value = fields[key];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    .map((item) => item.trim())
+    .slice(0, limit);
+}
+
+function PartnerSearchSummaryBar({ meta }: { meta: Record<string, unknown> }) {
+  const isDarkMode = useChatTheme();
+  const searchSummary = isRecord(meta.searchSummary) ? meta.searchSummary : null;
+  if (!searchSummary) {
+    return null;
+  }
+
+  const stageLabel = readStringField(searchSummary, "stageLabel");
+  const scenarioLabel = readStringField(searchSummary, "scenarioLabel");
+  const locationHint = readStringField(searchSummary, "locationHint");
+  const timeHint = readStringField(searchSummary, "timeHint");
+  const count = readNumberField(searchSummary, "count", 0);
+  const privacyHint = readStringField(searchSummary, "privacyHint");
+  const memoryHints = readStringArrayField(searchSummary, "memoryHints", 3);
+  const summaryChips = [
+    stageLabel,
+    scenarioLabel,
+    locationHint,
+    timeHint,
+    count > 0 ? `${count} 位候选` : "",
+  ].filter((chip): chip is string => chip.length > 0);
+
+  if (summaryChips.length === 0 && memoryHints.length === 0 && !privacyHint) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 space-y-2">
+      {summaryChips.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {summaryChips.map((chip, index) => (
+            <span
+              key={`${chip}-${index}`}
+              className={cn(
+                "rounded-full border px-2.5 py-1 text-[11px] font-medium",
+                index === 0
+                  ? isDarkMode
+                    ? "border-white/10 bg-white/[0.06] text-white/74"
+                    : "border-black/10 bg-black/[0.05] text-black/68"
+                  : isDarkMode
+                    ? "border-white/8 bg-white/[0.03] text-white/46"
+                    : "border-black/8 bg-black/[0.03] text-black/44"
+              )}
+            >
+              {chip}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {memoryHints.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {memoryHints.map((hint) => (
+            <span
+              key={hint}
+              className={cn(
+                "rounded-full border px-2.5 py-1 text-[11px]",
+                isDarkMode
+                  ? "border-emerald-300/10 bg-emerald-300/10 text-emerald-100/70"
+                  : "border-emerald-700/10 bg-emerald-600/10 text-emerald-700"
+              )}
+            >
+              {hint}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {privacyHint ? (
+        <p className={cn("text-xs leading-5", isDarkMode ? "text-white/36" : "text-black/36")}>{privacyHint}</p>
+      ) : null}
+    </div>
+  );
+}
+
 function ListBlockCard({
   block,
   disabled,
@@ -4199,6 +4330,10 @@ function ListBlockCard({
 
       {block.subtitle ? (
         <p className={cn("mt-2 text-sm", isDarkMode ? "text-white/42" : "text-black/42")}>{block.subtitle}</p>
+      ) : null}
+
+      {partnerMode && isRecord(block.meta) ? (
+        <PartnerSearchSummaryBar meta={block.meta} />
       ) : null}
 
       {browseable ? (

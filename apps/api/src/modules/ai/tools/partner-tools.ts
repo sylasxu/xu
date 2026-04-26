@@ -87,13 +87,17 @@ export interface SearchPartnerCandidate {
   nickname: string;
   avatarUrl: string | null;
   typeName: string;
+  scenarioType: PartnerScenarioType;
+  scenarioLabel: string;
   locationHint: string;
   destinationText?: string | null;
-  scenarioType?: string;
   timePreference: string | null;
   timeText?: string | null;
   summary: string;
   matchReason: string;
+  matchHighlights: string[];
+  compatibilitySummary: string;
+  privacyHint: string;
   score: number;
   tags: string[];
 }
@@ -102,7 +106,10 @@ export interface SearchSummary {
   total: number;
   locationHint: string;
   timeHint: string;
-  scenarioType?: string;
+  scenarioType?: PartnerScenarioType;
+  scenarioLabel: string;
+  stageLabel: string;
+  privacyHint: string;
 }
 
 type PartnerIntentWriteSnapshot = {
@@ -207,20 +214,6 @@ function extractCommonLocationHint(candidates: SearchPartnerCandidate[], queryLo
   
   // 否则返回第一个候选人的地点
   return `在${candidates[0].locationHint}附近`;
-}
-
-function buildSearchScenarioSummary(rawInput: string): string | undefined {
-  const understanding = understandPartnerRequest(rawInput);
-
-  if (understanding.scenarioType === 'destination_companion') {
-    return 'destination_companion';
-  }
-
-  if (understanding.scenarioType === 'fill_seat') {
-    return 'fill_seat';
-  }
-
-  return 'local_partner';
 }
 
 function buildSearchLocationSummary(rawInput: string, queryLocation: string, candidates: SearchPartnerCandidate[]): string {
@@ -448,6 +441,31 @@ function calculatePartnerSearchScore(params: {
   };
 }
 
+function getPartnerScenarioLabel(scenarioType: PartnerScenarioType): string {
+  switch (scenarioType) {
+    case 'destination_companion':
+      return '目的地同行';
+    case 'fill_seat':
+      return '临时补位';
+    case 'local_partner':
+    default:
+      return '本地搭子';
+  }
+}
+
+function buildPartnerCompatibilitySummary(params: {
+  scenarioType: PartnerScenarioType;
+  locationHint: string;
+  timePreference: string | null;
+  reasons: string[];
+}): string {
+  const scenarioLabel = getPartnerScenarioLabel(params.scenarioType);
+  const locationText = params.locationHint ? `区域在 ${params.locationHint}` : '区域待沟通';
+  const timeText = params.timePreference ? `时间偏向 ${params.timePreference}` : '时间可继续沟通';
+  const reasonText = params.reasons.length > 0 ? `，${params.reasons.slice(0, 2).join('、')}` : '';
+  return `${scenarioLabel} · ${locationText} · ${timeText}${reasonText}`;
+}
+
 export async function searchPartnerCandidates(
   userId: string | null,
   params: SearchPartnerCandidatesParams
@@ -507,9 +525,10 @@ export async function searchPartnerCandidates(
             scenarioType: resolvedScenarioType,
             defaultTypeName: typeName,
           }),
+          scenarioType: resolvedScenarioType,
+          scenarioLabel: getPartnerScenarioLabel(resolvedScenarioType),
           locationHint: row.intent.locationHint,
           ...(row.intent.destinationText ? { destinationText: row.intent.destinationText } : {}),
-          ...(row.intent.scenarioType ? { scenarioType: row.intent.scenarioType } : {}),
           timePreference: row.intent.timePreference || null,
           ...(row.intent.timeText ? { timeText: row.intent.timeText } : {}),
           summary,
@@ -517,6 +536,19 @@ export async function searchPartnerCandidates(
             scenarioType: resolvedScenarioType,
             reasons,
           }),
+          matchHighlights: reasons.length > 0
+            ? reasons
+            : [
+                `${getPartnerScenarioLabel(resolvedScenarioType)}方向接近`,
+                row.intent.timePreference ? `时间偏向${row.intent.timePreference}` : '可以继续沟通时间',
+              ],
+          compatibilitySummary: buildPartnerCompatibilitySummary({
+            scenarioType: resolvedScenarioType,
+            locationHint: row.intent.locationHint,
+            timePreference: row.intent.timePreference || null,
+            reasons,
+          }),
+          privacyHint: '确认前不会展示联系方式',
           score,
           tags: Array.isArray(row.intent.metaData?.tags) ? row.intent.metaData.tags.slice(0, 3) : [],
         } satisfies SearchPartnerCandidate;
@@ -529,14 +561,17 @@ export async function searchPartnerCandidates(
       total: scored.length,
       locationHint: buildSearchLocationSummary(params.rawInput, params.locationHint, scored),
       timeHint: extractCommonTimeHint(scored, params.timePreference),
-      scenarioType: buildSearchScenarioSummary(params.rawInput),
+      scenarioType: queryUnderstanding.scenarioType,
+      scenarioLabel: getPartnerScenarioLabel(queryUnderstanding.scenarioType),
+      stageLabel: '先搜一下',
+      privacyHint: '候选结果只展示摘要，确认前不暴露联系方式',
     };
 
     // 主要下一步动作：入池等待
     const nextAction: SearchNextAction = {
       type: 'opt_in_partner_pool',
-      label: '这轮没有就继续帮我留意',
-      description: '系统将持续为你寻找更合适的搭子，匹配成功会通知你',
+      label: '继续帮我留意',
+      description: '系统会持续为你寻找更合适的搭子，匹配成功后会进消息中心。',
     };
 
     // 次要动作：刷新搜索

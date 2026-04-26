@@ -998,7 +998,7 @@ function buildPartnerTaskSummary(task: AgentTask): string {
       return '差一步账号验证，恢复后就继续替你发意向。';
     case 'intent_posted':
     case 'awaiting_match':
-      return '意向已经挂上去了，我会继续替你盯着下一次合适的匹配。';
+      return '这条找搭子意向已经挂上去了，24 小时内我会继续替你盯着；有合适的人会先进消息中心，不用重新说一遍。';
     case 'match_ready':
       return task.intentMatchId
         ? '已经出现可确认的匹配结果，去消息中心看一眼，或者直接回来说你想继续哪一个。'
@@ -1179,7 +1179,7 @@ function buildPartnerTaskPrimaryAction(task: AgentTask): CurrentAgentTaskAction 
 
     return {
       kind: 'switch_tab',
-      label: task.currentStage === 'match_ready' ? '去确认匹配' : '看匹配进展',
+      label: task.currentStage === 'match_ready' ? '去确认匹配' : '查看代找进展',
       url: '/pages/message/index',
       ...(task.currentStage === 'match_ready'
         ? {

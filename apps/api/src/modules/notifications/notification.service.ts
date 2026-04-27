@@ -67,9 +67,9 @@ const DEFAULT_MESSAGE_CENTER_UI: MessageCenterUi = {
   visitorTitle: '这里会接住后续进展',
   visitorDescription: '待确认搭子、活动后跟进和群聊未读，都会整理到这里。',
   summaryTitle: '未读总数',
-  actionInboxSectionTitle: '等你处理',
-  actionInboxDescription: '先把最需要你接一下的事摆在上面，点开就能继续原来的那条链路。',
-  actionInboxEmpty: '当前没有必须立刻处理的事，新的进展会先出现在这里。',
+  actionInboxSectionTitle: '任务收件箱',
+  actionInboxDescription: '按紧急程度把出发前、活动后、讨论回复和草稿继续处理排好，点开就能回到原链路。',
+  actionInboxEmpty: '当前没有必须立刻处理的任务，新的进展会先出现在这里。',
   pendingMatchesTitle: '待确认搭子',
   pendingMatchesEmpty: '当前没有待确认匹配，新的搭子撮合到了会先出现在这里。',
   requestAuthHint: '请先登录后再查看消息中心',
@@ -566,6 +566,10 @@ export async function getPendingMatchDetail(
     nextActionOwner,
     organizerNickname,
   });
+  const continuationTitle = '刚才那条找搭子任务的继续';
+  const continuationText = nextActionOwner === 'self'
+    ? '这不是一条孤立通知，而是你之前找搭子请求的新进展。现在轮到你确认，确认后才会继续往活动协同推进。'
+    : `这不是一条孤立通知，而是你之前找搭子请求的新进展。现在等 ${organizerNickname} 确认，你可以先查看成员信息和破冰建议。`;
   const firstSportType = memberRows
     .map((row) => row.metaData?.sportType)
     .find((value) => typeof value === 'string' && value.trim().length > 0);
@@ -583,6 +587,8 @@ export async function getPendingMatchDetail(
     organizerUserId: match.tempOrganizerId,
     organizerNickname: organizer?.nickname || null,
     nextActionOwner,
+    continuationTitle,
+    continuationText,
     nextActionText,
     matchReasonTitle: '为什么是这次匹配',
     matchReasonText,
@@ -841,6 +847,21 @@ async function findLatestPartnerTaskIdForMatch(params: {
   return task?.id;
 }
 
+function getMessageCenterActionItemPriority(item: MessageCenterActionItem): number {
+  switch (item.type) {
+    case 'activity_reminder':
+      return 10;
+    case 'post_activity_follow_up':
+      return 20;
+    case 'discussion_reply':
+      return 30;
+    case 'draft_continue':
+      return 40;
+    case 'recruiting_follow_up':
+      return 50;
+  }
+}
+
 async function buildMessageCenterActionItems(params: {
   userId: string;
   chatActivities: Awaited<ReturnType<typeof getChatActivities>>;
@@ -940,7 +961,7 @@ async function buildMessageCenterActionItems(params: {
       updatedAt: reminder.createdAt.toISOString(),
       activityId: reminder.activityId,
       notificationId: reminder.id,
-      badge: '出发前',
+      badge: '优先处理',
       primaryAction: {
         kind: 'open_discussion',
         label: '确认到场安排',
@@ -957,10 +978,11 @@ async function buildMessageCenterActionItems(params: {
       id: `post-activity:${postActivity.id}`,
       type: 'post_activity_follow_up',
       title: `补一下「${activityTitle}」的活动结果`,
-      summary: '这场活动已经进入收尾阶段：先点真实反馈，再用复盘或再约把结果变成下一次更懂你的建议。',
+      summary: '这场活动已经进入收尾阶段：先补真实反馈，再顺手复盘或再约，后续推荐会接住这次结果。',
       statusLabel: '活动后',
       updatedAt: postActivity.updatedAt.toISOString(),
       activityId: postActivity.activityId,
+      badge: '结果待补',
       primaryAction: {
         kind: 'prompt',
         label: '补反馈 / 再约',
@@ -1008,6 +1030,7 @@ async function buildMessageCenterActionItems(params: {
       statusLabel: isDraftReady ? '草稿待确认' : '继续做草稿',
       updatedAt: draft.updatedAt.toISOString(),
       activityId: draft.activityId ?? null,
+      badge: isDraftReady ? '待发布' : '待补全',
       primaryAction: {
         kind: 'prompt',
         label: isDraftReady ? '继续确认' : '继续看草稿',
@@ -1029,6 +1052,7 @@ async function buildMessageCenterActionItems(params: {
       statusLabel: '继续招人',
       updatedAt: recruiting.updatedAt.toISOString(),
       activityId: recruiting.id,
+      badge: '招人中',
       primaryAction: {
         kind: 'prompt',
         label: '继续推进',
@@ -1039,7 +1063,14 @@ async function buildMessageCenterActionItems(params: {
     });
   }
 
-  return items;
+  return items.sort((left, right) => {
+    const priorityDelta = getMessageCenterActionItemPriority(left) - getMessageCenterActionItemPriority(right);
+    if (priorityDelta !== 0) {
+      return priorityDelta;
+    }
+
+    return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
+  });
 }
 
 /**

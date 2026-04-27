@@ -493,7 +493,7 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
                   : canConfirmFulfillment
                     ? "默认全部标记为到场，有未到场再取消勾选。"
                     : canJoin
-                      ? `剩余 ${remainingSeats} 个位置`
+                      ? `${activity.conversionTips.joinContext} 剩余 ${remainingSeats} 个位置`
                       : "可以先分享给朋友或回到首页继续找局"}
               </p>
             </div>
@@ -539,10 +539,12 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
               cloneActivity();
             }}
             className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl py-2 text-xs text-white/44 transition hover:bg-white/[0.04] hover:text-white/70"
+            title={activity.conversionTips.cloneContext}
           >
             <Plus className="h-3.5 w-3.5" />
             我也组一个
           </button>
+          <p className="px-2 text-center text-[11px] leading-5 text-white/35">{activity.conversionTips.cloneContext}</p>
 
           {shareStatus !== "idle" ? (
             <p className="mt-2 text-center text-xs text-white/44">

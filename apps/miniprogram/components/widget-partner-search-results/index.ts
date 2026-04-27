@@ -17,9 +17,11 @@ interface PartnerSearchResultItem {
   locationHint?: string
   timePreference?: string
   summary?: string
+  reasonTitle: string
   matchReason?: string
   matchHighlights: string[]
   compatibilitySummary?: string
+  nextStepHint?: string
   privacyHint?: string
   score?: number
   tags?: string[]
@@ -32,6 +34,7 @@ interface SearchSummary {
   count: number
   scenarioLabel?: string
   stageLabel?: string
+  stageHint?: string
   privacyHint?: string
   memoryHints?: string[]
 }
@@ -110,9 +113,11 @@ function readPartnerSearchResultItem(value: unknown, index: number): PartnerSear
     locationHint: readString(value.locationHint) || undefined,
     timePreference: readString(value.timePreference) || undefined,
     summary: readString(value.summary) || undefined,
+    reasonTitle: readString(value.reasonTitle) || '为什么合适',
     matchReason: readString(value.matchReason) || undefined,
     matchHighlights: readTags(value.matchHighlights),
     compatibilitySummary: readString(value.compatibilitySummary) || undefined,
+    nextStepHint: readString(value.nextStepHint) || undefined,
     privacyHint: readString(value.privacyHint) || undefined,
     score: readNumber(value.score),
     tags: readTags(value.tags),

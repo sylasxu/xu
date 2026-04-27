@@ -142,9 +142,10 @@ function buildJoinGuideTitle(title: string): string {
 function getJoinQuickStarters(title: string): string[] {
   const normalizedTitle = title.trim() || "这场活动"
   return [
-    `哈喽，我刚报名「${normalizedTitle}」，很高兴认识大家～`,
-    `我是刚进来的，关于「${normalizedTitle}」大家一般几点到呀？`,
-    `我会按时到，大家出发前也可以在群里说一声～`,
+    `哈喽，我刚加入「${normalizedTitle}」，先和大家打个招呼～`,
+    `大家一般提前多久到？我想把时间安排稳一点。`,
+    `集合点或到店方式有需要补充的吗？`,
+    `如果还缺一个开场，我可以先帮大家确认一下安排。`,
   ]
 }
 
@@ -635,7 +636,7 @@ export function DiscussionRuntimePanel({
             <p className="text-sm font-semibold">{buildJoinGuideTitle(activityTitle)}</p>
           </div>
           <p className="mt-1 text-xs leading-5 text-[#6673a8]">
-            刚才报的这场局已经接上了，先发一句招呼，大家更容易接住你。
+            刚才报的这场局已经接上了，先把集合、破冰或时间安排补一句，后续变化也会留在这里。
           </p>
           {quickStarters.length > 0 ? (
             <div className="mt-3 flex flex-wrap gap-2">

@@ -3819,7 +3819,9 @@ function ResultCarouselCard({
         .filter((highlight): highlight is string => typeof highlight === "string" && highlight.trim().length > 0)
         .slice(0, 3)
     : [];
+  const reasonTitle = readStringField(item, "reasonTitle", "为什么合适");
   const compatibilitySummary = readStringField(item, "compatibilitySummary");
+  const nextStepHint = readStringField(item, "nextStepHint");
   const privacyHint = readStringField(item, "privacyHint");
   const hiddenKeys = new Set([
     "id",
@@ -3841,8 +3843,10 @@ function ResultCarouselCard({
     "summary",
     "description",
     "matchReason",
+    "reasonTitle",
     "matchHighlights",
     "compatibilitySummary",
+    "nextStepHint",
     "privacyHint",
     "reason",
     "tags",
@@ -3935,20 +3939,23 @@ function ResultCarouselCard({
       ) : null}
 
       {partnerMode && matchHighlights.length > 0 ? (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {matchHighlights.map((highlight) => (
-            <span
-              key={highlight}
-              className={cn(
-                "rounded-full border px-2.5 py-1 text-[11px]",
-                isDarkMode
-                  ? "border-emerald-300/10 bg-emerald-300/10 text-emerald-100/70"
-                  : "border-emerald-700/10 bg-emerald-600/10 text-emerald-700"
-              )}
-            >
-              {highlight}
-            </span>
-          ))}
+        <div className="mt-3 space-y-2">
+          <p className={cn("text-[11px] font-semibold", isDarkMode ? "text-white/54" : "text-black/52")}>{reasonTitle}</p>
+          <div className="flex flex-wrap gap-2">
+            {matchHighlights.map((highlight) => (
+              <span
+                key={highlight}
+                className={cn(
+                  "rounded-full border px-2.5 py-1 text-[11px]",
+                  isDarkMode
+                    ? "border-emerald-300/10 bg-emerald-300/10 text-emerald-100/70"
+                    : "border-emerald-700/10 bg-emerald-600/10 text-emerald-700"
+                )}
+              >
+                {highlight}
+              </span>
+            ))}
+          </div>
         </div>
       ) : null}
 
@@ -4007,6 +4014,9 @@ function ResultCarouselCard({
 
       {partnerMode && actions.length > 0 ? (
         <div className="mt-4 grid grid-cols-1 gap-2">
+          {nextStepHint ? (
+            <p className={cn("text-[11px] leading-5", isDarkMode ? "text-white/42" : "text-black/42")}>{nextStepHint}</p>
+          ) : null}
           {actions.map((action, actionIndex) => (
             <button
               key={`${action.action}-${actionIndex}`}
@@ -4221,6 +4231,7 @@ function PartnerSearchSummaryBar({ meta }: { meta: Record<string, unknown> }) {
   }
 
   const stageLabel = readStringField(searchSummary, "stageLabel");
+  const stageHint = readStringField(searchSummary, "stageHint");
   const scenarioLabel = readStringField(searchSummary, "scenarioLabel");
   const locationHint = readStringField(searchSummary, "locationHint");
   const timeHint = readStringField(searchSummary, "timeHint");
@@ -4235,7 +4246,7 @@ function PartnerSearchSummaryBar({ meta }: { meta: Record<string, unknown> }) {
     count > 0 ? `${count} 位候选` : "",
   ].filter((chip): chip is string => chip.length > 0);
 
-  if (summaryChips.length === 0 && memoryHints.length === 0 && !privacyHint) {
+  if (summaryChips.length === 0 && memoryHints.length === 0 && !stageHint && !privacyHint) {
     return null;
   }
 
@@ -4283,6 +4294,10 @@ function PartnerSearchSummaryBar({ meta }: { meta: Record<string, unknown> }) {
 
       {privacyHint ? (
         <p className={cn("text-xs leading-5", isDarkMode ? "text-white/36" : "text-black/36")}>{privacyHint}</p>
+      ) : null}
+
+      {stageHint ? (
+        <p className={cn("text-xs leading-5", isDarkMode ? "text-white/42" : "text-black/42")}>{stageHint}</p>
       ) : null}
     </div>
   );

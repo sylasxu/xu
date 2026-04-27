@@ -318,6 +318,11 @@
         </view>
 
         <view class="match-detail-section">
+          <text class="match-detail-section__title">{{selectedMatchDetail.continuationTitle}}</text>
+          <text class="match-detail-section__text">{{selectedMatchDetail.continuationText}}</text>
+        </view>
+
+        <view class="match-detail-section">
           <text class="match-detail-section__title">现在是什么状态</text>
           <text class="match-detail-section__text">{{selectedMatchDetail.nextActionText}}</text>
         </view>

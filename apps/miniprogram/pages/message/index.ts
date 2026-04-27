@@ -20,7 +20,7 @@ import type {
 import { useUserStore } from '../../src/stores/user';
 import { useChatStore } from '../../src/stores/chat';
 import { useAppStore } from '../../src/stores/app';
-import { postActivityRebookFollowUp, postActivitySelfFeedback } from '../../src/services/activity-outcome';
+import { postActivityRebookFollowUp, postActivitySelfFeedback, type ActionResponse } from '../../src/services/activity-outcome';
 import { getPendingMatchDetail, type PendingMatchDetailResponse } from '../../src/services/pending-match';
 
 type NotificationType = NotificationMessageCenterResponseSystemNotificationsItemsItemType | 'match_pending';
@@ -105,6 +105,8 @@ interface PendingMatchDetailView {
   organizerUserId: string;
   organizerDisplayName: string;
   nextActionOwner: 'self' | 'organizer';
+  continuationTitle: string;
+  continuationText: string;
   nextActionText: string;
   matchReasonTitle: string;
   matchReasonText: string;
@@ -675,6 +677,14 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
 
 
   mapPendingMatchDetail(detail: PendingMatchDetailResponse): PendingMatchDetailView {
+    const detailRecord: Record<string, unknown> = isRecord(detail) ? detail : {};
+    const continuationTitle = typeof detailRecord.continuationTitle === 'string' && detailRecord.continuationTitle.trim()
+      ? detailRecord.continuationTitle.trim()
+      : '刚才那条找搭子任务的继续';
+    const continuationText = typeof detailRecord.continuationText === 'string' && detailRecord.continuationText.trim()
+      ? detailRecord.continuationText.trim()
+      : '这不是一条孤立通知，而是你之前找搭子请求的新进展。先看清楚这次匹配，再决定要不要继续推进。';
+
     return {
       id: detail.id,
       activityType: detail.activityType,
@@ -689,6 +699,8 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
       organizerUserId: detail.organizerUserId,
       organizerDisplayName: detail.organizerNickname || '召集人',
       nextActionOwner: detail.nextActionOwner,
+      continuationTitle,
+      continuationText,
       nextActionText: detail.nextActionText,
       matchReasonTitle: detail.matchReasonTitle,
       matchReasonText: detail.matchReasonText,
@@ -775,18 +787,21 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
 
   noop() {},
 
-  async recordRebookFollowUp(activityId: string) {
+  async recordRebookFollowUp(activityId: string): Promise<ActionResponse['nextAction'] | null> {
     if (!activityId) {
-      return;
+      return null;
     }
 
     try {
       const response = await postActivityRebookFollowUp(activityId);
       if (response.status !== 200) {
         console.warn('记录再约意愿失败', response.data);
+        return null;
       }
+      return 'nextAction' in response.data ? response.data.nextAction || null : null;
     } catch (error) {
       console.error('记录再约意愿失败', error);
+      return null;
     }
   },
 
@@ -1126,17 +1141,17 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
   },
 
   async startRebookFromNotification(activityId: string, title: string) {
-    await this.recordRebookFollowUp(activityId);
+    const nextAction = await this.recordRebookFollowUp(activityId);
 
     const activityTitle = normalizeNotificationActivityTitle(title);
     const activityHint = activityTitle ? `「${activityTitle}」` : '这场活动';
     const activityRef = activityId ? `（activityId: ${activityId}）` : '';
-    const prompt = `基于我刚结束的${activityHint}${activityRef}，帮我快速再约一场：延续合适的人、给个新时间建议，并直接生成一段可发送的招呼文案。`;
+    const prompt = nextAction?.prompt || `基于我刚结束的${activityHint}${activityRef}，帮我快速再约一场：延续合适的人、给个新时间建议，并直接生成一段可发送的招呼文案。`;
 
     this.openChatWithPrompt(prompt, {
       ...(activityId ? { activityId } : {}),
-      activityMode: 'rebook',
-      entry: 'message_center_post_activity',
+      activityMode: nextAction?.activityMode || 'rebook',
+      entry: nextAction?.entry || 'message_center_post_activity',
     });
   },
 

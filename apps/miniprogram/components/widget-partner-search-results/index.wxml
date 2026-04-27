@@ -18,6 +18,7 @@
     <text class="memory-hints__label">按你的习惯加权</text>
     <text wx:for="{{renderSearchSummary.memoryHints}}" wx:for-item="hint" wx:key="*this" class="memory-hints__chip">{{hint}}</text>
   </view>
+  <text wx:if="{{renderSearchSummary && renderSearchSummary.stageHint}}" class="stage-hint">{{renderSearchSummary.stageHint}}</text>
 
   <view wx:if="{{renderResults.length > 0}}" class="swiper-shell">
     <swiper
@@ -60,6 +61,7 @@
           <text wx:if="{{result.compatibilitySummary}}" class="compatibility">{{result.compatibilitySummary}}</text>
 
           <view wx:if="{{result.matchHighlights && result.matchHighlights.length > 0}}" class="highlight-wrap">
+            <text class="highlight-title">{{result.reasonTitle}}</text>
             <text wx:for="{{result.matchHighlights}}" wx:for-item="highlight" wx:key="*this" class="highlight-chip">{{highlight}}</text>
           </view>
 
@@ -69,6 +71,7 @@
           <text wx:if="{{result.privacyHint}}" class="privacy-hint">{{result.privacyHint}}</text>
 
           <view wx:if="{{result.actions.length > 0}}" class="action-wrap">
+            <text wx:if="{{result.nextStepHint}}" class="next-step-hint">{{result.nextStepHint}}</text>
             <button
               wx:for="{{result.actions}}"
               wx:for-item="actionItem"

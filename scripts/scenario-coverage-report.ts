@@ -45,6 +45,29 @@ async function readLatestArtifact(runner: string): Promise<RegressionArtifactFil
   return JSON.parse(raw) as RegressionArtifactFile;
 }
 
+async function readArtifacts(runner: string): Promise<RegressionArtifactFile[]> {
+  const dir = join(process.cwd(), '.artifacts', 'regression', runner);
+
+  let files: string[];
+  try {
+    files = await readdir(dir);
+  } catch {
+    return [];
+  }
+
+  const artifacts: RegressionArtifactFile[] = [];
+  for (const file of files.filter((item) => item.endsWith('.json')).sort()) {
+    try {
+      const raw = await readFile(join(dir, file), 'utf8');
+      artifacts.push(JSON.parse(raw) as RegressionArtifactFile);
+    } catch {
+      // Ignore malformed local artifacts; the report is best-effort.
+    }
+  }
+
+  return artifacts;
+}
+
 function summarizeMatrix(entries: ScenarioMatrixEntry[]) {
   const byDomain = new Map<string, number>();
   const byRunner = new Map<string, number>();
@@ -78,21 +101,55 @@ function summarizeArtifact(artifact: RegressionArtifactFile | null) {
   return { coveredDomains, passedDomains };
 }
 
+function buildLatestScenarioResults(
+  artifactsByRunner: Map<string, RegressionArtifactFile[]>,
+): Map<string, { scenario: ArtifactScenario; artifact: RegressionArtifactFile }> {
+  const latestByScenario = new Map<string, { scenario: ArtifactScenario; artifact: RegressionArtifactFile }>();
+
+  for (const artifacts of artifactsByRunner.values()) {
+    for (const artifact of artifacts) {
+      for (const scenario of artifact.scenarios) {
+        const previous = latestByScenario.get(scenario.id);
+        if (!previous || artifact.startedAt > previous.artifact.startedAt) {
+          latestByScenario.set(scenario.id, { scenario, artifact });
+        }
+      }
+    }
+  }
+
+  return latestByScenario;
+}
+
+function readScenarioStatus(
+  entry: ScenarioMatrixEntry,
+  latestByScenario: Map<string, { scenario: ArtifactScenario; artifact: RegressionArtifactFile }>,
+): { status: string; latestAt: string } {
+  const latest = latestByScenario.get(entry.id);
+  if (!latest) {
+    return { status: 'no-latest-artifact', latestAt: 'none' };
+  }
+
+  return {
+    status: latest.scenario.passed ? 'passed' : 'failed',
+    latestAt: latest.artifact.startedAt,
+  };
+}
+
 async function main(): Promise<void> {
   const matrix = listScenarioMatrix();
   const { byDomain, byRunner } = summarizeMatrix(matrix);
-  const latestSandbox = await readLatestArtifact('sandbox-regression');
-  const latestChat = await readLatestArtifact('chat-regression');
-  const latestIdentityMemory = await readLatestArtifact('identity-memory-regression');
+  const latestByRunner = new Map<string, RegressionArtifactFile | null>();
+  const artifactsByRunner = new Map<string, RegressionArtifactFile[]>();
+  for (const runner of byRunner.keys()) {
+    latestByRunner.set(runner, await readLatestArtifact(runner));
+    artifactsByRunner.set(runner, await readArtifacts(runner));
+  }
+  const latestByScenario = buildLatestScenarioResults(artifactsByRunner);
 
-  const sandboxSummary = summarizeArtifact(latestSandbox);
-  const chatSummary = summarizeArtifact(latestChat);
-  const identityMemorySummary = summarizeArtifact(latestIdentityMemory);
+  const artifactSummaries = [...latestByRunner.values()].map((artifact) => summarizeArtifact(artifact));
 
   const combinedCoveredDomains = new Set<string>([
-    ...sandboxSummary.coveredDomains,
-    ...chatSummary.coveredDomains,
-    ...identityMemorySummary.coveredDomains,
+    ...artifactSummaries.flatMap((summary) => [...summary.coveredDomains]),
   ]);
 
   console.log('=== Scenario Coverage Report ===');
@@ -113,22 +170,19 @@ async function main(): Promise<void> {
 
   console.log('');
   console.log('Latest artifacts:');
-  if (latestSandbox) {
-    console.log(`- sandbox-regression: ${latestSandbox.startedAt} | passed=${latestSandbox.passedCount}/${latestSandbox.scenarioCount}`);
-  } else {
-    console.log('- sandbox-regression: none');
+  for (const [runner, artifact] of latestByRunner.entries()) {
+    if (artifact) {
+      console.log(`- ${runner}: ${artifact.startedAt} | passed=${artifact.passedCount}/${artifact.scenarioCount}`);
+    } else {
+      console.log(`- ${runner}: none`);
+    }
   }
 
-  if (latestChat) {
-    console.log(`- chat-regression: ${latestChat.startedAt} | passed=${latestChat.passedCount}/${latestChat.scenarioCount}`);
-  } else {
-    console.log('- chat-regression: none');
-  }
-
-  if (latestIdentityMemory) {
-    console.log(`- identity-memory-regression: ${latestIdentityMemory.startedAt} | passed=${latestIdentityMemory.passedCount}/${latestIdentityMemory.scenarioCount}`);
-  } else {
-    console.log('- identity-memory-regression: none');
+  console.log('');
+  console.log('Scenario latest status:');
+  for (const entry of matrix) {
+    const { status, latestAt } = readScenarioStatus(entry, latestByScenario);
+    console.log(`- ${entry.id}: ${status} | runner=${entry.runner} | suite=${entry.suite} | domain=${entry.domain} | latest=${latestAt}`);
   }
 }
 

@@ -29,6 +29,11 @@ export interface PublicActivity {
     content: string
     createdAt: string
   }>
+  conversionTips: {
+    joinContext: string
+    discussionContext: string
+    cloneContext: string
+  }
 }
 
 // ── 活动类型中文映射 ──────────────────────────────────────
@@ -293,6 +298,11 @@ export function ActivityCard({
             {seatText}
           </p>
         )}
+        {activity.conversionTips.discussionContext ? (
+          <p className="rounded-xl bg-black/[0.04] px-3 py-2 text-xs leading-5 opacity-75" style={{ color: textColor }}>
+            {activity.conversionTips.discussionContext}
+          </p>
+        ) : null}
       </div>
     </div>
   )

@@ -60,9 +60,10 @@ export function getJoinQuickStarters(title?: string): string[] {
   const activityTitle = normalizeJoinTitle(title)
 
   return [
-    `哈喽，我刚报名「${activityTitle}」，很高兴认识大家～`,
-    `我是刚进来的，关于「${activityTitle}」大家一般几点到呀？`,
-    `我会按时到，大家出发前也可以在群里说一声～`,
+    `哈喽，我刚加入「${activityTitle}」，先和大家打个招呼～`,
+    `大家一般提前多久到？我想把时间安排稳一点。`,
+    `集合点或到店方式有需要补充的吗？`,
+    `如果还缺一个开场，我可以先帮大家确认一下安排。`,
   ]
 }
 

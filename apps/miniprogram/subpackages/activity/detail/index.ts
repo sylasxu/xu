@@ -44,6 +44,11 @@ interface Activity {
   status?: 'draft' | 'active' | 'completed' | 'cancelled';
   joinState?: ActivityJoinState;
   canJoin?: boolean;
+  conversionTips?: {
+    joinContext: string;
+    discussionContext: string;
+    cloneContext: string;
+  };
   creatorId: string;
   creator?: User;
   participants?: Participant[];

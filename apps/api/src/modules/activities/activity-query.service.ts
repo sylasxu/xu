@@ -81,6 +81,39 @@ function canExecuteJoinAction(params: {
   return params.status === 'active' && params.startAt > new Date();
 }
 
+function buildActivityConversionTips(params: {
+  title: string;
+  isFull: boolean;
+  canJoin: boolean;
+  isArchived: boolean;
+}) {
+  if (params.isArchived) {
+    return {
+      joinContext: '这场已经结束，可以先回看详情和讨论记录。',
+      discussionContext: '讨论区保留这次安排和沟通记录，方便之后复盘或再约。',
+      cloneContext: `喜欢「${params.title}」这种节奏的话，可以让 xu 顺手帮你再组一场类似的。`,
+    };
+  }
+
+  if (!params.canJoin) {
+    return {
+      joinContext: params.isFull
+        ? '当前已满员，可以先分享给朋友或让 xu 帮你找类似的局。'
+        : '这场暂时不能报名，可以先分享或回到首页继续找局。',
+      discussionContext: '加入后讨论区会继续承接集合、破冰和临时变动。',
+      cloneContext: `想要类似「${params.title}」的局，可以让 xu 参考这场快速整理新草稿。`,
+    };
+  }
+
+  return {
+    joinContext: params.isFull
+      ? '报名后会先进入候补，后续有位置再继续接上讨论区。'
+      : '报名成功后会直接进入讨论区，集合、破冰和临时变动都在那里继续。',
+    discussionContext: '讨论区会接住报名后的下一步：打招呼、确认集合、同步变化。',
+    cloneContext: `也可以参考「${params.title}」再组一场，xu 会优先保留类型、地点和人数节奏。`,
+  };
+}
+
 function escapeLikePattern(value: string): string {
   return value.replace(/[\%_]/g, (matched) => `\\${matched}`);
 }
@@ -402,6 +435,7 @@ export async function getActivityById(id: string, viewerUserId?: string | null):
         : canJoin
           ? 'not_joined'
           : 'closed';
+  const isArchived = calculateIsArchived(activity.startAt);
 
   return {
     id: activity.id,
@@ -424,9 +458,15 @@ export async function getActivityById(id: string, viewerUserId?: string | null):
     canJoin,
     createdAt: activity.createdAt.toISOString(),
     updatedAt: activity.updatedAt.toISOString(),
-    isArchived: calculateIsArchived(activity.startAt),
+    isArchived,
     groupOpenId: null,
     dynamicMessageId: null,
+    conversionTips: buildActivityConversionTips({
+      title: activity.title,
+      isFull,
+      canJoin,
+      isArchived,
+    }),
     creator: creator || null,
     participants: participantsList.map((item) => ({
       id: item.id,
@@ -471,6 +511,7 @@ export async function getPublicActivityById(activityId: string): Promise<PublicA
   const remainingSeats = calculateRemainingSeats(activity.currentParticipants, activity.maxParticipants);
   const isFull = remainingSeats === 0;
   const canJoin = activity.status === 'active' && activity.startAt > new Date();
+  const isArchived = calculateIsArchived(activity.startAt);
 
   const participantList = await db
     .select({
@@ -510,7 +551,7 @@ export async function getPublicActivityById(activityId: string): Promise<PublicA
     isFull,
     theme: activity.theme,
     themeConfig: activity.themeConfig,
-    isArchived: calculateIsArchived(activity.startAt),
+    isArchived,
     canJoin,
     creator: {
       nickname: activity.creatorNickname,
@@ -523,6 +564,12 @@ export async function getPublicActivityById(activityId: string): Promise<PublicA
       content: item.content,
       createdAt: item.createdAt.toISOString(),
     })),
+    conversionTips: buildActivityConversionTips({
+      title: activity.title,
+      isFull,
+      canJoin,
+      isArchived,
+    }),
   };
 }
 

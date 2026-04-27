@@ -95,6 +95,8 @@ const MatchPendingDetailResponse = t.Object({
   nextActionOwner: t.Union([t.Literal('self'), t.Literal('organizer')], {
     description: '当前需要谁来推进',
   }),
+  continuationTitle: t.String({ description: '任务承接标题' }),
+  continuationText: t.String({ description: '说明这次匹配属于哪条任务的继续' }),
   nextActionText: t.String({ description: '当前下一步提示' }),
   matchReasonTitle: t.String({ description: '匹配理由标题' }),
   matchReasonText: t.String({ description: '匹配理由说明' }),

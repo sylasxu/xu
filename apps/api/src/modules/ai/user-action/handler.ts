@@ -1481,10 +1481,10 @@ function buildPartnerSearchCardActions(params: {
   searchPayload: Record<string, unknown>;
 }): Array<{ label: string; action: string; params: Record<string, unknown> }> {
   const connectLabel = params.scenarioType === 'destination_companion'
-    ? (params.userId ? '发起同去邀约' : '登录后搭一下')
+    ? (params.userId ? '搭一下同去' : '登录后搭一下')
     : params.scenarioType === 'fill_seat'
-      ? (params.userId ? '发起补位邀约' : '登录后搭一下')
-      : (params.userId ? '发起搭子邀请' : '登录后搭一下');
+      ? (params.userId ? '搭一下补位' : '登录后搭一下')
+      : (params.userId ? '搭一下' : '登录后搭一下');
   const groupUpLabel = params.scenarioType === 'destination_companion'
     ? (params.userId ? '让 xu 帮我问问' : '登录后让 xu 帮我问问')
     : params.scenarioType === 'fill_seat'
@@ -1696,9 +1696,11 @@ async function handleSearchPartners(
       locationHint: item.locationHint,
       timePreference: item.timePreference || '时间待沟通',
       summary: item.summary,
+      reasonTitle: item.reasonTitle,
       matchReason: item.matchReason,
       matchHighlights: item.matchHighlights,
       compatibilitySummary: item.compatibilitySummary,
+      nextStepHint: item.nextStepHint,
       privacyHint: item.privacyHint,
       score: item.score,
       tags: item.tags,

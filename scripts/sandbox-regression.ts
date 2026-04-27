@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { agentTasks, and, db, desc, eq, inArray, partnerIntents, userMemories } from '@xu/db';
+import { agentTasks, and, db, desc, eq, inArray, partnerIntents, userMemories, users } from '@xu/db';
 import { app } from '../apps/api/src/index';
 import { readAiChatEnvelope } from './ai-chat-sse';
 import { writeRegressionArtifact } from './regression-artifact';
@@ -101,6 +101,15 @@ interface UnreadCountResponse {
 }
 
 interface MessageCenterResponse {
+  actionItems: Array<{
+    id: string;
+    type: string;
+    title: string;
+    summary: string;
+    statusLabel: string;
+    activityId: string | null;
+  }>;
+  pendingMatches: PendingMatchItem[];
   unreadNotificationCount: number;
   totalUnread: number;
   chatActivities: {
@@ -131,6 +140,19 @@ interface PendingMatchConfirmResponse {
   code: number;
   msg: string;
   activityId?: string;
+}
+
+interface PendingMatchDetailResponse {
+  id: string;
+  nextActionOwner: 'self' | 'organizer';
+  continuationTitle: string;
+  continuationText: string;
+  nextActionText: string;
+  members: Array<{
+    userId: string;
+    isTempOrganizer: boolean;
+    intentSummary: string;
+  }>;
 }
 
 interface WelcomeResponse {
@@ -220,6 +242,24 @@ interface CurrentTasksResponse {
   serverTime: string;
 }
 
+type PartnerScenarioType = 'local_partner' | 'destination_companion' | 'fill_seat';
+
+interface PartnerFlowFixture {
+  id: string;
+  scenarioType: PartnerScenarioType;
+  rawInput: string;
+  activityType: string;
+  locationName: string;
+  locationHint: string;
+  locationKeywords: string[];
+  timePreference: string;
+  timeKeywords: string[];
+  description: string;
+  lat: number;
+  lng: number;
+  destinationText?: string;
+}
+
 interface StoredActivityOutcome {
   activityId: string;
   activityTitle: string;
@@ -258,6 +298,52 @@ const scenarioFilter = scenarioArgIndex >= 0 ? Bun.argv[scenarioArgIndex + 1] : 
 const suiteArgIndex = Bun.argv.indexOf('--suite');
 const requestedSuite = suiteArgIndex >= 0 ? Bun.argv[suiteArgIndex + 1] : 'core';
 const scenarioSuite = requestedSuite === 'all' || requestedSuite === 'extended' ? requestedSuite : 'core';
+
+const LOCAL_PARTNER_FIXTURE: PartnerFlowFixture = {
+  id: 'local-boardgame',
+  scenarioType: 'local_partner',
+  rawInput: '南山周六晚找桌游搭子，能接受新手，最好别鸽',
+  activityType: 'boardgame',
+  locationName: '南山',
+  locationHint: '南山',
+  locationKeywords: ['南山'],
+  timePreference: '周六晚上',
+  timeKeywords: ['周六', '周末'],
+  description: '找能稳定赴约、接受新手的桌游搭子',
+  lat: 29.533009,
+  lng: 106.601556,
+};
+
+const DESTINATION_COMPANION_FIXTURE: PartnerFlowFixture = {
+  id: 'destination-music-festival',
+  scenarioType: 'destination_companion',
+  rawInput: '周六去泸州音乐节，想找个能一起出发的同去搭子',
+  activityType: 'entertainment',
+  locationName: '泸州音乐节',
+  locationHint: '重庆出发',
+  locationKeywords: ['泸州', '音乐节', '重庆出发'],
+  destinationText: '泸州音乐节',
+  timePreference: '周六',
+  timeKeywords: ['周六', '周末'],
+  description: '想找能一起出发、时间能对上的同行搭子',
+  lat: 29.533009,
+  lng: 106.601556,
+};
+
+const FILL_SEAT_FIXTURE: PartnerFlowFixture = {
+  id: 'fill-seat-mahjong',
+  scenarioType: 'fill_seat',
+  rawInput: '今晚观音桥麻将三缺一，想补一个不鸽的人',
+  activityType: 'entertainment',
+  locationName: '观音桥',
+  locationHint: '观音桥',
+  locationKeywords: ['观音桥'],
+  timePreference: '今晚',
+  timeKeywords: ['今晚', '今天'],
+  description: '已有三个人，想补一个能准时到的搭子',
+  lat: 29.563009,
+  lng: 106.551556,
+};
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -323,6 +409,42 @@ function findAlertBlock(blocks: AiChatEnvelope['response']['blocks']): AiChatBlo
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function buildPartnerPayload(fixture: PartnerFlowFixture): Record<string, unknown> {
+  return {
+    rawInput: fixture.rawInput,
+    prompt: fixture.rawInput,
+    scenarioType: fixture.scenarioType,
+    activityType: fixture.activityType,
+    type: fixture.activityType,
+    location: fixture.locationName,
+    locationName: fixture.locationName,
+    locationHint: fixture.locationHint,
+    timePreference: fixture.timePreference,
+    timeText: fixture.timePreference,
+    description: fixture.description,
+    lat: fixture.lat,
+    lng: fixture.lng,
+    ...(fixture.destinationText ? { destinationText: fixture.destinationText } : {}),
+  };
+}
+
+function assertPartnerSearchResultSafety(blocks: AiChatEnvelope['response']['blocks'], label: string): void {
+  const listBlocks = blocks.filter((block) => block.type === 'list');
+  for (const block of listBlocks) {
+    const serialized = JSON.stringify(block);
+    assert(!/"phoneNumber"\s*:/.test(serialized), `${label} 泄露 phoneNumber 字段: ${serialized}`);
+    assert(!/"purePhoneNumber"\s*:/.test(serialized), `${label} 泄露 purePhoneNumber 字段: ${serialized}`);
+    assert(!/"wxOpenId"\s*:/.test(serialized), `${label} 泄露 wxOpenId 字段: ${serialized}`);
+    assert(!/"wxId"\s*:/.test(serialized), `${label} 泄露 wxId 字段: ${serialized}`);
+    assert(!/"lat"\s*:/.test(serialized), `${label} 泄露精确 lat 字段: ${serialized}`);
+    assert(!/"lng"\s*:/.test(serialized), `${label} 泄露精确 lng 字段: ${serialized}`);
+    assert(!/"latitude"\s*:/.test(serialized), `${label} 泄露精确 latitude 字段: ${serialized}`);
+    assert(!/"longitude"\s*:/.test(serialized), `${label} 泄露精确 longitude 字段: ${serialized}`);
+    assert(!/(?<!\d)1[3-9]\d{9}(?!\d)/.test(serialized), `${label} 泄露手机号形态内容: ${serialized}`);
+    assert(!/(微信号|wxid|wechat)/i.test(serialized), `${label} 泄露微信联系方式形态内容: ${serialized}`);
+  }
 }
 
 function findCtaActionInput(
@@ -714,6 +836,22 @@ async function confirmPendingMatch(user: BootstrappedUser, matchId: string) {
   return requestJson<PendingMatchConfirmResponse>({
     method: 'POST',
     path: `/notifications/pending-matches/${matchId}/confirm`,
+    token: user.token,
+  });
+}
+
+async function cancelPendingMatch(user: BootstrappedUser, matchId: string) {
+  return requestJson<{ code: number; msg: string }>({
+    method: 'POST',
+    path: `/notifications/pending-matches/${matchId}/cancel`,
+    token: user.token,
+  });
+}
+
+async function getPendingMatchDetail(user: BootstrappedUser, matchId: string) {
+  return requestJson<PendingMatchDetailResponse>({
+    method: 'GET',
+    path: `/notifications/pending-matches/${matchId}?userId=${user.user.id}`,
     token: user.token,
   });
 }
@@ -1479,15 +1617,12 @@ async function scenarioAiPartnerSearchBootstrapFlow(context: ScenarioContext): P
   return { name: 'ai-partner-search-bootstrap-flow', passed: true, details };
 }
 
-async function optInPartnerPoolFromSearch(user: BootstrappedUser, rawInput: string) {
+async function optInPartnerPoolFromSearch(user: BootstrappedUser, fixture: PartnerFlowFixture) {
   const firstTurn = await postAiAction({
     user,
     action: 'find_partner',
-    displayText: rawInput,
-    payload: {
-      rawInput,
-      prompt: rawInput,
-    },
+    displayText: fixture.rawInput,
+    payload: buildPartnerPayload(fixture),
   });
 
   assert(typeof firstTurn.conversationId === 'string' && firstTurn.conversationId.length > 0, '找搭子首轮未返回 conversationId');
@@ -1498,22 +1633,12 @@ async function optInPartnerPoolFromSearch(user: BootstrappedUser, rawInput: stri
     action: 'search_partners',
     conversationId: firstTurn.conversationId,
     displayText: '先看看有没有合适的人',
-    payload: {
-      rawInput,
-      activityType: 'boardgame',
-      type: 'boardgame',
-      location: '南山',
-      locationName: '南山',
-      locationHint: '南山',
-      timePreference: '周末晚上',
-      description: '想找能稳定赴约、聊天压力别太大的桌游搭子',
-      lat: 29.533009,
-      lng: 106.601556,
-    },
+    payload: buildPartnerPayload(fixture),
   });
 
   assertNoLeakedToolText(searchTurn.response.blocks, '找搭子搜索结果');
   assert(hasVisibleFeedback(searchTurn.response.blocks), `找搭子搜索后缺少可见反馈: ${JSON.stringify(searchTurn.response.blocks)}`);
+  assertPartnerSearchResultSafety(searchTurn.response.blocks, '找搭子搜索结果');
 
   const optInCta = findCtaActionInput(
     searchTurn.response.blocks,
@@ -1528,18 +1653,7 @@ async function optInPartnerPoolFromSearch(user: BootstrappedUser, rawInput: stri
     conversationId: firstTurn.conversationId,
     actionId: optInCta.actionId,
     displayText: optInCta.displayText,
-    payload: {
-      rawInput,
-      activityType: 'boardgame',
-      type: 'boardgame',
-      location: '南山',
-      locationName: '南山',
-      locationHint: '南山',
-      timePreference: '周末晚上',
-      description: '想找能稳定赴约、聊天压力别太大的桌游搭子',
-      lat: 29.533009,
-      lng: 106.601556,
-    },
+    payload: buildPartnerPayload(fixture),
   });
 
   assertNoLeakedToolText(optInTurn.response.blocks, '继续帮我留意');
@@ -1551,13 +1665,36 @@ async function optInPartnerPoolFromSearch(user: BootstrappedUser, rawInput: stri
   };
 }
 
+async function getLatestActivePartnerIntent(user: BootstrappedUser) {
+  const [intent] = await db
+    .select({
+      id: partnerIntents.id,
+      scenarioType: partnerIntents.scenarioType,
+      activityType: partnerIntents.activityType,
+      locationHint: partnerIntents.locationHint,
+      destinationText: partnerIntents.destinationText,
+      timePreference: partnerIntents.timePreference,
+      timeText: partnerIntents.timeText,
+      description: partnerIntents.description,
+    })
+    .from(partnerIntents)
+    .where(and(
+      eq(partnerIntents.userId, user.user.id),
+      eq(partnerIntents.status, 'active'),
+    ))
+    .orderBy(desc(partnerIntents.updatedAt))
+    .limit(1);
+
+  return intent ?? null;
+}
+
 async function scenarioPendingMatchConfirmCreatesActivityFlow(context: ScenarioContext): Promise<ScenarioResult> {
   const [organizer, partner] = context.users;
   const details: string[] = [];
-  const rawInput = '南山周末桌游搭子，轻松一点就行';
+  const fixture = LOCAL_PARTNER_FIXTURE;
 
-  await optInPartnerPoolFromSearch(organizer, rawInput);
-  await optInPartnerPoolFromSearch(partner, rawInput);
+  await optInPartnerPoolFromSearch(organizer, fixture);
+  await optInPartnerPoolFromSearch(partner, fixture);
 
   const organizerPendingMatch = await waitFor(async () => {
     const pendingMatches = await getPendingMatches(organizer);
@@ -1601,6 +1738,132 @@ async function scenarioPendingMatchConfirmCreatesActivityFlow(context: ScenarioC
   details.push('成局后双方消息中心都能看到新的群聊摘要，找搭子任务不会继续挂在 current tasks 里');
 
   return { name: 'pending-match-confirm-creates-activity-flow', passed: true, details };
+}
+
+async function scenarioPartnerConfirmToDiscussionFlow(context: ScenarioContext): Promise<ScenarioResult> {
+  const [organizer, partner] = context.users;
+  const details: string[] = [];
+  const fixture = LOCAL_PARTNER_FIXTURE;
+
+  await cleanupSandboxAgentTasks([organizer, partner]);
+  await cleanupSandboxPartnerIntents([organizer, partner]);
+
+  await optInPartnerPoolFromSearch(organizer, fixture);
+  await optInPartnerPoolFromSearch(partner, fixture);
+
+  const pendingMatch = await waitFor(async () => {
+    const pendingMatches = await getPendingMatches(organizer);
+    return pendingMatches.items.find((item) => item.isTempOrganizer) ?? null;
+  }, { retries: 10, delayMs: 250 });
+  assert(pendingMatch, '找搭子确认进入讨论区前未生成待确认匹配');
+
+  const confirmResult = await confirmPendingMatch(organizer, pendingMatch.id);
+  assert(confirmResult.code === 200, `确认待确认匹配失败: ${JSON.stringify(confirmResult)}`);
+  assert(confirmResult.activityId, `确认待确认匹配未返回 activityId: ${JSON.stringify(confirmResult)}`);
+
+  const activityId = confirmResult.activityId;
+  const publicActivity = await waitFor(() => getPublicActivity(activityId).catch(() => null), { retries: 8, delayMs: 250 });
+  assert(publicActivity?.status === 'active', `找搭子确认后活动状态异常: ${JSON.stringify(publicActivity)}`);
+
+  const organizerDiscussion = await getChatMessages(activityId, organizer);
+  const partnerDiscussion = await getChatMessages(activityId, partner);
+  assert(Array.isArray(organizerDiscussion.messages), `召集人无法进入成局讨论区: ${JSON.stringify(organizerDiscussion)}`);
+  assert(Array.isArray(partnerDiscussion.messages), `匹配成员无法进入成局讨论区: ${JSON.stringify(partnerDiscussion)}`);
+
+  const organizerDiscussionEntered = await postAiDiscussionEntered({
+    user: organizer,
+    activityId,
+    entry: 'match_confirmed',
+  });
+  const partnerDiscussionEntered = await postAiDiscussionEntered({
+    user: partner,
+    activityId,
+    entry: 'match_confirmed',
+  });
+  assert(organizerDiscussionEntered.code === 200, `召集人 discussion-entered 失败: ${JSON.stringify(organizerDiscussionEntered)}`);
+  assert(partnerDiscussionEntered.code === 200, `匹配成员 discussion-entered 失败: ${JSON.stringify(partnerDiscussionEntered)}`);
+
+  const organizerMessageCenter = await getMessageCenter(organizer);
+  const partnerMessageCenter = await getMessageCenter(partner);
+  assert(
+    organizerMessageCenter.chatActivities.items.some((item) => item.activityId === activityId),
+    `召集人消息中心缺少成局讨论区: ${JSON.stringify(organizerMessageCenter.chatActivities.items)}`,
+  );
+  assert(
+    partnerMessageCenter.chatActivities.items.some((item) => item.activityId === activityId),
+    `匹配成员消息中心缺少成局讨论区: ${JSON.stringify(partnerMessageCenter.chatActivities.items)}`,
+  );
+
+  const completedTasks = await db
+    .select({
+      userId: agentTasks.userId,
+      status: agentTasks.status,
+      currentStage: agentTasks.currentStage,
+      resultOutcome: agentTasks.resultOutcome,
+      activityId: agentTasks.activityId,
+    })
+    .from(agentTasks)
+    .where(and(
+      inArray(agentTasks.userId, [organizer.user.id, partner.user.id]),
+      eq(agentTasks.taskType, 'find_partner'),
+      eq(agentTasks.activityId, activityId),
+    ));
+
+  for (const user of [organizer, partner]) {
+    const task = completedTasks.find((item) => item.userId === user.user.id);
+    assert(task, `找搭子确认后缺少用户 ${user.user.id} 的完成任务: ${JSON.stringify(completedTasks)}`);
+    assert(task.status === 'completed', `找搭子确认后任务未 completed: ${JSON.stringify(task)}`);
+    assert(task.currentStage === 'done', `找搭子确认后任务未进入 done: ${JSON.stringify(task)}`);
+    assert(task.resultOutcome === 'match_confirmed', `找搭子确认后任务 outcome 异常: ${JSON.stringify(task)}`);
+  }
+
+  details.push(`pending match ${pendingMatch.id} 已确认成局，activityId=${activityId}`);
+  details.push('双方都能进入讨论区，消息中心出现成局群聊摘要');
+  details.push('双方 find_partner 任务已落 completed/done/match_confirmed，不再停在待办链路');
+
+  return { name: 'partner-confirm-to-discussion-flow', passed: true, details };
+}
+
+async function scenarioPartnerScenarioFixturesFlow(context: ScenarioContext): Promise<ScenarioResult> {
+  const [user] = context.users;
+  const details: string[] = [];
+  const fixtures = [
+    LOCAL_PARTNER_FIXTURE,
+    DESTINATION_COMPANION_FIXTURE,
+    FILL_SEAT_FIXTURE,
+  ];
+
+  for (const fixture of fixtures) {
+    await cleanupSandboxAgentTasks([user]);
+    await cleanupSandboxPartnerIntents([user]);
+
+    const result = await optInPartnerPoolFromSearch(user, fixture);
+    const activeIntent = await waitFor(() => getLatestActivePartnerIntent(user), { retries: 8, delayMs: 250 });
+    assert(activeIntent, `${fixture.id} 入池后未落 active partner_intent`);
+    assert(activeIntent.scenarioType === fixture.scenarioType, `${fixture.id} scenarioType 异常: ${JSON.stringify(activeIntent)}`);
+    assert(activeIntent.activityType === fixture.activityType, `${fixture.id} activityType 异常: ${JSON.stringify(activeIntent)}`);
+    const storedLocationText = `${activeIntent.locationHint} ${activeIntent.destinationText ?? ''}`;
+    assert(
+      fixture.locationKeywords.some((keyword) => storedLocationText.includes(keyword)),
+      `${fixture.id} locationHint/destinationText 异常: ${JSON.stringify(activeIntent)}`,
+    );
+    const storedTimeText = `${activeIntent.timePreference ?? ''} ${activeIntent.timeText ?? ''}`;
+    assert(
+      fixture.timeKeywords.some((keyword) => storedTimeText.includes(keyword)),
+      `${fixture.id} timePreference/timeText 异常: ${JSON.stringify(activeIntent)}`,
+    );
+    if (fixture.destinationText) {
+      assert(
+        typeof activeIntent.destinationText === 'string'
+          && fixture.locationKeywords.some((keyword) => activeIntent.destinationText?.includes(keyword)),
+        `${fixture.id} destinationText 异常: ${JSON.stringify(activeIntent)}`,
+      );
+    }
+
+    details.push(`${fixture.id} 已通过 ${fixture.scenarioType} 入池，会话=${result.conversationId}，intent=${activeIntent.id}`);
+  }
+
+  return { name: 'partner-scenario-fixtures-flow', passed: true, details };
 }
 
 async function scenarioAiDestinationCompanionFlow(context: ScenarioContext): Promise<ScenarioResult> {
@@ -1649,6 +1912,313 @@ async function scenarioAiDestinationCompanionFlow(context: ScenarioContext): Pro
   details.push('系统没有退回重庆片区词表模式，仍保持在同一条 find_partner 主链内推进');
 
   return { name: 'ai-destination-companion-flow', passed: true, details };
+}
+
+async function scenarioPartnerActionGateFlow(context: ScenarioContext): Promise<ScenarioResult> {
+  const [boundUser] = context.users;
+  const details: string[] = [];
+  const rawInput = '南山周六晚找桌游搭子，能接受新手，最好别鸽';
+
+  await cleanupSandboxAgentTasks([boundUser]);
+  await cleanupSandboxPartnerIntents([boundUser]);
+
+  const guestSearchTurn = await postAiAction({
+    action: 'search_partners',
+    displayText: '先搜一下有没有合适搭子',
+    payload: {
+      rawInput,
+      activityType: 'boardgame',
+      type: 'boardgame',
+      location: '南山',
+      locationName: '南山',
+      locationHint: '南山',
+      timePreference: '周六晚上',
+      description: '找能稳定赴约、接受新手的桌游搭子',
+      lat: 29.533009,
+      lng: 106.601556,
+    },
+  });
+  assertNoLeakedToolText(guestSearchTurn.response.blocks, '游客找搭子即时搜索');
+  assert(
+    guestSearchTurn.response.blocks.some((block) => block.type === 'list' || block.type === 'cta-group' || block.type === 'text'),
+    `游客 search_partners 未返回可浏览结果或反馈: ${JSON.stringify(guestSearchTurn.response.blocks)}`,
+  );
+
+  const guestOptInTurn = await postAiAction({
+    action: 'opt_in_partner_pool',
+    conversationId: guestSearchTurn.conversationId,
+    displayText: '继续帮我留意',
+    payload: {
+      rawInput,
+      activityType: 'boardgame',
+      type: 'boardgame',
+      location: '南山',
+      locationName: '南山',
+      locationHint: '南山',
+      timePreference: '周六晚上',
+      description: '找能稳定赴约、接受新手的桌游搭子',
+      lat: 29.533009,
+      lng: 106.601556,
+    },
+  });
+  const guestAlert = findAlertBlock(guestOptInTurn.response.blocks);
+  assert(guestAlert, `游客 opt_in_partner_pool 未返回 auth alert: ${JSON.stringify(guestOptInTurn.response.blocks)}`);
+  const guestMeta = readAlertMeta(guestAlert);
+  assert(guestMeta?.authRequired && typeof guestMeta.authRequired === 'object', `游客 opt_in 缺少 authRequired: ${JSON.stringify(guestMeta)}`);
+  const guestAuth = guestMeta.authRequired as Record<string, unknown>;
+  assert(guestAuth.mode === 'login', `游客 opt_in auth mode 应为 login: ${JSON.stringify(guestAuth)}`);
+  assert(isRecord(guestAuth.pendingAction) && guestAuth.pendingAction.action === 'opt_in_partner_pool', `游客 opt_in pendingAction 异常: ${JSON.stringify(guestAuth)}`);
+
+  const originalPhoneNumber = boundUser.user.phoneNumber;
+  assert(originalPhoneNumber, '测试账号缺少手机号，无法验证未绑手机号分支');
+
+  try {
+    await db
+      .update(users)
+      .set({ phoneNumber: null, updatedAt: new Date() })
+      .where(eq(users.id, boundUser.user.id));
+
+    const bindPhoneTurn = await postAiAction({
+      user: boundUser,
+      action: 'opt_in_partner_pool',
+      conversationId: guestSearchTurn.conversationId,
+      displayText: '继续帮我留意',
+      payload: {
+        rawInput,
+        activityType: 'boardgame',
+        type: 'boardgame',
+        location: '南山',
+        locationName: '南山',
+        locationHint: '南山',
+        timePreference: '周六晚上',
+        description: '找能稳定赴约、接受新手的桌游搭子',
+        lat: 29.533009,
+        lng: 106.601556,
+      },
+    });
+    const bindPhoneAlert = findAlertBlock(bindPhoneTurn.response.blocks);
+    assert(bindPhoneAlert, `未绑手机号 opt_in_partner_pool 未返回 auth alert: ${JSON.stringify(bindPhoneTurn.response.blocks)}`);
+    const bindPhoneMeta = readAlertMeta(bindPhoneAlert);
+    assert(bindPhoneMeta?.authRequired && typeof bindPhoneMeta.authRequired === 'object', `未绑手机号 opt_in 缺少 authRequired: ${JSON.stringify(bindPhoneMeta)}`);
+    const bindPhoneAuth = bindPhoneMeta.authRequired as Record<string, unknown>;
+    assert(bindPhoneAuth.mode === 'bind_phone', `未绑手机号 opt_in auth mode 应为 bind_phone: ${JSON.stringify(bindPhoneAuth)}`);
+    assert(isRecord(bindPhoneAuth.pendingAction) && bindPhoneAuth.pendingAction.action === 'opt_in_partner_pool', `未绑手机号 opt_in pendingAction 异常: ${JSON.stringify(bindPhoneAuth)}`);
+  } finally {
+    await db
+      .update(users)
+      .set({ phoneNumber: originalPhoneNumber, updatedAt: new Date() })
+      .where(eq(users.id, boundUser.user.id));
+  }
+
+  const activeIntentAfterGate = await db
+    .select({ id: partnerIntents.id })
+    .from(partnerIntents)
+    .where(and(
+      eq(partnerIntents.userId, boundUser.user.id),
+      eq(partnerIntents.status, 'active'),
+    ))
+    .limit(1);
+  assert(activeIntentAfterGate.length === 0, `auth gate 分支不应写入 active partner_intent: ${JSON.stringify(activeIntentAfterGate)}`);
+
+  details.push(`游客会话 ${guestSearchTurn.conversationId} 可先浏览找搭子搜索结果`);
+  details.push('游客点击“继续帮我留意”返回 login authRequired + pendingAction');
+  details.push('已登录但未绑手机号点击“继续帮我留意”返回 bind_phone authRequired + pendingAction，且没有写入 active intent');
+
+  return { name: 'partner-action-gate-flow', passed: true, details };
+}
+
+async function scenarioPartnerLongMultiUserBranchFlow(context: ScenarioContext): Promise<ScenarioResult> {
+  const [organizer, partner, outsider] = context.users;
+  const details: string[] = [];
+  const fixture = LOCAL_PARTNER_FIXTURE;
+
+  await cleanupSandboxAgentTasks(context.users);
+  await cleanupSandboxPartnerIntents(context.users);
+
+  const longSteps = [
+    '我周六晚上想找个桌游搭子',
+    '地点先放南山附近',
+    '轻策略就好，最好别鸽',
+    '如果没人立刻合适，也可以继续帮我留意',
+  ];
+  let conversationId: string | null = null;
+  for (let index = 0; index < longSteps.length; index++) {
+    const turn = await postAiChat({
+      user: organizer,
+      text: longSteps[index],
+      conversationId: conversationId || undefined,
+    });
+    assert(typeof turn.conversationId === 'string', `找搭子长对话 turn${index + 1} 未返回 conversationId`);
+    assertNoLeakedToolText(turn.response.blocks, `找搭子长对话 turn${index + 1}`);
+    if (conversationId) {
+      assert(turn.conversationId === conversationId, `找搭子长对话 turn${index + 1} conversationId 漂移`);
+    }
+    conversationId = turn.conversationId;
+  }
+
+  assert(conversationId, '找搭子长对话未形成 conversationId');
+
+  const searchTurn = await postAiAction({
+    user: organizer,
+    action: 'search_partners',
+    conversationId,
+    displayText: '先搜一下有没有合适的人',
+    payload: buildPartnerPayload(fixture),
+  });
+  assertNoLeakedToolText(searchTurn.response.blocks, '找搭子长对话搜索');
+  assertPartnerSearchResultSafety(searchTurn.response.blocks, '找搭子长对话搜索');
+  assert(
+    searchTurn.response.blocks.some((block) => block.type === 'list' || block.type === 'cta-group'),
+    `找搭子长对话搜索缺少结果或 CTA: ${JSON.stringify(searchTurn.response.blocks)}`,
+  );
+
+  const optInCta = findCtaActionInput(
+    searchTurn.response.blocks,
+    'opt_in_partner_pool',
+    'sandbox_partner_long_opt_in_organizer',
+    '找搭子长对话搜索',
+  );
+  const organizerOptIn = await postAiAction({
+    user: organizer,
+    action: 'opt_in_partner_pool',
+    conversationId,
+    actionId: optInCta.actionId,
+    displayText: optInCta.displayText,
+    payload: buildPartnerPayload(fixture),
+  });
+  assertNoLeakedToolText(organizerOptIn.response.blocks, '长对话继续帮我留意');
+
+  await optInPartnerPoolFromSearch(partner, fixture);
+
+  const organizerPendingMatch = await waitFor(async () => {
+    const pendingMatches = await getPendingMatches(organizer);
+    return pendingMatches.items.find((item) => item.isTempOrganizer) ?? null;
+  }, { retries: 10, delayMs: 250 });
+  assert(organizerPendingMatch, '多用户长链路未生成临时召集人的 pending match');
+  assert(organizerPendingMatch.taskId, `pending match 未回挂 find_partner taskId: ${JSON.stringify(organizerPendingMatch)}`);
+
+  const organizerDetail = await getPendingMatchDetail(organizer, organizerPendingMatch.id);
+  assert(organizerDetail.nextActionOwner === 'self', `临时召集人详情 nextActionOwner 异常: ${JSON.stringify(organizerDetail)}`);
+  assert(organizerDetail.continuationTitle.includes('找搭子任务'), `临时召集人详情缺少任务承接标题: ${JSON.stringify(organizerDetail)}`);
+  assert(organizerDetail.members.length >= 2, `pending match 详情成员不足: ${JSON.stringify(organizerDetail)}`);
+
+  const partnerPendingMatches = await getPendingMatches(partner);
+  const partnerPendingMatch = partnerPendingMatches.items.find((item) => item.id === organizerPendingMatch.id);
+  assert(partnerPendingMatch, `匹配成员消息中心未看到同一个 pending match: ${JSON.stringify(partnerPendingMatches.items)}`);
+  const partnerDetail = await getPendingMatchDetail(partner, organizerPendingMatch.id);
+  assert(partnerDetail.nextActionOwner === 'organizer', `非召集人详情 nextActionOwner 异常: ${JSON.stringify(partnerDetail)}`);
+  assert(partnerDetail.continuationText.includes('不是一条孤立通知'), `非召集人详情没有说明任务连续性: ${JSON.stringify(partnerDetail)}`);
+
+  const nonOrganizerConfirm = await requestError({
+    method: 'POST',
+    path: `/notifications/pending-matches/${organizerPendingMatch.id}/confirm`,
+    token: partner.token,
+  });
+  assert(nonOrganizerConfirm.msg.includes('临时召集人'), `非召集人确认提示异常: ${nonOrganizerConfirm.msg}`);
+
+  const outsiderDetail = await requestError({
+    method: 'GET',
+    path: `/notifications/pending-matches/${organizerPendingMatch.id}?userId=${outsider.user.id}`,
+    token: outsider.token,
+  });
+  assert(outsiderDetail.msg.includes('不在这个匹配'), `局外人读取 pending match 详情提示异常: ${outsiderDetail.msg}`);
+
+  const cancelResult = await cancelPendingMatch(organizer, organizerPendingMatch.id);
+  assert(cancelResult.code === 200, `临时召集人取消 pending match 失败: ${JSON.stringify(cancelResult)}`);
+
+  const organizerPendingAfterCancel = await getPendingMatches(organizer);
+  assert(
+    !organizerPendingAfterCancel.items.some((item) => item.id === organizerPendingMatch.id),
+    `取消后 pending match 仍在列表中: ${JSON.stringify(organizerPendingAfterCancel.items)}`,
+  );
+
+  const organizerTasks = await getAiCurrentTasks(organizer);
+  const partnerTasks = await getAiCurrentTasks(partner);
+  const organizerTask = organizerTasks.items.find((item) => item.taskType === 'find_partner');
+  const partnerTask = partnerTasks.items.find((item) => item.taskType === 'find_partner');
+  assert(organizerTask?.currentStage === 'awaiting_match', `取消后召集人任务未回到 awaiting_match: ${JSON.stringify(organizerTasks.items)}`);
+  assert(partnerTask?.currentStage === 'awaiting_match', `取消后匹配成员任务未回到 awaiting_match: ${JSON.stringify(partnerTasks.items)}`);
+
+  details.push(`长对话会话 ${conversationId} 完成 4 轮找搭子追问后入池`);
+  details.push(`多用户 pending match=${organizerPendingMatch.id} 已生成，taskId=${organizerPendingMatch.taskId}`);
+  details.push('pending match 详情区分召集人与非召集人，且明确说明这是找搭子任务的继续');
+  details.push('非召集人确认、局外人查看详情均被拦截；召集人取消后双方任务回到 awaiting_match');
+
+  return { name: 'partner-long-multi-user-branch-flow', passed: true, details };
+}
+
+async function scenarioPartnerConditionUpdateIntentFlow(context: ScenarioContext): Promise<ScenarioResult> {
+  const [user] = context.users;
+  const details: string[] = [];
+  const fixture = LOCAL_PARTNER_FIXTURE;
+
+  await cleanupSandboxAgentTasks([user]);
+  await cleanupSandboxPartnerIntents([user]);
+
+  const longSteps = [
+    '我想找观音桥周五晚羽毛球搭子',
+    '地点改成南山，不在观音桥了',
+    '时间改周六晚上',
+    '玩法也改一下，还是桌游轻策略，别按羽毛球找',
+  ];
+  let conversationId: string | null = null;
+  for (const text of longSteps) {
+    const turn = await postAiChat({
+      user,
+      text,
+      conversationId: conversationId || undefined,
+    });
+    assert(typeof turn.conversationId === 'string', `条件变更长对话 "${text}" 未返回 conversationId`);
+    assertNoLeakedToolText(turn.response.blocks, `条件变更长对话 ${text}`);
+    conversationId = turn.conversationId;
+  }
+  assert(conversationId, '条件变更长对话未形成 conversationId');
+
+  const searchTurn = await postAiAction({
+    user,
+    action: 'search_partners',
+    conversationId,
+    displayText: '按最后说的条件搜一下',
+    payload: buildPartnerPayload(fixture),
+  });
+  assertNoLeakedToolText(searchTurn.response.blocks, '条件变更最终搜索');
+  assertPartnerSearchResultSafety(searchTurn.response.blocks, '条件变更最终搜索');
+  const optInCta = findCtaActionInput(
+    searchTurn.response.blocks,
+    'opt_in_partner_pool',
+    'sandbox_partner_condition_update_opt_in',
+    '条件变更最终搜索',
+  );
+
+  const optInTurn = await postAiAction({
+    user,
+    action: 'opt_in_partner_pool',
+    conversationId,
+    actionId: optInCta.actionId,
+    displayText: optInCta.displayText,
+    payload: buildPartnerPayload(fixture),
+  });
+  assertNoLeakedToolText(optInTurn.response.blocks, '条件变更最终入池');
+
+  const activeIntent = await waitFor(() => getLatestActivePartnerIntent(user), { retries: 8, delayMs: 250 });
+  assert(activeIntent, '条件变更最终入池后未落 active partner_intent');
+  assert(activeIntent.locationHint.includes('南山'), `最终意向 locationHint 未采用最后地点: ${JSON.stringify(activeIntent)}`);
+  assert(!activeIntent.locationHint.includes('观音桥'), `最终意向仍残留旧地点: ${JSON.stringify(activeIntent)}`);
+  assert(activeIntent.activityType === 'boardgame', `最终意向 activityType 未采用最后玩法: ${JSON.stringify(activeIntent)}`);
+  const storedFinalTimeText = `${activeIntent.timePreference ?? ''} ${activeIntent.timeText ?? ''}`;
+  assert(
+    storedFinalTimeText.includes('周六'),
+    `最终意向 time 未采用最后时间: ${JSON.stringify(activeIntent)}`,
+  );
+  assert(
+    !activeIntent.description.includes('羽毛球'),
+    `最终意向描述仍残留旧玩法: ${JSON.stringify(activeIntent)}`,
+  );
+
+  details.push(`长对话 ${conversationId} 从观音桥/周五/羽毛球改到南山/周六/桌游`);
+  details.push(`最终 active partner_intent=${activeIntent.id} 已按最后条件落库`);
+
+  return { name: 'partner-condition-update-intent-flow', passed: true, details };
 }
 
 async function scenarioAiDraftSettingsFormFlow(context: ScenarioContext): Promise<ScenarioResult> {
@@ -2194,12 +2764,17 @@ const coreScenarios = [
   scenarioAiJoinAuthResumeDiscussionFlow,
   scenarioAiPartnerSearchBootstrapFlow,
   scenarioPendingMatchConfirmCreatesActivityFlow,
+  scenarioPartnerConfirmToDiscussionFlow,
+  scenarioPartnerScenarioFixturesFlow,
   scenarioAiDestinationCompanionFlow,
+  scenarioPartnerActionGateFlow,
   scenarioAiDraftSettingsFormFlow,
   scenarioAiAccessFlow,
 ];
 
 const extendedScenarios = [
+  scenarioPartnerLongMultiUserBranchFlow,
+  scenarioPartnerConditionUpdateIntentFlow,
   scenarioAiLongConversationFlow,
   scenarioAiTransientContextFlow,
   scenarioAiMultiIntentCrossFlow,
@@ -2310,6 +2885,9 @@ async function main() {
     },
   });
   console.log(`Artifact: ${artifactPath}`);
+
+  await cleanupSandboxPartnerIntents(users);
+  await cleanupSandboxAgentTasks(users);
 
   const failed = results.filter((item) => !item.passed);
   if (failed.length > 0) {

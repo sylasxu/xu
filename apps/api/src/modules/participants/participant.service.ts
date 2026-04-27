@@ -294,6 +294,23 @@ async function getActivityOutcomeContext(userId: string, activityId: string) {
   return activity;
 }
 
+function buildRebookFollowUpNextAction(params: {
+  activityId: string;
+  activityTitle: string;
+  activityType: string;
+  locationName: string;
+}): ActionResponse['nextAction'] {
+  const typeHint = params.activityType.trim() ? `类型先沿用${params.activityType}，` : '';
+  const placeHint = params.locationName.trim() ? `地点先参考${params.locationName}，` : '';
+
+  return {
+    label: '继续约下一场',
+    prompt: `我想顺着「${params.activityTitle}」（activityId: ${params.activityId}）再约下一场，${typeHint}${placeHint}帮我给一个更容易成局的新时间建议、人数安排和一段可以直接发出去的邀约文案。`,
+    activityMode: 'rebook',
+    entry: 'post_activity_rebook_follow_up',
+  };
+}
+
 export async function markActivityRebookFollowUp(
   userId: string,
   activityId: string,
@@ -316,6 +333,12 @@ export async function markActivityRebookFollowUp(
   return {
     code: 200,
     msg: '已记录这次再约意愿，后续推荐会更懂你',
+    nextAction: buildRebookFollowUpNextAction({
+      activityId,
+      activityTitle: activity.title,
+      activityType: activity.type,
+      locationName: activity.locationName,
+    }),
   };
 }
 

@@ -12,8 +12,10 @@ import {
   eq,
   inArray,
   intentMatches,
+  partnerIntents,
   sql,
   userMemories,
+  users,
 } from '@xu/db';
 import { app } from '../../../index';
 import {
@@ -28,6 +30,7 @@ import {
   syncJoinTaskFromChatResponse,
   syncPartnerTaskFromChatResponse,
 } from '../task-runtime/agent-task.service';
+import { searchPartnerCandidates } from '../tools/partner-tools';
 import type { GenUIBlock, GenUIRequest } from '@xu/genui-contract';
 
 interface ApiError {
@@ -119,6 +122,8 @@ const createdTaskIds = new Set<string>();
 const createdActivityIds = new Set<string>();
 const createdConversationIds = new Set<string>();
 const createdIntentMatchIds = new Set<string>();
+const createdPartnerIntentIds = new Set<string>();
+const createdUserIds = new Set<string>();
 let testUser: BootstrappedUser | null = null;
 
 async function requestJson<T>(params: {
@@ -415,6 +420,14 @@ describe('Agent Task Runtime Integration', () => {
         .where(inArray(intentMatches.id, intentMatchIds));
     }
 
+    const partnerIntentIds = Array.from(createdPartnerIntentIds);
+    createdPartnerIntentIds.clear();
+    if (partnerIntentIds.length > 0) {
+      await db
+        .delete(partnerIntents)
+        .where(inArray(partnerIntents.id, partnerIntentIds));
+    }
+
     if (activityIds.length > 0) {
       await db
         .delete(activities)
@@ -425,6 +438,14 @@ describe('Agent Task Runtime Integration', () => {
       await db
         .delete(conversations)
         .where(inArray(conversations.id, conversationIds));
+    }
+
+    const userIds = Array.from(createdUserIds);
+    createdUserIds.clear();
+    if (userIds.length > 0) {
+      await db
+        .delete(users)
+        .where(inArray(users.id, userIds));
     }
   });
 
@@ -987,8 +1008,58 @@ describe('Agent Task Runtime Integration', () => {
     expect(memories[0]?.content).toContain('挺顺利');
   });
 
+  it('returns a next action when post-activity rebook follow-up is recorded', async () => {
+    expect(testUser).toBeDefined();
+
+    const activityId = randomUUID();
+
+    await db.insert(activities).values({
+      id: activityId,
+      creatorId: testUser!.user.id,
+      title: '再约下一步动作测试局',
+      description: '验证 post_activity 再约动作能直接回到 AI',
+      location: { x: 106.52988, y: 29.58567 },
+      locationName: '观音桥',
+      address: '观音桥步行街',
+      locationHint: '地铁站附近',
+      startAt: new Date('2026-03-15T20:00:00+08:00'),
+      type: 'food',
+      maxParticipants: 4,
+      currentParticipants: 1,
+      status: 'completed',
+    });
+    createdActivityIds.add(activityId);
+
+    const response = await requestJson<ActivityOutcomeActionResponse>({
+      method: 'POST',
+      path: '/participants/rebook-follow-up',
+      token: testUser!.token,
+      payload: {
+        activityId,
+      },
+    });
+
+    expect(response.code).toBe(200);
+    expect(response.nextAction).toMatchObject({
+      label: '继续约下一场',
+      activityMode: 'rebook',
+      entry: 'post_activity_rebook_follow_up',
+    });
+    expect(response.nextAction?.prompt).toContain(activityId);
+    expect(response.nextAction?.prompt).toContain('观音桥');
+  });
+
   it('surfaces recent activity outcome memory in the welcome card', async () => {
     expect(testUser).toBeDefined();
+
+    await db
+      .update(activities)
+      .set({ status: 'cancelled' })
+      .where(and(
+        eq(activities.creatorId, testUser!.user.id),
+        eq(activities.status, 'active'),
+        sql`${activities.startAt} > ${new Date().toISOString()}`,
+      ));
 
     const activityId = randomUUID();
     const activityTitle = '欢迎页真实结果回流测试局';
@@ -1406,6 +1477,64 @@ describe('Agent Task Runtime Integration', () => {
       action: 'find_partner',
       label: '继续补偏好',
     });
+  });
+
+  it('returns scan-friendly partner search context before creating a match', async () => {
+    expect(testUser).toBeDefined();
+
+    const candidateUserId = randomUUID();
+    const candidateIntentId = randomUUID();
+
+    await db.insert(users).values({
+      id: candidateUserId,
+      wxOpenId: `partner-search-candidate-${candidateUserId}`,
+      phoneNumber: `13${candidateUserId.replace(/-/g, '').slice(0, 9)}`,
+      nickname: '周末羽毛球搭子',
+      avatarUrl: null,
+    });
+    createdUserIds.add(candidateUserId);
+
+    await db.insert(partnerIntents).values({
+      id: candidateIntentId,
+      userId: candidateUserId,
+      activityType: 'sports',
+      scenarioType: 'local_partner',
+      locationHint: '观音桥',
+      location: { x: 106.52988, y: 29.58567 },
+      timePreference: '周六晚上',
+      description: '想找个轻松一点的羽毛球搭子，AA 就好',
+      metaData: {
+        tags: ['AA', '轻松'],
+        sportType: 'badminton',
+        rawInput: '周六晚上观音桥羽毛球，想找轻松一点的搭子',
+      },
+      status: 'active',
+      expiresAt: new Date('2026-04-30T20:00:00+08:00'),
+    });
+    createdPartnerIntentIds.add(candidateIntentId);
+
+    const result = await searchPartnerCandidates(testUser!.user.id, {
+      rawInput: '想找个周末羽毛球搭子',
+      activityType: 'sports',
+      sportType: 'badminton',
+      locationHint: '观音桥',
+      timePreference: '周六晚上',
+      description: '周六晚上观音桥羽毛球，轻松一点，AA',
+    });
+
+    if (!result.success) {
+      throw new Error(result.error);
+    }
+
+    expect(result.searchSummary.stageLabel).toBe('先搜一下');
+    expect(result.searchSummary.stageHint).toContain('不自动入池');
+    expect(result.searchSummary.privacyHint).toContain('确认前');
+    expect(result.items[0]).toMatchObject({
+      intentId: candidateIntentId,
+      reasonTitle: '为什么合适',
+    });
+    expect(result.items[0]?.matchHighlights.length).toBeGreaterThan(0);
+    expect(result.items[0]?.nextStepHint).toContain('xu');
   });
 
   it('surfaces real partner matches as match_ready snapshots with a message-center action', async () => {

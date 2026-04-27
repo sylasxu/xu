@@ -49,6 +49,12 @@ const ActivityJoinResult = t.Union([
   t.Literal('closed'),
 ], { description: '执行 join_activity 后的统一结果' });
 
+const ActivityConversionTips = t.Object({
+  joinContext: t.String({ description: '报名按钮附近的承接说明' }),
+  discussionContext: t.String({ description: '讨论区承接说明' }),
+  cloneContext: t.String({ description: '找类似活动入口说明' }),
+});
+
 // 活动详情响应（包含 isArchived 计算字段）
 const ActivityDetailResponse = t.Object({
   id: t.String(),
@@ -76,6 +82,7 @@ const ActivityDetailResponse = t.Object({
   // Chat Tool Mode 字段 (v4.8)
   groupOpenId: t.Union([t.String(), t.Null()], { description: '群聊标识' }),
   dynamicMessageId: t.Union([t.String(), t.Null()], { description: '微信动态消息ID' }),
+  conversionTips: ActivityConversionTips,
   // 关联数据
   creator: t.Union([CreatorInfo, t.Null()]),
   participants: t.Array(ParticipantInfo),
@@ -240,6 +247,7 @@ const PublicActivityResponse = t.Object({
   }),
   participants: t.Array(PublicParticipantInfo),
   recentMessages: t.Array(PublicMessagePreview),
+  conversionTips: ActivityConversionTips,
 });
 
 // ==========================================

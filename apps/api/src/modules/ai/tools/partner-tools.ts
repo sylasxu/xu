@@ -94,9 +94,11 @@ export interface SearchPartnerCandidate {
   timePreference: string | null;
   timeText?: string | null;
   summary: string;
+  reasonTitle: string;
   matchReason: string;
   matchHighlights: string[];
   compatibilitySummary: string;
+  nextStepHint: string;
   privacyHint: string;
   score: number;
   tags: string[];
@@ -109,6 +111,7 @@ export interface SearchSummary {
   scenarioType?: PartnerScenarioType;
   scenarioLabel: string;
   stageLabel: string;
+  stageHint: string;
   privacyHint: string;
 }
 
@@ -466,6 +469,20 @@ function buildPartnerCompatibilitySummary(params: {
   return `${scenarioLabel} · ${locationText} · ${timeText}${reasonText}`;
 }
 
+function buildPartnerCandidateNextStepHint(params: {
+  scenarioType: PartnerScenarioType;
+}): string {
+  if (params.scenarioType === 'destination_companion') {
+    return '想继续就发起同去邀约；如果不确定，也可以让 xu 先帮你问问。';
+  }
+
+  if (params.scenarioType === 'fill_seat') {
+    return '想继续就发起补位邀约；如果还差信息，也可以让 xu 先帮你问问。';
+  }
+
+  return '想继续就搭一下；如果还不想直接推进，也可以让 xu 先帮你问问。';
+}
+
 export async function searchPartnerCandidates(
   userId: string | null,
   params: SearchPartnerCandidatesParams
@@ -532,6 +549,7 @@ export async function searchPartnerCandidates(
           timePreference: row.intent.timePreference || null,
           ...(row.intent.timeText ? { timeText: row.intent.timeText } : {}),
           summary,
+          reasonTitle: '为什么合适',
           matchReason: buildPartnerCandidateReason({
             scenarioType: resolvedScenarioType,
             reasons,
@@ -547,6 +565,9 @@ export async function searchPartnerCandidates(
             locationHint: row.intent.locationHint,
             timePreference: row.intent.timePreference || null,
             reasons,
+          }),
+          nextStepHint: buildPartnerCandidateNextStepHint({
+            scenarioType: resolvedScenarioType,
           }),
           privacyHint: '确认前不会展示联系方式',
           score,
@@ -564,7 +585,8 @@ export async function searchPartnerCandidates(
       scenarioType: queryUnderstanding.scenarioType,
       scenarioLabel: getPartnerScenarioLabel(queryUnderstanding.scenarioType),
       stageLabel: '先搜一下',
-      privacyHint: '候选结果只展示摘要，确认前不暴露联系方式',
+      stageHint: '现在只是先搜一轮；不自动入池，也不会直接暴露联系方式。',
+      privacyHint: '候选结果只展示摘要，确认前不暴露联系方式。',
     };
 
     // 主要下一步动作：入池等待

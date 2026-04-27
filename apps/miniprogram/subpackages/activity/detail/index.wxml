@@ -140,6 +140,10 @@
           <text wx:elif="{{activity.remainingSeats >= 0}}" class="activity-detail-page__info-muted">还剩 {{activity.remainingSeats}} 个位置</text>
         </view>
       </view>
+
+      <view wx:if="{{activity.conversionTips && activity.conversionTips.joinContext}}" class="activity-detail-page__conversion-note">
+        <text class="activity-detail-page__conversion-text">{{activity.conversionTips.joinContext}}</text>
+      </view>
       
     </view>
     
@@ -160,6 +164,9 @@
           👯‍♂️ 找类似的局
         </button>
       </view>
+      <text wx:if="{{activity.conversionTips && activity.conversionTips.cloneContext}}" class="activity-detail-page__quick-hint">
+        {{activity.conversionTips.cloneContext}}
+      </text>
     </view>
     
     <!-- 发起人信息 -->

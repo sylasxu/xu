@@ -139,6 +139,8 @@ type PendingMatchDetail = {
   organizerUserId: string;
   organizerNickname: string | null;
   nextActionOwner: "self" | "organizer";
+  continuationTitle: string;
+  continuationText: string;
   nextActionText: string;
   matchReasonTitle: string;
   matchReasonText: string;
@@ -673,16 +675,17 @@ export function MessageCenterDrawer({
   const recordRebookFollowUp = useCallback(
     async (activityId: string | null) => {
       if (!activityId) {
-        return;
+        return null;
       }
 
       try {
-        await requestJson<SuccessResponse>("/participants/rebook-follow-up", {
+        return await requestJson<SuccessResponse>("/participants/rebook-follow-up", {
           method: "POST",
           body: JSON.stringify({ activityId }),
         });
       } catch (requestError) {
         console.error("记录再约意愿失败", requestError);
+        return null;
       }
     },
     [requestJson]
@@ -753,12 +756,14 @@ export function MessageCenterDrawer({
           await markNotificationRead(notification.id);
         }
 
-        if (mode === "rebook") {
-          await recordRebookFollowUp(notification.activityId);
-        }
+        const rebookResult = mode === "rebook"
+          ? await recordRebookFollowUp(notification.activityId)
+          : null;
+        const backendNextAction = rebookResult?.nextAction;
 
         const prompt =
           promptOverride?.text ||
+          backendNextAction?.prompt ||
           (mode === "review"
             ? buildFeedbackPrompt(notification)
             : mode === "rebook"
@@ -766,6 +771,7 @@ export function MessageCenterDrawer({
               : buildKickoffPrompt(notification.activityId || undefined, notification.title));
         const displayText =
           promptOverride?.label ||
+          backendNextAction?.label ||
           (mode === "review"
             ? messageCenter?.ui.reviewActionLabel || "去复盘"
             : mode === "rebook"
@@ -773,8 +779,8 @@ export function MessageCenterDrawer({
               : messageCenter?.ui.kickoffActionLabel || "让 AI 帮我写开场白");
         const contextOverrides: PromptContextOverrides = {
           ...(notification.activityId ? { activityId: notification.activityId } : {}),
-          activityMode: mode,
-          entry: buildFollowUpEntry(notification.id, mode),
+          activityMode: backendNextAction?.activityMode || mode,
+          entry: backendNextAction?.entry || buildFollowUpEntry(notification.id, mode),
         };
 
         setOpen(false);
@@ -1280,6 +1286,16 @@ export function MessageCenterDrawer({
                               召集人：{pendingMatchDetail.organizerNickname || "召集人"}
                             </span>
                           </div>
+                        </div>
+
+                        <div
+                          className={cn(
+                            "rounded-2xl border px-4 py-4",
+                            isDarkMode ? "border-white/8 bg-white/[0.03]" : "border-black/8 bg-black/[0.02]"
+                          )}
+                        >
+                          <p className={cn("text-[11px] font-semibold", isDarkMode ? "text-emerald-100/70" : "text-emerald-700")}>{pendingMatchDetail.continuationTitle}</p>
+                          <p className={cn("mt-2 text-xs leading-6", isDarkMode ? "text-white/48" : "text-black/48")}>{pendingMatchDetail.continuationText}</p>
                         </div>
 
                         <div

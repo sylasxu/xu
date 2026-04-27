@@ -239,11 +239,28 @@
   background: rgba(91, 117, 251, 0.1);
 }
 
+.stage-hint {
+  display: block;
+  margin: -8rpx 0 @spacing-4;
+  font-size: @text-xs;
+  line-height: 1.6;
+  color: var(--text-secondary, @text-secondary);
+}
+
 .action-wrap {
   display: flex;
   flex-direction: column;
   gap: @spacing-2;
   margin-top: @spacing-4;
+}
+
+.highlight-title,
+.next-step-hint {
+  display: block;
+  width: 100%;
+  font-size: @text-xs;
+  line-height: 1.5;
+  color: var(--text-secondary, @text-secondary);
 }
 
 .action-btn {

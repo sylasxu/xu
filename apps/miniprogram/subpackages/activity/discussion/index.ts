@@ -102,7 +102,7 @@ Page<DiscussionPageData, WechatMiniprogram.Page.CustomOption>({
     isConnected: false,
     showJoinGuide: false,
     joinGuideTitle: '',
-    joinGuideHint: '先打个招呼吧，大家更容易接住你。',
+    joinGuideHint: '先把集合、破冰或时间安排补一句，后续变化也会留在这里。',
     quickStarters: [],
   },
 

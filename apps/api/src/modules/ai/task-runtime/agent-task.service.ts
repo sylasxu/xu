@@ -1550,10 +1550,15 @@ async function updateJoinTask(params: {
   completedAt?: Date | null;
   eventType?: AgentTaskEventType;
   eventPayload?: Record<string, unknown>;
+  allowStageRegression?: boolean;
 }): Promise<AgentTask> {
   const nextStage = (() => {
     if (!params.stage) {
       return params.task.currentStage;
+    }
+
+    if (params.allowStageRegression) {
+      return params.stage;
     }
 
     return getStageRank(params.task.taskType, params.stage) >= getStageRank(params.task.taskType, params.task.currentStage)
@@ -2392,6 +2397,7 @@ export async function recordPartnerTaskMatchCancelled(params: {
       resultOutcome: 'match_cancelled',
       resultSummary: '这次找搭子匹配已取消，系统会继续等待下一次更合适的匹配。',
       eventType: 'outcome_recorded',
+      allowStageRegression: true,
       eventPayload: {
         matchId: params.matchId,
       },

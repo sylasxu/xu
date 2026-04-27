@@ -35,6 +35,8 @@ export interface PendingMatchDetailResponse {
   organizerUserId: string;
   organizerNickname: string | null;
   nextActionOwner: 'self' | 'organizer';
+  continuationTitle?: string;
+  continuationText?: string;
   nextActionText: string;
   matchReasonTitle: string;
   matchReasonText: string;

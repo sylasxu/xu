@@ -134,6 +134,19 @@ function StatusBadge({ status }: { status: string }) {
   return null
 }
 
+function isLightHexColor(value: string): boolean {
+  const hex = value.trim().replace(/^#/, "")
+  if (!/^[0-9a-fA-F]{6}$/.test(hex)) {
+    return false
+  }
+
+  const r = Number.parseInt(hex.slice(0, 2), 16)
+  const g = Number.parseInt(hex.slice(2, 4), 16)
+  const b = Number.parseInt(hex.slice(4, 6), 16)
+  const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
+  return luminance > 0.72
+}
+
 // ── 参与者头像列表（重叠圆形） ────────────────────────────
 
 function ParticipantAvatars({
@@ -192,9 +205,16 @@ export function ActivityCard({
   const seatText = activity.isFull ? "当前已满员，可以先关注后续动态" : `还剩 ${activity.remainingSeats} 个位置`
   const creatorNickname = activity.creator.nickname
   const creatorAvatarUrl = activity.creator.avatarUrl
+  const usesLightText = isLightHexColor(textColor)
 
   return (
-    <div className="w-full max-w-lg mx-auto rounded-2xl bg-white/90 backdrop-blur-sm shadow-xl overflow-hidden">
+    <div
+      className={`mx-auto w-full max-w-lg overflow-hidden rounded-2xl border backdrop-blur-sm shadow-xl ${
+        usesLightText
+          ? "border-white/10 bg-black/52"
+          : "border-white/65 bg-white/90"
+      }`}
+    >
       {/* 状态徽章 */}
       {isEnded && (
         <div className="flex justify-center pt-4">
@@ -260,7 +280,7 @@ export function ActivityCard({
         </div>
 
         {/* 分隔线 */}
-        <div className="border-t border-gray-200/60" />
+        <div className={usesLightText ? "border-t border-white/10" : "border-t border-gray-200/60"} />
 
         {/* 发起人 */}
         <div className="flex items-center gap-3">
@@ -299,7 +319,12 @@ export function ActivityCard({
           </p>
         )}
         {activity.conversionTips.discussionContext ? (
-          <p className="rounded-xl bg-black/[0.04] px-3 py-2 text-xs leading-5 opacity-75" style={{ color: textColor }}>
+          <p
+            className={`rounded-xl px-3 py-2 text-xs leading-5 opacity-75 ${
+              usesLightText ? "bg-white/[0.08]" : "bg-black/[0.04]"
+            }`}
+            style={{ color: textColor }}
+          >
             {activity.conversionTips.discussionContext}
           </p>
         ) : null}

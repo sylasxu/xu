@@ -2,6 +2,7 @@
 
 import { agentTasks, and, db, desc, eq, inArray, partnerIntents, userMemories, users } from '@xu/db';
 import { app } from '../apps/api/src/index';
+import { resetQuota } from '../apps/api/src/modules/ai/guardrails/rate-limiter';
 import { readAiChatEnvelope } from './ai-chat-sse';
 import { writeRegressionArtifact } from './regression-artifact';
 import { findScenarioMatrixEntry } from './regression-scenario-matrix';
@@ -693,6 +694,12 @@ async function cleanupSandboxAgentTasks(users: BootstrappedUser[]): Promise<void
       inArray(agentTasks.userId, userIds),
       inArray(agentTasks.status, ['active', 'waiting_auth', 'waiting_async_result'])
     ));
+}
+
+function resetSandboxRateLimits(users: BootstrappedUser[]): void {
+  for (const item of users) {
+    resetQuota(item.user.id);
+  }
 }
 
 async function createActivity(creator: BootstrappedUser, overrides?: Parameters<typeof buildCreatePayload>[0]) {
@@ -2812,6 +2819,7 @@ async function main() {
   for (const scenario of selectedScenarios) {
     const scenarioName = scenario.name.replace(/^scenario/, '').replace(/([A-Z])/g, '-$1').toLowerCase().replace(/^-/, '');
     console.log(`\n>>> ${scenarioName}`);
+    resetSandboxRateLimits(context.users);
     const scenarioStartedAt = Date.now();
     try {
       const result = await scenario(context);

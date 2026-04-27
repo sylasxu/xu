@@ -214,10 +214,6 @@ function getErrorMessage(value: unknown, fallback: string): string {
   return fallback;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
 type PromptContextOverrides = {
   activityId?: string;
   activityMode?: 'review' | 'rebook' | 'kickoff';
@@ -677,12 +673,11 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
 
 
   mapPendingMatchDetail(detail: PendingMatchDetailResponse): PendingMatchDetailView {
-    const detailRecord: Record<string, unknown> = isRecord(detail) ? detail : {};
-    const continuationTitle = typeof detailRecord.continuationTitle === 'string' && detailRecord.continuationTitle.trim()
-      ? detailRecord.continuationTitle.trim()
+    const continuationTitle = detail.continuationTitle?.trim()
+      ? detail.continuationTitle.trim()
       : '刚才那条找搭子任务的继续';
-    const continuationText = typeof detailRecord.continuationText === 'string' && detailRecord.continuationText.trim()
-      ? detailRecord.continuationText.trim()
+    const continuationText = detail.continuationText?.trim()
+      ? detail.continuationText.trim()
       : '这不是一条孤立通知，而是你之前找搭子请求的新进展。先看清楚这次匹配，再决定要不要继续推进。';
 
     return {
@@ -1059,7 +1054,7 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
       await this.loadData();
 
       if (response.data.activityId) {
-        this.openActivityDetail(response.data.activityId);
+        this.openActivityDetail(response.data.activityId, 'match_confirmed');
       }
     } catch (error) {
       console.error('确认待处理匹配失败', error);
@@ -1175,13 +1170,14 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
     });
   },
 
-  openActivityDetail(activityId: string) {
+  openActivityDetail(activityId: string, entry?: string) {
     if (!activityId) {
       return;
     }
 
+    const entryParam = entry ? `&entry=${encodeURIComponent(entry)}` : '';
     wx.navigateTo({
-      url: `/subpackages/activity/detail/index?id=${activityId}`,
+      url: `/subpackages/activity/detail/index?id=${activityId}${entryParam}`,
     });
   },
 

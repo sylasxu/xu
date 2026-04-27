@@ -161,7 +161,7 @@ function buildExploreMemorySignals(
   return signals.slice(0, 2);
 }
 
-function mergeExploreResultsWithNearbyFallback(params: {
+export function mergeExploreResultsWithNearbyFallback(params: {
   primary: ExploreResultItem[];
   fallback: Array<{
     id: string;

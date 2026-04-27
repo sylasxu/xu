@@ -688,6 +688,40 @@ function buildLocationPreferencePayload(inputText: string, activityType?: string
   };
 }
 
+function shouldAskExploreLocation(inputText: string): boolean {
+  const normalizedText = inputText.replace(/\s+/g, '').trim();
+  if (!normalizedText) {
+    return false;
+  }
+
+  if (findKnownLocationCenter(normalizedText) || CREATE_ACTIVITY_PATTERN.test(normalizedText)) {
+    return false;
+  }
+
+  if (PARTNER_ENTRY_PATTERN.test(normalizedText) || /(搭子|找人|约人|同去|三缺一|补一个|一起去)/.test(normalizedText)) {
+    return false;
+  }
+
+  return EXPLORE_TEXT_PATTERN.test(normalizedText);
+}
+
+function resolveExploreLocationPreferenceAction(
+  inputText: string,
+  requestLocation: [number, number] | undefined
+): ChatRequest['structuredAction'] | undefined {
+  if (requestLocation || !shouldAskExploreLocation(inputText)) {
+    return undefined;
+  }
+
+  const normalizedText = inputText.trim();
+  return {
+    action: 'ask_preference',
+    source: 'text_action_inference',
+    originalText: normalizedText,
+    payload: buildLocationPreferencePayload(normalizedText, inferActivityTypeFromText(normalizedText)),
+  };
+}
+
 function buildCreatePromptFromExplore(params: {
   locationName: string;
   originalText: string;
@@ -1235,11 +1269,15 @@ async function resolveAiChatExecution(
 ): Promise<ResolvedAiChatExecution> {
   const conversation = await resolveConversationContext(request, viewer);
   const userText = normalizeActionDisplayText(request.input);
+  const requestLocation = parseRequestLocation(request);
   const suggestionResolution = request.input.type === 'text'
     ? resolveContinuationFromSuggestions(request.input.text, conversation.latestAssistantSuggestions)
     : undefined;
   const stateResolution = request.input.type === 'text'
     ? resolveCreateLocationFollowUpAction(request.input.text, conversation.historyMessages)
+    : undefined;
+  const exploreLocationResolution = request.input.type === 'text'
+    ? resolveExploreLocationPreferenceAction(request.input.text, requestLocation)
     : undefined;
   const resolvedStructuredAction = request.input.type === 'action'
     ? resolveStructuredActionFromInput(
@@ -1247,8 +1285,8 @@ async function resolveAiChatExecution(
         conversation.latestAssistantSuggestions,
         typeof request.context?.entry === 'string' ? request.context.entry : undefined
       )
-    : suggestionResolution?.structuredAction ?? stateResolution;
-  const location = parseRequestLocation(request) || parseStructuredActionLocation(resolvedStructuredAction);
+    : suggestionResolution?.structuredAction ?? stateResolution ?? exploreLocationResolution;
+  const location = requestLocation || parseStructuredActionLocation(resolvedStructuredAction);
   const ai = parseRequestAiParams(request);
 
   if (!userText) {
@@ -1280,6 +1318,15 @@ async function resolveAiChatExecution(
             source: stateResolution.source || null,
           },
         }
+      : exploreLocationResolution
+        ? {
+            stage: 'text_action_resolved',
+            detail: {
+              inputText: userText,
+              action: exploreLocationResolution.action,
+              source: exploreLocationResolution.source || null,
+            },
+          }
       : undefined;
 
   return {

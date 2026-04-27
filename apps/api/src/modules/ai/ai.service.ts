@@ -62,6 +62,7 @@ import {
   getEnhancedUserProfile,
   buildProfilePrompt,
 } from './memory/working';
+import type { EnhancedUserProfile } from './memory';
 // Processors (v4.9 管线架构)
 import {
   inputGuardProcessor,
@@ -2741,6 +2742,63 @@ function clampWelcomeTitle(title: string, maxLength = 12): string {
 
 const OPEN_WELCOME_TASK_STATUSES = ['active', 'waiting_auth', 'waiting_async_result'] as const;
 
+function buildActivityOutcomeWelcomeFocus(
+  profile: EnhancedUserProfile,
+  now: Date,
+): WelcomeFocus | undefined {
+  const recentOutcome = (profile.activityOutcomes || [])
+    .filter((outcome) => {
+      const ageMs = now.getTime() - outcome.updatedAt.getTime();
+      return ageMs >= 0 && ageMs <= 30 * 24 * 60 * 60 * 1000;
+    })
+    .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())
+    .find((outcome) => outcome.attended !== null);
+
+  if (!recentOutcome) {
+    return undefined;
+  }
+
+  const title = clampWelcomeTitle(recentOutcome.activityTitle, 10);
+  const context = {
+    activityId: recentOutcome.activityId,
+    activityTitle: recentOutcome.activityTitle,
+    activityType: recentOutcome.activityType,
+    locationName: recentOutcome.locationName,
+    entry: 'activity_outcome_memory',
+    outcome: recentOutcome.attended === false ? 'failed' : 'attended',
+    rebookTriggered: recentOutcome.rebookTriggered,
+    ...(recentOutcome.reviewSummary ? { reviewSummary: recentOutcome.reviewSummary } : {}),
+  };
+
+  if (recentOutcome.attended === false) {
+    return {
+      type: 'post_activity_feedback',
+      label: `换个方式再组「${title}」`,
+      prompt: `上次「${recentOutcome.activityTitle}」没成局，结合这次真实结果，帮我换个更容易成局的新方案。`,
+      priority: 6,
+      context,
+    };
+  }
+
+  if (recentOutcome.rebookTriggered) {
+    return {
+      type: 'post_activity_feedback',
+      label: `继续沿用「${title}」的经验`,
+      prompt: `结合上次「${recentOutcome.activityTitle}」的真实结果，帮我找一个相近但更合适的下一场活动。`,
+      priority: 6,
+      context,
+    };
+  }
+
+  return {
+    type: 'post_activity_feedback',
+    label: `顺着「${title}」再约`,
+    prompt: `上次「${recentOutcome.activityTitle}」挺顺利，结合地点、类型和反馈，帮我快速再约一场。`,
+    priority: 6,
+    context,
+  };
+}
+
 function buildPostActivityFeedbackPrompts(activityTitle: string, activityId: string): QuickPrompt[] {
   const title = clampWelcomeTitle(activityTitle, 16);
   return [
@@ -2777,6 +2835,44 @@ function buildPostActivityFeedbackPrompts(activityTitle: string, activityId: str
         reviewSummary: `这次「${title}」没成局。`,
       },
     },
+  ];
+}
+
+function buildActivityOutcomeMemoryQuickPrompts(params: {
+  activityTitle: string;
+  outcome: 'attended' | 'failed';
+  rebookTriggered?: boolean;
+  prompt: string;
+}): QuickPrompt[] {
+  if (params.outcome === 'failed') {
+    return [
+      {
+        icon: '↺',
+        text: '换个方式再组',
+        prompt: params.prompt,
+      },
+      ...DEFAULT_WELCOME_UI_CONFIG.quickPrompts.slice(0, 2),
+    ];
+  }
+
+  if (params.rebookTriggered) {
+    return [
+      {
+        icon: '↺',
+        text: '沿用上次经验',
+        prompt: params.prompt,
+      },
+      ...DEFAULT_WELCOME_UI_CONFIG.quickPrompts.slice(0, 2),
+    ];
+  }
+
+  return [
+    {
+      icon: '↺',
+      text: '顺着这次再约',
+      prompt: params.prompt,
+    },
+    ...DEFAULT_WELCOME_UI_CONFIG.quickPrompts.slice(0, 2),
   ];
 }
 
@@ -2998,7 +3094,7 @@ export async function getWelcomeCard(
       getEnhancedUserProfile(userId),
       selectWelcomeFocus(userId, now),
     ]);
-    welcomeFocus = selectedWelcomeFocus;
+    welcomeFocus = selectedWelcomeFocus ?? buildActivityOutcomeWelcomeFocus(profile, now);
 
     const preferencesCount = profile.preferences.length;
     const locationsCount = profile.frequentLocations.length;
@@ -3122,8 +3218,26 @@ export async function getWelcomeCard(
   const focusContext = isRecord(welcomeFocus?.context) ? welcomeFocus.context : null;
   const focusActivityTitle = getNonEmptyString(focusContext?.activityTitle);
   const focusActivityId = getNonEmptyString(focusContext?.activityId);
-  const quickPrompts = welcomeFocus?.type === 'post_activity_feedback' && focusActivityTitle && focusActivityId
+  const focusEntry = getNonEmptyString(focusContext?.entry);
+  const focusOutcome = getNonEmptyString(focusContext?.outcome);
+  const focusRebookTriggered = typeof focusContext?.rebookTriggered === 'boolean'
+    ? focusContext.rebookTriggered
+    : false;
+  const quickPrompts = welcomeFocus?.type === 'post_activity_feedback'
+    && focusEntry !== 'activity_outcome_memory'
+    && focusActivityTitle
+    && focusActivityId
     ? buildPostActivityFeedbackPrompts(focusActivityTitle, focusActivityId)
+    : welcomeFocus?.type === 'post_activity_feedback'
+      && focusEntry === 'activity_outcome_memory'
+      && focusActivityTitle
+      && (focusOutcome === 'attended' || focusOutcome === 'failed')
+      ? buildActivityOutcomeMemoryQuickPrompts({
+          activityTitle: focusActivityTitle,
+          outcome: focusOutcome,
+          rebookTriggered: focusRebookTriggered,
+          prompt: welcomeFocus.prompt,
+        })
     : hasDraftActivity ? [] : welcomeUi.quickPrompts;
 
   return {

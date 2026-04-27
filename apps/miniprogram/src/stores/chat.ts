@@ -459,6 +459,17 @@ function toStringValue(value: unknown, fallback = ''): string {
   return fallback
 }
 
+function toStringArrayValue(value: unknown, limit = 4): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .map((item) => item.trim())
+    .slice(0, limit)
+}
+
 function toNumberValue(value: unknown, fallback: number): number {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value
@@ -748,6 +759,7 @@ function mapEntityCardToWidgetPart(block: GenUIEntityCardBlock): WidgetPart {
 function readExploreBlockMeta(block: GenUIListBlock): {
   center: { lat: number; lng: number; name: string } | null
   semanticQuery: string
+  memoryHints: string[]
   fetchConfig: Record<string, unknown> | null
   interaction: Record<string, unknown> | null
   preview: Record<string, unknown> | null
@@ -770,6 +782,9 @@ function readExploreBlockMeta(block: GenUIListBlock): {
   return {
     center,
     semanticQuery: toStringValue(block.semanticQuery, toStringValue(explore?.semanticQuery, '')),
+    memoryHints: toStringArrayValue(meta?.memoryHints, 2).length > 0
+      ? toStringArrayValue(meta?.memoryHints, 2)
+      : toStringArrayValue(explore?.memoryHints, 2),
     fetchConfig: isRecord(block.fetchConfig)
       ? block.fetchConfig
       : isRecord(explore?.fetchConfig)
@@ -915,6 +930,7 @@ function mapListToWidgetPart(block: GenUIListBlock): WidgetPart {
       presentation,
       showHeader,
       semanticQuery: exploreMeta.semanticQuery,
+      memoryHints: exploreMeta.memoryHints,
       fetchConfig: exploreMeta.fetchConfig,
       interaction: exploreMeta.interaction,
       preview: exploreMeta.preview,

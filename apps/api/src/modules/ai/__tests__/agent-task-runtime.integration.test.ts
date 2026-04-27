@@ -68,6 +68,20 @@ interface ActivityOutcomeActionResponse {
   };
 }
 
+interface WelcomeCardResponse {
+  quickPrompts: Array<{
+    text: string;
+    prompt: string;
+  }>;
+  welcomeFocus?: {
+    type: string;
+    label: string;
+    prompt: string;
+    priority: number;
+    context?: Record<string, unknown>;
+  };
+}
+
 function readResponseCompleteFromSse<T>(bodyText: string): T | null {
   const packets = bodyText.split(/\r?\n\r?\n/);
   for (const packet of packets) {
@@ -957,6 +971,8 @@ describe('Agent Task Runtime Integration', () => {
       entry: 'post_activity_feedback_next_action',
     });
     expect(response.nextAction?.prompt).toContain(activityId);
+    expect(response.nextAction?.prompt).toContain('food');
+    expect(response.nextAction?.prompt).toContain('观音桥');
 
     const memories = await db
       .select()
@@ -969,6 +985,55 @@ describe('Agent Task Runtime Integration', () => {
 
     expect(memories).toHaveLength(1);
     expect(memories[0]?.content).toContain('挺顺利');
+  });
+
+  it('surfaces recent activity outcome memory in the welcome card', async () => {
+    expect(testUser).toBeDefined();
+
+    const activityId = randomUUID();
+    const activityTitle = '欢迎页真实结果回流测试局';
+
+    await db.insert(activities).values({
+      id: activityId,
+      creatorId: testUser!.user.id,
+      title: activityTitle,
+      description: '验证首页欢迎态会引用最近真实结果',
+      location: { x: 106.52988, y: 29.58567 },
+      locationName: '观音桥',
+      address: '观音桥步行街',
+      locationHint: '地铁站附近',
+      startAt: new Date('2026-03-15T20:00:00+08:00'),
+      type: 'food',
+      maxParticipants: 4,
+      currentParticipants: 1,
+      status: 'completed',
+    });
+    createdActivityIds.add(activityId);
+
+    await requestJson<ActivityOutcomeActionResponse>({
+      method: 'POST',
+      path: '/participants/self-feedback',
+      token: testUser!.token,
+      payload: {
+        activityId,
+        feedback: 'failed',
+      },
+    });
+
+    const welcome = await requestJson<WelcomeCardResponse>({
+      method: 'GET',
+      path: '/ai/welcome',
+      token: testUser!.token,
+    });
+
+    expect(welcome.welcomeFocus?.type).toBe('post_activity_feedback');
+    expect(welcome.welcomeFocus?.label).toContain('换个方式再组');
+    expect(welcome.welcomeFocus?.prompt).toContain(activityTitle);
+    expect(welcome.welcomeFocus?.context?.entry).toBe('activity_outcome_memory');
+    expect(welcome.quickPrompts[0]).toMatchObject({
+      text: '换个方式再组',
+    });
+    expect(welcome.quickPrompts[0]?.prompt).toContain(activityTitle);
   });
 
   it('resumes the same create task after auth gate and promotes it to draft_ready', async () => {

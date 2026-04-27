@@ -4304,6 +4304,9 @@ function ListBlockCard({
   const showHeader = readListShowHeader(block);
   const preview = isRecord(block.preview) ? block.preview : null;
   const fetchConfig = isRecord(block.fetchConfig) ? block.fetchConfig : null;
+  const memoryHints = !partnerMode && isRecord(block.meta)
+    ? readStringArrayField(block.meta, "memoryHints", 2)
+    : [];
 
   if (block.items.length === 0 && !preview && !fetchConfig) {
     return null;
@@ -4330,6 +4333,24 @@ function ListBlockCard({
 
       {block.subtitle ? (
         <p className={cn("mt-2 text-sm", isDarkMode ? "text-white/42" : "text-black/42")}>{block.subtitle}</p>
+      ) : null}
+
+      {memoryHints.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {memoryHints.map((hint) => (
+            <span
+              key={hint}
+              className={cn(
+                "rounded-full border px-2.5 py-1 text-[11px]",
+                isDarkMode
+                  ? "border-emerald-300/10 bg-emerald-300/10 text-emerald-100/70"
+                  : "border-emerald-700/10 bg-emerald-600/10 text-emerald-700"
+              )}
+            >
+              {hint}
+            </span>
+          ))}
+        </div>
       ) : null}
 
       {partnerMode && isRecord(block.meta) ? (

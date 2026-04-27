@@ -71,6 +71,7 @@ interface WidgetExploreProperties {
   presentation?: 'compact-stack' | 'immersive-carousel';
   showHeader?: boolean;
   semanticQuery?: string;
+  memoryHints?: string[];
   fetchConfig?: FetchConfig;
   interaction?: Interaction;
   preview?: PreviewData;
@@ -159,6 +160,17 @@ function readExploreResults(value: unknown): ExploreResult[] {
   return value
     .map((item) => readExploreResult(item))
     .filter((item): item is ExploreResult => item !== null);
+}
+
+function readMemoryHints(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .map((item) => item.trim())
+    .slice(0, 2);
 }
 
 function readCenterPoint(value: unknown): CenterPoint {
@@ -326,6 +338,7 @@ Component({
     presentation: { type: String, value: 'compact-stack' },
     showHeader: { type: Boolean, value: true },
     semanticQuery: { type: String, value: '' },
+    memoryHints: { type: Array, value: [] },
     // 引用模式新增
     fetchConfig: { type: Object, value: undefined },
     interaction: { type: Object, value: undefined },
@@ -346,15 +359,17 @@ Component({
     // 半屏详情
     halfScreenVisible: false,
     halfScreenActivityId: '',
+    visibleMemoryHints: [] as string[],
   },
 
   observers: {
-    'results, center, title, presentation, interaction': function (
+    'results, center, title, presentation, interaction, memoryHints': function (
       results: ExploreResult[],
       center: CenterPoint,
       title: string,
       presentation: string,
       interaction: Interaction | null,
+      memoryHints: string[],
     ) {
       // 自包含模式：直接用 results 渲染
       const fetchConfig = readFetchConfig(this.properties.fetchConfig);
@@ -377,13 +392,15 @@ Component({
         swiperMode,
         activeIndex: 0,
         centerDisplayName: resolvedCenter.name || DEFAULT_CENTER.name,
+        visibleMemoryHints: readMemoryHints(memoryHints),
       });
     },
 
-    'fetchConfig, interaction, preview': function (
+    'fetchConfig, interaction, preview, memoryHints': function (
       fetchConfig: FetchConfig | null,
       interaction: Interaction | null,
       preview: PreviewData | null,
+      memoryHints: string[],
     ) {
       const resolvedFetchConfig = readFetchConfig(fetchConfig);
       if (!resolvedFetchConfig) return;
@@ -403,7 +420,7 @@ Component({
           ? `为你找到附近的 ${resolvedPreview.total} 个热门活动`
           : '正在加载附近活动...');
 
-      this.setData({ swiperMode, headerTitle, centerDisplayName: DEFAULT_CENTER.name });
+      this.setData({ swiperMode, headerTitle, centerDisplayName: DEFAULT_CENTER.name, visibleMemoryHints: readMemoryHints(memoryHints) });
       void this.loadReferenceData(resolvedFetchConfig);
     },
   },

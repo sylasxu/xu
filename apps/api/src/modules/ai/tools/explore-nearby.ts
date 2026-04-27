@@ -74,6 +74,7 @@ export interface ExploreData {
   results: ExploreResultItem[];
   title: string;
   semanticQuery?: string;
+  memoryHints?: string[];
 }
 
 export interface ExplorePreview {
@@ -92,6 +93,7 @@ export interface ExploreNearbyResultPayload {
   type?: string;
   message: string;
   explore: ExploreData;
+  memoryHints?: string[];
   fetchConfig?: WidgetFetchConfig;
   preview?: ExplorePreview;
   interaction?: WidgetInteraction;
@@ -162,8 +164,9 @@ export function buildExploreNearbyResult(params: {
   radiusKm: number;
   semanticQuery?: string;
   type?: string;
+  memoryHints?: string[];
 }): ExploreNearbyResultPayload {
-  const { center, locationName, results, radiusKm, semanticQuery, type } = params;
+  const { center, locationName, results, radiusKm, semanticQuery, type, memoryHints } = params;
   const locationLabel = locationName.trim() || center?.name || '附近';
   const title = results.length > 0
     ? `为你找到${locationLabel}附近的 ${results.length} 个活动`
@@ -176,12 +179,14 @@ export function buildExploreNearbyResult(params: {
     return {
       locationName: locationLabel,
       ...(type ? { type } : {}),
+      ...(memoryHints && memoryHints.length > 0 ? { memoryHints } : {}),
       message,
       explore: {
         center,
         results: [],
         title,
         ...(semanticQuery ? { semanticQuery } : {}),
+        ...(memoryHints && memoryHints.length > 0 ? { memoryHints } : {}),
       },
       fetchConfig: {
         source: 'nearby_activities',
@@ -220,12 +225,14 @@ export function buildExploreNearbyResult(params: {
   return {
     locationName: locationLabel,
     ...(type ? { type } : {}),
+    ...(memoryHints && memoryHints.length > 0 ? { memoryHints } : {}),
     message,
     explore: {
       ...(center ? { center } : {}),
       results,
       title,
       ...(semanticQuery ? { semanticQuery } : {}),
+      ...(memoryHints && memoryHints.length > 0 ? { memoryHints } : {}),
     },
     ...(results.length > 1 ? {
       interaction: {

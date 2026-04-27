@@ -16,6 +16,7 @@ import { buildCreateDraftParamsFromActionPayload, createActivityDraftRecord, pub
 import { createPartnerIntent, ensureSearchDrivenPartnerIntent, searchPartnerCandidates } from '../tools/partner-tools';
 import { buildExploreNearbyResult, type ExploreResultItem } from '../tools/explore-nearby';
 import { getEnhancedUserProfile, type EnhancedUserProfile } from '../memory';
+import type { ActivityOutcome } from '../memory';
 import {
   buildPartnerAskPreferencePayload,
   buildPartnerIntentFormPayload,
@@ -88,14 +89,76 @@ function buildPartnerSearchMemoryHints(
     hints.push(`常选${timePreference}`);
   }
 
-  const positiveOutcome = (profile.activityOutcomes || [])
-    .filter((outcome) => outcome.attended === true || outcome.rebookTriggered)
-    .find((outcome) => outcome.activityType === params.activityType || Boolean(outcome.reviewSummary?.trim()));
+  const positiveOutcome = selectRecentActivityOutcome(profile.activityOutcomes || [], {
+    activityType: params.activityType,
+    result: 'positive',
+  });
   if (positiveOutcome) {
-    hints.push(`参考最近顺利的「${positiveOutcome.activityTitle}」`);
+    hints.push(`参考上次顺利的「${positiveOutcome.activityTitle}」`);
+  }
+
+  const failedOutcome = selectRecentActivityOutcome(profile.activityOutcomes || [], {
+    activityType: params.activityType,
+    result: 'failed',
+  });
+  if (failedOutcome) {
+    hints.push(`避开上次「${failedOutcome.activityTitle}」没成局的问题`);
   }
 
   return hints.slice(0, 3);
+}
+
+function selectRecentActivityOutcome(
+  outcomes: ActivityOutcome[],
+  params: {
+    activityType?: string;
+    result: 'positive' | 'failed';
+  },
+): ActivityOutcome | null {
+  const matchesResult = params.result === 'positive'
+    ? (outcome: ActivityOutcome) => outcome.attended === true || outcome.rebookTriggered
+    : (outcome: ActivityOutcome) => outcome.attended === false;
+
+  return outcomes
+    .filter(matchesResult)
+    .filter((outcome) => !params.activityType || outcome.activityType === params.activityType || Boolean(outcome.reviewSummary?.trim()))
+    .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())[0] ?? null;
+}
+
+function buildExploreMemorySignals(
+  profile: EnhancedUserProfile | null,
+  params: {
+    activityType?: string;
+    locationName: string;
+  },
+): string[] {
+  if (!profile) {
+    return [];
+  }
+
+  const signals: string[] = [];
+  const positiveOutcome = selectRecentActivityOutcome(profile.activityOutcomes || [], {
+    activityType: params.activityType,
+    result: 'positive',
+  });
+  if (positiveOutcome) {
+    const samePlace = positiveOutcome.locationName === params.locationName
+      || positiveOutcome.locationName.includes(params.locationName)
+      || params.locationName.includes(positiveOutcome.locationName);
+    signals.push(samePlace
+      ? `上次在${positiveOutcome.locationName}的「${positiveOutcome.activityTitle}」挺顺利`
+      : `参考上次顺利的「${positiveOutcome.activityTitle}」`);
+  }
+
+  const failedOutcome = selectRecentActivityOutcome(profile.activityOutcomes || [], {
+    activityType: params.activityType,
+    result: 'failed',
+  });
+  if (failedOutcome) {
+    signals.push(`会避开上次「${failedOutcome.activityTitle}」没成局的问题`);
+  }
+
+  return signals.slice(0, 2);
 }
 
 function mergeExploreResultsWithNearbyFallback(params: {
@@ -1137,6 +1200,11 @@ async function handleExploreNearby(
     const semanticQuery = typeof payload.semanticQuery === 'string' && payload.semanticQuery.trim()
       ? payload.semanticQuery.trim()
       : `${locationName}附近的活动`;
+    const profile = userId ? await getEnhancedUserProfile(userId) : null;
+    const memoryHints = buildExploreMemorySignals(profile, {
+      ...(type ? { activityType: type } : {}),
+      locationName,
+    });
 
     const resultLimit = 10;
     const scoredResults = await search({
@@ -1202,6 +1270,7 @@ async function handleExploreNearby(
         radiusKm: radius,
         semanticQuery,
         ...(type ? { type } : {}),
+        ...(memoryHints.length > 0 ? { memoryHints } : {}),
       }),
     };
   } catch (error) {

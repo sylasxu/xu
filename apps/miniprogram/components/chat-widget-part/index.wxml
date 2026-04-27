@@ -37,6 +37,7 @@
       title="{{part.data.title}}"
       presentation="{{part.data.presentation}}"
       showHeader="{{part.data.showHeader}}"
+      memoryHints="{{part.data.memoryHints}}"
       fetchConfig="{{part.data.fetchConfig}}"
       interaction="{{part.data.interaction}}"
       preview="{{part.data.preview}}"

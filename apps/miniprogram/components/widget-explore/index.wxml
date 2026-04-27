@@ -15,6 +15,14 @@
     <text class="header-title">{{headerTitle}}</text>
   </view>
 
+  <view wx:if="{{visibleMemoryHints.length > 0}}" class="memory-hints">
+    <text
+      wx:for="{{visibleMemoryHints}}"
+      wx:key="*this"
+      class="memory-hint"
+    >{{item}}</text>
+  </view>
+
   <!-- ========== 引用模式：加载中 ========== -->
   <block wx:if="{{fetchConfig && fetchState === 'loading'}}">
     <!-- preview 预览 -->

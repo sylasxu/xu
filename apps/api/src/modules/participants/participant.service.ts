@@ -340,15 +340,23 @@ function buildActivityFeedbackSummary(activityTitle: string, feedback: ActivityF
 function buildActivityOutcomeNextAction(params: {
   activityTitle: string;
   activityId: string;
+  activityType: string;
+  locationName: string;
   feedback: ActivityFeedbackValue;
+  reviewSummary?: string;
 }): ActionResponse['nextAction'] {
   const activityHint = `「${params.activityTitle}」`;
   const activityRef = `（activityId: ${params.activityId}）`;
+  const placeHint = params.locationName.trim() ? `地点先参考${params.locationName}，` : '';
+  const typeHint = params.activityType.trim() ? `类型先沿用${params.activityType}，` : '';
+  const reviewHint = params.reviewSummary?.trim()
+    ? `这次反馈是：${params.reviewSummary.trim()}。`
+    : '';
 
   if (params.feedback === 'positive') {
     return {
       label: '顺着这次再约',
-      prompt: `这次${activityHint}${activityRef}挺顺利，帮我顺着这次体验快速再约一场：保留合适的活动类型、给个新时间建议，并生成一段可直接发出去的邀约文案。`,
+      prompt: `这次${activityHint}${activityRef}挺顺利，${typeHint}${placeHint}${reviewHint}帮我顺着这次体验快速再约一场：给一个新时间建议、一个更容易成局的人数安排，并生成一段可直接发出去的邀约文案。`,
       activityMode: 'rebook',
       entry: 'post_activity_feedback_next_action',
     };
@@ -357,7 +365,7 @@ function buildActivityOutcomeNextAction(params: {
   if (params.feedback === 'neutral') {
     return {
       label: '复盘哪里能改',
-      prompt: `这次${activityHint}${activityRef}体验一般，帮我复盘：哪里卡住了、下次怎么改、如果要再组一场应该调整哪些条件。`,
+      prompt: `这次${activityHint}${activityRef}体验一般，${typeHint}${placeHint}${reviewHint}帮我复盘：哪里卡住了、下次怎么改、如果要再组一场应该调整哪些条件。`,
       activityMode: 'review',
       entry: 'post_activity_feedback_next_action',
     };
@@ -365,7 +373,7 @@ function buildActivityOutcomeNextAction(params: {
 
   return {
     label: '换个方式再组',
-    prompt: `这次${activityHint}${activityRef}没成局，帮我换个推进方式：分析可能原因，给一个更容易成局的新方案，并写一段不尴尬的重新邀约文案。`,
+    prompt: `这次${activityHint}${activityRef}没成局，${typeHint}${placeHint}${reviewHint}帮我换个推进方式：分析可能原因，给一个更容易成局的新方案，并写一段不尴尬的重新邀约文案。`,
     activityMode: 'review',
     entry: 'post_activity_feedback_next_action',
   };
@@ -469,7 +477,10 @@ export async function recordActivitySelfFeedback(params: {
     nextAction: buildActivityOutcomeNextAction({
       activityTitle: activity.title,
       activityId: params.activityId,
+      activityType: activity.type,
+      locationName: activity.locationName,
       feedback: params.feedback,
+      reviewSummary: summary,
     }),
   };
 }

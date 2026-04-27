@@ -1358,6 +1358,17 @@ function toStringValue(value: unknown, fallback = ''): string {
   return fallback;
 }
 
+function toStringArrayValue(value: unknown, limit = 4): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .map((item) => item.trim())
+    .slice(0, limit);
+}
+
 function sanitizeChoiceQuestion(rawQuestion: string): string {
   const normalized = rawQuestion
     .replace(/\r\n/g, '\n')
@@ -2088,6 +2099,9 @@ function mapExplorePayloadToList(
   const interaction = isRecord(payload.interaction) ? payload.interaction : null;
   const preview = isRecord(payload.preview) ? payload.preview : null;
   const semanticQuery = toStringValue(container.semanticQuery);
+  const memoryHints = toStringArrayValue(container.memoryHints).length > 0
+    ? toStringArrayValue(container.memoryHints)
+    : toStringArrayValue(payload.memoryHints);
   if (items.length === 0 && !fetchConfig && !preview) {
     return null;
   }
@@ -2115,6 +2129,7 @@ function mapExplorePayloadToList(
     meta: {
       listPresentation: fetchConfig || interaction?.swipeable === true ? 'immersive-carousel' : 'compact-stack',
       listShowHeader: false,
+      ...(memoryHints.length > 0 ? { memoryHints } : {}),
     },
   });
 }

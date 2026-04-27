@@ -29,6 +29,7 @@ interface ExploreWidgetData {
   center: ExploreCenter
   title: string
   semanticQuery: string
+  memoryHints: string[]
   fetchConfig: Record<string, unknown> | null
   interaction: Record<string, unknown> | null
   preview: Record<string, unknown> | null
@@ -70,6 +71,9 @@ const WIDGET_TRANSFORMS: Record<string, WidgetTransformFn> = {
       center: readExploreCenter(exploreSource),
       title: readString(exploreSource.title) ?? '',
       semanticQuery: readString(exploreSource.semanticQuery) ?? '',
+      memoryHints: readStringArray(exploreSource.memoryHints).length > 0
+        ? readStringArray(exploreSource.memoryHints)
+        : readStringArray(toolOutput.memoryHints),
       fetchConfig: isRecord(toolOutput.fetchConfig) ? toolOutput.fetchConfig : null,
       interaction: isRecord(toolOutput.interaction) ? toolOutput.interaction : null,
       preview: isRecord(toolOutput.preview) ? toolOutput.preview : null,
@@ -114,6 +118,17 @@ export function transformToolResult(widgetType: string, result: unknown): unknow
 
 function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .map((item) => item.trim())
+    .slice(0, 2)
 }
 
 function readNumber(value: unknown): number | null {

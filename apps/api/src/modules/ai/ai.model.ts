@@ -145,6 +145,26 @@ const DiscussionEnteredResponseSchema = t.Object({
   msg: t.String(),
 });
 
+const JoinAuthGateRequestSchema = t.Object({
+  activityId: t.String({ minLength: 1, description: '活动 ID' }),
+  activityTitle: t.Optional(t.String({ minLength: 1, description: '活动标题，用于任务摘要' })),
+  startAt: t.Optional(t.String({ minLength: 1, description: '活动开始时间' })),
+  locationName: t.Optional(t.String({ minLength: 1, description: '活动地点名' })),
+  entry: t.Optional(t.String({ minLength: 1, description: '触发入口' })),
+  source: t.Optional(t.String({ minLength: 1, description: '触发来源' })),
+  authMode: t.Optional(t.Union([
+    t.Literal('login'),
+    t.Literal('bind_phone'),
+  ])),
+  originalText: t.Optional(t.String({ minLength: 1, description: '用户侧动作文案' })),
+}, { additionalProperties: false });
+
+const JoinAuthGateResponseSchema = t.Object({
+  code: t.Number(),
+  msg: t.String(),
+  taskId: t.Union([t.String({ minLength: 1 }), t.Null()]),
+});
+
 const CurrentTaskActionSchema = t.Object({
   kind: t.Union([
     t.Literal('structured_action'),
@@ -183,6 +203,12 @@ const CurrentTaskSnapshotSchema = t.Object({
   updatedAt: t.String({ minLength: 1 }),
   activityId: t.Optional(t.String({ minLength: 1 })),
   activityTitle: t.Optional(t.String({ minLength: 1 })),
+  attentionLevel: t.Optional(t.Union([
+    t.Literal('normal'),
+    t.Literal('time_sensitive'),
+    t.Literal('action_required'),
+    t.Literal('follow_up'),
+  ])),
   primaryAction: t.Optional(CurrentTaskActionSchema),
   secondaryAction: t.Optional(CurrentTaskActionSchema),
 });
@@ -920,6 +946,8 @@ export const aiModel = new Elysia({ name: 'aiModel' })
     'ai.chatResponseEnvelope': ChatResponseEnvelopeSchema,
     'ai.discussionEnteredRequest': DiscussionEnteredRequestSchema,
     'ai.discussionEnteredResponse': DiscussionEnteredResponseSchema,
+    'ai.joinAuthGateRequest': JoinAuthGateRequestSchema,
+    'ai.joinAuthGateResponse': JoinAuthGateResponseSchema,
     'ai.currentTasksResponse': CurrentTasksResponseSchema,
     // 用户对话消息
     'ai.conversationsQuery': ConversationsQuery,
@@ -985,6 +1013,8 @@ export type ChatInputAction = Static<typeof ChatInputActionSchema>;
 export type ChatRequest = Static<typeof ChatRequestSchema>;
 export type DiscussionEnteredRequest = Static<typeof DiscussionEnteredRequestSchema>;
 export type DiscussionEnteredResponse = Static<typeof DiscussionEnteredResponseSchema>;
+export type JoinAuthGateRequest = Static<typeof JoinAuthGateRequestSchema>;
+export type JoinAuthGateResponse = Static<typeof JoinAuthGateResponseSchema>;
 export type CurrentTaskAction = Static<typeof CurrentTaskActionSchema>;
 export type CurrentTaskSnapshot = Static<typeof CurrentTaskSnapshotSchema>;
 export type CurrentTasksResponse = Static<typeof CurrentTasksResponseSchema>;

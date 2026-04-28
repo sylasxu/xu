@@ -91,6 +91,7 @@ type SidebarTaskSnapshot = {
   updatedAt: string;
   activityId?: string;
   activityTitle?: string;
+  attentionLevel?: "normal" | "time_sensitive" | "action_required" | "follow_up";
   primaryAction?: SidebarTaskAction;
   secondaryAction?: SidebarTaskAction;
 };
@@ -379,7 +380,15 @@ export function SidebarDrawer({
                       key={task.id}
                       className={cn(
                         "rounded-[22px] border px-4 py-3",
-                        isDarkMode ? "border-white/8 bg-white/[0.025]" : "border-black/8 bg-white"
+                        task.attentionLevel === "time_sensitive" || task.attentionLevel === "action_required"
+                          ? isDarkMode
+                            ? "border-amber-300/20 bg-amber-300/[0.045]"
+                            : "border-amber-500/18 bg-amber-50"
+                          : task.attentionLevel === "follow_up"
+                            ? isDarkMode
+                              ? "border-emerald-300/16 bg-emerald-300/[0.035]"
+                              : "border-emerald-600/14 bg-emerald-50"
+                          : isDarkMode ? "border-white/8 bg-white/[0.025]" : "border-black/8 bg-white"
                       )}
                     >
                       <div className="flex items-start justify-between gap-3">

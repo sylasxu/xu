@@ -28,6 +28,7 @@ export type HomeStateTaskSnapshot = {
   updatedAt: string;
   activityId?: string;
   activityTitle?: string;
+  attentionLevel?: "normal" | "time_sensitive" | "action_required" | "follow_up";
   primaryAction?: HomeStateTaskAction;
   secondaryAction?: HomeStateTaskAction;
 };
@@ -109,6 +110,22 @@ function getStageBadgeStyles(homeState: HomeState, isDarkMode: boolean) {
     : "border-black/8 bg-white text-black/48";
 }
 
+function getAttentionIndicatorStyles(task: HomeStateTaskSnapshot, homeState: HomeState, isDarkMode: boolean) {
+  if (task.attentionLevel === "time_sensitive") {
+    return isDarkMode ? "bg-amber-300/85" : "bg-amber-500/85";
+  }
+
+  if (task.attentionLevel === "action_required") {
+    return isDarkMode ? "bg-rose-300/85" : "bg-rose-500/85";
+  }
+
+  if (task.attentionLevel === "follow_up" || homeState === "H4") {
+    return isDarkMode ? "bg-emerald-300/70" : "bg-emerald-600/70";
+  }
+
+  return isDarkMode ? "bg-white/70" : "bg-black/60";
+}
+
 export function HomeStateCard({ task, homeState, isDarkMode, disabled, onAction }: HomeStateCardProps) {
   const handleCardClick = () => {
     if (disabled || !task.primaryAction) return;
@@ -141,11 +158,11 @@ export function HomeStateCard({ task, homeState, isDarkMode, disabled, onAction 
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2">
           {/* H3 urgency 指示点 */}
-          {homeState === "H3" && (
+          {(homeState === "H3" || task.attentionLevel) && (
             <span
               className={cn(
                 "h-2 w-2 shrink-0 rounded-full",
-                isDarkMode ? "bg-white/70" : "bg-black/60"
+                getAttentionIndicatorStyles(task, homeState, isDarkMode)
               )}
             />
           )}

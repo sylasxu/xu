@@ -21,6 +21,11 @@ import { Button } from "@/components/ui/button";
 import { resolveThemeConfig } from "@/lib/themes";
 import { buildActivityDetailPath, resolveActivityEntry } from "@/lib/activity-url";
 import { readClientPhoneNumber, readClientToken, readClientUserId } from "@/lib/client-auth";
+import {
+  persistPendingAgentActionStateInBrowser,
+  type PendingActionAuthMode,
+  type PendingAgentActionState,
+} from "@/lib/pending-agent-action";
 import { cn } from "@/lib/utils";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:1996";
@@ -186,13 +191,32 @@ function navigateToChatWithPrefill(prefill: string): void {
   window.location.href = "/chat";
 }
 
+function buildJoinPendingAgentAction(activity: PublicActivity, authMode: PendingActionAuthMode): PendingAgentActionState {
+  return {
+    action: {
+      type: "structured_action",
+      action: "join_activity",
+      payload: {
+        activityId: activity.id,
+        source: "activity_detail_join",
+        title: activity.title,
+        startAt: activity.startAt,
+        locationName: activity.locationName,
+      },
+      source: "activity_detail_join",
+      originalText: "报名加入",
+      authMode,
+    },
+  };
+}
+
 export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
   const [authToken, setAuthToken] = useState<string | null>(null);
-  const [phoneNumber, setPhoneNumber] = useState<string | null>(null);
   const [detail, setDetail] = useState<ActivityDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [joining, setJoining] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<PendingActionAuthMode>("login");
   const [notice, setNotice] = useState<string | null>(null);
   const [shareStatus, setShareStatus] = useState<"idle" | "copied" | "failed">("idle");
   const [fulfillmentOpen, setFulfillmentOpen] = useState(false);
@@ -209,7 +233,6 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
   const syncAuth = useCallback(() => {
     const token = readClientToken();
     setAuthToken(token);
-    setPhoneNumber(readClientPhoneNumber(token));
   }, []);
 
   useEffect(() => {
@@ -254,6 +277,49 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
       setLoadingDetail(false);
     }
   }, [activity.id]);
+
+  const recordJoinAuthGateTask = useCallback(
+    async (token: string, authMode: PendingActionAuthMode) => {
+      const response = await fetch(`${API_BASE}/ai/tasks/join-auth-gate`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          activityId: activity.id,
+          activityTitle: activity.title,
+          startAt: activity.startAt,
+          locationName: activity.locationName,
+          entry: "activity_detail_join",
+          source: "activity_detail_join",
+          authMode,
+          originalText: "报名加入",
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`记录报名待恢复动作失败（${response.status}）`);
+      }
+    },
+    [activity.id, activity.locationName, activity.startAt, activity.title],
+  );
+
+  const suspendJoinForAuth = useCallback(
+    async (authMode: PendingActionAuthMode, token: string | null) => {
+      persistPendingAgentActionStateInBrowser(buildJoinPendingAgentAction(activity, authMode));
+
+      if (token) {
+        await recordJoinAuthGateTask(token, authMode).catch((error) => {
+          console.error("Failed to record join auth gate task:", error);
+        });
+      }
+
+      setAuthMode(authMode);
+      setAuthOpen(true);
+    },
+    [activity, recordJoinAuthGateTask],
+  );
 
   useEffect(() => {
     void loadViewerDetail();
@@ -326,7 +392,7 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
     const token = readClientToken();
     const userId = readClientUserId(token);
     if (!token || !userId || !readClientPhoneNumber(token)) {
-      setAuthOpen(true);
+      await suspendJoinForAuth(!token || !userId ? "login" : "bind_phone", token);
       return;
     }
 
@@ -343,12 +409,13 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
       if (!response.ok || !isJoinResponse(payload)) {
         const message = readApiError(payload, `报名失败（${response.status}）`);
         if (message.includes("绑定手机号") || response.status === 401) {
-          setAuthOpen(true);
+          await suspendJoinForAuth(message.includes("绑定手机号") ? "bind_phone" : "login", token);
         }
         throw new Error(message);
       }
 
       setNotice(payload.msg);
+      persistPendingAgentActionStateInBrowser(null);
       await loadViewerDetail();
       if (payload.navigationIntent === "open_discussion") {
         openDiscussionFromDetail(activity.id, "join_success");
@@ -358,7 +425,7 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
     } finally {
       setJoining(false);
     }
-  }, [activity.id, canConfirmFulfillment, isJoined, loadFulfillmentParticipants, loadViewerDetail]);
+  }, [activity, canConfirmFulfillment, isJoined, loadFulfillmentParticipants, loadViewerDetail, suspendJoinForAuth]);
 
   const toggleFulfillmentParticipant = useCallback((userId: string) => {
     setFulfillmentParticipants((current) =>
@@ -373,6 +440,7 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
   const submitFulfillment = useCallback(async () => {
     const token = readClientToken();
     if (!token) {
+      setAuthMode("login");
       setAuthOpen(true);
       return;
     }
@@ -555,7 +623,7 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
       </div>
 
       <AuthSheet
-        mode={phoneNumber ? "login" : "bind_phone"}
+        mode={authMode}
         isDarkMode
         open={authOpen}
         onOpenChange={setAuthOpen}

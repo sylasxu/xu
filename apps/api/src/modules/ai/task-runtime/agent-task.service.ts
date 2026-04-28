@@ -44,6 +44,7 @@ export interface CurrentAgentTaskSnapshot {
   updatedAt: string;
   activityId?: string;
   activityTitle?: string;
+  attentionLevel?: 'normal' | 'time_sensitive' | 'action_required' | 'follow_up';
   primaryAction?: CurrentAgentTaskAction;
   secondaryAction?: CurrentAgentTaskAction;
 }
@@ -74,6 +75,8 @@ export interface JoinTaskContext {
   entry?: string;
   source?: string;
 }
+
+type AuthGateMode = 'login' | 'bind_phone';
 
 export interface PartnerTaskContext {
   activityType?: string;
@@ -1238,6 +1241,34 @@ function buildTaskHeadline(task: AgentTask, activityTitle?: string): string {
   }
 
   return task.goalText.trim() || '正在持续推进这件事';
+}
+
+function resolveTaskAttentionLevel(
+  task: AgentTask,
+  activity?: { startAt: Date; status: string },
+): CurrentAgentTaskSnapshot['attentionLevel'] {
+  if (task.currentStage === 'match_ready') {
+    return 'action_required';
+  }
+
+  if (task.currentStage === 'post_activity') {
+    return 'follow_up';
+  }
+
+  if (
+    task.taskType === 'join_activity'
+    && activity?.status === 'active'
+    && (task.currentStage === 'joined' || task.currentStage === 'discussion')
+  ) {
+    const now = Date.now();
+    const startAt = activity.startAt.getTime();
+    const twoHoursMs = 2 * 60 * 60 * 1000;
+    if (startAt >= now && startAt <= now + twoHoursMs) {
+      return 'time_sensitive';
+    }
+  }
+
+  return undefined;
 }
 
 function getPartnerTypeLabel(activityType?: string | null, sportType?: string | null): string {
@@ -2554,13 +2585,15 @@ export async function listCurrentAgentTaskSnapshots(userId: string): Promise<Cur
       .filter((value): value is string => typeof value === 'string' && value.length > 0),
   ));
 
-  const activityMap = new Map<string, { id: string; title: string; locationName: string }>();
+  const activityMap = new Map<string, { id: string; title: string; locationName: string; startAt: Date; status: string }>();
   if (activityIds.length > 0) {
     const activityRows = await db
       .select({
         id: activities.id,
         title: activities.title,
         locationName: activities.locationName,
+        startAt: activities.startAt,
+        status: activities.status,
       })
       .from(activities)
       .where(inArray(activities.id, activityIds));
@@ -2573,6 +2606,7 @@ export async function listCurrentAgentTaskSnapshots(userId: string): Promise<Cur
   return tasks.map((task) => {
     const activity = task.activityId ? activityMap.get(task.activityId) : undefined;
     const activityTitle = activity?.title;
+    const attentionLevel = resolveTaskAttentionLevel(task, activity);
     const baseSnapshot: CurrentAgentTaskSnapshot = {
       id: task.id,
       taskType: task.taskType,
@@ -2595,6 +2629,7 @@ export async function listCurrentAgentTaskSnapshots(userId: string): Promise<Cur
       updatedAt: task.updatedAt.toISOString(),
       ...(task.activityId ? { activityId: task.activityId } : {}),
       ...(activityTitle ? { activityTitle } : {}),
+      ...(attentionLevel ? { attentionLevel } : {}),
     };
 
     const primaryAction = (() => {
@@ -2641,6 +2676,17 @@ export function resolveCurrentTaskHomeState(
     return {
       homeState: 'H3',
       primaryTaskId: h3.id,
+    };
+  }
+
+  const timeSensitive = tasks.find((task) => (
+    task.attentionLevel === 'time_sensitive'
+    || task.attentionLevel === 'action_required'
+  ));
+  if (timeSensitive) {
+    return {
+      homeState: 'H3',
+      primaryTaskId: timeSensitive.id,
     };
   }
 
@@ -2928,6 +2974,225 @@ export async function markJoinTaskDiscussionEntered(params: {
     eventType: 'discussion_entered',
     eventPayload: {
       entry: params.entry ?? null,
+    },
+  });
+}
+
+export async function recordJoinTaskJoinedFromDomain(params: {
+  userId: string;
+  activityId: string;
+  activityTitle?: string;
+  entry?: string;
+  source?: string;
+  joinResult?: 'joined' | 'already_joined';
+}): Promise<void> {
+  const openTask = await findOpenJoinTask({
+    userId: params.userId,
+    activityId: params.activityId,
+  });
+  const task = openTask ?? await findLatestJoinTaskByActivity({
+    userId: params.userId,
+    activityId: params.activityId,
+  });
+
+  if (task && isTerminalTaskStatus(task.status)) {
+    return;
+  }
+
+  const hasReachedJoined = task
+    ? getStageRank(task.taskType, task.currentStage) >= getStageRank(task.taskType, 'joined')
+    : false;
+  if (task && hasReachedJoined && task.status === 'active') {
+    return;
+  }
+
+  const goalText = params.activityTitle?.trim()
+    ? `报名「${params.activityTitle.trim()}」`
+    : '报名参加活动';
+  const source = params.source ?? 'activity_join';
+  const ensuredTask = task ?? await ensureTask({
+    userId: params.userId,
+    taskType: 'join_activity',
+    activityId: params.activityId,
+    goalText,
+    defaultStage: 'joined',
+    source,
+    entry: params.entry,
+    slotSummary: {
+      activityId: params.activityId,
+      ...(params.entry ? { entry: params.entry } : {}),
+    },
+  });
+
+  await updateJoinTask({
+    task: ensuredTask,
+    stage: 'joined',
+    status: 'active',
+    activityId: params.activityId,
+    source,
+    entry: params.entry,
+    goalText,
+    slotSummary: {
+      activityId: params.activityId,
+      ...(params.entry ? { entry: params.entry } : {}),
+    },
+    pendingAction: null,
+    eventType: 'stage_changed',
+    eventPayload: {
+      joinResult: params.joinResult ?? 'joined',
+      entry: params.entry ?? null,
+    },
+  });
+}
+
+export async function recordJoinTaskAuthGateFromDomain(params: {
+  userId: string;
+  activityId: string;
+  activityTitle?: string;
+  startAt?: string;
+  locationName?: string;
+  entry?: string;
+  source?: string;
+  authMode?: AuthGateMode;
+  originalText?: string;
+}): Promise<AgentTask | null> {
+  const openTask = await findOpenJoinTask({
+    userId: params.userId,
+    activityId: params.activityId,
+  });
+  const task = openTask ?? await findLatestJoinTaskByActivity({
+    userId: params.userId,
+    activityId: params.activityId,
+  });
+
+  if (task && isTerminalTaskStatus(task.status)) {
+    return null;
+  }
+
+  const hasPassedAuthGate = task
+    ? getStageRank(task.taskType, task.currentStage) > getStageRank(task.taskType, 'auth_gate')
+    : false;
+  if (task && hasPassedAuthGate) {
+    return task;
+  }
+
+  const title = params.activityTitle?.trim();
+  const source = params.source ?? 'activity_detail_join';
+  const entry = params.entry ?? 'activity_detail_join';
+  const goalText = title ? `报名「${title}」` : '报名参加活动';
+  const slotSummary = {
+    activityId: params.activityId,
+    source,
+    entry,
+    ...(params.locationName?.trim() ? { locationName: params.locationName.trim() } : {}),
+    ...(params.startAt?.trim() ? { startAt: params.startAt.trim() } : {}),
+  };
+  const pendingAction = {
+    type: 'structured_action',
+    action: 'join_activity',
+    payload: {
+      activityId: params.activityId,
+      source,
+      ...(title ? { title } : {}),
+      ...(params.locationName?.trim() ? { locationName: params.locationName.trim() } : {}),
+      ...(params.startAt?.trim() ? { startAt: params.startAt.trim() } : {}),
+    },
+    source,
+    originalText: params.originalText?.trim() || '报名加入',
+    authMode: params.authMode ?? 'bind_phone',
+  };
+  const ensuredTask = task ?? await ensureTask({
+    userId: params.userId,
+    taskType: 'join_activity',
+    activityId: params.activityId,
+    goalText,
+    defaultStage: 'auth_gate',
+    source,
+    entry,
+    slotSummary,
+  });
+  const alreadyWaitingAuth = ensuredTask.status === 'waiting_auth' && ensuredTask.currentStage === 'auth_gate';
+
+  return updateJoinTask({
+    task: ensuredTask,
+    stage: 'auth_gate',
+    status: 'waiting_auth',
+    activityId: params.activityId,
+    source,
+    entry,
+    goalText,
+    slotSummary,
+    pendingAction,
+    eventType: alreadyWaitingAuth ? 'context_updated' : 'auth_blocked',
+    eventPayload: {
+      mode: params.authMode ?? 'bind_phone',
+      entry,
+    },
+  });
+}
+
+export async function recordJoinTaskPostActivityFromDomain(params: {
+  userId: string;
+  activityId: string;
+  activityTitle?: string;
+  source?: string;
+}): Promise<void> {
+  const openTask = await findOpenJoinTask({
+    userId: params.userId,
+    activityId: params.activityId,
+  });
+  const task = openTask ?? await findLatestJoinTaskByActivity({
+    userId: params.userId,
+    activityId: params.activityId,
+  });
+
+  if (task && isTerminalTaskStatus(task.status)) {
+    return;
+  }
+
+  const hasReachedPostActivity = task
+    ? getStageRank(task.taskType, task.currentStage) >= getStageRank(task.taskType, 'post_activity')
+    : false;
+  if (task && hasReachedPostActivity) {
+    return;
+  }
+
+  const goalText = params.activityTitle?.trim()
+    ? `补一下「${params.activityTitle.trim()}」的活动结果`
+    : '补一下这场活动的真实结果';
+  const source = params.source ?? 'post_activity_notification';
+  const ensuredTask = task ?? await ensureTask({
+    userId: params.userId,
+    taskType: 'join_activity',
+    activityId: params.activityId,
+    goalText,
+    defaultStage: 'post_activity',
+    source,
+    entry: 'post_activity',
+    slotSummary: {
+      activityId: params.activityId,
+      activityMode: 'review',
+      entry: 'post_activity',
+    },
+  });
+
+  await updateJoinTask({
+    task: ensuredTask,
+    stage: 'post_activity',
+    status: 'waiting_async_result',
+    activityId: params.activityId,
+    source,
+    entry: 'post_activity',
+    goalText,
+    slotSummary: {
+      activityId: params.activityId,
+      activityMode: 'review',
+      entry: 'post_activity',
+    },
+    pendingAction: null,
+    eventType: 'stage_changed',
+    eventPayload: {
+      trigger: source,
     },
   });
 }

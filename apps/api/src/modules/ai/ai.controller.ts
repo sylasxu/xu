@@ -15,6 +15,7 @@ import {
   listUserConversations,
   markJoinTaskDiscussionEntered,
   normalizeAiProviderErrorMessage,
+  recordJoinTaskAuthGateFromDomain,
   resolveCurrentTaskHomeState,
   streamAiChatResponse,
 } from './ai.service';
@@ -160,6 +161,47 @@ export const aiController = new Elysia({ prefix: '/ai' })
       body: 'ai.discussionEnteredRequest',
       response: {
         200: 'ai.discussionEnteredResponse',
+        401: 'common.error',
+      },
+    }
+  )
+
+  .post(
+    '/tasks/join-auth-gate',
+    async ({ body, set, jwt, headers }) => {
+      const user = await verifyAuth(jwt, headers);
+      if (!user) {
+        set.status = 401;
+        return { code: 401, msg: '未授权' } satisfies ErrorResponse;
+      }
+
+      const task = await recordJoinTaskAuthGateFromDomain({
+        userId: user.id,
+        activityId: body.activityId,
+        activityTitle: body.activityTitle,
+        startAt: body.startAt,
+        locationName: body.locationName,
+        entry: body.entry,
+        source: body.source,
+        authMode: body.authMode,
+        originalText: body.originalText,
+      });
+
+      return {
+        code: 200,
+        msg: '已记录报名待恢复动作',
+        taskId: task?.id ?? null,
+      };
+    },
+    {
+      detail: {
+        tags: ['AI'],
+        summary: '记录报名 Auth Gate',
+        description: '活动详情页直连报名被登录或手机号闸门打断时，写入同一条 join_activity 任务，避免离开页面后丢动作。',
+      },
+      body: 'ai.joinAuthGateRequest',
+      response: {
+        200: 'ai.joinAuthGateResponse',
         401: 'common.error',
       },
     }

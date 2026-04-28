@@ -17,6 +17,7 @@ interface TaskItem {
   headline: string
   summary: string
   activityTitle?: string
+  attentionLevel?: 'normal' | 'time_sensitive' | 'action_required' | 'follow_up'
   primaryAction?: TaskAction
   secondaryAction?: TaskAction
 }
@@ -59,6 +60,7 @@ function readTaskItem(value: unknown): TaskItem | null {
 
   const primaryAction = readTaskAction(value.primaryAction)
   const secondaryAction = readTaskAction(value.secondaryAction)
+  const rawAttentionLevel = value.attentionLevel
 
   return {
     id: value.id,
@@ -67,6 +69,12 @@ function readTaskItem(value: unknown): TaskItem | null {
     headline: value.headline,
     summary: value.summary,
     ...(typeof value.activityTitle === 'string' ? { activityTitle: value.activityTitle } : {}),
+    ...(rawAttentionLevel === 'normal' ||
+      rawAttentionLevel === 'time_sensitive' ||
+      rawAttentionLevel === 'action_required' ||
+      rawAttentionLevel === 'follow_up'
+      ? { attentionLevel: rawAttentionLevel }
+      : {}),
     ...(primaryAction ? { primaryAction } : {}),
     ...(secondaryAction ? { secondaryAction } : {}),
   }

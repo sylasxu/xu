@@ -114,7 +114,10 @@ import { isIdentityMemoryQuestion } from './identity-reply';
 import { applyAiChatResponsePolicies } from './runtime/response-policy';
 import type { AiChatEnvelopeResult } from './runtime/chat-response';
 
-export { resolveCurrentTaskHomeState } from './task-runtime/agent-task.service';
+export {
+  recordJoinTaskAuthGateFromDomain,
+  resolveCurrentTaskHomeState,
+} from './task-runtime/agent-task.service';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 

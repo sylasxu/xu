@@ -14,6 +14,7 @@ import type {
 import { getChatActivities, getDiscussionReplySignals } from '../chat/chat.service';
 import { sendServiceNotificationByUserId, type ServiceNotificationScene } from '../wechat';
 import { confirmMatch as confirmPendingMatchService, cancelMatch as cancelPendingMatchService } from '../ai/tools/partner-match';
+import { recordJoinTaskPostActivityFromDomain } from '../ai/task-runtime/agent-task.service';
 import { getConfigValue } from '../ai/config/config.service';
 import {
   buildActivityReminderTouchpoint,
@@ -1240,25 +1241,34 @@ export async function notifyPostActivity(
       eq(participants.status, 'joined'),
     ));
 
-  const tasks = joinedParticipants.map(async (p) => dispatchNotificationWithFallback({
-    userId: p.userId,
-    type: 'post_activity',
-    title: touchpoint.title,
-    content: touchpoint.content,
-    activityId,
-    taskId: await findLatestOpenJoinTaskIdForActivity({
+  const tasks = joinedParticipants.map(async (p) => {
+    await recordJoinTaskPostActivityFromDomain({
       userId: p.userId,
       activityId,
-    }),
-    serviceNotification: {
-      scene: 'post_activity',
-      pagePath: touchpoint.pagePath,
-      data: {
-        thing1: toTemplateValue(activityTitle),
-        thing2: toTemplateValue(touchpoint.serviceHint),
+      activityTitle,
+      source: 'post_activity_notification',
+    });
+
+    return dispatchNotificationWithFallback({
+      userId: p.userId,
+      type: 'post_activity',
+      title: touchpoint.title,
+      content: touchpoint.content,
+      activityId,
+      taskId: await findLatestOpenJoinTaskIdForActivity({
+        userId: p.userId,
+        activityId,
+      }),
+      serviceNotification: {
+        scene: 'post_activity',
+        pagePath: touchpoint.pagePath,
+        data: {
+          thing1: toTemplateValue(activityTitle),
+          thing2: toTemplateValue(touchpoint.serviceHint),
+        },
       },
-    },
-  }));
+    });
+  });
 
   const results = await Promise.allSettled(tasks);
   for (const result of results) {

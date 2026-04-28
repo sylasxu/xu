@@ -50,6 +50,12 @@ import {
   DISCUSSION_STATE_UPDATED_EVENT,
   readDiscussionStateUpdate,
 } from "@/lib/discussion-state-events";
+import {
+  persistPendingAgentActionStateInBrowser,
+  readPendingAgentActionStateFromBrowser,
+  readStructuredPendingAction,
+  type PendingAgentActionState,
+} from "@/lib/pending-agent-action";
 import { isWelcomeFocusCoveredByCurrentTasks } from "@/lib/runtime-task-focus";
 import { cn } from "@/lib/utils";
 import { HomeStateCard } from "@/components/chat/home-state-card";
@@ -106,7 +112,6 @@ const DEFAULT_SIDEBAR_UI = {
   emptyHistory: "还没有历史会话，发起第一条消息后这里就会出现。",
 };
 const COMPOSER_EXPAND_THRESHOLD = 10;
-const PENDING_AGENT_ACTION_STORAGE_KEY = "xu:web:pending-agent-action";
 const THEME_STORAGE_KEY = "xu:web:theme";
 const TEXT_STREAM_CHUNK_DELAY_MS = 60;  // v5.5: 调慢打字机速度，提升可读性
 const ChatThemeContext = createContext(true);
@@ -129,21 +134,6 @@ type LocalGenUIRecentMessage = GenUIRecentMessage & {
   displayText?: string;
 };
 const MAX_TRANSIENT_TURNS = 10;
-type PendingActionAuthMode = "login" | "bind_phone";
-
-type StructuredPendingAction = {
-  type: "structured_action";
-  action: string;
-  payload: Record<string, unknown>;
-  source?: string;
-  originalText?: string;
-  authMode?: PendingActionAuthMode;
-};
-
-type PendingAgentActionState = {
-  action: StructuredPendingAction;
-  message?: string;
-};
 
 type MessageCenterFocusIntent = {
   taskId?: string;
@@ -268,6 +258,7 @@ type RuntimeTaskSnapshot = {
   updatedAt: string;
   activityId?: string;
   activityTitle?: string;
+  attentionLevel?: "normal" | "time_sensitive" | "action_required" | "follow_up";
   primaryAction?: RuntimeTaskAction;
   secondaryAction?: RuntimeTaskAction;
 };
@@ -330,81 +321,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function readPendingActionAuthMode(value: unknown): PendingActionAuthMode | null {
-  return value === "login" || value === "bind_phone" ? value : null;
-}
-
-function readStructuredPendingAction(value: unknown): StructuredPendingAction | null {
-  if (!isRecord(value) || value.type !== "structured_action") {
-    return null;
-  }
-
-  const action = readString(value.action);
-  const payload = isRecord(value.payload) ? value.payload : null;
-  if (!action || !payload) {
-    return null;
-  }
-
-  const authMode = readPendingActionAuthMode(value.authMode);
-
-  return {
-    type: "structured_action",
-    action,
-    payload,
-    ...(typeof value.source === "string" ? { source: value.source } : {}),
-    ...(typeof value.originalText === "string" ? { originalText: value.originalText } : {}),
-    ...(authMode ? { authMode } : {}),
-  };
-}
-
-function readPendingAgentActionState(value: unknown): PendingAgentActionState | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-
-  const action = readStructuredPendingAction(value.action);
-  if (!action) {
-    return null;
-  }
-
-  return {
-    action,
-    ...(typeof value.message === "string" && value.message.trim()
-      ? { message: value.message.trim() }
-      : {}),
-  };
-}
-
-function readPendingAgentActionStateFromStorage(): PendingAgentActionState | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  try {
-    const raw = window.sessionStorage.getItem(PENDING_AGENT_ACTION_STORAGE_KEY);
-    if (!raw) {
-      return null;
-    }
-
-    return readPendingAgentActionState(JSON.parse(raw));
-  } catch {
-    return null;
-  }
-}
-
-function persistPendingAgentActionState(state: PendingAgentActionState | null): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  if (!state) {
-    window.sessionStorage.removeItem(PENDING_AGENT_ACTION_STORAGE_KEY);
-    return;
-  }
-
-  window.sessionStorage.setItem(PENDING_AGENT_ACTION_STORAGE_KEY, JSON.stringify(state));
 }
 
 function readMessageCenterFocusIntent(value: unknown): MessageCenterFocusIntent | null {
@@ -1777,7 +1693,7 @@ export default function ChatPage() {
   useEffect(() => {
     const nextToken = readClientToken();
     if (nextToken) {
-      setPendingAgentAction(readPendingAgentActionStateFromStorage());
+      setPendingAgentAction(readPendingAgentActionStateFromBrowser());
     }
     setPendingAgentActionHydrated(true);
   }, []);
@@ -1787,7 +1703,7 @@ export default function ChatPage() {
       return;
     }
 
-    persistPendingAgentActionState(pendingAgentAction);
+    persistPendingAgentActionStateInBrowser(pendingAgentAction);
   }, [pendingAgentAction, pendingAgentActionHydrated]);
 
   useEffect(() => {
@@ -1795,7 +1711,7 @@ export default function ChatPage() {
       return;
     }
 
-    const restoredPendingAction = readPendingAgentActionStateFromStorage();
+    const restoredPendingAction = readPendingAgentActionStateFromBrowser();
     if (restoredPendingAction) {
       setPendingAgentAction(restoredPendingAction);
     }
@@ -1977,7 +1893,9 @@ export default function ChatPage() {
       const authRequiredMeta = isRecord(meta?.authRequired) ? meta.authRequired : null;
       if (authRequiredMeta) {
         const pendingAction = readStructuredPendingAction(authRequiredMeta.pendingAction);
-        const authMode = readPendingActionAuthMode(authRequiredMeta.mode);
+        const authMode = authRequiredMeta.mode === "login" || authRequiredMeta.mode === "bind_phone"
+          ? authRequiredMeta.mode
+          : null;
         if (pendingAction) {
           setPendingAgentAction({
             action: {
@@ -2650,6 +2568,9 @@ export default function ChatPage() {
           openSignal={messageCenterOpenSignal}
           focusPendingMatchId={messageCenterFocusMatchId}
           trigger={null}
+          onTaskStateChanged={() => {
+            void refreshCurrentTasks();
+          }}
           onSendPrompt={async (prompt, displayText, contextOverrides) => {
             await sendChatRequest(
               {
@@ -2716,7 +2637,7 @@ export default function ChatPage() {
           </div>
         </header>
 
-        {pendingAgentAction && homeState !== "H1" ? (
+        {pendingAgentAction ? (
           <div className="shrink-0 space-y-2 px-3 pb-2">
             {pendingAgentAction ? (
               <section

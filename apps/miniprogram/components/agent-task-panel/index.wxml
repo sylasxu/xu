@@ -5,8 +5,9 @@
   </view>
 
   <view class="agent-task-panel__list">
-    <view wx:for="{{tasks}}" wx:key="id" class="agent-task-card">
+    <view wx:for="{{tasks}}" wx:key="id" class="agent-task-card agent-task-card--{{item.attentionLevel || 'normal'}}">
       <view class="agent-task-card__meta">
+        <view wx:if="{{item.attentionLevel}}" class="agent-task-card__signal agent-task-card__signal--{{item.attentionLevel}}"></view>
         <text class="agent-task-card__type">{{item.taskTypeLabel}}</text>
         <text class="agent-task-card__dot">·</text>
         <text class="agent-task-card__stage">{{item.stageLabel}}</text>

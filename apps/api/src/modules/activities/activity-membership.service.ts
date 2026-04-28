@@ -14,6 +14,7 @@ import {
   notifyJoin,
   notifyNewParticipant,
 } from '../notifications/notification.service';
+import { recordJoinTaskJoinedFromDomain } from '../ai/task-runtime/agent-task.service';
 
 function getJoinActivityErrorMessage(error: unknown): string {
   if (
@@ -105,6 +106,10 @@ export async function joinActivity(activityId: string, userId: string): Promise<
           navigationIntent: 'stay_on_detail',
         } satisfies JoinActivityResult;
       }
+
+      creatorId = activity.creatorId;
+      activityTitle = activity.title;
+      joinerName = joiningUser.nickname || '新成员';
 
       const [existing] = await tx
         .select({
@@ -205,9 +210,6 @@ export async function joinActivity(activityId: string, userId: string): Promise<
         }
       }
 
-      creatorId = activity.creatorId;
-      activityTitle = activity.title;
-      joinerName = joiningUser.nickname || '新成员';
       shouldNotify = finalStatus === 'joined' && existing?.status !== 'joined';
 
       if (finalStatus === 'waitlist') {
@@ -263,10 +265,32 @@ export async function joinActivity(activityId: string, userId: string): Promise<
   }
 
   if (result.joinResult === 'joined') {
+    await recordJoinTaskJoinedFromDomain({
+      userId,
+      activityId,
+      activityTitle,
+      source: 'activity_join',
+      entry: 'activity_detail_join',
+      joinResult: 'joined',
+    }).catch((error) => {
+      console.error('Failed to record join task joined:', error);
+    });
+
     import('../hot-keywords/hot-keywords.service').then(({ trackConversion }) => {
       trackConversion(userId).catch((error) => {
         console.error('Failed to track keyword conversion:', error);
       });
+    });
+  } else if (result.joinResult === 'already_joined') {
+    await recordJoinTaskJoinedFromDomain({
+      userId,
+      activityId,
+      activityTitle,
+      source: 'activity_join',
+      entry: 'activity_detail_join',
+      joinResult: 'already_joined',
+    }).catch((error) => {
+      console.error('Failed to record already joined task:', error);
     });
   }
 

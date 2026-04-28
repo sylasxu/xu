@@ -234,6 +234,7 @@ type MessageCenterDrawerProps = {
   openSignal?: number;
   focusPendingMatchId?: string | null;
   trigger?: ReactNode;
+  onTaskStateChanged?: () => void;
   onSendPrompt: (
     prompt: string,
     displayText?: string,
@@ -417,6 +418,7 @@ export function MessageCenterDrawer({
   openSignal = 0,
   focusPendingMatchId = null,
   trigger,
+  onTaskStateChanged,
   onSendPrompt,
 }: MessageCenterDrawerProps) {
   const [open, setOpen] = useState(false);
@@ -730,6 +732,7 @@ export function MessageCenterDrawer({
           closePendingMatchDetail();
         }
         await refreshMessageCenter({ silent: true });
+        onTaskStateChanged?.();
       } catch (requestError) {
         setNotice({
           kind: "error",
@@ -739,7 +742,7 @@ export function MessageCenterDrawer({
         setPendingActionKey(null);
       }
     },
-    [closePendingMatchDetail, messageCenter?.ui.actionFailed, refreshMessageCenter, requestJson]
+    [closePendingMatchDetail, messageCenter?.ui.actionFailed, onTaskStateChanged, refreshMessageCenter, requestJson]
   );
 
   const handleFollowUpPrompt = useCallback(
@@ -834,6 +837,7 @@ export function MessageCenterDrawer({
             : {}),
         });
         await refreshMessageCenter({ silent: true });
+        onTaskStateChanged?.();
       } catch (requestError) {
         setNotice({
           kind: "error",
@@ -843,7 +847,7 @@ export function MessageCenterDrawer({
         setPendingActionKey(null);
       }
     },
-    [markNotificationRead, messageCenter?.ui.followUpFailed, recordActivitySelfFeedback, refreshMessageCenter]
+    [markNotificationRead, messageCenter?.ui.followUpFailed, onTaskStateChanged, recordActivitySelfFeedback, refreshMessageCenter]
   );
 
   const handleActionItemFeedback = useCallback(
@@ -872,6 +876,7 @@ export function MessageCenterDrawer({
             : {}),
         });
         await refreshMessageCenter({ silent: true });
+        onTaskStateChanged?.();
       } catch (requestError) {
         setNotice({
           kind: "error",
@@ -881,7 +886,7 @@ export function MessageCenterDrawer({
         setPendingActionKey(null);
       }
     },
-    [messageCenter?.ui.followUpFailed, recordActivitySelfFeedback, refreshMessageCenter]
+    [messageCenter?.ui.followUpFailed, onTaskStateChanged, recordActivitySelfFeedback, refreshMessageCenter]
   );
 
   const handleActionItem = useCallback(
@@ -1147,17 +1152,19 @@ export function MessageCenterDrawer({
                             <Clock3 className="h-3.5 w-3.5" />
                             {formatRelativeTime(item.updatedAt)}
                           </div>
-                          <div className="mt-3 flex gap-2">
-                            <button
-                              type="button"
-                              disabled={disabled || Boolean(pendingActionKey)}
-                              onClick={() => void handleActionItem(item)}
-                              className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-2 text-xs font-medium text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              {pendingActionKey === actionKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                              {item.primaryAction.label}
-                            </button>
-                          </div>
+                          {!isPostActivityItem ? (
+                            <div className="mt-3 flex gap-2">
+                              <button
+                                type="button"
+                                disabled={disabled || Boolean(pendingActionKey)}
+                                onClick={() => void handleActionItem(item)}
+                                className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-2 text-xs font-medium text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {pendingActionKey === actionKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                                {item.primaryAction.label}
+                              </button>
+                            </div>
+                          ) : null}
                           {isPostActivityItem ? (
                             <div className="mt-3 space-y-2">
                               <div className="flex flex-wrap gap-2">
@@ -1513,8 +1520,6 @@ export function MessageCenterDrawer({
                   <div className="space-y-3">
                     {systemNotifications.map((notification) => {
                       const readKey = `read:${notification.id}`;
-                      const reviewKey = `review:${notification.id}`;
-                      const rebookKey = `rebook:${notification.id}`;
                       const kickoffKey = `kickoff:${notification.id}`;
                       const positiveFeedbackKey = `feedback:positive:${notification.id}`;
                       const neutralFeedbackKey = `feedback:neutral:${notification.id}`;
@@ -1587,29 +1592,6 @@ export function MessageCenterDrawer({
                                 >
                                   {pendingActionKey === negativeFeedbackKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
                                   {messageCenter?.ui.feedbackNegativeLabel || "没成局"}
-                                </button>
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                <button
-                                  type="button"
-                                  disabled={disabled || Boolean(pendingActionKey)}
-                                  onClick={() => void handleFollowUpPrompt(notification, "review")}
-                                  className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-2 text-xs font-medium text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                  {pendingActionKey === reviewKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                                  {messageCenter?.ui.reviewActionLabel || "去复盘"}
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={disabled || Boolean(pendingActionKey)}
-                                  onClick={() => void handleFollowUpPrompt(notification, "rebook")}
-                                  className={cn(
-                                    "inline-flex items-center gap-1 rounded-full px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50",
-                                    isDarkMode ? "border border-white/8 bg-white/[0.05] text-white/80 hover:bg-white/[0.08]" : "border border-black/8 bg-black/[0.03] text-black/76 hover:bg-black/[0.05]"
-                                  )}
-                                >
-                                  {pendingActionKey === rebookKey ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                                  {messageCenter?.ui.rebookActionLabel || "去再约"}
                                 </button>
                               </div>
                             </div>

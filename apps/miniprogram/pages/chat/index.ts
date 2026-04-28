@@ -103,6 +103,7 @@ type ChatTaskItem = {
   headline: string
   summary: string
   activityTitle?: string
+  attentionLevel?: 'normal' | 'time_sensitive' | 'action_required' | 'follow_up'
   primaryAction?: ChatTaskAction
   secondaryAction?: ChatTaskAction
 }
@@ -217,6 +218,7 @@ function readCurrentTask(value: AiCurrentTasksResponseItemsItem): ChatTaskItem |
 
   const primaryAction = readTaskAction(value.primaryAction)
   const secondaryAction = readTaskAction(value.secondaryAction)
+  const rawAttentionLevel = isRecord(value) ? value.attentionLevel : undefined
 
   return {
     id: value.id,
@@ -225,6 +227,12 @@ function readCurrentTask(value: AiCurrentTasksResponseItemsItem): ChatTaskItem |
     headline: value.headline,
     summary: value.summary,
     ...(typeof value.activityTitle === 'string' ? { activityTitle: value.activityTitle } : {}),
+    ...(rawAttentionLevel === 'normal' ||
+      rawAttentionLevel === 'time_sensitive' ||
+      rawAttentionLevel === 'action_required' ||
+      rawAttentionLevel === 'follow_up'
+      ? { attentionLevel: rawAttentionLevel }
+      : {}),
     ...(primaryAction ? { primaryAction } : {}),
     ...(secondaryAction ? { secondaryAction } : {}),
   }

@@ -18,6 +18,11 @@ export interface RegressionArtifactScenario {
     prdSections: string[];
     primarySurface: string;
     scenarioType: string;
+    userMindsets?: string[];
+    trustRisks?: string[];
+    dropOffPoints?: string[];
+    expectedFeeling?: string;
+    longFlowIds?: string[];
   } | null;
 }
 

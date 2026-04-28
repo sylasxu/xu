@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { listScenarioMatrix, summarizeScenarioMatrix } from './regression-scenario-matrix';
+import { listScenarioMatrix, longFlowCatalog, summarizeScenarioMatrix } from './regression-scenario-matrix';
 
 function main(): void {
   const entries = listScenarioMatrix();
@@ -21,9 +21,46 @@ function main(): void {
   }
 
   console.log('');
+  console.log('By user mindset:');
+  for (const [mindset, count] of Object.entries(summary.byUserMindset)) {
+    console.log(`- ${mindset}: ${count}`);
+  }
+
+  console.log('');
+  console.log('By trust risk:');
+  for (const [risk, count] of Object.entries(summary.byTrustRisk)) {
+    console.log(`- ${risk}: ${count}`);
+  }
+
+  console.log('');
+  console.log('By drop-off point:');
+  for (const [point, count] of Object.entries(summary.byDropOffPoint)) {
+    console.log(`- ${point}: ${count}`);
+  }
+
+  console.log('');
+  console.log('By long flow:');
+  for (const [flow, count] of Object.entries(summary.byLongFlow)) {
+    console.log(`- ${flow}: ${count}`);
+  }
+
+  console.log('');
+  console.log('Long flow catalog:');
+  for (const item of longFlowCatalog) {
+    console.log(`- ${item.id} | ${item.title} | ${item.userJourney}`);
+  }
+
+  console.log('');
   console.log('Scenario entries:');
   for (const entry of entries) {
-    console.log(`- ${entry.id} | ${entry.runner} | ${entry.domain} | ${entry.suite} | ${entry.branchLength} | ${entry.userGoal}`);
+    const longFlows = entry.longFlowIds?.join(',') ?? 'none';
+    const mindsets = entry.userMindsets?.join(',') ?? 'none';
+    console.log(
+      `- ${entry.id} | ${entry.runner} | ${entry.domain} | ${entry.suite} | ${entry.branchLength} | longFlow=${longFlows} | mindsets=${mindsets} | ${entry.userGoal}`,
+    );
+    if (entry.expectedFeeling) {
+      console.log(`  expectedFeeling: ${entry.expectedFeeling}`);
+    }
   }
 }
 

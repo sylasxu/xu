@@ -108,6 +108,11 @@ async function main(): Promise<void> {
               prdSections: matrixEntry.prdSections,
               primarySurface: matrixEntry.primarySurface,
               scenarioType: matrixEntry.scenarioType,
+              userMindsets: matrixEntry.userMindsets,
+              trustRisks: matrixEntry.trustRisks,
+              dropOffPoints: matrixEntry.dropOffPoints,
+              expectedFeeling: matrixEntry.expectedFeeling,
+              longFlowIds: matrixEntry.longFlowIds,
             }
           : null,
       },

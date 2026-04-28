@@ -2916,6 +2916,54 @@ export async function createAiChatStreamResponse(params: {
   });
 }
 
+export async function createAiChatErrorStreamResponse(params: {
+  request: GenUIRequest;
+  message: string;
+  conversationId?: string | null;
+}): Promise<Response> {
+  const traceId = createId(ID_PREFIX.trace);
+  const responseId = createId(ID_PREFIX.response);
+  const requestedConversationId = typeof params.request.conversationId === 'string'
+    ? params.request.conversationId.trim()
+    : '';
+  const conversationId = params.conversationId?.trim()
+    || requestedConversationId
+    || createId(ID_PREFIX.conversation);
+  const block = createAlertBlock({
+    level: 'error',
+    message: params.message,
+    dedupeKey: 'ai-provider-error',
+    traceRef: traceId,
+    meta: { source: 'ai_provider' },
+  });
+
+  return createAiChatStreamResponse({
+    request: params.request,
+    envelope: {
+      traceId,
+      conversationId,
+      response: {
+        responseId,
+        role: 'assistant',
+        status: 'completed',
+        blocks: [block],
+      },
+    },
+    traces: [
+      {
+        stage: 'response_error',
+        detail: {
+          traceId,
+          responseId,
+          conversationId,
+          message: params.message,
+          source: 'ai_provider',
+        },
+      },
+    ],
+  });
+}
+
 export async function buildAiChatEnvelope(
   request: GenUIRequest,
   options?: AiChatResponseOptions

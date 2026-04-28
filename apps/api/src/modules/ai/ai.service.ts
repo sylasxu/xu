@@ -47,6 +47,10 @@ import { resolveToolsForIntent } from './tools';
 import { getSystemPrompt, type PromptContext, type ActivityDraftForPrompt } from './prompts';
 import { getFallbackConfig, resolveChatModelSelection, resolveFallbackChatModelSelection, shouldOmitTemperatureForModelId } from './models/router';
 import { runText } from './models/runtime';
+import {
+  isKnownAiProviderErrorMessage as isKnownProviderError,
+  normalizeAiProviderErrorMessage as normalizeProviderError,
+} from './models/provider-error';
 import { generateText } from 'ai';
 // Guardrails
 import { checkRateLimit } from './guardrails/rate-limiter';
@@ -3335,19 +3339,36 @@ export async function streamAiChatResponse(
   request: GenUIRequest,
   options: { viewer?: ViewerContext | null; abortSignal?: AbortSignal; requestAbortSignal?: AbortSignal } = {}
 ) {
-  const result = await buildAiChatEnvelopeInternal(request, {
-    viewer: options.viewer,
-    abortSignal: options.requestAbortSignal ?? options.abortSignal,
-  });
-  const finalized = await finalizeAiChatResponse({
-    request,
-    viewer: options.viewer ?? null,
-    result,
-  });
   const chatRuntime = await import('./runtime/chat-response');
-  return chatRuntime.createAiChatStreamResponse({
-    request,
-    envelope: finalized.envelope,
-    traces: finalized.traces,
-  });
+  try {
+    const result = await buildAiChatEnvelopeInternal(request, {
+      viewer: options.viewer,
+      abortSignal: options.requestAbortSignal ?? options.abortSignal,
+    });
+    const finalized = await finalizeAiChatResponse({
+      request,
+      viewer: options.viewer ?? null,
+      result,
+    });
+    return chatRuntime.createAiChatStreamResponse({
+      request,
+      envelope: finalized.envelope,
+      traces: finalized.traces,
+    });
+  } catch (error) {
+    const rawMessage = error instanceof Error ? error.message : String(error);
+    if (!isKnownProviderError(rawMessage)) {
+      throw error;
+    }
+
+    const message = normalizeProviderError(rawMessage);
+    logger.warn('AI provider error converted to stream response', {
+      message,
+      viewerId: options.viewer?.id || null,
+    });
+    return chatRuntime.createAiChatErrorStreamResponse({
+      request,
+      message,
+    });
+  }
 }

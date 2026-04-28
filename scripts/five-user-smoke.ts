@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 
 import { app } from '../apps/api/src/index';
+import { writeRegressionArtifact } from './regression-artifact';
+import { findScenarioMatrixEntry } from './regression-scenario-matrix';
 
 interface ApiError {
   code?: number;
@@ -142,6 +144,7 @@ function buildCreatePayload() {
 }
 
 async function main(): Promise<void> {
+  const startedAt = new Date();
   assert(Number.isFinite(USER_COUNT) && USER_COUNT >= 2 && USER_COUNT <= 5, 'SMOKE_USER_COUNT 必须在 2-5 之间');
 
   console.log('1/6 准备测试账号...');
@@ -256,6 +259,55 @@ async function main(): Promise<void> {
   console.log(`- 报名人数: ${publicAfterJoin.currentParticipants}`);
   console.log(`- 讨论区消息数: ${chatMessages.messages.length}`);
   console.log(`- 群聊列表命中: ${chatActivities.items.length}`);
+
+  const completedAt = new Date();
+  const matrixEntry = findScenarioMatrixEntry('five-user-smoke');
+  const artifactPath = await writeRegressionArtifact({
+    runner: 'five-user-smoke',
+    suite: 'core',
+    startedAt: startedAt.toISOString(),
+    completedAt: completedAt.toISOString(),
+    durationMs: completedAt.getTime() - startedAt.getTime(),
+    scenarioCount: 1,
+    passedCount: 1,
+    failedCount: 0,
+    scenarios: [
+      {
+        id: 'five-user-smoke',
+        passed: true,
+        details: [
+          `activityId=${activityId}`,
+          `participants=${publicAfterJoin.currentParticipants}`,
+          `messages=${chatMessages.messages.length}`,
+          `chatActivities=${chatActivities.items.length}`,
+          `cleanup=${CLEANUP}`,
+        ],
+        matrix: matrixEntry
+          ? {
+              runner: matrixEntry.runner,
+              layer: matrixEntry.layer,
+              suite: matrixEntry.suite,
+              domain: matrixEntry.domain,
+              branchLength: matrixEntry.branchLength,
+              userGoal: matrixEntry.userGoal,
+              prdSections: matrixEntry.prdSections,
+              primarySurface: matrixEntry.primarySurface,
+              scenarioType: matrixEntry.scenarioType,
+              userMindsets: matrixEntry.userMindsets,
+              trustRisks: matrixEntry.trustRisks,
+              dropOffPoints: matrixEntry.dropOffPoints,
+              expectedFeeling: matrixEntry.expectedFeeling,
+              longFlowIds: matrixEntry.longFlowIds,
+            }
+          : null,
+      },
+    ],
+    metadata: {
+      userCount: USER_COUNT,
+      cleanup: CLEANUP,
+    },
+  });
+  console.log(`- Artifact: ${artifactPath}`);
 
   if (CLEANUP) {
     await requestJson<{ success: boolean; msg?: string }>({

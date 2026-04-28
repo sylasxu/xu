@@ -95,7 +95,7 @@ export async function getChatActivities(
         eq(participants.userId, userId),
         eq(participants.status, 'joined')
       ))
-      .orderBy(desc(activities.startAt))
+      .orderBy(desc(participants.joinedAt), desc(activities.startAt))
       .limit(limit)
       .offset(offset),
     db
@@ -238,9 +238,20 @@ export async function getDiscussionReplySignals(params: {
     page: 1,
     limit: Math.max(params.limit ?? 10, 1),
   });
+  const candidateActivityIds = chatActivities.items.map((item) => item.activityId);
+  const activeActivityRows = candidateActivityIds.length > 0
+    ? await db
+      .select({ id: activities.id })
+      .from(activities)
+      .where(and(
+        inArray(activities.id, candidateActivityIds),
+        eq(activities.status, 'active'),
+      ))
+    : [];
+  const activeActivityIds = new Set(activeActivityRows.map((item) => item.id));
 
   return chatActivities.items
-    .filter((item) => !item.isArchived && item.unreadCount > 0 && item.responseNeeded)
+    .filter((item) => activeActivityIds.has(item.activityId) && !item.isArchived && item.unreadCount > 0 && item.responseNeeded)
     .map((item) => ({
       activityId: item.activityId,
       activityTitle: item.activityTitle,

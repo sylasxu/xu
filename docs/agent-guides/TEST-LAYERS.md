@@ -149,7 +149,7 @@ bun run release:gate
 - [chat-regression.ts](../../scripts/chat-regression.ts)：协议与流式回归层
 - [flow-regression.ts](../../scripts/flow-regression.ts)：流程回归统一入口
 - [release-gate.ts](../../scripts/release-gate.ts)：发布门禁统一入口
-- [regression-scenario-matrix.ts](../../scripts/regression-scenario-matrix.ts)：PRD 场景矩阵真源（场景 id -> 主域 / 分支长度 / 对应 PRD）
+- [regression-scenario-matrix.ts](../../scripts/regression-scenario-matrix.ts)：PRD 场景矩阵真源（场景 id -> 主域 / 分支长度 / 用户心路 / 信任风险 / 长流程编号 / 对应 PRD）
 - [scenario-matrix-report.ts](../../scripts/scenario-matrix-report.ts)：输出当前场景矩阵概览
 - [identity-memory-regression.ts](../../scripts/identity-memory-regression.ts)：身份记忆专项回归（同样输出 artifact）
 
@@ -168,8 +168,16 @@ bun run regression:matrix
 用途：
 
 - 查看当前回归脚本已经登记了哪些产品场景
-- 按 `layer / domain / suite / branchLength` 快速盘点覆盖面
+- 按 `layer / domain / suite / branchLength / userMindsets / trustRisks / longFlowIds` 快速盘点覆盖面
 - 作为后续补 PRD 场景与覆盖率报告的真源入口
+
+矩阵里的用户心路字段用于把 PRD 痛点固定到验收口径里：
+
+- `userMindsets`：用户当时的心理状态，例如先试试看、登录被打断、报名后怕冷场、异步等待、跨任务回来
+- `trustRisks`：这条链路最容易伤害信任的风险，例如过早登录、任务丢失、隐私暴露、消息断裂、角色不清
+- `dropOffPoints`：用户最可能离开的节点，例如首页、详情页、auth gate、讨论区、消息中心、待确认匹配、活动后反馈
+- `expectedFeeling`：这条回归真正要证明的用户体感
+- `longFlowIds`：长流程编号，用来追踪端到端心路，而不是只看孤立功能点
 
 `sandbox-regression`、`chat-regression` 和 `identity-memory-regression` 现在都会额外输出结构化 artifact 到：
 
@@ -183,7 +191,7 @@ artifact 包含：
 
 - 本次运行的 suite、开始/结束时间、总耗时
 - 每个 scenario 的 pass/fail、耗时、details、error
-- 对应的矩阵元信息：`domain / userGoal / prdSections / branchLength / primarySurface`
+- 对应的矩阵元信息：`domain / userGoal / prdSections / branchLength / primarySurface / userMindsets / trustRisks / dropOffPoints / longFlowIds`
 
 这层的目标不是替代终端日志，而是把“跑过了哪些产品场景”沉淀成可复盘产物。
 
@@ -196,14 +204,15 @@ bun run regression:coverage
 用途：
 
 - 汇总矩阵里按 `domain / runner` 登记的场景数
+- 汇总矩阵里按 `userMindsets / trustRisks / longFlowIds` 登记的产品验收断点
 - 对照最近一次 `sandbox-regression` / `chat-regression` / `identity-memory-regression` artifact
-- 快速看“哪些主域最近一次跑到了，哪些还没跑到”
+- 快速看“哪些主域、用户心路、信任风险、长流程最近一次跑到了，哪些还没跑到”
 
 当前这份 coverage 还是第一版：
 
-- 它能回答“最近一次 artifact 触达了哪些 domain”
+- 它能回答“最近一次 artifact 触达了哪些 domain / 用户心路 / 信任风险 / 长流程”
 - 还不能回答“PRD 全量覆盖率百分比”
-- 后续继续补 persona / state seed / H5 黑盒后，再升级成真正的产品覆盖报告
+- 后续继续补 state seed / H5 黑盒 / 多端视觉断点后，再升级成真正的产品覆盖报告
 
 ## 使用建议
 

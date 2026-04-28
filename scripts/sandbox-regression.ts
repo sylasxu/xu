@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { agentTasks, and, db, desc, eq, inArray, partnerIntents, userMemories, users } from '@xu/db';
+import { activities, agentTasks, and, db, desc, eq, inArray, participants, partnerIntents, userMemories, users } from '@xu/db';
 import { app } from '../apps/api/src/index';
 import { resetQuota } from '../apps/api/src/modules/ai/guardrails/rate-limiter';
 import { readAiChatEnvelope } from './ai-chat-sse';
@@ -694,6 +694,38 @@ async function cleanupSandboxAgentTasks(users: BootstrappedUser[]): Promise<void
       inArray(agentTasks.userId, userIds),
       inArray(agentTasks.status, ['active', 'waiting_auth', 'waiting_async_result'])
     ));
+}
+
+async function cleanupSandboxActivities(users: BootstrappedUser[]): Promise<void> {
+  const userIds = users.map((item) => item.user.id);
+  if (userIds.length === 0) {
+    return;
+  }
+
+  const [ownedRows, joinedRows] = await Promise.all([
+    db
+      .select({ activityId: activities.id })
+      .from(activities)
+      .where(inArray(activities.creatorId, userIds)),
+    db
+      .select({ activityId: participants.activityId })
+      .from(participants)
+      .where(inArray(participants.userId, userIds)),
+  ]);
+
+  const activityIds = [...new Set([...ownedRows, ...joinedRows].map((item) => item.activityId))];
+  if (activityIds.length === 0) {
+    return;
+  }
+
+  await db
+    .update(activities)
+    .set({
+      status: 'cancelled',
+      embedding: null,
+      updatedAt: new Date(),
+    })
+    .where(inArray(activities.id, activityIds));
 }
 
 function resetSandboxRateLimits(users: BootstrappedUser[]): void {
@@ -2793,6 +2825,7 @@ const extendedScenarios = [
 async function main() {
   const startedAt = new Date();
   const users = await bootstrapUsers();
+  await cleanupSandboxActivities(users);
   await cleanupSandboxPartnerIntents(users);
   await cleanupSandboxAgentTasks(users);
   const context: ScenarioContext = { users };
@@ -2880,6 +2913,11 @@ async function main() {
               prdSections: matrixEntry.prdSections,
               primarySurface: matrixEntry.primarySurface,
               scenarioType: matrixEntry.scenarioType,
+              userMindsets: matrixEntry.userMindsets,
+              trustRisks: matrixEntry.trustRisks,
+              dropOffPoints: matrixEntry.dropOffPoints,
+              expectedFeeling: matrixEntry.expectedFeeling,
+              longFlowIds: matrixEntry.longFlowIds,
             }
           : null,
       };
@@ -2896,6 +2934,7 @@ async function main() {
 
   await cleanupSandboxPartnerIntents(users);
   await cleanupSandboxAgentTasks(users);
+  await cleanupSandboxActivities(users);
 
   const failed = results.filter((item) => !item.passed);
   if (failed.length > 0) {

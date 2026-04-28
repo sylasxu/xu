@@ -54,3 +54,41 @@ export function normalizeAiProviderErrorMessage(message: string): string {
 
   return normalized
 }
+
+export function isKnownAiProviderErrorMessage(message: string): boolean {
+  const normalized = message.trim()
+  const lowerCased = normalized.toLowerCase()
+
+  if (!normalized) {
+    return false
+  }
+
+  return (
+    lowerCased.includes('invalid api key')
+    || lowerCased.includes('incorrect api key')
+    || lowerCased.includes('authentication')
+    || lowerCased.includes('unauthorized')
+    || lowerCased.includes('invalid_api_key')
+    || lowerCased.includes('api key not valid')
+    || lowerCased.includes('free tier of the model has been exhausted')
+    || (lowerCased.includes('use free tier only') && lowerCased.includes('management console'))
+    || lowerCased.includes('insufficient_quota')
+    || lowerCased.includes('quota exceeded')
+    || lowerCased.includes('exceeded your current quota')
+    || lowerCased.includes('billing')
+    || lowerCased.includes('credit balance')
+    || lowerCased.includes('balance is not enough')
+    || lowerCased.includes('recharge')
+    || lowerCased.includes('rate limit')
+    || lowerCased.includes('too many requests')
+    || lowerCased.includes('429')
+    || lowerCased.includes('model not found')
+    || lowerCased.includes('does not exist')
+    || lowerCased.includes('unknown model')
+    || normalized.includes('AI 服务鉴权失败')
+    || normalized.includes('免费额度已经用完')
+    || normalized.includes('AI 服务上游账户余额')
+    || normalized.includes('AI 服务请求过于频繁')
+    || normalized.includes('当前 AI 模型不可用')
+  )
+}

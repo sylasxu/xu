@@ -1,50 +1,44 @@
 # xu
 
-**群主分身型组局 agent。**
+**Agent-driven social activity product built with Bun, Elysia, Next.js, Native WeChat Mini Program, and GenUI blocks.**
 
-你不用先想清楚该点哪个页面，只要把一个模糊想法说出来：
+xu 是一个围绕状态首页、Agent Runtime、GenUI blocks 和多端客户端构建的组局产品。README 面向外部展示和技术沟通：先展示核心界面，再说明工程架构、启动方式和质量门禁。产品定义、用户痛点和主流程细节见 [PRD](./docs/PRD.md)。
 
-- 今天有什么想玩的
-- 周末想找个轻松局
-- 想认识附近同频的人
-- 帮我写个不尴尬的邀约
+## Screenshots
 
-xu 会尽量把这些碎片化需求接住，帮你找人、凑局、开口、续上同一件事。
+> 将最新截图放到 `docs/assets/readme/` 后，下面 5 张图会自动成为 README 第一屏展示。
 
-## 现在可以直接体验什么
+| Home Chat | Activity Detail | Partner Flow | Admin Overview | Admin AI Ops |
+|-----------|-----------------|--------------|----------------|--------------|
+| ![xu home chat](./docs/assets/readme/home-chat.png) | ![xu activity detail](./docs/assets/readme/activity-detail.png) | ![xu partner flow](./docs/assets/readme/partner-flow.png) | ![xu admin overview](./docs/assets/readme/admin-overview.png) | ![xu admin ai ops](./docs/assets/readme/admin-ai-ops.png) |
 
-当前版本已经重点打通了几条最核心的主场景：
+## Engineering Highlights
 
-- 找局
-  例如“附近有没有局”“观音桥附近有什么活动”“这个我能直接报吗”
-- 找搭子
-  例如“有没有饭搭子”“帮我找个羽毛球搭子”“观音桥饭搭子有没有”
-- 自己组局
-  例如“我想组个局”“帮我组一个周五晚的桌游局”
-- 补位与快速成局
-  例如“麻将三缺一有没有人”“差一个能不能帮我找”
-- 对话式续接
-  用户不用每轮都重说一遍，系统会尽量沿着上一件事继续往下接
+- Unified `/ai/chat` SSE runtime: text, structured actions, task context, and GenUI blocks share one protocol.
+- Database-first domain model: Drizzle schema in `@xu/db` is the single source of truth.
+- Multi-client architecture: Web/H5, Native WeChat Mini Program, Admin, and API consume the same domain capabilities.
+- Agent task runtime: long user journeys are tracked as recoverable tasks instead of disconnected page actions.
+- Scenario-first regression: product flows are validated by matrix + artifacts + coverage, not only unit tests.
 
-## 项目在做什么
+## 技术概览
 
-xu 要解决的，不是“做一个新社交平台”，而是把群聊里那些高频、碎片化、口语化的需求整理成可执行的产品流程：
+- Runtime：Bun
+- Monorepo：Turborepo workspaces
+- API：Elysia + TypeBox + JWT
+- DB：PostgreSQL + PostGIS + Drizzle ORM
+- Admin：Vite + React + TanStack Router + Eden Treaty
+- Web/H5：Next.js App Router + Tailwind + AI SDK Elements
+- Mini Program：微信原生小程序 + TypeScript + Zustand Vanilla + Orval SDK
+- GenUI：`packages/genui-contract` 维护界面块协议
 
-- 找局：附近有没有活动，这个局我能不能直接报
-- 找搭子：有没有饭搭子、球搭子、桌游搭子
-- 组局：我想自己发一个局，帮我先整理成草稿
-- 承接后续：报名之后、讨论区里、活动结束后还能继续接
+## 架构原则
 
-对外，它是一个群主分身型组局 agent。
-对内，它把“找局 / 找搭子 / 组局 / 活动后续上”当成主流程，用状态首页、任务状态和会话上下文，把同一件事持续往下推进；内容工作台负责把这些真实需求翻成可外部分发的内容。
-
-当前这轮收口的核心标准也很明确：
-
-- 首页是不是状态首页，而不是活动广场或空白聊天壳
-- agent 能不能把 `找局 / 组局 / 找搭子 / 活动后续上` 稳定接住
-- 报名、讨论区、活动后 follow-up 这些后续承接是不是同一条任务在往下走
-
-当前进度上，这条主线已经不只停在“能报名”和“能发消息”：报名成功会统一进入讨论区，消息中心能承接待确认匹配、群聊摘要和活动后 follow-up，活动结束后的真实反馈也已经能直接从消息中心写回，不必先进 AI 才能留下结果。
+- `@xu/db` 是单一数据真源，Schema 从 Drizzle 表定义派生。
+- API 按领域能力建模，不按 H5 / Admin / 小程序拆后端模块。
+- `/ai/chat` 是统一 SSE 协议入口，请求体固定为 `conversationId? + input + context`。
+- Web 对话主轴继续使用 `components/ai-elements/*`，不重写消息流协议。
+- 小程序只消费 Orval 生成 SDK 和协议类型，不复用 Web 运行时。
+- 用户可见业务文案优先支持“入库 + 后端下发”，前端只保留中性兜底。
 
 ## 仓库结构
 
@@ -104,7 +98,8 @@ bun run dev
 如果 API 契约有更新，先执行：
 
 ```bash
-bun run gen:api
+bun run gen:api      # 全量生成
+bun run gen:api:mp   # 只生成小程序 Orval SDK
 ```
 
 ## 常用命令
@@ -127,14 +122,19 @@ bun run db:reset
 
 # 协议 / 代码生成
 bun run gen:api
+bun run gen:api:mp
 bun run gen:genui-contract
 
 # 质量检查
-bun run test
+bun run test:api
 bun run type-check
 bun run arch:check
+bun run regression:matrix
 bun run regression:flow
+bun run regression:flow:extended
 bun run regression:protocol
+bun run regression:coverage
+bun run release:gate
 ```
 
 ## 本地服务地址
@@ -146,14 +146,16 @@ bun run regression:protocol
 
 ## 怎么理解这套实现
 
-这套实现的主干其实很简单：
+这套实现的主干：
 
-- 用户从对话入口表达“找局 / 找搭子 / 组局 / 报名”这类目标
-- 后端先把自然语言收敛成结构化动作或明确执行路径
-- 请求再经过处理链、工具、工作流和模型路由推进
-- 最后以 SSE + 界面块的形式回到 Web、小程序和后台
+- 用户输入进入 `/ai/chat`
+- 后端把文本或 action 规范化成统一请求语义
+- Runtime 解析结构化动作、任务状态和上下文
+- Processor 管线执行护栏、画像、召回和指标记录
+- Tool / Workflow / Model Router 推进领域动作
+- 最终以 SSE + GenUI blocks 返回 Web、小程序或后台
 
-真正的难点不在接模型，而在把“附近有没有局”“观音桥饭搭子有没有”“我来组一个”这类口语化表达稳定地落到真实业务动作上，并且让同一件事能在多轮对话、多端承接和任务状态里继续往下走。
+产品语义详见 PRD；这里重点关注工程上如何保证多轮对话、任务状态、多端协议和数据库状态一致。
 
 ## AI 模块主链路
 
@@ -270,17 +272,20 @@ bun run regression:protocol
 常用质量命令：
 
 ```bash
-bun run test
+bun run test:api
 bun run type-check
+bun run regression:matrix
 bun run regression:flow
 bun run regression:flow:extended
 bun run regression:protocol
+bun run regression:coverage
 ```
 
 ## 文档入口
 
 - [产品需求文档 PRD](./docs/PRD.md)
 - [技术架构文档 TAD](./docs/TAD.md)
+- [测试分层与发布门禁](./docs/agent-guides/TEST-LAYERS.md)
 
 ## 开发约定
 

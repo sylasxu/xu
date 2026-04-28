@@ -187,6 +187,8 @@ bun run regression:matrix
 .artifacts/regression/identity-memory-regression/
 ```
 
+这些 artifact 是本地复盘产物，用来回答“最近一次到底跑到了哪些产品场景”。默认不提交，收口或 commit 前应清理或保持未跟踪。
+
 artifact 包含：
 
 - 本次运行的 suite、开始/结束时间、总耗时

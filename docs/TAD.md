@@ -1,7 +1,7 @@
 # xu 技术架构文档
 
 > **版本**：正式版（State Home + Agent Runtime + GenUI Blocks）
-> **更新日期**：2026-04-11
+> **更新日期**：2026-04-28
 > **架构**：原生小程序 + Zustand Vanilla + Elysia API + Drizzle ORM + Next.js Web
 
 ---
@@ -3741,7 +3741,7 @@ const userListSchema = t.Array(selectUserSchema);
 bun install
 
 # 启动基础设施
-cd docker && docker-compose up -d
+bun run docker:up
 
 # 数据库操作
 bun run db:migrate      # 执行迁移
@@ -3753,10 +3753,12 @@ bun run db:seed         # 填充种子数据
 bun run dev             # 启动所有服务
 bun run dev:api         # 仅启动 API
 bun run dev:admin       # 仅启动 Admin
-bun run dev --filter=@xu/web  # 仅启动 Web
+bun run dev:web         # 仅启动 Web
 
 # 代码生成
-bun run gen:api         # 生成 Orval SDK
+bun run gen:api         # 全量生成 API SDK / 契约
+bun run gen:api:mp      # 只生成小程序 Orval SDK
+bun run gen:genui-contract
 ```
 
 ### 11.1 场景验收与覆盖报告
@@ -3766,17 +3768,20 @@ bun run gen:api         # 生成 Orval SDK
 ```bash
 bun run regression:matrix
 bun run regression:flow
+bun run regression:flow:extended
 bun run regression:protocol
 bun run regression:identity-memory
 bun run regression:coverage
+bun run release:gate
 ```
 
 约束：
 
-- `regression-scenario-matrix` 是当前回归场景真源；每个主流程脚本都应尽量映射到明确的 `domain / userGoal / prdSections`
+- `regression-scenario-matrix` 是当前回归场景真源；每个主流程脚本都应尽量映射到明确的 `domain / userGoal / prdSections / userMindsets / trustRisks / longFlowIds`
 - `sandbox-regression`、`chat-regression`、`identity-memory-regression` 必须输出结构化 artifact，供后续复盘“最近一次到底跑到了哪些真实场景”
-- 评估主流程是否完成时，优先回答“哪些产品主域最近一次已被 artifact 覆盖”，而不是只回答“有多少测试通过”
+- 评估主流程是否完成时，优先回答“哪些产品主域、用户心路、信任风险、长流程最近一次已被 artifact 覆盖”，而不是只回答“有多少测试通过”
 - `five-user-smoke` 保留为人工联调 / 演示工具，不作为默认发布门禁主依据
+- `.artifacts/regression/*` 是本地复盘产物，不进入提交；提交前应清理或保持未跟踪
 
 ---
 

@@ -38,7 +38,9 @@ type ActivityDetail = {
   joinState: ActivityJoinState;
   canJoin: boolean;
   isFull: boolean;
+  currentParticipants: number;
   remainingSeats: number;
+  participants: ParticipantInfo[];
 };
 
 type ParticipantInfo = {
@@ -98,7 +100,10 @@ function isActivityDetail(value: unknown): value is ActivityDetail {
     typeof value.id === "string" &&
     typeof value.canJoin === "boolean" &&
     typeof value.isFull === "boolean" &&
+    typeof value.currentParticipants === "number" &&
     typeof value.remainingSeats === "number" &&
+    Array.isArray(value.participants) &&
+    value.participants.every(isParticipantInfo) &&
     (value.joinState === "creator" ||
       value.joinState === "joined" ||
       value.joinState === "waitlisted" ||
@@ -328,6 +333,25 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
   const joinState = detail?.joinState ?? (activity.canJoin ? "not_joined" : "closed");
   const canJoin = detail?.canJoin ?? activity.canJoin;
   const remainingSeats = detail?.remainingSeats ?? activity.remainingSeats;
+  const displayActivity = useMemo<PublicActivity>(() => {
+    if (!detail) {
+      return activity;
+    }
+
+    return {
+      ...activity,
+      canJoin: detail.canJoin,
+      currentParticipants: detail.currentParticipants,
+      remainingSeats: detail.remainingSeats,
+      isFull: detail.isFull,
+      participants: detail.participants
+        .filter((participant) => participant.status === "joined")
+        .map((participant) => ({
+          nickname: participant.user?.nickname ?? null,
+          avatarUrl: participant.user?.avatarUrl ?? null,
+        })),
+    };
+  }, [activity, detail]);
   const isJoined = joinState === "joined" || joinState === "creator";
   const isWaitlisted = joinState === "waitlisted";
   const canConfirmFulfillment = joinState === "creator" && activity.status === "completed";
@@ -493,14 +517,14 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
     }
 
     try {
-      await navigator.clipboard.writeText(buildShareText(activity));
+      await navigator.clipboard.writeText(buildShareText(displayActivity));
       setShareStatus("copied");
       window.setTimeout(() => setShareStatus("idle"), 1200);
     } catch {
       setShareStatus("failed");
       window.setTimeout(() => setShareStatus("idle"), 1500);
     }
-  }, [activity]);
+  }, [displayActivity]);
 
   const cloneActivity = useCallback(() => {
     const prompt = buildClonePrompt(activity);
@@ -529,7 +553,7 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
 
         <div className="flex flex-1 items-center">
           <div className="w-full space-y-4">
-            <ActivityCard activity={activity} themeConfig={themeConfig} />
+            <ActivityCard activity={displayActivity} themeConfig={themeConfig} />
             <DiscussionRuntimePanel
               activityId={activity.id}
               activityTitle={activity.title}

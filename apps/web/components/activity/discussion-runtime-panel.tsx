@@ -598,10 +598,10 @@ export function DiscussionRuntimePanel({
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-semibold text-gray-700">讨论区</h2>
-            {connectionState === "connected" ? (
+            {connectionState === "connected" || loadState === "ready" ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">
                 <Wifi className="h-3 w-3" />
-                实时在线
+                {connectionState === "connected" ? "实时在线" : "已接入实时"}
               </span>
             ) : (
               <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">

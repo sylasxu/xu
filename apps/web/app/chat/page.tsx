@@ -1691,10 +1691,7 @@ export default function ChatPage() {
   );
 
   useEffect(() => {
-    const nextToken = readClientToken();
-    if (nextToken) {
-      setPendingAgentAction(readPendingAgentActionStateFromBrowser());
-    }
+    setPendingAgentAction(readPendingAgentActionStateFromBrowser());
     setPendingAgentActionHydrated(true);
   }, []);
 

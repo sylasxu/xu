@@ -1131,7 +1131,7 @@ export function MessageCenterDrawer({
                           )}
                         >
                           <div className="flex items-start justify-between gap-3">
-                            <div>
+                            <div className="min-w-0 flex-1">
                               <div className="flex flex-wrap items-center gap-2">
                                 <p className="text-sm font-semibold">{item.title}</p>
                                 <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", isDarkMode ? "border border-white/8 bg-white/[0.04] text-white/70" : "border border-black/8 bg-black/[0.03] text-black/70")}>
@@ -1143,7 +1143,7 @@ export function MessageCenterDrawer({
                               </p>
                             </div>
                             {item.badge ? (
-                              <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-black">
+                              <span className="inline-flex shrink-0 whitespace-nowrap rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-black">
                                 {item.badge}
                               </span>
                             ) : null}

@@ -108,6 +108,7 @@ const messageCenterUiConfig = {
   chatSummaryDescription: '这里汇总活动群聊的最近动态，点进详情可以继续讨论和跟进。',
   chatSummaryEmpty: '暂无活动群聊记录，参与活动后这里会同步显示最近动态。',
   chatSummaryFallbackMessage: '还没人说话，发句开场吧',
+  chatSummaryOpenActionLabel: '进入讨论区',
 };
 
 const authGateUiConfig = {

@@ -91,6 +91,7 @@ type MessageCenterResponse = {
     chatSummaryDescription: string;
     chatSummaryEmpty: string;
     chatSummaryFallbackMessage: string;
+    chatSummaryOpenActionLabel: string;
   };
 };
 
@@ -1702,7 +1703,21 @@ export function MessageCenterDrawer({
                           {chat.isArchived ? <span>已归档</span> : null}
                         </div>
                         {!chat.isArchived ? (
-                          <div className="mt-3 flex gap-2">
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              disabled={disabled || Boolean(pendingActionKey)}
+                              onClick={() => {
+                                setOpen(false);
+                                window.location.href = buildActivityDetailPath(chat.activityId, {
+                                  entry: chat.responseNeeded ? "message_center_chat_response" : "message_center_chat_summary",
+                                });
+                              }}
+                              className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-2 text-xs font-medium text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <ChevronRight className="h-3.5 w-3.5" />
+                              {messageCenter?.ui.chatSummaryOpenActionLabel || "进入讨论区"}
+                            </button>
                             <button
                               type="button"
                               disabled={disabled || Boolean(pendingActionKey)}

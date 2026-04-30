@@ -213,6 +213,7 @@ const MessageCenterUi = t.Object({
   chatSummaryDescription: t.String({ description: '群聊摘要说明文案' }),
   chatSummaryEmpty: t.String({ description: '群聊摘要空状态文案' }),
   chatSummaryFallbackMessage: t.String({ description: '群聊摘要默认消息文案' }),
+  chatSummaryOpenActionLabel: t.String({ description: '群聊摘要进入讨论区按钮文案' }),
 });
 
 const MessageCenterResponse = t.Object({

@@ -2580,8 +2580,8 @@ export default function ChatPage() {
           }}
         />
 
-        <header className="relative z-20 flex shrink-0 items-center justify-between px-5 pb-2 pt-6">
-          <div className="flex items-center gap-2.5">
+        <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center justify-between bg-transparent px-5 pb-2 pt-6">
+          <div className="pointer-events-auto flex items-center gap-2.5">
             <SidebarDrawer
               disabled={isSending}
               isDarkMode={isDarkMode}
@@ -2598,7 +2598,7 @@ export default function ChatPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="pointer-events-auto flex items-center gap-2">
             <button
               type="button"
               onClick={() => setIsDarkMode((current) => !current)}
@@ -2632,7 +2632,7 @@ export default function ChatPage() {
         </header>
 
         {pendingAgentAction ? (
-          <div className="shrink-0 space-y-2 px-3 pb-2">
+          <div className="shrink-0 space-y-2 px-3 pb-2 pt-[76px]">
             {pendingAgentAction ? (
               <section
                 className={cn(
@@ -2710,7 +2710,8 @@ export default function ChatPage() {
           <Conversation className="relative h-full">
             <ConversationContent
               className={cn(
-                "w-full gap-4 px-3 pb-4 pt-1",
+                "w-full gap-4 px-3 pb-4",
+                messages.length > 0 ? "pt-[76px]" : "pt-1",
                 messages.length > 0 &&
                   (isDarkMode
                     ? "[scrollbar-color:rgba(255,255,255,0.16)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/12 [&::-webkit-scrollbar-thumb:hover]:bg-white/20"
@@ -2726,11 +2727,11 @@ export default function ChatPage() {
                       "pointer-events-none absolute left-1/2 z-0 -translate-x-1/2",
                       isDarkMode
                         ? homeState === "H0"
-                          ? "top-[-8px] h-[356px] w-[356px] opacity-100"
-                          : "top-[-132px] h-[300px] w-[300px] opacity-35"
+                          ? "top-[88px] h-[356px] w-[356px] opacity-100"
+                          : "top-[-20px] h-[300px] w-[300px] opacity-35"
                         : homeState === "H0"
-                          ? "top-[10px] h-[312px] w-[312px] opacity-100"
-                          : "top-[-96px] h-[260px] w-[260px] opacity-28"
+                          ? "top-[106px] h-[312px] w-[312px] opacity-100"
+                          : "top-[16px] h-[260px] w-[260px] opacity-28"
                     )}
                   >
                     <Orb
@@ -2747,11 +2748,11 @@ export default function ChatPage() {
                       "pointer-events-none absolute left-1/2 z-[1] -translate-x-1/2",
                       homeState === "H0"
                         ? isDarkMode
-                          ? "top-[140px] h-44 w-[368px] bg-[radial-gradient(ellipse_at_center,rgba(0,0,0,0.56)_0%,rgba(0,0,0,0.22)_48%,transparent_78%)]"
-                          : "top-[126px] h-36 w-[320px] bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.95)_0%,rgba(255,255,255,0.68)_46%,transparent_80%)]"
+                          ? "top-[236px] h-44 w-[368px] bg-[radial-gradient(ellipse_at_center,rgba(0,0,0,0.56)_0%,rgba(0,0,0,0.22)_48%,transparent_78%)]"
+                          : "top-[222px] h-36 w-[320px] bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.95)_0%,rgba(255,255,255,0.68)_46%,transparent_80%)]"
                         : isDarkMode
-                          ? "top-[76px] h-[440px] w-[390px] max-w-[92vw] bg-[linear-gradient(180deg,rgba(9,9,9,0.72)_0%,rgba(9,9,9,0.94)_34%,rgba(9,9,9,0.98)_100%)]"
-                          : "top-[80px] h-[420px] w-[360px] max-w-[92vw] bg-[linear-gradient(180deg,rgba(255,255,255,0.72)_0%,rgba(255,255,255,0.96)_34%,rgba(255,255,255,0.99)_100%)]"
+                          ? "top-[188px] h-[440px] w-[390px] max-w-[92vw] bg-[linear-gradient(180deg,rgba(9,9,9,0.72)_0%,rgba(9,9,9,0.94)_34%,rgba(9,9,9,0.98)_100%)]"
+                          : "top-[192px] h-[420px] w-[360px] max-w-[92vw] bg-[linear-gradient(180deg,rgba(255,255,255,0.72)_0%,rgba(255,255,255,0.96)_34%,rgba(255,255,255,0.99)_100%)]"
                     )}
                   />
 

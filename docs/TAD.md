@@ -3894,6 +3894,7 @@ bun run release:gate
 - 高级感优先通过 **留白、字号、字重、行高、模块间距、对齐关系** 建立，不依赖蓝紫渐变和大面积玻璃态
 - 首页空态允许保留极轻的情绪背景（如 orb / 柔和背景层），但只能作为舞台气氛，不能抢 Hero 文案
 - 任何动态、发光、轨道类视觉实现都必须固定为最底层 `bg` 氛围层：`pointer-events-none`、`aria-hidden`，并位于内容层之下；任务卡、Hero、CTA 必须通过实底或遮罩保证可读性，禁止让特效穿过文本和卡片主体
+- 首页 header 必须实现为透明浮层，不能用实色容器背景截断页面 bg；交互区通过子元素 `pointer-events-auto` 承接点击，header 容器本身保持不拦截背景与滚动
 - 任务主舞台进入后背景必须收敛到 **纯黑或近纯黑**，让消息和 GenUI cards 成为主角
 - React Bits 仅作为首页空态的 **wrapper / 背景包装层** 使用；聊天主轴继续使用 AI SDK Elements 与现有 GenUI block 渲染
 

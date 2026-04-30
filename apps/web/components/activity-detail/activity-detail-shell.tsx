@@ -532,12 +532,12 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
   }, [activity]);
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-black text-white">
+    <div className="relative min-h-screen overflow-x-hidden bg-black text-white">
       <DiscussionEntryTracker activityId={activity.id} />
       <ThemeBackground config={themeConfig} />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-[1] h-32 bg-gradient-to-b from-black/55 to-transparent" />
-      <main className="relative z-10 mx-auto flex min-h-screen max-w-lg flex-col px-4 pb-36 pt-4">
+      <main className="relative z-10 mx-auto flex min-h-screen max-w-lg flex-col px-4 pb-80 pt-4">
         <header className="mb-4 flex items-center justify-between">
           <a
             href="/chat"
@@ -551,7 +551,7 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
           </div>
         </header>
 
-        <div className="flex flex-1 items-center">
+        <div className="flex flex-1 items-start">
           <div className="w-full space-y-4">
             <ActivityCard activity={displayActivity} themeConfig={themeConfig} surface="dark" />
             <DiscussionRuntimePanel

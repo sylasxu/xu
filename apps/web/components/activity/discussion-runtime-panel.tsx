@@ -88,6 +88,7 @@ type DiscussionRuntimePanelProps = {
     createdAt: string
   }>
   isArchived: boolean
+  surface?: "light" | "dark"
 }
 
 type LoadState = "visitor" | "loading" | "ready" | "not_participant" | "error"
@@ -259,6 +260,7 @@ export function DiscussionRuntimePanel({
   activityTitle,
   initialMessages,
   isArchived,
+  surface = "light",
 }: DiscussionRuntimePanelProps) {
   const searchParams = useSearchParams()
   const entry = searchParams.get("entry") || ""
@@ -591,26 +593,44 @@ export function DiscussionRuntimePanel({
 
   const isReadOnly = isArchived || loadState !== "ready"
   const showComposer = loadState === "ready" && !isArchived
+  const isDarkSurface = surface === "dark"
 
   return (
-    <section className="rounded-2xl bg-white/90 p-4 shadow-lg backdrop-blur-sm">
+    <section
+      className={cn(
+        "rounded-2xl border p-4 shadow-lg backdrop-blur-sm",
+        isDarkSurface
+          ? "border-white/10 bg-black/58 text-white shadow-[0_24px_70px_-44px_rgba(0,0,0,0.95)]"
+          : "border-transparent bg-white/90"
+      )}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold text-gray-700">讨论区</h2>
+            <h2 className={cn("text-sm font-semibold", isDarkSurface ? "text-white/88" : "text-gray-700")}>讨论区</h2>
             {connectionState === "connected" || loadState === "ready" ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]",
+                  isDarkSurface ? "bg-emerald-300/12 text-emerald-100" : "bg-emerald-50 text-emerald-700"
+                )}
+              >
                 <Wifi className="h-3 w-3" />
                 {connectionState === "connected" ? "实时在线" : "已接入实时"}
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]",
+                  isDarkSurface ? "bg-white/[0.06] text-white/48" : "bg-slate-100 text-slate-500"
+                )}
+              >
                 <WifiOff className="h-3 w-3" />
                 {isArchived ? "已归档" : "预览模式"}
               </span>
             )}
           </div>
-          <p className="mt-1 text-xs leading-5 text-gray-500">
+          <p className={cn("mt-1 text-xs leading-5", isDarkSurface ? "text-white/48" : "text-gray-500")}>
             {loadState === "visitor"
               ? "登录并加入后，这里会继续承接后续讨论和安排。"
               : loadState === "not_participant"
@@ -622,7 +642,12 @@ export function DiscussionRuntimePanel({
         </div>
 
         {loadState === "ready" ? (
-          <div className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] text-slate-600">
+          <div
+            className={cn(
+              "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px]",
+              isDarkSurface ? "bg-white/[0.06] text-white/58" : "bg-slate-100 text-slate-600"
+            )}
+          >
             <Users className="h-3 w-3" />
             {onlineCount > 0 ? `${onlineCount} 人在线` : "已接入实时"}
           </div>
@@ -630,12 +655,19 @@ export function DiscussionRuntimePanel({
       </div>
 
       {isJoinSuccessEntry ? (
-        <div className="mt-3 rounded-2xl border border-[#e5e9ff] bg-[linear-gradient(180deg,#f8f9ff_0%,#f3f6ff_100%)] px-3 py-3">
-          <div className="flex items-center gap-2 text-[#4453a4]">
+        <div
+          className={cn(
+            "mt-3 rounded-2xl border px-3 py-3",
+            isDarkSurface
+              ? "border-white/10 bg-white/[0.05]"
+              : "border-[#e5e9ff] bg-[linear-gradient(180deg,#f8f9ff_0%,#f3f6ff_100%)]"
+          )}
+        >
+          <div className={cn("flex items-center gap-2", isDarkSurface ? "text-white/86" : "text-[#4453a4]")}>
             <Sparkles className="h-4 w-4" />
             <p className="text-sm font-semibold">{buildJoinGuideTitle(activityTitle)}</p>
           </div>
-          <p className="mt-1 text-xs leading-5 text-[#6673a8]">
+          <p className={cn("mt-1 text-xs leading-5", isDarkSurface ? "text-white/50" : "text-[#6673a8]")}>
             刚才报的这场局已经接上了，先把集合、破冰或时间安排补一句，后续变化也会留在这里。
           </p>
           {quickStarters.length > 0 ? (
@@ -652,7 +684,12 @@ export function DiscussionRuntimePanel({
 
                     setInput(starter)
                   }}
-                  className="rounded-full bg-white px-3 py-1.5 text-xs text-[#4150a8] shadow-[0_10px_24px_-20px_rgba(67,86,170,0.55)] transition hover:bg-[#f9fbff]"
+                  className={cn(
+                    "rounded-full px-3 py-1.5 text-xs shadow-[0_10px_24px_-20px_rgba(67,86,170,0.55)] transition",
+                    isDarkSurface
+                      ? "bg-white/[0.08] text-white/78 hover:bg-white/[0.12]"
+                      : "bg-white text-[#4150a8] hover:bg-[#f9fbff]"
+                  )}
                 >
                   {starter}
                 </button>
@@ -666,7 +703,13 @@ export function DiscussionRuntimePanel({
         ref={scrollRef}
         className={cn(
           "mt-4 max-h-[360px] space-y-3 overflow-y-auto rounded-2xl border px-3 py-3",
-          isReadOnly ? "border-slate-200 bg-slate-50/80" : "border-[#e5e9ff] bg-[#fbfcff]"
+          isDarkSurface
+            ? isReadOnly
+              ? "border-white/10 bg-white/[0.035]"
+              : "border-white/10 bg-white/[0.05]"
+            : isReadOnly
+              ? "border-slate-200 bg-slate-50/80"
+              : "border-[#e5e9ff] bg-[#fbfcff]"
         )}
       >
         {loadState === "ready" && hasMoreHistory ? (
@@ -677,7 +720,12 @@ export function DiscussionRuntimePanel({
                 void loadOlderMessages()
               }}
               disabled={loadingHistory}
-              className="inline-flex items-center gap-2 rounded-full border border-[#dfe4ff] bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-[#f8faff] disabled:opacity-50"
+              className={cn(
+                "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition disabled:opacity-50",
+                isDarkSurface
+                  ? "border-white/10 bg-white/[0.07] text-white/62 hover:bg-white/[0.1]"
+                  : "border-[#dfe4ff] bg-white text-slate-600 hover:bg-[#f8faff]"
+              )}
             >
               {loadingHistory ? "正在加载更早消息…" : "查看更多历史消息"}
             </button>
@@ -685,7 +733,12 @@ export function DiscussionRuntimePanel({
         ) : null}
 
         {messages.length === 0 ? (
-          <div className="rounded-xl bg-white px-3 py-5 text-center text-sm text-slate-500">
+          <div
+            className={cn(
+              "rounded-xl px-3 py-5 text-center text-sm",
+              isDarkSurface ? "bg-white/[0.06] text-white/48" : "bg-white text-slate-500"
+            )}
+          >
             {loadState === "ready" ? "还没有讨论消息，你可以先来开个场。" : "暂时还没有可展示的讨论内容。"}
           </div>
         ) : (
@@ -704,21 +757,30 @@ export function DiscussionRuntimePanel({
                       className="h-8 w-8 shrink-0 rounded-full object-cover"
                     />
                   ) : (
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-300 text-[11px] font-medium text-white">
+                    <div
+                      className={cn(
+                        "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-medium text-white",
+                        isDarkSurface ? "bg-white/18" : "bg-slate-300"
+                      )}
+                    >
                       {message.senderNickname?.charAt(0) || "?"}
                     </div>
                   )
                 ) : null}
 
                 <div className={cn("max-w-[82%] space-y-1", isSelf ? "items-end text-right" : "items-start text-left")}>
-                  <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                  <div className={cn("flex items-center gap-2 text-[11px]", isDarkSurface ? "text-white/34" : "text-slate-400")}>
                     {!isSelf ? <span>{message.senderNickname || "匿名用户"}</span> : null}
                     <span>{formatRelativeTime(message.createdAt)}</span>
                   </div>
                   <div
                     className={cn(
                       "rounded-2xl px-3 py-2 text-sm leading-6 shadow-[0_12px_24px_-18px_rgba(67,86,170,0.35)]",
-                      isSelf ? "bg-[#5b67f4] text-white" : "bg-white text-slate-700"
+                      isSelf
+                        ? "bg-[#5b67f4] text-white"
+                        : isDarkSurface
+                          ? "bg-white/[0.08] text-white/82"
+                          : "bg-white text-slate-700"
                     )}
                   >
                     {message.content}
@@ -731,7 +793,12 @@ export function DiscussionRuntimePanel({
       </div>
 
       {notice ? (
-        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+        <div
+          className={cn(
+            "mt-3 rounded-xl border px-3 py-2 text-sm",
+            isDarkSurface ? "border-amber-200/20 bg-amber-200/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-700"
+          )}
+        >
           {notice}
         </div>
       ) : null}
@@ -743,7 +810,12 @@ export function DiscussionRuntimePanel({
             onChange={(event) => setInput(event.target.value)}
             rows={input.trim().length > 24 ? 3 : 2}
             placeholder="说点集合、破冰、时间安排都可以"
-            className="min-h-[48px] flex-1 resize-none rounded-2xl border border-[#dfe4ff] bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-[#b7c4ff]"
+            className={cn(
+              "min-h-[48px] flex-1 resize-none rounded-2xl border px-3 py-2 text-sm outline-none transition",
+              isDarkSurface
+                ? "border-white/10 bg-white/[0.06] text-white/84 placeholder:text-white/30 focus:border-white/24"
+                : "border-[#dfe4ff] bg-white text-slate-700 focus:border-[#b7c4ff]"
+            )}
           />
           <button
             type="button"
@@ -758,7 +830,12 @@ export function DiscussionRuntimePanel({
           </button>
         </div>
       ) : (
-        <div className="mt-3 rounded-2xl bg-slate-50 px-3 py-3 text-sm leading-6 text-slate-500">
+        <div
+          className={cn(
+            "mt-3 rounded-2xl px-3 py-3 text-sm leading-6",
+            isDarkSurface ? "bg-white/[0.05] text-white/48" : "bg-slate-50 text-slate-500"
+          )}
+        >
           {loadState === "visitor"
             ? "登录后这里会自动恢复为可继续讨论的实时面板。"
             : loadState === "not_participant"

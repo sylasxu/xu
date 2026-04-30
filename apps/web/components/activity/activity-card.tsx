@@ -36,6 +36,8 @@ export interface PublicActivity {
   }
 }
 
+type ActivityCardSurface = "theme" | "dark"
+
 // ── 活动类型中文映射 ──────────────────────────────────────
 const ACTIVITY_TYPE_LABELS: Record<string, string> = {
   food: "🍜 美食",
@@ -194,23 +196,32 @@ function ParticipantAvatars({
 export function ActivityCard({
   activity,
   themeConfig,
+  surface = "theme",
 }: {
   activity: PublicActivity
   themeConfig: ThemeConfig
+  surface?: ActivityCardSurface
 }) {
-  const textColor = themeConfig.colorScheme?.text || "#1F2937"
+  const themeTextColor = themeConfig.colorScheme?.text || "#1F2937"
+  const isDarkSurface = surface === "dark"
+  const textColor = isDarkSurface ? "#F8FAFC" : themeTextColor
   const primaryColor = themeConfig.colorScheme?.primary || "#374151"
+  const accentColor = isDarkSurface && !isLightHexColor(primaryColor)
+    ? themeConfig.colorScheme?.secondary || "#E5E7EB"
+    : primaryColor
   const isEnded = activity.status === "completed" || activity.status === "cancelled"
   const typeLabel = ACTIVITY_TYPE_LABELS[activity.type] || "✨ 活动"
   const seatText = activity.isFull ? "当前已满员，可以先关注后续动态" : `还剩 ${activity.remainingSeats} 个位置`
   const creatorNickname = activity.creator.nickname
   const creatorAvatarUrl = activity.creator.avatarUrl
-  const usesLightText = isLightHexColor(textColor)
+  const usesLightText = isDarkSurface || isLightHexColor(textColor)
 
   return (
     <div
       className={`mx-auto w-full max-w-lg overflow-hidden rounded-2xl border backdrop-blur-sm shadow-xl ${
-        usesLightText
+        isDarkSurface
+          ? "border-white/10 bg-black/58 shadow-[0_24px_70px_-44px_rgba(0,0,0,0.95)]"
+          : usesLightText
           ? "border-white/10 bg-black/52"
           : "border-white/65 bg-white/90"
       }`}
@@ -228,8 +239,8 @@ export function ActivityCard({
         <span
           className="inline-block rounded-full px-3 py-0.5 text-xs font-medium"
           style={{
-            backgroundColor: `${primaryColor}18`,
-            color: primaryColor,
+            backgroundColor: isDarkSurface ? `${accentColor}24` : `${accentColor}18`,
+            color: accentColor,
           }}
         >
           {typeLabel}

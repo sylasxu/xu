@@ -553,12 +553,13 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
 
         <div className="flex flex-1 items-center">
           <div className="w-full space-y-4">
-            <ActivityCard activity={displayActivity} themeConfig={themeConfig} />
+            <ActivityCard activity={displayActivity} themeConfig={themeConfig} surface="dark" />
             <DiscussionRuntimePanel
               activityId={activity.id}
               activityTitle={activity.title}
               initialMessages={activity.recentMessages}
               isArchived={activity.isArchived}
+              surface="dark"
             />
           </div>
         </div>

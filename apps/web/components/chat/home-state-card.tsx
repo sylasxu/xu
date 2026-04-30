@@ -45,19 +45,19 @@ function getCardStyles(homeState: HomeState, isDarkMode: boolean) {
   switch (homeState) {
     case "H3":
       return isDarkMode
-        ? "border-white/14 bg-white/[0.05] shadow-[0_24px_40px_-28px_rgba(0,0,0,0.82)]"
+        ? "border-white/14 bg-[#101010]/92 shadow-[0_24px_40px_-28px_rgba(0,0,0,0.82)]"
         : "border-black/14 bg-white shadow-[0_22px_40px_-28px_rgba(0,0,0,0.16)]";
     case "H1":
       return isDarkMode
-        ? "border-white/10 bg-white/[0.04] shadow-[0_20px_36px_-30px_rgba(0,0,0,0.78)]"
+        ? "border-white/10 bg-[#101010]/90 shadow-[0_20px_36px_-30px_rgba(0,0,0,0.78)]"
         : "border-black/10 bg-white shadow-[0_18px_36px_-30px_rgba(0,0,0,0.14)]";
     case "H4":
       return isDarkMode
-        ? "border-white/6 bg-white/[0.02]"
+        ? "border-white/8 bg-[#101010]/92 shadow-[0_20px_38px_-30px_rgba(0,0,0,0.82)]"
         : "border-black/6 bg-white/[0.98]";
     default:
       return isDarkMode
-        ? "border-white/8 bg-white/[0.03]"
+        ? "border-white/8 bg-[#101010]/90"
         : "border-black/8 bg-white shadow-[0_18px_36px_-30px_rgba(0,0,0,0.12)]";
   }
 }

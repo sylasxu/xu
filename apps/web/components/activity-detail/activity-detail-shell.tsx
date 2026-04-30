@@ -16,7 +16,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { ThemeBackground } from "@/components/activity/theme-background";
 import { Button } from "@/components/ui/button";
 import { resolveThemeConfig } from "@/lib/themes";
 import { buildActivityDetailPath, resolveActivityEntry } from "@/lib/activity-url";
@@ -534,8 +533,6 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-black text-white">
       <DiscussionEntryTracker activityId={activity.id} />
-      <ThemeBackground config={themeConfig} />
-
       <div className="pointer-events-none absolute inset-x-0 top-0 z-[1] h-32 bg-gradient-to-b from-black/55 to-transparent" />
       <main className="relative z-10 mx-auto flex min-h-screen max-w-lg flex-col px-4 pb-80 pt-4">
         <header className="mb-4 flex items-center justify-between">
@@ -593,14 +590,14 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
             {notice ? <p className="max-w-[168px] text-right text-xs text-white/58">{notice}</p> : null}
           </div>
 
-          <div className="grid grid-cols-[1fr_auto] gap-2">
+          <div className="space-y-2">
             <Button
               type="button"
               onClick={() => {
                 void joinActivity();
               }}
               disabled={joining || fulfillmentSubmitting || (!canJoin && !isJoined && !canConfirmFulfillment)}
-              className="h-12 rounded-2xl bg-white text-sm font-semibold text-black hover:bg-white/90"
+              className="h-12 w-full rounded-2xl bg-white text-sm font-semibold text-black hover:bg-white/90"
             >
               {joining || fulfillmentSubmitting ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -613,31 +610,31 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
               )}
               {canConfirmFulfillment ? "履约确认" : joinLabel}
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                void copyShareText();
-              }}
-              className="h-12 rounded-2xl border-white/12 bg-white/[0.06] px-4 text-white hover:bg-white/10 hover:text-white"
-            >
-              <Share2 className="h-4 w-4" />
-              <span className="sr-only">{shareStatus === "copied" ? "已复制" : "分享"}</span>
-            </Button>
-          </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              cloneActivity();
-            }}
-            className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl py-2 text-xs text-white/44 transition hover:bg-white/[0.04] hover:text-white/70"
-            title={activity.conversionTips.cloneContext}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            我也组一个
-          </button>
-          <p className="px-2 text-center text-[11px] leading-5 text-white/35">{activity.conversionTips.cloneContext}</p>
+            <div className="flex items-center justify-center gap-4 px-2 text-xs text-white/44">
+              <button
+                type="button"
+                onClick={() => {
+                  void copyShareText();
+                }}
+                className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 transition hover:bg-white/[0.04] hover:text-white/70"
+              >
+                <Share2 className="h-3.5 w-3.5" />
+                {shareStatus === "copied" ? "已复制" : "复制链接"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  cloneActivity();
+                }}
+                className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 transition hover:bg-white/[0.04] hover:text-white/70"
+                title={activity.conversionTips.cloneContext}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                我也组一个
+              </button>
+            </div>
+          </div>
 
           {shareStatus !== "idle" ? (
             <p className="mt-2 text-center text-xs text-white/44">

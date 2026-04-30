@@ -1498,27 +1498,31 @@ export function MessageCenterDrawer({
                 )}
               </section>
 
-              <section
+              <details
                 className={cn(
-                  "rounded-[28px] border px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035),0_18px_42px_-32px_rgba(0,0,0,0.78)]",
+                  "group rounded-[28px] border px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.035),0_18px_42px_-32px_rgba(0,0,0,0.78)] [&>summary::-webkit-details-marker]:hidden",
                   isDarkMode ? "border-white/10 bg-white/[0.035]" : "border-black/8 bg-white"
                 )}
               >
-                <div className="mb-3 flex items-center gap-2">
-                  <BellRing className="h-4 w-4 text-white/62" />
-                  <p className="text-sm font-semibold">{messageCenter?.ui.systemSectionTitle || "系统跟进"}</p>
-                  <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", isDarkMode ? "border border-white/8 bg-white/[0.04] text-white/70" : "border border-black/8 bg-black/[0.03] text-black/70")}>
-                    {systemNotifications.length}
-                  </span>
-                </div>
+                <summary className="flex cursor-pointer items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <BellRing className="h-4 w-4 text-white/62" />
+                    <p className="text-sm font-semibold">{messageCenter?.ui.systemSectionTitle || "系统跟进"}</p>
+                    <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", isDarkMode ? "border border-white/8 bg-white/[0.04] text-white/70" : "border border-black/8 bg-black/[0.03] text-black/70")}>
+                      {systemNotifications.length}
+                    </span>
+                  </div>
+                  <ChevronRight className={cn("h-4 w-4 transition group-open:rotate-90", isDarkMode ? "text-white/36" : "text-black/36")} />
+                </summary>
 
-                {systemNotifications.length === 0 ? (
-                  <p className={cn("text-sm leading-6", isDarkMode ? "text-white/54" : "text-black/52")}>
-                    {messageCenter?.ui.systemEmpty || "暂无系统通知，活动进度有变化会第一时间出现在这里。"}
-                  </p>
-                ) : (
-                  <div className="space-y-3">
-                    {systemNotifications.map((notification) => {
+                <div className="mt-3">
+                  {systemNotifications.length === 0 ? (
+                    <p className={cn("text-sm leading-6", isDarkMode ? "text-white/54" : "text-black/52")}>
+                      {messageCenter?.ui.systemEmpty || "暂无系统通知，活动进度有变化会第一时间出现在这里。"}
+                    </p>
+                  ) : (
+                    <div className="space-y-3">
+                      {systemNotifications.map((notification) => {
                       const readKey = `read:${notification.id}`;
                       const kickoffKey = `kickoff:${notification.id}`;
                       const positiveFeedbackKey = `feedback:positive:${notification.id}`;
@@ -1623,35 +1627,40 @@ export function MessageCenterDrawer({
                           ) : null}
                         </div>
                       );
-                    })}
-                  </div>
-                )}
-              </section>
+                      })}
+                    </div>
+                  )}
+                </div>
+              </details>
 
-              <section
+              <details
                 className={cn(
-                  "rounded-[28px] border px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.035),0_18px_42px_-32px_rgba(0,0,0,0.78)]",
+                  "group rounded-[28px] border px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.035),0_18px_42px_-32px_rgba(0,0,0,0.78)] [&>summary::-webkit-details-marker]:hidden",
                   isDarkMode ? "border-white/10 bg-white/[0.035]" : "border-black/8 bg-white"
                 )}
               >
-                <div className="mb-3 flex items-center gap-2">
-                  <MessageSquareText className="h-4 w-4 text-white/62" />
-                  <p className="text-sm font-semibold">{messageCenter?.ui.chatSummarySectionTitle || "活动群聊摘要"}</p>
-                  <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", isDarkMode ? "border border-white/8 bg-white/[0.04] text-white/70" : "border border-black/8 bg-black/[0.03] text-black/70")}>
-                    {messageCenter?.chatActivities.totalUnread || 0} 条未读
-                  </span>
-                </div>
-                <p className={cn("mb-3 text-xs leading-5", isDarkMode ? "text-white/42" : "text-black/42")}>
+                <summary className="flex cursor-pointer items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <MessageSquareText className="h-4 w-4 text-white/62" />
+                    <p className="text-sm font-semibold">{messageCenter?.ui.chatSummarySectionTitle || "活动群聊摘要"}</p>
+                    <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", isDarkMode ? "border border-white/8 bg-white/[0.04] text-white/70" : "border border-black/8 bg-black/[0.03] text-black/70")}>
+                      {messageCenter?.chatActivities.totalUnread || 0} 条未读
+                    </span>
+                  </div>
+                  <ChevronRight className={cn("h-4 w-4 transition group-open:rotate-90", isDarkMode ? "text-white/36" : "text-black/36")} />
+                </summary>
+                <p className={cn("mt-3 text-xs leading-5", isDarkMode ? "text-white/42" : "text-black/42")}>
                   {messageCenter?.ui.chatSummaryDescription || "这里汇总活动群聊的最近动态，点进详情可以继续讨论和跟进。"}
                 </p>
 
-                {chatActivities.length === 0 ? (
-                  <p className={cn("text-sm leading-6", isDarkMode ? "text-white/54" : "text-black/52")}>
-                    {messageCenter?.ui.chatSummaryEmpty || "暂无活动群聊记录，参与活动后这里会同步显示最近动态。"}
-                  </p>
-                ) : (
-                  <div className="space-y-3">
-                    {chatActivities.map((chat) => (
+                <div className="mt-3">
+                  {chatActivities.length === 0 ? (
+                    <p className={cn("text-sm leading-6", isDarkMode ? "text-white/54" : "text-black/52")}>
+                      {messageCenter?.ui.chatSummaryEmpty || "暂无活动群聊记录，参与活动后这里会同步显示最近动态。"}
+                    </p>
+                  ) : (
+                    <div className="space-y-3">
+                      {chatActivities.map((chat) => (
                       <div
                         key={chat.activityId}
                         className={cn(
@@ -1725,10 +1734,11 @@ export function MessageCenterDrawer({
                           </div>
                         ) : null}
                       </div>
-                    ))}
-                  </div>
-                )}
-              </section>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </details>
             </div>
           )}
         </div>

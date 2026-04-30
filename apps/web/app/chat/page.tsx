@@ -2586,11 +2586,8 @@ export default function ChatPage() {
               disabled={isSending}
               isDarkMode={isDarkMode}
               activeConversationId={conversationId}
-              currentTasks={currentTasks}
-              currentTasksLoading={isCurrentTasksLoading}
               ui={welcomeUi.sidebar}
               onSelectConversation={handleSelectConversation}
-              onSelectTaskAction={handleRuntimeTaskAction}
               onOpenMessageCenter={() => {
                 setMessageCenterFocusMatchId(null);
                 setMessageCenterOpenSignal((value) => value + 1);

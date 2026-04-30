@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Send, Sparkles, Users, Wifi, WifiOff } from "lucide-react"
+import { Send, Sparkles } from "lucide-react"
 import { useSearchParams } from "next/navigation"
 
 import { readClientToken, readClientUserId } from "@/lib/client-auth"
@@ -143,10 +143,7 @@ function buildJoinGuideTitle(title: string): string {
 function getJoinQuickStarters(title: string): string[] {
   const normalizedTitle = title.trim() || "这场活动"
   return [
-    `哈喽，我刚加入「${normalizedTitle}」，先和大家打个招呼～`,
-    `大家一般提前多久到？我想把时间安排稳一点。`,
-    `集合点或到店方式有需要补充的吗？`,
-    `如果还缺一个开场，我可以先帮大家确认一下安排。`,
+    `我已报名「${normalizedTitle}」，想确认一下集合时间和地点按页面信息来吗？`,
   ]
 }
 
@@ -269,8 +266,7 @@ export function DiscussionRuntimePanel({
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [messages, setMessages] = useState<RuntimeMessage[]>(() => buildInitialMessages(initialMessages))
   const [loadState, setLoadState] = useState<LoadState>("visitor")
-  const [connectionState, setConnectionState] = useState<ConnectionState>("idle")
-  const [onlineCount, setOnlineCount] = useState(0)
+  const [, setConnectionState] = useState<ConnectionState>("idle")
   const [input, setInput] = useState("")
   const [notice, setNotice] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
@@ -524,7 +520,6 @@ export function DiscussionRuntimePanel({
       }
 
       if (parsed.type === "online") {
-        setOnlineCount(parsed.data.count)
         return
       }
 
@@ -608,50 +603,25 @@ export function DiscussionRuntimePanel({
         <div>
           <div className="flex items-center gap-2">
             <h2 className={cn("text-sm font-semibold", isDarkSurface ? "text-white/88" : "text-gray-700")}>讨论区</h2>
-            {connectionState === "connected" || loadState === "ready" ? (
-              <span
-                className={cn(
-                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]",
-                  isDarkSurface ? "bg-emerald-300/12 text-emerald-100" : "bg-emerald-50 text-emerald-700"
-                )}
-              >
-                <Wifi className="h-3 w-3" />
-                {connectionState === "connected" ? "实时在线" : "已接入实时"}
-              </span>
-            ) : (
-              <span
-                className={cn(
-                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]",
-                  isDarkSurface ? "bg-white/[0.06] text-white/48" : "bg-slate-100 text-slate-500"
-                )}
-              >
-                <WifiOff className="h-3 w-3" />
-                {isArchived ? "已归档" : "预览模式"}
-              </span>
-            )}
+            <span
+              className={cn(
+                "inline-flex items-center rounded-full px-2 py-0.5 text-[11px]",
+                isDarkSurface ? "bg-white/[0.06] text-white/58" : "bg-slate-100 text-slate-600"
+              )}
+            >
+              {loadState === "ready" ? "协作记录" : isArchived ? "已归档" : "预览"}
+            </span>
           </div>
           <p className={cn("mt-1 text-xs leading-5", isDarkSurface ? "text-white/48" : "text-gray-500")}>
             {loadState === "visitor"
-              ? "登录并加入后，这里会继续承接后续讨论和安排。"
+              ? "登录并加入后，这里会继续承接集合、时间和地点安排。"
               : loadState === "not_participant"
-                ? "你还没加入这场活动，加入后这里会自动变成可继续沟通的讨论区。"
+                ? "你还没加入这场活动，加入后这里会变成可继续协作的记录。"
                 : isArchived
                   ? "活动已归档，目前保留只读记录。"
-                  : "加入成功后，接下来就在这里继续破冰、对齐和协作。"}
+                  : "加入成功后，集合、时间、地点变化都在这里接住。"}
           </p>
         </div>
-
-        {loadState === "ready" ? (
-          <div
-            className={cn(
-              "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px]",
-              isDarkSurface ? "bg-white/[0.06] text-white/58" : "bg-slate-100 text-slate-600"
-            )}
-          >
-            <Users className="h-3 w-3" />
-            {onlineCount > 0 ? `${onlineCount} 人在线` : "已接入实时"}
-          </div>
-        ) : null}
       </div>
 
       {isJoinSuccessEntry ? (
@@ -668,7 +638,7 @@ export function DiscussionRuntimePanel({
             <p className="text-sm font-semibold">{buildJoinGuideTitle(activityTitle)}</p>
           </div>
           <p className={cn("mt-1 text-xs leading-5", isDarkSurface ? "text-white/50" : "text-[#6673a8]")}>
-            刚才报的这场局已经接上了，先把集合、破冰或时间安排补一句，后续变化也会留在这里。
+            刚才报的这场局已经接上了，先确认集合时间、地点或到店方式，后续变化也会留在这里。
           </p>
           {quickStarters.length > 0 ? (
             <div className="mt-3 flex flex-wrap gap-2">
@@ -809,7 +779,7 @@ export function DiscussionRuntimePanel({
             value={input}
             onChange={(event) => setInput(event.target.value)}
             rows={input.trim().length > 24 ? 3 : 2}
-            placeholder="说点集合、破冰、时间安排都可以"
+            placeholder="说点集合、时间、地点安排都可以"
             className={cn(
               "min-h-[48px] flex-1 resize-none rounded-2xl border px-3 py-2 text-sm outline-none transition",
               isDarkSurface

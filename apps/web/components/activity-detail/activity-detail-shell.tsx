@@ -620,7 +620,7 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
                 className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 transition hover:bg-white/[0.04] hover:text-white/70"
               >
                 <Share2 className="h-3.5 w-3.5" />
-                {shareStatus === "copied" ? "已复制" : "复制链接"}
+                {shareStatus === "copied" ? "已复制" : "复制文案"}
               </button>
               <button
                 type="button"
@@ -638,7 +638,7 @@ export function ActivityDetailShell({ activity }: ActivityDetailShellProps) {
 
           {shareStatus !== "idle" ? (
             <p className="mt-2 text-center text-xs text-white/44">
-              {shareStatus === "copied" ? "分享文案已复制" : "复制失败，可以手动复制当前链接"}
+              {shareStatus === "copied" ? "活动文案已复制" : "复制失败，可以手动复制当前链接"}
             </p>
           ) : null}
         </section>

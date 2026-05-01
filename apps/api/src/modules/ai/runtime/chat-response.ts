@@ -11,13 +11,7 @@ import type {
   GenUISuggestions,
   GenUIResponseEnvelope,
 } from '@xu/genui-contract';
-import {
-  getConversationMessages,
-  executeChatRequest,
-  isUuidLike,
-  type ChatExecutionResult,
-  type ChatRequest,
-} from '../ai.service';
+import type { ChatExecutionResult, ChatRequest } from '../ai.service';
 import { createThread } from '../memory';
 import { extractStructuredAction, isStructuredActionType } from '../user-action';
 import {
@@ -53,6 +47,12 @@ const ID_PREFIX = {
   block: 'block',
   event: 'evt',
 } as const;
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isUuidLike(value: string | null | undefined): value is string {
+  return typeof value === 'string' && UUID_PATTERN.test(value);
+}
 
 const MAX_PRIVATE_HISTORY_MESSAGES = 10;
 const MAX_ACTIVITY_HISTORY_MESSAGES = 6;
@@ -1163,7 +1163,8 @@ function readTransientConversationHistoryFromRequest(request: GenUIRequest): {
 
 async function resolveConversationContext(
   request: GenUIRequest,
-  viewer: ViewerContext | null
+  viewer: ViewerContext | null,
+  getConversationMessages: (id: string) => Promise<{ conversation: { userId: string } | null; messages: Array<{ role: string; content: unknown; messageType?: string }> } | null>,
 ): Promise<ResolvedConversation> {
   const requestedConversationId = request.conversationId?.trim() || '';
   const requestLevelSuggestions = request.latestAssistantSuggestions;
@@ -1265,9 +1266,10 @@ async function resolveConversationContext(
 async function resolveAiChatExecution(
   request: GenUIRequest,
   viewer: ViewerContext | null,
+  getConversationMessages: (id: string) => Promise<{ conversation: { userId: string } | null; messages: Array<{ role: string; content: unknown; messageType?: string }> } | null>,
   abortSignal?: AbortSignal
 ): Promise<ResolvedAiChatExecution> {
-  const conversation = await resolveConversationContext(request, viewer);
+  const conversation = await resolveConversationContext(request, viewer, getConversationMessages);
   const userText = normalizeActionDisplayText(request.input);
   const requestLocation = parseRequestLocation(request);
   const suggestionResolution = request.input.type === 'text'
@@ -2966,11 +2968,14 @@ export async function createAiChatErrorStreamResponse(params: {
 
 export async function buildAiChatEnvelope(
   request: GenUIRequest,
-  options?: AiChatResponseOptions
+  options: AiChatResponseOptions & {
+    executeChatRequest: (req: ChatRequest) => Promise<ChatExecutionResult>;
+    getConversationMessages: (id: string) => Promise<{ conversation: { userId: string } | null; messages: Array<{ role: string; content: unknown; messageType?: string }> } | null>;
+  }
 ): Promise<AiChatEnvelopeResult> {
   const viewer = options?.viewer ?? null;
-  const execution = await resolveAiChatExecution(request, viewer, options?.abortSignal);
-  const executionResult = await executeChatRequest(execution.chatRequest);
+  const execution = await resolveAiChatExecution(request, viewer, options.getConversationMessages, options?.abortSignal);
+  const executionResult = await options.executeChatRequest(execution.chatRequest);
   const mapped = buildBlocksFromExecutionResult(executionResult, request);
   const executionPath = mapped.executionPath;
   const suggestions = buildSuggestionsFromBlocks(mapped.blocks);

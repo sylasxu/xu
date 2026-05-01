@@ -112,7 +112,12 @@ import {
 } from './task-runtime/agent-task.service';
 import { isIdentityMemoryQuestion } from './identity-reply';
 import { applyAiChatResponsePolicies } from './runtime/response-policy';
-import type { AiChatEnvelopeResult } from './runtime/chat-response';
+import {
+  buildAiChatEnvelope,
+  createAiChatStreamResponse,
+  createAiChatErrorStreamResponse,
+  type AiChatEnvelopeResult,
+} from './runtime/chat-response';
 
 export {
   recordJoinTaskAuthGateFromDomain,
@@ -3263,14 +3268,6 @@ export async function getWelcomeCard(
   };
 }
 
-async function buildAiChatEnvelopeInternal(
-  request: GenUIRequest,
-  options: { viewer?: ViewerContext | null; abortSignal?: AbortSignal } = {}
-): Promise<AiChatEnvelopeResult> {
-  const chatRuntime = await import('./runtime/chat-response');
-  return chatRuntime.buildAiChatEnvelope(request, options);
-}
-
 async function finalizeAiChatResponse(params: {
   request: GenUIRequest;
   viewer: ViewerContext | null;
@@ -3342,18 +3339,19 @@ export async function streamAiChatResponse(
   request: GenUIRequest,
   options: { viewer?: ViewerContext | null; abortSignal?: AbortSignal; requestAbortSignal?: AbortSignal } = {}
 ) {
-  const chatRuntime = await import('./runtime/chat-response');
   try {
-    const result = await buildAiChatEnvelopeInternal(request, {
+    const result = await buildAiChatEnvelope(request, {
       viewer: options.viewer,
       abortSignal: options.requestAbortSignal ?? options.abortSignal,
+      executeChatRequest,
+      getConversationMessages,
     });
     const finalized = await finalizeAiChatResponse({
       request,
       viewer: options.viewer ?? null,
       result,
     });
-    return chatRuntime.createAiChatStreamResponse({
+    return createAiChatStreamResponse({
       request,
       envelope: finalized.envelope,
       traces: finalized.traces,
@@ -3369,7 +3367,7 @@ export async function streamAiChatResponse(
       message,
       viewerId: options.viewer?.id || null,
     });
-    return chatRuntime.createAiChatErrorStreamResponse({
+    return createAiChatErrorStreamResponse({
       request,
       message,
     });

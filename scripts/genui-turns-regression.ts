@@ -86,11 +86,11 @@ const scenarioFilter = scenarioArgIndex >= 0 ? Bun.argv[scenarioArgIndex + 1]?.t
 const AUTO_ADMIN_PHONE = process.env.GENUI_ADMIN_PHONE?.trim()
   || process.env.SMOKE_ADMIN_PHONE?.trim()
   || process.env.ADMIN_PHONE_WHITELIST?.split(",").map((phone) => phone.trim()).find(Boolean)
-  || "";
+  || '13996092317';
 const AUTO_ADMIN_CODE = process.env.GENUI_ADMIN_CODE?.trim()
   || process.env.SMOKE_ADMIN_CODE?.trim()
   || process.env.ADMIN_SUPER_CODE?.trim()
-  || "";
+  || '9999';
 
 function readAuthHeaderArgs(token?: string): string[] {
   return token ? ["-H", `Authorization: Bearer ${token}`] : [];
@@ -278,50 +278,6 @@ function readTracePayloadsFromStream(streamOutput: string): TracePayload[] {
   }
 
   return traces;
-}
-
-function postResponse(
-  conversationId: string | null,
-  input: InputStep,
-  options?: {
-    token?: string;
-    recentMessages?: RecentMessage[];
-  }
-): ResponseEnvelope {
-  const body = {
-    ...(conversationId ? { conversationId } : {}),
-    input,
-    context: {
-      client: "web",
-      locale: "zh-CN",
-      timezone: "Asia/Shanghai",
-      platformVersion: "regression",
-      ...(options?.recentMessages && options.recentMessages.length > 0
-        ? { recentMessages: options.recentMessages }
-        : {}),
-    },
-    ai: {
-      model: DEFAULT_TEST_MODEL,
-    },
-  };
-
-  const result = execCurl([
-    "-sS",
-    "-X",
-    "POST",
-    BASE_URL,
-    "-H",
-    "Content-Type: application/json",
-    ...readAuthHeaderArgs(options?.token),
-    "-d",
-    JSON.stringify(body),
-  ]);
-
-  if (result.status !== 0) {
-    throw new Error(`response endpoint failed: ${result.stderr}`);
-  }
-
-  return JSON.parse(result.stdout) as ResponseEnvelope;
 }
 
 function postResponseStream(
@@ -840,19 +796,12 @@ function runScenario(scenario: Scenario): string[] {
       && recentMessages.length > 0;
     const requestTransientTurns = shouldPreserveAnonymousTransientTurns ? recentMessages : undefined;
     const shouldUseTraceStream = scenario.streamTraceStepIndexes?.includes(index) === true;
-    const traceStreamOutput = shouldUseTraceStream
-      ? postResponseStream(conversationId, step, {
-          token: scenarioToken,
-          recentMessages: requestTransientTurns,
-          trace: true,
-        })
-      : null;
-    const turn = traceStreamOutput
-      ? readResponseCompleteEnvelopeFromStream(traceStreamOutput)
-      : postResponse(conversationId, step, {
-          token: scenarioToken,
-          recentMessages: requestTransientTurns,
-        });
+    const streamOutput = postResponseStream(conversationId, step, {
+      token: scenarioToken,
+      recentMessages: requestTransientTurns,
+      trace: shouldUseTraceStream,
+    });
+    const turn = readResponseCompleteEnvelopeFromStream(streamOutput);
 
     assert(turn, `${label}: stream response-complete envelope missing`);
     const resolvedTurn = turn;

@@ -1483,7 +1483,7 @@ export default function ChatPage() {
   const isSending = status === "submitted";
   const showComposerHint = shouldExpandComposer(input);
   const currentUserId = useMemo(() => readClientUserId(authToken), [authToken]);
-  const visibleCurrentTasks = useMemo(() => currentTasks.slice(0, 2), [currentTasks]);
+  const visibleCurrentTasks = useMemo(() => currentTasks.slice(0, 1), [currentTasks]);
   const visibleWelcomeFocus = useMemo(
     () => (isWelcomeFocusCoveredByCurrentTasks(welcomeFocus, currentTasks) ? null : welcomeFocus),
     [currentTasks, welcomeFocus]

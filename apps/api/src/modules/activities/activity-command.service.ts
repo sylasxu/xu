@@ -15,8 +15,8 @@ import { indexActivity, deleteIndex } from '../ai/rag';
 import { validateFields } from '../content-security';
 import { ACTIVITY_TYPE_THEME_MAP, PRESET_THEMES } from './theme-presets';
 import {
-  notifyCompleted,
   notifyCancelled,
+  notifyPostActivity,
 } from '../notifications/notification.service';
 
 async function getActivityRowForRag(activityId: string) {
@@ -351,10 +351,11 @@ export async function updateActivityStatus(
     .map((item) => item.userId)
     .filter((participantUserId) => participantUserId !== userId);
 
-  const notifier = status === 'completed' ? notifyCompleted : notifyCancelled;
-  const results = await Promise.allSettled(
-    recipients.map((participantUserId) => notifier(participantUserId, activityId, activity.title))
-  );
+  const results = status === 'completed'
+    ? await Promise.allSettled([notifyPostActivity(activityId, activity.title)])
+    : await Promise.allSettled(
+      recipients.map((participantUserId) => notifyCancelled(participantUserId, activityId, activity.title))
+    );
 
   for (const result of results) {
     if (result.status === 'rejected') {

@@ -167,55 +167,43 @@ export async function confirmActivityFulfillment(
     ? `真实履约结果：发起人已到场，成员到场 ${attendedCount} 人，未到场 ${noShowCount} 人。`
     : `真实履约结果：发起人已到场，成员全部 ${attendedCount} 人到场。`;
 
-  const memoryTasks: Promise<unknown>[] = [
-    upsertActivityOutcomeMemory(creatorId, {
+  const writeFulfillmentOutcomeMemory = async (params: {
+    userId: string;
+    attended: boolean;
+  }) => {
+    await upsertActivityOutcomeMemory(params.userId, {
       activityId,
       activityTitle: activity.title,
       activityType: activity.type,
       locationName: activity.locationName,
-      attended: true,
+      attended: params.attended,
       rebookTriggered: false,
       reviewSummary: outcomeSummary,
       happenedAt: activity.startAt,
       updatedAt: now,
-    }),
-    ...confirmations.map((item) => upsertActivityOutcomeMemory(item.userId, {
-      activityId,
-      activityTitle: activity.title,
-      activityType: activity.type,
-      locationName: activity.locationName,
-      attended: item.fulfilled,
-      rebookTriggered: false,
-      reviewSummary: outcomeSummary,
-      happenedAt: activity.startAt,
-      updatedAt: now,
-    })),
-  ];
+    });
 
-  if (activity.embedding) {
-    memoryTasks.push(
-      addInterestVector(creatorId, {
+    if (activity.embedding && params.attended) {
+      await addInterestVector(params.userId, {
         activityId,
         embedding: activity.embedding,
         participatedAt: activity.startAt,
         feedback: 'positive',
-      }),
-    );
-
-    for (const item of confirmations) {
-      if (!item.fulfilled) {
-        continue;
-      }
-      memoryTasks.push(
-        addInterestVector(item.userId, {
-          activityId,
-          embedding: activity.embedding,
-          participatedAt: activity.startAt,
-          feedback: 'positive',
-        }),
-      );
+      });
     }
+  };
+
+  const fulfillmentOutcomeByUserId = new Map<string, boolean>();
+  fulfillmentOutcomeByUserId.set(creatorId, true);
+  for (const item of confirmations) {
+    fulfillmentOutcomeByUserId.set(item.userId, item.fulfilled);
   }
+
+  const memoryTasks: Promise<unknown>[] = Array.from(fulfillmentOutcomeByUserId.entries())
+    .map(([memoryUserId, attended]) => writeFulfillmentOutcomeMemory({
+      userId: memoryUserId,
+      attended,
+    }));
 
   const results = await Promise.allSettled(memoryTasks);
   for (const result of results) {

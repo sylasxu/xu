@@ -440,6 +440,7 @@ Page<MessagePageData, WechatMiniprogram.Page.CustomOption>({
       chatSummaryDescription: ui?.chatSummaryDescription || '',
       chatSummaryEmpty: ui?.chatSummaryEmpty || '',
       chatSummaryFallbackMessage: ui?.chatSummaryFallbackMessage || '',
+      chatSummaryOpenActionLabel: ui?.chatSummaryOpenActionLabel || '进入讨论区',
     };
   },
 

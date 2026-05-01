@@ -109,6 +109,14 @@ interface MessageCenterResponse {
     summary: string;
     statusLabel: string;
     activityId: string | null;
+    primaryAction: {
+      kind: string;
+      label: string;
+      prompt?: string;
+      activityId?: string;
+      activityMode?: ActivityMode;
+      entry?: string;
+    };
   }>;
   pendingMatches: PendingMatchItem[];
   unreadNotificationCount: number;
@@ -1027,11 +1035,45 @@ async function confirmFulfillment(params: {
 }
 
 async function markRebookFollowUp(activityId: string, user: BootstrappedUser) {
-  return requestJson<{ code: number; msg: string }>({
+  return requestJson<{
+    code: number;
+    msg: string;
+    nextAction?: {
+      label: string;
+      prompt: string;
+      activityMode: 'review' | 'rebook';
+      entry: string;
+    };
+  }>({
     method: 'POST',
     path: '/participants/rebook-follow-up',
     token: user.token,
     payload: { activityId },
+  });
+}
+
+async function recordActivitySelfFeedback(params: {
+  activityId: string;
+  user: BootstrappedUser;
+  feedback: 'positive' | 'neutral' | 'failed';
+}) {
+  return requestJson<{
+    code: number;
+    msg: string;
+    nextAction?: {
+      label: string;
+      prompt: string;
+      activityMode: 'review' | 'rebook';
+      entry: string;
+    };
+  }>({
+    method: 'POST',
+    path: '/participants/self-feedback',
+    token: params.user.token,
+    payload: {
+      activityId: params.activityId,
+      feedback: params.feedback,
+    },
   });
 }
 
@@ -1344,6 +1386,20 @@ async function scenarioPostActivityFollowUpFlow(context: ScenarioContext): Promi
   const completed = await markActivityCompleted(activityId, creator);
   assert(completed.success === true, `活动完成状态更新失败: ${completed.msg}`);
 
+  const postActivityMessageCenter = await getMessageCenter(joiner);
+  const postActivityAction = postActivityMessageCenter.actionItems.find((item) => (
+    item.type === 'post_activity_follow_up' && item.activityId === activityId
+  ));
+  assert(postActivityAction, `活动完成后消息中心未出现活动后反馈任务: ${JSON.stringify(postActivityMessageCenter.actionItems)}`);
+  assert(
+    postActivityAction.primaryAction.label.includes('反馈'),
+    `活动后任务第一步不是补真实反馈: ${JSON.stringify(postActivityAction.primaryAction)}`,
+  );
+  assert(
+    postActivityAction.primaryAction.activityMode !== 'review' && postActivityAction.primaryAction.activityMode !== 'rebook',
+    `活动后任务第一步不应直接进入复盘/再约: ${JSON.stringify(postActivityAction.primaryAction)}`,
+  );
+
   const afterCompletedMessages = await getChatMessages(activityId, joiner);
   assert(
     afterCompletedMessages.messages.some((item) => item.content.includes('已确认成局')),
@@ -1383,9 +1439,32 @@ async function scenarioPostActivityFollowUpFlow(context: ScenarioContext): Promi
     `履约确认后的初始 reviewSummary 异常: ${initialOutcome.reviewSummary}`,
   );
 
+  const feedbackResult = await recordActivitySelfFeedback({
+    activityId,
+    user: joiner,
+    feedback: 'positive',
+  });
+  assert(feedbackResult.code === 200, `活动后轻反馈失败: ${feedbackResult.msg}`);
+  assert(
+    feedbackResult.nextAction?.activityMode === 'rebook',
+    `挺顺利反馈后应优先承接再约: ${JSON.stringify(feedbackResult.nextAction)}`,
+  );
+  assert(
+    feedbackResult.nextAction.prompt.includes(activityId),
+    `轻反馈 nextAction 未带 activityId: ${JSON.stringify(feedbackResult.nextAction)}`,
+  );
+
+  const feedbackOutcome = await waitFor(async () => {
+    const outcome = await getUserActivityOutcome(joiner.user.id, activityId);
+    return outcome?.reviewSummary?.includes('挺顺利') ? outcome : null;
+  }, { retries: 8, delayMs: 300 });
+  assert(feedbackOutcome, '活动后轻反馈未先写入真实结果 memory');
+  assert(feedbackOutcome.attended === true, `轻反馈 attended 写回异常: ${feedbackOutcome.attended}`);
+  assert(feedbackOutcome.rebookTriggered === false, '轻反馈不应直接标记 rebookTriggered');
+
   const reviewTurn = await postAiChat({
     user: joiner,
-    text: `我刚结束「${activityTitle}」（activityId: ${activityId}），帮我先做一份复盘：亮点、槽点、下次优化和一句可直接发群里的总结。`,
+    text: `我已经先反馈这次「${activityTitle}」（activityId: ${activityId}）挺顺利了，现在帮我做一份复盘：亮点、槽点、下次优化和一句可直接发群里的总结。`,
     context: {
       activityId,
       activityMode: 'review',
@@ -1405,7 +1484,7 @@ async function scenarioPostActivityFollowUpFlow(context: ScenarioContext): Promi
     }
 
     const reviewSummary = outcome.reviewSummary?.trim();
-    if (!reviewSummary || reviewSummary === initialOutcome.reviewSummary) {
+    if (!reviewSummary || reviewSummary === feedbackOutcome.reviewSummary) {
       return null;
     }
 
@@ -1429,6 +1508,7 @@ async function scenarioPostActivityFollowUpFlow(context: ScenarioContext): Promi
 
   details.push(`活动 ${activityId} 已串通 completed -> confirm-fulfillment -> review -> rebook`);
   details.push(`参与者初始复盘="${initialOutcome.reviewSummary}"`);
+  details.push(`轻反馈先写回="${feedbackOutcome.reviewSummary}"，nextAction=${feedbackResult.nextAction.activityMode}`);
   details.push(`AI 复盘后写回摘要="${reviewedOutcome.reviewSummary}"`);
   details.push(`再约标记已落库，rebookTriggered=${rebookedOutcome.rebookTriggered}`);
 

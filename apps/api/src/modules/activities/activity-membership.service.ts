@@ -33,6 +33,22 @@ function getJoinActivityErrorMessage(error: unknown): string {
   return '报名失败';
 }
 
+function formatDiscussionStartTime(startAt: Date): string {
+  const month = startAt.getMonth() + 1;
+  const day = startAt.getDate();
+  const hour = startAt.getHours().toString().padStart(2, '0');
+  const minute = startAt.getMinutes().toString().padStart(2, '0');
+  return `${month}月${day}日 ${hour}:${minute}`;
+}
+
+function buildJoinDiscussionSystemMessage(params: {
+  joinerName: string;
+  locationName: string;
+  startAt: Date;
+}): string {
+  return `${params.joinerName} 刚刚加入了！先在这里确认集合、时间和地点：${formatDiscussionStartTime(params.startAt)}，${params.locationName}。`;
+}
+
 export type JoinNavigationIntent = 'open_discussion' | 'stay_on_detail';
 
 export interface JoinActivityResult {
@@ -47,6 +63,8 @@ export async function joinActivity(activityId: string, userId: string): Promise<
   let shouldNotify = false;
   let creatorId = '';
   let activityTitle = '';
+  let activityLocationName = '';
+  let activityStartAt: Date | null = null;
   let joinerName = '新成员';
   let result: JoinActivityResult | null = null;
 
@@ -67,6 +85,7 @@ export async function joinActivity(activityId: string, userId: string): Promise<
           id: activities.id,
           creatorId: activities.creatorId,
           title: activities.title,
+          locationName: activities.locationName,
           status: activities.status,
           currentParticipants: activities.currentParticipants,
           maxParticipants: activities.maxParticipants,
@@ -109,6 +128,8 @@ export async function joinActivity(activityId: string, userId: string): Promise<
 
       creatorId = activity.creatorId;
       activityTitle = activity.title;
+      activityLocationName = activity.locationName;
+      activityStartAt = activity.startAt;
       joinerName = joiningUser.nickname || '新成员';
 
       const [existing] = await tx
@@ -248,12 +269,20 @@ export async function joinActivity(activityId: string, userId: string): Promise<
       console.error('Failed to send join notification:', error);
     });
 
-    db.insert(activityMessages).values({
-      activityId,
-      senderId: null,
-      messageType: 'system',
-      content: `${joinerName} 刚刚加入了！`,
-    }).catch((error) => console.error('Failed to send join system message:', error));
+    try {
+      await db.insert(activityMessages).values({
+        activityId,
+        senderId: null,
+        messageType: 'system',
+        content: buildJoinDiscussionSystemMessage({
+          joinerName,
+          locationName: activityLocationName || '待确认地点',
+          startAt: activityStartAt ?? new Date(),
+        }),
+      });
+    } catch (error) {
+      console.error('Failed to send join system message:', error);
+    }
 
     notifyNewParticipant(
       activityId,

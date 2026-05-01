@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import {
   activities,
+  activityMessages,
   agentTaskEvents,
   agentTasks,
   and,
@@ -12,7 +13,9 @@ import {
   eq,
   inArray,
   intentMatches,
+  notifications,
   partnerIntents,
+  participants,
   sql,
   userMemories,
   users,
@@ -83,6 +86,20 @@ interface WelcomeCardResponse {
     priority: number;
     context?: Record<string, unknown>;
   };
+}
+
+interface JoinActivityResponse {
+  success: boolean;
+  joinResult: 'joined' | 'already_joined' | 'waitlisted' | 'closed';
+  navigationIntent: 'open_discussion' | 'stay_on_detail';
+}
+
+interface ChatMessagesResponse {
+  messages: Array<{
+    senderId: string | null;
+    type: string;
+    content: string;
+  }>;
 }
 
 function readResponseCompleteFromSse<T>(bodyText: string): T | null {
@@ -364,6 +381,9 @@ describe('Agent Task Runtime Integration', () => {
       await db
         .delete(conversationMessages)
         .where(inArray(conversationMessages.taskId, taskIds));
+      await db
+        .delete(notifications)
+        .where(inArray(notifications.taskId, taskIds));
     }
 
     const conversationIds = Array.from(createdConversationIds);
@@ -384,11 +404,20 @@ describe('Agent Task Runtime Integration', () => {
         .delete(userMemories)
         .where(inArray(sql<string>`${userMemories.metadata}->>'activityId'`, activityIds));
       await db
+        .delete(notifications)
+        .where(inArray(notifications.activityId, activityIds));
+      await db
         .delete(agentTaskEvents)
         .where(inArray(agentTaskEvents.activityId, activityIds));
       await db
         .delete(conversationMessages)
         .where(inArray(conversationMessages.activityId, activityIds));
+      await db
+        .delete(activityMessages)
+        .where(inArray(activityMessages.activityId, activityIds));
+      await db
+        .delete(participants)
+        .where(inArray(participants.activityId, activityIds));
     }
 
     if (taskIds.length > 0) {
@@ -506,6 +535,83 @@ describe('Agent Task Runtime Integration', () => {
 
     expect(task?.currentStage).toBe('discussion');
     expect(events.filter((event) => event.eventType === 'discussion_entered')).toHaveLength(1);
+  });
+
+  it('continues a successful activity join into a guided discussion record', async () => {
+    expect(testUser).toBeDefined();
+
+    const creatorId = randomUUID();
+    const activityId = randomUUID();
+
+    await db.insert(users).values({
+      id: creatorId,
+      wxOpenId: `runtime-join-creator-${creatorId}`,
+      phoneNumber: '13800000000',
+      nickname: '发起人',
+    });
+    createdUserIds.add(creatorId);
+
+    await db.insert(activities).values({
+      id: activityId,
+      creatorId,
+      title: '报名后讨论承接测试局',
+      description: '验证 join_success 后讨论区不是空白',
+      location: { x: 106.52988, y: 29.58567 },
+      locationName: '重庆观音桥',
+      address: '观音桥步行街',
+      locationHint: '地铁站附近',
+      startAt: new Date(Date.now() + 3 * 60 * 60 * 1000),
+      type: 'food',
+      maxParticipants: 4,
+      currentParticipants: 1,
+      status: 'active',
+    });
+    createdActivityIds.add(activityId);
+
+    const joinResult = await requestJson<JoinActivityResponse>({
+      method: 'POST',
+      path: `/activities/${activityId}/join`,
+      token: testUser!.token,
+    });
+    expect(joinResult.joinResult).toBe('joined');
+    expect(joinResult.navigationIntent).toBe('open_discussion');
+
+    await requestJson<{ code: number; msg: string }>({
+      method: 'POST',
+      path: '/ai/tasks/discussion-entered',
+      token: testUser!.token,
+      payload: {
+        activityId,
+        entry: 'join_success',
+      },
+    });
+
+    const [task] = await db
+      .select()
+      .from(agentTasks)
+      .where(and(
+        eq(agentTasks.activityId, activityId),
+        eq(agentTasks.userId, testUser!.user.id),
+        eq(agentTasks.taskType, 'join_activity'),
+      ))
+      .limit(1);
+    if (task) {
+      createdTaskIds.add(task.id);
+    }
+
+    const discussion = await requestJson<ChatMessagesResponse>({
+      method: 'GET',
+      path: `/chat/${activityId}/messages?limit=20`,
+      token: testUser!.token,
+    });
+    const systemMessage = discussion.messages.find((message) => message.type === 'system' && message.senderId === null);
+
+    expect(task?.currentStage).toBe('discussion');
+    expect(systemMessage?.content).toContain('刚刚加入');
+    expect(systemMessage?.content).toContain('集合');
+    expect(systemMessage?.content).toContain('时间');
+    expect(systemMessage?.content).toContain('地点');
+    expect(systemMessage?.content).toContain('重庆观音桥');
   });
 
   it('does not reopen a completed join task when follow-up chat arrives later', async () => {
@@ -822,7 +928,7 @@ describe('Agent Task Runtime Integration', () => {
   it('does not append task_completed twice when later outcomes enrich the same task', async () => {
     expect(testUser).toBeDefined();
 
-    const activityId = '96969696-9696-4969-8969-969696969696';
+    const activityId = randomUUID();
 
     await db.insert(activities).values({
       id: activityId,
@@ -885,7 +991,7 @@ describe('Agent Task Runtime Integration', () => {
   it('records welcome post-activity feedback through /ai/chat structured action', async () => {
     expect(testUser).toBeDefined();
 
-    const activityId = '97979797-9797-4979-8979-979797979797';
+    const activityId = randomUUID();
 
     await db.insert(activities).values({
       id: activityId,

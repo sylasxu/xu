@@ -988,11 +988,10 @@ async function buildMessageCenterActionItems(params: {
       badge: '结果待补',
       primaryAction: {
         kind: 'prompt',
-        label: '补反馈 / 再约',
-        prompt: `继续处理：${postActivity.goalText}`,
+        label: '先补真实反馈',
+        prompt: `先补一下「${activityTitle}」的真实反馈：挺顺利 / 一般 / 没成局。`,
         activityId: postActivity.activityId,
-        activityMode: 'review',
-        entry: 'message_center_post_activity',
+        entry: 'message_center_post_activity_feedback',
       },
     });
   }

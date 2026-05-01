@@ -4,6 +4,7 @@ export type WechatNotifyScene =
   | 'activity_reminder'
   | 'discussion_reply'
   | 'post_activity'
+  | 'partner_match_ready'
 
 type RequestWechatNotificationSubscriptionParams = {
   scenes: WechatNotifyScene[]

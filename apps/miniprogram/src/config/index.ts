@@ -47,6 +47,7 @@ export const WECHAT_NOTIFY_CONFIG = {
     activity_reminder: '_rUIQvfF95KC6IJRIctfsVe9fZz3QZ9mbYdmXhEZFDQ',
     discussion_reply: '',
     post_activity: '',
+    partner_match_ready: '',
   },
   SUBSCRIBE_PROMPT_COOLDOWN_MS: 7 * 24 * 60 * 60 * 1000,
 }

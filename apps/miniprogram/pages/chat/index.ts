@@ -22,6 +22,7 @@ import {
   type QuickItem,
   type QuickPrompt,
 } from '../../src/services/welcome'
+import { requestWechatNotificationSubscription } from '../../src/services/wechat-notification-subscription'
 import { getAiTasksCurrent } from '../../src/api/endpoints/ai/ai'
 import type {
   ActivityData,
@@ -1168,6 +1169,15 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     const action = typeof detail?.action === 'string' ? detail.action : ''
     if (!action) {
       return
+    }
+
+    if (action === 'opt_in_partner_pool') {
+      const userId = useUserStore.getState().user?.id || null
+      void requestWechatNotificationSubscription({
+        scenes: ['partner_match_ready'],
+        userId,
+        source: 'join_success',
+      })
     }
 
     this.runStructuredAction({

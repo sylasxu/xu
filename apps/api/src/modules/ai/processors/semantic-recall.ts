@@ -1,12 +1,12 @@
 /**
- * Semantic Recall Processor (v4.9)
+ * Semantic Recall Processor (v5.0)
  *
  * 负责语义检索历史活动和对话消息：
  * - 同时搜索 activities 表和 conversation_messages 表
  * - 搜索独立的长期 user_memories 表
  * - 相似度阈值 0.5
  * - 合并结果后使用本地轻量排序
- * - 返回 top-K 结果（K=5）
+ * - 返回 top-K 结果（K=3），单条截断 120 字
  */
 
 import type { ProcessorContext, ProcessorResult } from './types';
@@ -18,7 +18,7 @@ import { rerank } from '../models/router';
 const SIMILARITY_THRESHOLD = 0.5;
 
 /** 最终返回的 top-K 结果数 */
-const TOP_K = 5;
+const TOP_K = 3;
 
 /** 太短的输入大多是噪音，不值得做向量检索。 */
 const MIN_RECALL_QUERY_LENGTH = 2;
@@ -27,6 +27,7 @@ const MIN_RECALL_QUERY_LENGTH = 2;
 async function searchActivities(userId: string, queryEmbedding: number[]) {
   return db
     .select({
+      id: activities.id,
       title: activities.title,
       type: activities.type,
       locationHint: activities.locationHint,
@@ -130,6 +131,16 @@ export async function semanticRecallProcessor(context: ProcessorContext): Promis
       searchUserMemories(userId, queryEmbedding),
     ]);
 
+    // 保留结构化活动召回结果（供 Tool 显式消费）
+    const recalledActivities = activityResults.map((r) => ({
+      id: r.id ?? '',
+      title: r.title,
+      type: r.type,
+      locationHint: r.locationHint,
+      startAt: r.startAt,
+      similarity: r.similarity ?? 0,
+    }));
+
     // 合并结果为统一格式
     const allDocuments: Array<{ text: string; source: 'activities' | 'conversations' | 'user_memories'; similarity: number }> = [];
 
@@ -144,7 +155,7 @@ export async function semanticRecallProcessor(context: ProcessorContext): Promis
     for (const r of messageResults) {
       const contentStr = typeof r.content === 'string' ? r.content : JSON.stringify(r.content);
       allDocuments.push({
-        text: `[对话] ${contentStr.slice(0, 200)}`,
+        text: `[对话] ${contentStr.slice(0, 120)}`,
         source: 'conversations',
         similarity: r.similarity ?? 0,
       });
@@ -152,7 +163,7 @@ export async function semanticRecallProcessor(context: ProcessorContext): Promis
 
     for (const r of userMemoryResults) {
       allDocuments.push({
-        text: `[记忆/${r.memoryType}] ${r.content.slice(0, 200)}`,
+        text: `[记忆/${r.memoryType}] ${r.content.slice(0, 120)}`,
         source: 'user_memories',
         similarity: r.similarity ?? 0,
       });
@@ -214,6 +225,7 @@ export async function semanticRecallProcessor(context: ProcessorContext): Promis
           avgSimilarity,
           rerankApplied,
           sources,
+          recalledActivities,
         },
       },
     };

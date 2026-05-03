@@ -15,6 +15,8 @@ import {
   type NewAgentTask,
 } from '@xu/db';
 import type { GenUIBlock, GenUIRequest } from '@xu/genui-contract';
+import { incrementCounter } from '../observability/metrics';
+import { withSpan } from '../observability/tracer';
 
 type AgentTaskType = AgentTask['taskType'];
 type AgentTaskStage = AgentTask['currentStage'];
@@ -1314,6 +1316,12 @@ async function appendAgentTaskEvent(params: {
     source: params.source,
     payload: params.payload ?? {},
   });
+
+  incrementCounter('agent_task_event_total', 1, {
+    event_type: params.eventType,
+    from_stage: params.fromStage ?? 'none',
+    to_stage: params.toStage ?? 'none',
+  });
 }
 
 async function findOpenTask(params: {
@@ -1711,10 +1719,12 @@ export async function syncJoinTaskFromChatResponse(params: {
   blocks: GenUIBlock[];
   outcome?: string | null;
 }): Promise<void> {
-  if (!params.userId) {
+  const userId = params.userId;
+  if (!userId) {
     return;
   }
 
+  return withSpan('task.syncJoinTask', async (_span) => {
   const goalText = getGoalTextFromRequest(params.request);
   const slotSummary = mergeJoinTaskContext(
     undefined,
@@ -1737,11 +1747,11 @@ export async function syncJoinTaskFromChatResponse(params: {
 
   if (activityMode && contextActivityId) {
     const existingOpenTask = await findOpenJoinTask({
-      userId: params.userId,
+      userId: userId,
       activityId: contextActivityId,
     });
     const existingTask = existingOpenTask ?? await findLatestJoinTaskByActivity({
-      userId: params.userId,
+      userId: userId,
       activityId: contextActivityId,
     });
 
@@ -1750,7 +1760,7 @@ export async function syncJoinTaskFromChatResponse(params: {
     }
 
     const task = existingTask ?? await ensureTask({
-      userId: params.userId,
+      userId: userId,
       taskType: 'join_activity',
       conversationId: params.conversationId,
       activityId: contextActivityId,
@@ -1793,7 +1803,7 @@ export async function syncJoinTaskFromChatResponse(params: {
 
   if (explored) {
     task = await ensureTask({
-      userId: params.userId,
+      userId: userId,
       taskType: 'join_activity',
       conversationId: params.conversationId,
       goalText,
@@ -1821,7 +1831,7 @@ export async function syncJoinTaskFromChatResponse(params: {
   if (isJoinAction) {
     const joinActionInput = params.request.input;
     task = await ensureTask({
-      userId: params.userId,
+      userId: userId,
       taskType: 'join_activity',
       conversationId: params.conversationId,
       activityId: joinActivityId ?? undefined,
@@ -1854,7 +1864,7 @@ export async function syncJoinTaskFromChatResponse(params: {
       ? readTextValue(authRequirement.pendingAction.payload.activityId)
       : null;
     const authTask = task ?? await ensureTask({
-      userId: params.userId,
+      userId: userId,
       taskType: 'join_activity',
       conversationId: params.conversationId,
       activityId: pendingActionActivityId ?? joinActivityId ?? undefined,
@@ -1886,7 +1896,7 @@ export async function syncJoinTaskFromChatResponse(params: {
 
   if (joinActivityId) {
     const joinedTask = task ?? await ensureTask({
-      userId: params.userId,
+      userId: userId,
       taskType: 'join_activity',
       conversationId: params.conversationId,
       activityId: joinActivityId,
@@ -1914,6 +1924,7 @@ export async function syncJoinTaskFromChatResponse(params: {
       },
     });
   }
+  }, { userId });
 }
 
 export async function syncPartnerTaskFromChatResponse(params: {
@@ -1923,10 +1934,12 @@ export async function syncPartnerTaskFromChatResponse(params: {
   blocks: GenUIBlock[];
   outcome?: string | null;
 }): Promise<void> {
-  if (!params.userId) {
+  const userId = params.userId;
+  if (!userId) {
     return;
   }
 
+  return withSpan('task.syncPartnerTask', async (_span) => {
   const goalText = getGoalTextFromRequest(params.request);
   const slotSummary = mergePartnerTaskContext(
     undefined,
@@ -1946,7 +1959,7 @@ export async function syncPartnerTaskFromChatResponse(params: {
   }
 
   let task = await findOpenTask({
-    userId: params.userId,
+    userId: userId,
     taskType: 'find_partner',
     conversationId: params.conversationId,
   });
@@ -1958,7 +1971,7 @@ export async function syncPartnerTaskFromChatResponse(params: {
     // pending match that requires confirmation.
     const nextStage = 'preference_collecting';
     task = task ?? await ensureTask({
-      userId: params.userId,
+      userId: userId,
       taskType: 'find_partner',
       conversationId: params.conversationId,
       goalText,
@@ -1988,7 +2001,7 @@ export async function syncPartnerTaskFromChatResponse(params: {
       ? authRequirement.pendingAction.payload
       : null;
     const authTask = task ?? await ensureTask({
-      userId: params.userId,
+      userId: userId,
       taskType: 'find_partner',
       conversationId: params.conversationId,
       partnerIntentId: readTextValue(pendingPayload?.intentId) ?? undefined,
@@ -2019,6 +2032,7 @@ export async function syncPartnerTaskFromChatResponse(params: {
       },
     });
   }
+  }, { userId });
 }
 
 export async function syncCreateTaskFromChatResponse(params: {
@@ -2027,10 +2041,12 @@ export async function syncCreateTaskFromChatResponse(params: {
   request: GenUIRequest;
   blocks: GenUIBlock[];
 }): Promise<void> {
-  if (!params.userId) {
+  const userId = params.userId;
+  if (!userId) {
     return;
   }
 
+  return withSpan('task.syncCreateTask', async (_span) => {
   const goalText = getGoalTextFromRequest(params.request);
   const slotSummary = mergeCreateTaskContext(
     undefined,
@@ -2052,7 +2068,7 @@ export async function syncCreateTaskFromChatResponse(params: {
   }
 
   let task = await findOpenTask({
-    userId: params.userId,
+    userId: userId,
     taskType: 'create_activity',
     conversationId: params.conversationId,
     activityId: activityId ?? undefined,
@@ -2060,7 +2076,7 @@ export async function syncCreateTaskFromChatResponse(params: {
 
   if (isCreateAction || isEditAction || hasDraftForm) {
     task = task ?? await ensureTask({
-      userId: params.userId,
+      userId: userId,
       taskType: 'create_activity',
       conversationId: params.conversationId,
       activityId: activityId ?? undefined,
@@ -2093,7 +2109,7 @@ export async function syncCreateTaskFromChatResponse(params: {
       : null;
     const pendingActivityId = readTextValue(pendingPayload?.activityId);
     const authTask = task ?? await ensureTask({
-      userId: params.userId,
+      userId: userId,
       taskType: 'create_activity',
       conversationId: params.conversationId,
       activityId: pendingActivityId ?? activityId ?? undefined,
@@ -2126,7 +2142,7 @@ export async function syncCreateTaskFromChatResponse(params: {
 
   if (hasDraftReady && activityId) {
     const draftTask = task ?? await ensureTask({
-      userId: params.userId,
+      userId: userId,
       taskType: 'create_activity',
       conversationId: params.conversationId,
       activityId,
@@ -2153,6 +2169,7 @@ export async function syncCreateTaskFromChatResponse(params: {
       },
     });
   }
+  }, { userId });
 }
 
 export async function recordPartnerTaskIntentPosted(params: {

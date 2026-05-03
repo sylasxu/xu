@@ -65,6 +65,16 @@ export interface ProcessorMetadata {
     hasProfile: boolean;
     preferencesCount: number;
     topPreferences?: string[];
+    frequentLocations?: string[];
+    preferences?: Array<{ sentiment: string; category: string; value: string; confidence: number }>;
+    activityOutcomes?: Array<{
+      attended: boolean;
+      activityTitle: string;
+      locationName: string;
+      activityType: string;
+      rebookTriggered?: boolean;
+      updatedAt: Date;
+    }>;
   };
 
   /** semantic-recall-processor 输出 */
@@ -73,6 +83,15 @@ export interface ProcessorMetadata {
     avgSimilarity: number;
     rerankApplied: boolean;
     sources: ('conversations' | 'activities' | 'user_memories')[];
+    /** 结构化召回的活动结果（供 Tool 显式消费） */
+    recalledActivities?: Array<{
+      id: string;
+      title: string;
+      type: string;
+      locationHint: string | null;
+      startAt: Date;
+      similarity: number;
+    }>;
   };
 
   /** 对话历史摘要 */

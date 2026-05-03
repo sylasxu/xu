@@ -17,6 +17,11 @@ const TEST_USER_BLUEPRINTS = [
   { phoneNumber: '13800138003', nickname: '测试用户3', wxOpenId: 'test_bootstrap_user_3' },
   { phoneNumber: '13800138004', nickname: '测试用户4', wxOpenId: 'test_bootstrap_user_4' },
   { phoneNumber: '13800138005', nickname: '测试用户5', wxOpenId: 'test_bootstrap_user_5' },
+  { phoneNumber: '13800138006', nickname: '测试用户6', wxOpenId: 'test_bootstrap_user_6' },
+  { phoneNumber: '13800138007', nickname: '测试用户7', wxOpenId: 'test_bootstrap_user_7' },
+  { phoneNumber: '13800138008', nickname: '测试用户8', wxOpenId: 'test_bootstrap_user_8' },
+  { phoneNumber: '13800138009', nickname: '测试用户9', wxOpenId: 'test_bootstrap_user_9' },
+  { phoneNumber: '13800138010', nickname: '测试用户10', wxOpenId: 'test_bootstrap_user_10' },
 ] as const;
 
 const DEFAULT_AUTH_GATE_UI: AuthGateUi = {

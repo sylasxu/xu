@@ -1,1153 +1,116 @@
 #!/usr/bin/env bun
 
-import { activities, agentTasks, and, db, desc, eq, inArray, participants, partnerIntents, userMemories, users } from '@xu/db';
-import { app } from '../apps/api/src/index';
-import { resetQuota } from '../apps/api/src/modules/ai/guardrails/rate-limiter';
-import { readAiChatEnvelope } from './ai-chat-sse';
+import {
+  ADMIN_CODE,
+  ADMIN_PHONE,
+  assert,
+  assertNoLeakedToolText,
+  assertPartnerSearchResultSafety,
+  BASE_URL,
+  bootstrapUsers,
+  buildCreatePayload,
+  buildPartnerPayload,
+  cancelActivity,
+  cancelPendingMatch,
+  cleanupSandboxActivities,
+  cleanupSandboxAgentTasks,
+  cleanupSandboxConversations,
+  cleanupSandboxPartnerIntents,
+  cleanupSandboxUserMemories,
+  confirmFulfillment,
+  confirmPendingMatch,
+  createActivity,
+  decodeTokenPayload,
+  DEFAULT_TEST_MODEL,
+  DESTINATION_COMPANION_FIXTURE,
+  extractVisibleText,
+  FILL_SEAT_FIXTURE,
+  findAlertBlock,
+  findBlock,
+  findCtaActionInput,
+  getActivityParticipants,
+  getAdminToken,
+  getAiConversations,
+  getAiCurrentTasks,
+  getAiWelcome,
+  getChatMessages,
+  getMessageCenter,
+  getNotifications,
+  getPendingMatchDetail,
+  getPendingMatches,
+  getPublicActivity,
+  getUnreadCount,
+  getUserActivityOutcome,
+  hasLeakedToolCallText,
+  hasTextContent,
+  hasVisibleFeedback,
+  isRecord,
+  joinActivity,
+  listChatActivities,
+  listChatActivitiesForTarget,
+  LOCAL_PARTNER_FIXTURE,
+  markActivityCompleted,
+  markNotificationRead,
+  markRebookFollowUp,
+  postAiAction,
+  postAiChat,
+  postAiDiscussionEntered,
+  quitActivity,
+  readAlertMeta,
+  recordActivitySelfFeedback,
+  requestError,
+  requestJson,
+  requestText,
+  resetSandboxRateLimits,
+  sendChatMessage,
+  sleep,
+  USER_COUNT,
+  waitFor,
+  withActivity,
+} from './regression-sandbox-utils';
+
+import type {
+  ActivityMode,
+  ActivityParticipantInfo,
+  AiChatBlock,
+  AiChatEnvelope,
+  AiChatRequestContext,
+  AiConversationsResponse,
+  ApiError,
+  BootstrappedUser,
+  BootstrapResponse,
+  ChatActivitiesResponse,
+  ChatMessagesResponse,
+  CurrentTaskActionSnapshot,
+  CurrentTaskSnapshot,
+  CurrentTasksResponse,
+  LoginResponse,
+  MessageCenterResponse,
+  NotificationItem,
+  NotificationListResponse,
+  PartnerFlowFixture,
+  PartnerScenarioType,
+  PendingMatchConfirmResponse,
+  PendingMatchDetailResponse,
+  PendingMatchItem,
+  PendingMatchListResponse,
+  PublicActivityResponse,
+  ScenarioContext,
+  ScenarioResult,
+  StoredActivityOutcome,
+  UnreadCountResponse,
+  UserProfile,
+  WelcomeResponse,
+} from './regression-sandbox-utils';
+
 import { writeRegressionArtifact } from './regression-artifact';
 import { findScenarioMatrixEntry } from './regression-scenario-matrix';
 
-interface ApiError {
-  code?: number;
-  msg?: string;
-}
-
-interface UserProfile {
-  id: string;
-  wxOpenId: string | null;
-  phoneNumber: string | null;
-  nickname: string | null;
-}
-
-interface BootstrappedUser {
-  user: UserProfile;
-  token: string;
-  isNewUser: boolean;
-}
-
-interface BootstrapResponse {
-  users: BootstrappedUser[];
-  msg: string;
-}
-
-interface LoginResponse {
-  token: string;
-}
-
-interface PublicActivityResponse {
-  id: string;
-  title: string;
-  status: string;
-  currentParticipants: number;
-  participants: Array<{ userId: string; nickname: string | null }>;
-  recentMessages: Array<{ content: string; createdAt: string }>;
-}
-
-interface ActivityParticipantInfo {
-  id: string;
-  userId: string;
-  status: string;
-  joinedAt: string | null;
-  user: {
-    id: string;
-    nickname: string | null;
-    avatarUrl: string | null;
-  } | null;
-}
-
-interface ChatMessagesResponse {
-  messages: Array<{
-    id: string;
-    senderId: string | null;
-    content: string;
-    type: string;
-    createdAt: string;
-  }>;
-  isArchived: boolean;
-}
-
-interface ChatActivitiesResponse {
-  items: Array<{
-    activityId: string;
-    activityTitle: string;
-    participantCount: number;
-    lastMessage: string | null;
-  }>;
-  total: number;
-  page: number;
-  totalPages: number;
-  totalUnread: number;
-}
-
-interface NotificationItem {
-  id: string;
-  userId: string;
-  type: string;
-  title: string;
-  content: string;
-  activityId: string | null;
-  isRead: boolean;
-  createdAt: string;
-}
-
-interface NotificationListResponse {
-  items: NotificationItem[];
-  total: number;
-  page: number;
-  totalPages: number;
-}
-
-interface UnreadCountResponse {
-  count: number;
-}
-
-interface MessageCenterResponse {
-  actionItems: Array<{
-    id: string;
-    type: string;
-    title: string;
-    summary: string;
-    statusLabel: string;
-    activityId: string | null;
-    primaryAction: {
-      kind: string;
-      label: string;
-      prompt?: string;
-      activityId?: string;
-      activityMode?: ActivityMode;
-      entry?: string;
-    };
-  }>;
-  pendingMatches: PendingMatchItem[];
-  unreadNotificationCount: number;
-  totalUnread: number;
-  chatActivities: {
-    items: Array<{
-      activityId: string;
-      activityTitle: string;
-      lastMessage: string | null;
-      unreadCount: number;
-    }>;
-    totalUnread: number;
-  };
-}
-
-interface PendingMatchItem {
-  id: string;
-  activityType: string;
-  typeName: string;
-  locationHint: string;
-  taskId: string | null;
-  isTempOrganizer: boolean;
-}
-
-interface PendingMatchListResponse {
-  items: PendingMatchItem[];
-}
-
-interface PendingMatchConfirmResponse {
-  code: number;
-  msg: string;
-  activityId?: string;
-}
-
-interface PendingMatchDetailResponse {
-  id: string;
-  nextActionOwner: 'self' | 'organizer';
-  continuationTitle: string;
-  continuationText: string;
-  nextActionText: string;
-  members: Array<{
-    userId: string;
-    isTempOrganizer: boolean;
-    intentSummary: string;
-  }>;
-}
-
-interface WelcomeResponse {
-  greeting: string;
-  subGreeting?: string;
-  sections?: unknown[];
-}
-
-type ActivityMode = 'review' | 'rebook' | 'kickoff';
-
-interface AiChatRequestContext {
-  client?: 'web' | 'miniprogram' | 'admin';
-  locale?: string;
-  timezone?: string;
-  platformVersion?: string;
-  lat?: number;
-  lng?: number;
-  activityId?: string;
-  activityMode?: ActivityMode;
-  entry?: string;
-}
-
-interface AiChatBlock {
-  blockId: string;
-  type: string;
-  content?: string;
-  title?: string;
-  question?: string;
-  level?: string;
-  message?: string;
-  schema?: Record<string, unknown>;
-  initialValues?: Record<string, unknown>;
-  fields?: Record<string, unknown>;
-  meta?: Record<string, unknown>;
-  items?: Array<{
-    label?: string;
-    action?: string;
-    params?: Record<string, unknown>;
-  }>;
-}
-
-interface AiChatEnvelope {
-  traceId: string;
-  conversationId: string;
-  response: {
-    responseId: string;
-    role: 'assistant';
-    status: 'completed' | 'streaming' | 'error';
-    blocks: AiChatBlock[];
-  };
-}
-
-interface AiConversationsResponse {
-  items: Array<{
-    id: string;
-    userId: string;
-    messageCount: number;
-    userNickname: string | null;
-  }>;
-  total: number;
-  hasMore: boolean;
-  cursor: string | null;
-}
-
-interface CurrentTaskActionSnapshot {
-  kind: string;
-  label: string;
-  action?: string;
-  payload?: Record<string, unknown>;
-  url?: string;
-}
-
-interface CurrentTaskSnapshot {
-  id: string;
-  taskType: string;
-  currentStage: string;
-  status: string;
-  headline: string;
-  summary: string;
-  activityId?: string;
-  primaryAction?: CurrentTaskActionSnapshot;
-  secondaryAction?: CurrentTaskActionSnapshot;
-}
-
-interface CurrentTasksResponse {
-  items: CurrentTaskSnapshot[];
-  serverTime: string;
-}
-
-type PartnerScenarioType = 'local_partner' | 'destination_companion' | 'fill_seat';
-
-interface PartnerFlowFixture {
-  id: string;
-  scenarioType: PartnerScenarioType;
-  rawInput: string;
-  activityType: string;
-  locationName: string;
-  locationHint: string;
-  locationKeywords: string[];
-  timePreference: string;
-  timeKeywords: string[];
-  description: string;
-  lat: number;
-  lng: number;
-  destinationText?: string;
-}
-
-interface StoredActivityOutcome {
-  activityId: string;
-  activityTitle: string;
-  activityType: string;
-  locationName: string;
-  attended: boolean | null;
-  rebookTriggered: boolean;
-  reviewSummary?: string | null;
-  happenedAt: string;
-  updatedAt: string;
-}
-
-interface ScenarioResult {
-  name: string;
-  passed: boolean;
-  details: string[];
-  error?: string;
-  durationMs?: number;
-}
-
-interface ScenarioContext {
-  users: BootstrappedUser[];
-}
-
-const ADMIN_PHONE = process.env.SMOKE_ADMIN_PHONE?.trim()
-  || process.env.ADMIN_PHONE_WHITELIST?.split(',').map((phone) => phone.trim()).find(Boolean)
-  || '13996092317';
-const ADMIN_CODE = process.env.SMOKE_ADMIN_CODE?.trim()
-  || process.env.ADMIN_SUPER_CODE?.trim()
-  || '9999';
-const BASE_URL = 'http://localhost';
-const USER_COUNT = 5;
-const DEFAULT_TEST_MODEL = process.env.GENUI_TEST_MODEL?.trim() || 'moonshot/kimi-k2.5';
 const scenarioArgIndex = Bun.argv.indexOf('--scenario');
 const scenarioFilter = scenarioArgIndex >= 0 ? Bun.argv[scenarioArgIndex + 1] : '';
 const suiteArgIndex = Bun.argv.indexOf('--suite');
 const requestedSuite = suiteArgIndex >= 0 ? Bun.argv[suiteArgIndex + 1] : 'core';
 const scenarioSuite = requestedSuite === 'all' || requestedSuite === 'extended' ? requestedSuite : 'core';
-
-const LOCAL_PARTNER_FIXTURE: PartnerFlowFixture = {
-  id: 'local-boardgame',
-  scenarioType: 'local_partner',
-  rawInput: '南山周六晚找桌游搭子，能接受新手，最好别鸽',
-  activityType: 'boardgame',
-  locationName: '南山',
-  locationHint: '南山',
-  locationKeywords: ['南山'],
-  timePreference: '周六晚上',
-  timeKeywords: ['周六', '周末'],
-  description: '找能稳定赴约、接受新手的桌游搭子',
-  lat: 29.533009,
-  lng: 106.601556,
-};
-
-const DESTINATION_COMPANION_FIXTURE: PartnerFlowFixture = {
-  id: 'destination-music-festival',
-  scenarioType: 'destination_companion',
-  rawInput: '周六去泸州音乐节，想找个能一起出发的同去搭子',
-  activityType: 'entertainment',
-  locationName: '泸州音乐节',
-  locationHint: '重庆出发',
-  locationKeywords: ['泸州', '音乐节', '重庆出发'],
-  destinationText: '泸州音乐节',
-  timePreference: '周六',
-  timeKeywords: ['周六', '周末'],
-  description: '想找能一起出发、时间能对上的同行搭子',
-  lat: 29.533009,
-  lng: 106.601556,
-};
-
-const FILL_SEAT_FIXTURE: PartnerFlowFixture = {
-  id: 'fill-seat-mahjong',
-  scenarioType: 'fill_seat',
-  rawInput: '今晚观音桥麻将三缺一，想补一个不鸽的人',
-  activityType: 'entertainment',
-  locationName: '观音桥',
-  locationHint: '观音桥',
-  locationKeywords: ['观音桥'],
-  timePreference: '今晚',
-  timeKeywords: ['今晚', '今天'],
-  description: '已有三个人，想补一个能准时到的搭子',
-  lat: 29.563009,
-  lng: 106.551556,
-};
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(message);
-  }
-}
-
-function hasLeakedToolCallText(value: string): boolean {
-  const normalized = value.replace(/\s+/g, '');
-  return /^call[a-zA-Z]+\(/.test(normalized);
-}
-
-function assertNoLeakedToolText(blocks: AiChatEnvelope['response']['blocks'], label: string): void {
-  for (const block of blocks) {
-    if (block.type !== 'text' || typeof block.content !== 'string') {
-      continue;
-    }
-
-    if (hasLeakedToolCallText(block.content)) {
-      throw new Error(`${label} 出现伪 Tool 文本泄漏: ${block.content}`);
-    }
-  }
-}
-
-function findBlock(blocks: AiChatEnvelope['response']['blocks'], type: string): AiChatBlock | undefined {
-  return blocks.find((block) => block.type === type);
-}
-
-function hasTextContent(blocks: AiChatEnvelope['response']['blocks']): boolean {
-  return blocks.some((block) => block.type === 'text' && typeof block.content === 'string' && block.content.trim().length > 0);
-}
-
-function extractVisibleText(blocks: AiChatEnvelope['response']['blocks']): string {
-  return blocks
-    .filter((block) => block.type === 'text' && typeof block.content === 'string' && block.content.trim().length > 0)
-    .map((block) => block.content!.trim())
-    .join('\n');
-}
-
-function hasVisibleFeedback(blocks: AiChatEnvelope['response']['blocks']): boolean {
-  return blocks.some((block) => {
-    if (block.type === 'text' && typeof block.content === 'string' && block.content.trim().length > 0) {
-      return true;
-    }
-
-    if (block.type === 'alert' && typeof block.message === 'string' && block.message.trim().length > 0) {
-      return true;
-    }
-
-    return false;
-  });
-}
-
-function readAlertMeta(block: AiChatBlock): Record<string, unknown> | null {
-  return block.type === 'alert' && block.meta && typeof block.meta === 'object'
-    ? block.meta
-    : null;
-}
-
-function findAlertBlock(blocks: AiChatEnvelope['response']['blocks']): AiChatBlock | undefined {
-  return blocks.find((block) => block.type === 'alert');
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function buildPartnerPayload(fixture: PartnerFlowFixture): Record<string, unknown> {
-  return {
-    rawInput: fixture.rawInput,
-    prompt: fixture.rawInput,
-    scenarioType: fixture.scenarioType,
-    activityType: fixture.activityType,
-    type: fixture.activityType,
-    location: fixture.locationName,
-    locationName: fixture.locationName,
-    locationHint: fixture.locationHint,
-    timePreference: fixture.timePreference,
-    timeText: fixture.timePreference,
-    description: fixture.description,
-    lat: fixture.lat,
-    lng: fixture.lng,
-    ...(fixture.destinationText ? { destinationText: fixture.destinationText } : {}),
-  };
-}
-
-function assertPartnerSearchResultSafety(blocks: AiChatEnvelope['response']['blocks'], label: string): void {
-  const listBlocks = blocks.filter((block) => block.type === 'list');
-  for (const block of listBlocks) {
-    const serialized = JSON.stringify(block);
-    assert(!/"phoneNumber"\s*:/.test(serialized), `${label} 泄露 phoneNumber 字段: ${serialized}`);
-    assert(!/"purePhoneNumber"\s*:/.test(serialized), `${label} 泄露 purePhoneNumber 字段: ${serialized}`);
-    assert(!/"wxOpenId"\s*:/.test(serialized), `${label} 泄露 wxOpenId 字段: ${serialized}`);
-    assert(!/"wxId"\s*:/.test(serialized), `${label} 泄露 wxId 字段: ${serialized}`);
-    assert(!/"lat"\s*:/.test(serialized), `${label} 泄露精确 lat 字段: ${serialized}`);
-    assert(!/"lng"\s*:/.test(serialized), `${label} 泄露精确 lng 字段: ${serialized}`);
-    assert(!/"latitude"\s*:/.test(serialized), `${label} 泄露精确 latitude 字段: ${serialized}`);
-    assert(!/"longitude"\s*:/.test(serialized), `${label} 泄露精确 longitude 字段: ${serialized}`);
-    assert(!/(?<!\d)1[3-9]\d{9}(?!\d)/.test(serialized), `${label} 泄露手机号形态内容: ${serialized}`);
-    assert(!/(微信号|wxid|wechat)/i.test(serialized), `${label} 泄露微信联系方式形态内容: ${serialized}`);
-  }
-}
-
-function findCtaActionInput(
-  blocks: AiChatEnvelope['response']['blocks'],
-  actionName: string,
-  actionId: string,
-  label: string,
-): { action: string; actionId: string; displayText: string; params?: Record<string, unknown> } {
-  for (const block of blocks) {
-    if (block.type !== 'cta-group' || !Array.isArray(block.items)) {
-      continue;
-    }
-
-    for (const item of block.items) {
-      if (!isRecord(item)) {
-        continue;
-      }
-
-      const action = typeof item.action === 'string' ? item.action.trim() : '';
-      if (action !== actionName) {
-        continue;
-      }
-
-      return {
-        action,
-        actionId,
-        displayText: typeof item.label === 'string' && item.label.trim() ? item.label.trim() : action,
-        ...(isRecord(item.params) ? { params: item.params } : {}),
-      };
-    }
-  }
-
-  throw new Error(`${label} 缺少 CTA action=${actionName}`);
-}
-
-async function requestJson<T>(params: {
-  method: 'GET' | 'POST' | 'PATCH';
-  path: string;
-  token?: string;
-  payload?: Record<string, unknown>;
-}): Promise<T> {
-  const response = await app.handle(
-    new Request(`${BASE_URL}${params.path}`, {
-      method: params.method,
-      headers: {
-        'content-type': 'application/json',
-        ...(params.token ? { authorization: `Bearer ${params.token}` } : {}),
-      },
-      body: params.payload ? JSON.stringify(params.payload) : undefined,
-    })
-  );
-
-  const bodyText = await response.text();
-  const parsed = bodyText ? JSON.parse(bodyText) as T | ApiError : {};
-
-  if (!response.ok) {
-    const apiError = parsed as ApiError;
-    throw new Error(`${params.method} ${params.path} 失败: HTTP ${response.status} ${apiError.msg || bodyText}`);
-  }
-
-  return parsed as T;
-}
-
-async function requestText(params: {
-  method: 'GET' | 'POST' | 'PATCH';
-  path: string;
-  token?: string;
-  payload?: Record<string, unknown>;
-}): Promise<{ status: number; body: string }> {
-  const response = await app.handle(
-    new Request(`${BASE_URL}${params.path}`, {
-      method: params.method,
-      headers: {
-        'content-type': 'application/json',
-        ...(params.token ? { authorization: `Bearer ${params.token}` } : {}),
-      },
-      body: params.payload ? JSON.stringify(params.payload) : undefined,
-    })
-  );
-
-  return {
-    status: response.status,
-    body: await response.text(),
-  };
-}
-
-async function getAdminToken(): Promise<string> {
-  const response = await requestJson<LoginResponse>({
-    method: 'POST',
-    path: '/auth/login',
-    payload: {
-      grantType: 'phone_otp',
-      phone: ADMIN_PHONE,
-      code: ADMIN_CODE,
-    },
-  });
-
-  assert(response.token, '管理员登录后未返回 token');
-  return response.token;
-}
-
-function decodeTokenPayload(token: string): Record<string, unknown> {
-  const payloadSegment = token.split('.')[1];
-  assert(payloadSegment, 'JWT 缺少 payload 段');
-
-  const normalized = payloadSegment.replace(/-/g, '+').replace(/_/g, '/');
-  const padding = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
-  return JSON.parse(Buffer.from(`${normalized}${padding}`, 'base64').toString('utf8')) as Record<string, unknown>;
-}
-
-async function sleep(ms: number) {
-  await new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function waitFor<T>(
-  producer: () => Promise<T | null>,
-  options?: { retries?: number; delayMs?: number }
-): Promise<T | null> {
-  const retries = options?.retries ?? 6;
-  const delayMs = options?.delayMs ?? 200;
-
-  for (let index = 0; index < retries; index++) {
-    const value = await producer();
-    if (value) {
-      return value;
-    }
-    if (index < retries - 1) {
-      await sleep(delayMs);
-    }
-  }
-
-  return null;
-}
-
-async function requestError(params: {
-  method: 'GET' | 'POST' | 'PATCH';
-  path: string;
-  token?: string;
-  payload?: Record<string, unknown>;
-}): Promise<{ status: number; msg: string }> {
-  const response = await app.handle(
-    new Request(`${BASE_URL}${params.path}`, {
-      method: params.method,
-      headers: {
-        'content-type': 'application/json',
-        ...(params.token ? { authorization: `Bearer ${params.token}` } : {}),
-      },
-      body: params.payload ? JSON.stringify(params.payload) : undefined,
-    })
-  );
-
-  const bodyText = await response.text();
-  let parsed: ApiError = {};
-  if (bodyText) {
-    try {
-      parsed = JSON.parse(bodyText) as ApiError;
-    } catch {
-      parsed = { msg: bodyText };
-    }
-  }
-
-  if (response.ok) {
-    throw new Error(`${params.method} ${params.path} 预期失败，但返回成功`);
-  }
-
-  return {
-    status: response.status,
-    msg: parsed.msg || bodyText,
-  };
-}
-
-function buildCreatePayload(overrides?: Partial<{
-  title: string;
-  description: string;
-  location: [number, number];
-  locationName: string;
-  address: string;
-  locationHint: string;
-  startAt: string;
-  type: 'food' | 'entertainment' | 'sports' | 'boardgame' | 'other';
-  maxParticipants: number;
-}>): Record<string, unknown> {
-  const titleSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  return {
-    title: `沙盘验收局-${titleSuffix}`,
-    description: '用于多账号沙盘验收。',
-    location: [106.551556, 29.563009],
-    locationName: '重庆观音桥',
-    address: '观音桥步行街',
-    locationHint: '地铁站 3 号口见',
-    startAt: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
-    type: 'food',
-    maxParticipants: 5,
-    ...overrides,
-  };
-}
-
-async function bootstrapUsers(): Promise<BootstrappedUser[]> {
-  const adminToken = await getAdminToken();
-  const bootstrap = await requestJson<BootstrapResponse>({
-    method: 'POST',
-    path: '/auth/test-users/bootstrap',
-    token: adminToken,
-    payload: {
-      phone: ADMIN_PHONE,
-      code: ADMIN_CODE,
-      count: USER_COUNT,
-    },
-  });
-
-  assert(bootstrap.users.length === USER_COUNT, `期望准备 ${USER_COUNT} 个账号，实际得到 ${bootstrap.users.length}`);
-  return bootstrap.users;
-}
-
-async function cleanupSandboxPartnerIntents(users: BootstrappedUser[]): Promise<void> {
-  const userIds = users.map((item) => item.user.id);
-  if (userIds.length === 0) {
-    return;
-  }
-
-  await db
-    .update(partnerIntents)
-    .set({
-      status: 'cancelled',
-      updatedAt: new Date(),
-    })
-    .where(and(
-      inArray(partnerIntents.userId, userIds),
-      eq(partnerIntents.status, 'active')
-    ));
-}
-
-async function cleanupSandboxAgentTasks(users: BootstrappedUser[]): Promise<void> {
-  const userIds = users.map((item) => item.user.id);
-  if (userIds.length === 0) {
-    return;
-  }
-
-  await db
-    .update(agentTasks)
-    .set({
-      status: 'cancelled',
-      updatedAt: new Date(),
-    })
-    .where(and(
-      inArray(agentTasks.userId, userIds),
-      inArray(agentTasks.status, ['active', 'waiting_auth', 'waiting_async_result'])
-    ));
-}
-
-async function cleanupSandboxActivities(users: BootstrappedUser[]): Promise<void> {
-  const userIds = users.map((item) => item.user.id);
-  if (userIds.length === 0) {
-    return;
-  }
-
-  const [ownedRows, joinedRows] = await Promise.all([
-    db
-      .select({ activityId: activities.id })
-      .from(activities)
-      .where(inArray(activities.creatorId, userIds)),
-    db
-      .select({ activityId: participants.activityId })
-      .from(participants)
-      .where(inArray(participants.userId, userIds)),
-  ]);
-
-  const activityIds = [...new Set([...ownedRows, ...joinedRows].map((item) => item.activityId))];
-  if (activityIds.length === 0) {
-    return;
-  }
-
-  await db
-    .update(activities)
-    .set({
-      status: 'cancelled',
-      embedding: null,
-      updatedAt: new Date(),
-    })
-    .where(inArray(activities.id, activityIds));
-}
-
-function resetSandboxRateLimits(users: BootstrappedUser[]): void {
-  for (const item of users) {
-    resetQuota(item.user.id);
-  }
-}
-
-async function createActivity(creator: BootstrappedUser, overrides?: Parameters<typeof buildCreatePayload>[0]) {
-  const result = await requestJson<{ id: string; msg: string }>({
-    method: 'POST',
-    path: '/activities',
-    token: creator.token,
-    payload: buildCreatePayload(overrides),
-  });
-  return result.id;
-}
-
-async function joinActivity(activityId: string, user: BootstrappedUser) {
-  return requestJson<{
-    success: boolean;
-    msg: string;
-    participantId: string | null;
-    joinResult: 'joined' | 'already_joined' | 'waitlisted' | 'closed';
-    navigationIntent: 'open_discussion' | 'stay_on_detail';
-  }>({
-    method: 'POST',
-    path: `/activities/${activityId}/join`,
-    token: user.token,
-  });
-}
-
-async function quitActivity(activityId: string, user: BootstrappedUser) {
-  return requestJson<{ success: boolean; msg: string }>({
-    method: 'POST',
-    path: `/activities/${activityId}/quit`,
-    token: user.token,
-  });
-}
-
-async function cancelActivity(activityId: string, creator: BootstrappedUser) {
-  return requestJson<{ success: boolean; msg?: string }>({
-    method: 'PATCH',
-    path: `/activities/${activityId}/status`,
-    token: creator.token,
-    payload: { status: 'cancelled' },
-  });
-}
-
-async function markActivityCompleted(activityId: string, creator: BootstrappedUser) {
-  return requestJson<{ success: boolean; msg: string }>({
-    method: 'PATCH',
-    path: `/activities/${activityId}/status`,
-    token: creator.token,
-    payload: { status: 'completed' },
-  });
-}
-
-async function getPublicActivity(activityId: string) {
-  return requestJson<PublicActivityResponse>({
-    method: 'GET',
-    path: `/activities/${activityId}/public`,
-  });
-}
-
-async function getActivityParticipants(activityId: string) {
-  return requestJson<ActivityParticipantInfo[]>({
-    method: 'GET',
-    path: `/participants/activity/${activityId}`,
-  });
-}
-
-async function getChatMessages(activityId: string, user: BootstrappedUser) {
-  return requestJson<ChatMessagesResponse>({
-    method: 'GET',
-    path: `/chat/${activityId}/messages?limit=50`,
-    token: user.token,
-  });
-}
-
-async function listChatActivities(user: BootstrappedUser) {
-  return requestJson<ChatActivitiesResponse>({
-    method: 'GET',
-    path: `/chat/activities?userId=${user.user.id}&page=1&limit=20`,
-    token: user.token,
-  });
-}
-
-async function listChatActivitiesForTarget(targetUserId: string, requesterToken: string) {
-  return requestJson<ChatActivitiesResponse>({
-    method: 'GET',
-    path: `/chat/activities?userId=${targetUserId}&page=1&limit=20`,
-    token: requesterToken,
-  });
-}
-
-async function sendChatMessage(activityId: string, user: BootstrappedUser, content: string) {
-  return requestJson<{ id: string; msg: string }>({
-    method: 'POST',
-    path: `/chat/${activityId}/messages`,
-    token: user.token,
-    payload: { content },
-  });
-}
-
-async function getNotifications(user: BootstrappedUser) {
-  return requestJson<NotificationListResponse>({
-    method: 'GET',
-    path: `/notifications?userId=${user.user.id}&page=1&limit=20`,
-    token: user.token,
-  });
-}
-
-async function getUnreadCount(user: BootstrappedUser) {
-  return requestJson<UnreadCountResponse>({
-    method: 'GET',
-    path: '/notifications/unread-count',
-    token: user.token,
-  });
-}
-
-async function markNotificationRead(user: BootstrappedUser, notificationId: string) {
-  return requestJson<{ code: number; msg: string }>({
-    method: 'POST',
-    path: `/notifications/${notificationId}/read`,
-    token: user.token,
-  });
-}
-
-async function getMessageCenter(user: BootstrappedUser) {
-  return requestJson<MessageCenterResponse>({
-    method: 'GET',
-    path: `/notifications/message-center?userId=${user.user.id}&notificationPage=1&notificationLimit=10&chatPage=1&chatLimit=10`,
-    token: user.token,
-  });
-}
-
-async function getPendingMatches(user: BootstrappedUser) {
-  return requestJson<PendingMatchListResponse>({
-    method: 'GET',
-    path: `/notifications/pending-matches?userId=${user.user.id}`,
-    token: user.token,
-  });
-}
-
-async function confirmPendingMatch(user: BootstrappedUser, matchId: string) {
-  return requestJson<PendingMatchConfirmResponse>({
-    method: 'POST',
-    path: `/notifications/pending-matches/${matchId}/confirm`,
-    token: user.token,
-  });
-}
-
-async function cancelPendingMatch(user: BootstrappedUser, matchId: string) {
-  return requestJson<{ code: number; msg: string }>({
-    method: 'POST',
-    path: `/notifications/pending-matches/${matchId}/cancel`,
-    token: user.token,
-  });
-}
-
-async function getPendingMatchDetail(user: BootstrappedUser, matchId: string) {
-  return requestJson<PendingMatchDetailResponse>({
-    method: 'GET',
-    path: `/notifications/pending-matches/${matchId}?userId=${user.user.id}`,
-    token: user.token,
-  });
-}
-
-async function getAiWelcome(user?: BootstrappedUser) {
-  return requestJson<WelcomeResponse>({
-    method: 'GET',
-    path: '/ai/welcome?lat=29.56&lng=106.55',
-    token: user?.token,
-  });
-}
-
-async function postAiChat(params: {
-  user?: BootstrappedUser;
-  text: string;
-  conversationId?: string;
-  context?: AiChatRequestContext;
-}) {
-  const response = await requestText({
-    method: 'POST',
-    path: '/ai/chat',
-    token: params.user?.token,
-    payload: {
-      ...(params.conversationId ? { conversationId: params.conversationId } : {}),
-      input: { type: 'text', text: params.text },
-      ai: { model: DEFAULT_TEST_MODEL },
-      context: {
-        client: 'web',
-        locale: 'zh-CN',
-        timezone: 'Asia/Shanghai',
-        ...params.context,
-      },
-    },
-  });
-
-  if (response.status !== 200) {
-    throw new Error(`POST /ai/chat 失败: HTTP ${response.status} ${response.body}`);
-  }
-
-  return readAiChatEnvelope<AiChatEnvelope>(response.body, 'sandbox postAiChat');
-}
-
-async function postAiAction(params: {
-  user?: BootstrappedUser;
-  action: string;
-  actionId?: string;
-  conversationId?: string;
-  payload?: Record<string, unknown>;
-  displayText?: string;
-  context?: AiChatRequestContext;
-}) {
-  const response = await requestText({
-    method: 'POST',
-    path: '/ai/chat',
-    token: params.user?.token,
-    payload: {
-      ...(params.conversationId ? { conversationId: params.conversationId } : {}),
-      input: {
-        type: 'action',
-        action: params.action,
-        actionId: params.actionId || `smoke_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        ...(params.payload ? { params: params.payload } : {}),
-        ...(params.displayText ? { displayText: params.displayText } : {}),
-      },
-      ai: { model: DEFAULT_TEST_MODEL },
-      context: {
-        client: 'web',
-        locale: 'zh-CN',
-        timezone: 'Asia/Shanghai',
-        ...params.context,
-      },
-    },
-  });
-
-  if (response.status !== 200) {
-    throw new Error(`POST /ai/chat 失败: HTTP ${response.status} ${response.body}`);
-  }
-
-  return readAiChatEnvelope<AiChatEnvelope>(response.body, 'sandbox postAiAction');
-}
-
-async function getAiConversations(user: BootstrappedUser) {
-  return requestJson<AiConversationsResponse>({
-    method: 'GET',
-    path: `/ai/conversations?userId=${user.user.id}&limit=20`,
-    token: user.token,
-  });
-}
-
-async function getAiCurrentTasks(user: BootstrappedUser) {
-  return requestJson<CurrentTasksResponse>({
-    method: 'GET',
-    path: '/ai/tasks/current',
-    token: user.token,
-  });
-}
-
-async function postAiDiscussionEntered(params: {
-  user: BootstrappedUser;
-  activityId: string;
-  entry?: string;
-}) {
-  return requestJson<{ code: number; msg: string }>({
-    method: 'POST',
-    path: '/ai/tasks/discussion-entered',
-    token: params.user.token,
-    payload: {
-      activityId: params.activityId,
-      ...(params.entry ? { entry: params.entry } : {}),
-    },
-  });
-}
-
-async function confirmFulfillment(params: {
-  activityId: string;
-  creator: BootstrappedUser;
-  participants: Array<{ userId: string; fulfilled: boolean }>;
-}) {
-  return requestJson<{
-    activityId: string;
-    attendedCount: number;
-    noShowCount: number;
-    totalSubmitted: number;
-    msg: string;
-  }>({
-    method: 'POST',
-    path: '/participants/confirm-fulfillment',
-    token: params.creator.token,
-    payload: {
-      activityId: params.activityId,
-      participants: params.participants,
-    },
-  });
-}
-
-async function markRebookFollowUp(activityId: string, user: BootstrappedUser) {
-  return requestJson<{
-    code: number;
-    msg: string;
-    nextAction?: {
-      label: string;
-      prompt: string;
-      activityMode: 'review' | 'rebook';
-      entry: string;
-    };
-  }>({
-    method: 'POST',
-    path: '/participants/rebook-follow-up',
-    token: user.token,
-    payload: { activityId },
-  });
-}
-
-async function recordActivitySelfFeedback(params: {
-  activityId: string;
-  user: BootstrappedUser;
-  feedback: 'positive' | 'neutral' | 'failed';
-}) {
-  return requestJson<{
-    code: number;
-    msg: string;
-    nextAction?: {
-      label: string;
-      prompt: string;
-      activityMode: 'review' | 'rebook';
-      entry: string;
-    };
-  }>({
-    method: 'POST',
-    path: '/participants/self-feedback',
-    token: params.user.token,
-    payload: {
-      activityId: params.activityId,
-      feedback: params.feedback,
-    },
-  });
-}
-
-async function getUserActivityOutcome(userId: string, activityId: string): Promise<StoredActivityOutcome | null> {
-  const records = await db
-    .select({
-      metadata: userMemories.metadata,
-    })
-    .from(userMemories)
-    .where(and(
-      eq(userMemories.userId, userId),
-      eq(userMemories.memoryType, 'activity_outcome'),
-    ))
-    .orderBy(desc(userMemories.updatedAt))
-    .limit(20);
-
-  const record = records.find((item) => {
-    const metadata = item.metadata as Record<string, unknown>;
-    return metadata.activityId === activityId;
-  });
-  if (!record) return null;
-
-  const metadata = record.metadata as Record<string, unknown>;
-  if (metadata.activityId !== activityId) {
-    return null;
-  }
-
-  const attended = metadata.attended;
-  const rebookTriggered = metadata.rebookTriggered;
-  const reviewSummary = metadata.reviewSummary;
-  const activityTitle = metadata.activityTitle;
-  const activityType = metadata.activityType;
-  const locationName = metadata.locationName;
-  const happenedAt = metadata.happenedAt;
-  const updatedAt = metadata.updatedAt;
-
-  if (
-    typeof activityTitle !== 'string'
-    || typeof activityType !== 'string'
-    || typeof locationName !== 'string'
-    || typeof happenedAt !== 'string'
-    || typeof updatedAt !== 'string'
-    || !(attended === null || typeof attended === 'boolean')
-    || typeof rebookTriggered !== 'boolean'
-    || !(
-      reviewSummary === undefined
-      || reviewSummary === null
-      || typeof reviewSummary === 'string'
-    )
-  ) {
-    return null;
-  }
-
-  return {
-    activityId,
-    activityTitle,
-    activityType,
-    locationName,
-    attended,
-    rebookTriggered,
-    reviewSummary: typeof reviewSummary === 'string' ? reviewSummary : null,
-    happenedAt,
-    updatedAt,
-  };
-}
-
-async function withActivity<T>(creator: BootstrappedUser, run: (activityId: string) => Promise<T>, overrides?: Parameters<typeof buildCreatePayload>[0]) {
-  const activityId = await createActivity(creator, overrides);
-  try {
-    return await run(activityId);
-  } finally {
-    await cancelActivity(activityId, creator).catch(() => null);
-  }
-}
 
 async function scenarioBasicDiscussionFlow(context: ScenarioContext): Promise<ScenarioResult> {
   const [creator, ...joiners] = context.users;
@@ -1516,93 +479,167 @@ async function scenarioPostActivityFollowUpFlow(context: ScenarioContext): Promi
 }
 
 async function scenarioAiExploreWithoutLocationFlow(context: ScenarioContext): Promise<ScenarioResult> {
-  const [user] = context.users;
+  const [userA, userB] = context.users;
   const details: string[] = [];
 
-  const firstTurn = await postAiChat({ user, text: '周末附近有什么活动' });
-  assert(typeof firstTurn.conversationId === 'string' && firstTurn.conversationId.length > 0, 'AI 探索首轮未返回 conversationId');
-  assertNoLeakedToolText(firstTurn.response.blocks, 'AI 无位置探索首轮');
+  const firstA = await postAiChat({ user: userA, text: '周末附近有什么活动' });
+  assert(typeof firstA.conversationId === 'string' && firstA.conversationId.length > 0, 'userA AI 探索首轮未返回 conversationId');
+  assertNoLeakedToolText(firstA.response.blocks, 'userA AI 无位置探索首轮');
   assert(
-    firstTurn.response.blocks.some((block) => block.type === 'choice'),
-    `AI 无位置探索首轮未返回位置选择卡: ${JSON.stringify(firstTurn.response.blocks)}`,
+    firstA.response.blocks.some((block) => block.type === 'choice'),
+    `userA AI 无位置探索首轮未返回位置选择卡: ${JSON.stringify(firstA.response.blocks)}`,
   );
 
-  const secondTurn = await postAiChat({
-    user,
-    conversationId: firstTurn.conversationId,
+  const secondA = await postAiChat({
+    user: userA,
+    conversationId: firstA.conversationId,
     text: '解放碑',
   });
-  assertNoLeakedToolText(secondTurn.response.blocks, 'AI 位置追答');
+  assertNoLeakedToolText(secondA.response.blocks, 'userA AI 位置追答');
   assert(
-    secondTurn.response.blocks.some((block) => block.type === 'choice'),
-    `AI 位置追答后未返回类型选择卡: ${JSON.stringify(secondTurn.response.blocks)}`,
+    secondA.response.blocks.some((block) => block.type === 'choice'),
+    `userA AI 位置追答后未返回类型选择卡: ${JSON.stringify(secondA.response.blocks)}`,
   );
 
-  const thirdTurn = await postAiChat({
-    user,
-    conversationId: firstTurn.conversationId,
+  const thirdA = await postAiChat({
+    user: userA,
+    conversationId: firstA.conversationId,
     text: '火锅',
   });
-  assertNoLeakedToolText(thirdTurn.response.blocks, 'AI 类型追答');
+  assertNoLeakedToolText(thirdA.response.blocks, 'userA AI 类型追答');
   assert(
-    thirdTurn.response.blocks.some((block) =>
+    thirdA.response.blocks.some((block) =>
       block.type === 'list'
       || block.type === 'cta-group'
       || block.type === 'choice'
       || block.type === 'text'
     ),
-    `AI 类型追答后未进入 explore 链路: ${JSON.stringify(thirdTurn.response.blocks)}`,
+    `userA AI 类型追答后未进入 explore 链路: ${JSON.stringify(thirdA.response.blocks)}`,
   );
 
-  details.push(`会话 ${firstTurn.conversationId} 对“周末附近有什么活动”先返回位置卡`);
-  details.push('输入“解放碑”后返回类型卡，输入“火锅”后进入 explore 结果或无结果时的下一步改找承接');
+  const firstB = await postAiChat({ user: userB, text: '附近有什么活动' });
+  assert(typeof firstB.conversationId === 'string' && firstB.conversationId.length > 0, 'userB AI 探索首轮未返回 conversationId');
+  assert(firstB.conversationId !== firstA.conversationId, '多用户探索不应共享 conversationId');
+  assertNoLeakedToolText(firstB.response.blocks, 'userB AI 无位置探索首轮');
+  assert(
+    firstB.response.blocks.some((block) => block.type === 'choice'),
+    `userB AI 无位置探索首轮未返回位置选择卡: ${JSON.stringify(firstB.response.blocks)}`,
+  );
+
+  const secondB = await postAiChat({
+    user: userB,
+    conversationId: firstB.conversationId,
+    text: '南山',
+  });
+  assertNoLeakedToolText(secondB.response.blocks, 'userB AI 位置追答');
+  assert(
+    secondB.response.blocks.some((block) => block.type === 'choice'),
+    `userB AI 位置追答后未返回类型选择卡: ${JSON.stringify(secondB.response.blocks)}`,
+  );
+
+  const thirdB = await postAiChat({
+    user: userB,
+    conversationId: firstB.conversationId,
+    text: '桌游',
+  });
+  assertNoLeakedToolText(thirdB.response.blocks, 'userB AI 类型追答');
+  assert(
+    thirdB.response.blocks.some((block) =>
+      block.type === 'list'
+      || block.type === 'cta-group'
+      || block.type === 'choice'
+      || block.type === 'text'
+    ),
+    `userB AI 类型追答后未进入 explore 链路: ${JSON.stringify(thirdB.response.blocks)}`,
+  );
+
+  details.push(`userA 会话 ${firstA.conversationId}：解放碑 → 火锅`);
+  details.push(`userB 会话 ${firstB.conversationId}：南山 → 桌游`);
+  details.push('多用户探索路径隔离通过');
 
   return { name: 'ai-explore-without-location-flow', passed: true, details };
 }
 
 async function scenarioAiLocationFollowupFlow(context: ScenarioContext): Promise<ScenarioResult> {
-  const [user] = context.users;
+  const [userA, userB] = context.users;
   const details: string[] = [];
 
-  await cleanupSandboxAgentTasks([user]);
+  await cleanupSandboxAgentTasks([userA, userB]);
 
-  const firstTurn = await postAiChat({ user, text: '想组个周五晚的局' });
-  assert(typeof firstTurn.conversationId === 'string' && firstTurn.conversationId.length > 0, 'AI 追问链路未返回 conversationId');
-  assertNoLeakedToolText(firstTurn.response.blocks, 'AI 首轮追问');
+  const firstA = await postAiChat({ user: userA, text: '想组个周五晚的局' });
+  assert(typeof firstA.conversationId === 'string' && firstA.conversationId.length > 0, 'userA AI 追问链路未返回 conversationId');
+  assertNoLeakedToolText(firstA.response.blocks, 'userA AI 首轮追问');
   assert(
-    hasVisibleFeedback(firstTurn.response.blocks),
-    `AI 首轮未返回用户可见追问: ${JSON.stringify(firstTurn.response.blocks)}`,
+    hasVisibleFeedback(firstA.response.blocks),
+    `userA AI 首轮未返回用户可见追问: ${JSON.stringify(firstA.response.blocks)}`,
   );
 
-  const secondTurn = await postAiChat({
-    user,
-    conversationId: firstTurn.conversationId,
+  const secondA = await postAiChat({
+    user: userA,
+    conversationId: firstA.conversationId,
     text: '解放碑',
   });
-  assertNoLeakedToolText(secondTurn.response.blocks, 'AI 地点追答');
+  assertNoLeakedToolText(secondA.response.blocks, 'userA AI 地点追答');
   assert(
-    secondTurn.response.blocks.some((block) => block.type === 'choice' || block.type === 'form' || block.type === 'cta-group'),
-    `AI 地点追答后未返回下一步交互组件: ${JSON.stringify(secondTurn.response.blocks)}`,
+    secondA.response.blocks.some((block) => block.type === 'choice' || block.type === 'form' || block.type === 'cta-group'),
+    `userA AI 地点追答后未返回下一步交互组件: ${JSON.stringify(secondA.response.blocks)}`,
   );
 
-  const thirdTurn = await postAiChat({
-    user,
-    conversationId: firstTurn.conversationId,
+  const thirdA = await postAiChat({
+    user: userA,
+    conversationId: firstA.conversationId,
     text: '桌游',
   });
-  assertNoLeakedToolText(thirdTurn.response.blocks, 'AI 类型追答');
+  assertNoLeakedToolText(thirdA.response.blocks, 'userA AI 类型追答');
   assert(
-    thirdTurn.response.blocks.some((block) =>
+    thirdA.response.blocks.some((block) =>
       block.type === 'list'
       || block.type === 'cta-group'
       || block.type === 'entity-card'
       || block.type === 'form'
     ),
-    `AI 类型追答后未进入后续承接链路: ${JSON.stringify(thirdTurn.response.blocks)}`,
+    `userA AI 类型追答后未进入后续承接链路: ${JSON.stringify(thirdA.response.blocks)}`,
   );
 
-  details.push(`会话 ${firstTurn.conversationId} 首轮已返回可继续追答的建局提示`);
-  details.push('二轮输入“解放碑”后返回下一步交互组件，三轮输入“桌游”后进入结果或建局承接链路');
+  const firstB = await postAiChat({ user: userB, text: '想组个周六晚的局' });
+  assert(typeof firstB.conversationId === 'string' && firstB.conversationId.length > 0, 'userB AI 追问链路未返回 conversationId');
+  assert(firstB.conversationId !== firstA.conversationId, '多用户追问不应共享 conversationId');
+  assertNoLeakedToolText(firstB.response.blocks, 'userB AI 首轮追问');
+  assert(
+    hasVisibleFeedback(firstB.response.blocks),
+    `userB AI 首轮未返回用户可见追问: ${JSON.stringify(firstB.response.blocks)}`,
+  );
+
+  const secondB = await postAiChat({
+    user: userB,
+    conversationId: firstB.conversationId,
+    text: '观音桥',
+  });
+  assertNoLeakedToolText(secondB.response.blocks, 'userB AI 地点追答');
+  assert(
+    secondB.response.blocks.some((block) => block.type === 'choice' || block.type === 'form' || block.type === 'cta-group'),
+    `userB AI 地点追答后未返回下一步交互组件: ${JSON.stringify(secondB.response.blocks)}`,
+  );
+
+  const thirdB = await postAiChat({
+    user: userB,
+    conversationId: firstB.conversationId,
+    text: '羽毛球',
+  });
+  assertNoLeakedToolText(thirdB.response.blocks, 'userB AI 类型追答');
+  assert(
+    thirdB.response.blocks.some((block) =>
+      block.type === 'list'
+      || block.type === 'cta-group'
+      || block.type === 'entity-card'
+      || block.type === 'form'
+    ),
+    `userB AI 类型追答后未进入后续承接链路: ${JSON.stringify(thirdB.response.blocks)}`,
+  );
+
+  details.push(`userA 会话 ${firstA.conversationId}：周五晚 → 解放碑 → 桌游`);
+  details.push(`userB 会话 ${firstB.conversationId}：周六晚 → 观音桥 → 羽毛球`);
+  details.push('多用户追问路径隔离通过');
 
   return { name: 'ai-location-followup-flow', passed: true, details };
 }
@@ -2870,6 +1907,120 @@ async function scenarioAiRapidFireFlow(context: ScenarioContext): Promise<Scenar
   return { name: 'ai-rapid-fire-flow', passed: true, details };
 }
 
+async function scenarioActionFastExitValidation(context: ScenarioContext): Promise<ScenarioResult> {
+  const [user] = context.users;
+  const details: string[] = [];
+
+  const startedAt = Date.now();
+  const turn = await postAiAction({
+    user,
+    action: 'explore_nearby',
+    displayText: '观音桥附近有什么活动',
+    payload: {
+      lat: 29.563009,
+      lng: 106.551556,
+      locationHint: '观音桥',
+      type: 'boardgame',
+    },
+  });
+  const durationMs = Date.now() - startedAt;
+
+  assertNoLeakedToolText(turn.response.blocks, 'action fast exit explore');
+  assert(hasVisibleFeedback(turn.response.blocks), 'action fast exit 缺少可见反馈');
+  assert(
+    turn.response.blocks.some((b) => b.type === 'list' || b.type === 'choice' || b.type === 'entity-card' || b.type === 'text'),
+    `action fast exit 未返回预期 block 类型: ${turn.response.blocks.map((b) => b.type).join(',')}`,
+  );
+
+  details.push(`explore_nearby action 耗时 ${durationMs}ms`);
+  details.push(`返回 block 类型: ${turn.response.blocks.map((b) => b.type).join(',')}`);
+
+  return { name: 'action-fast-exit-validation', passed: true, details };
+}
+
+async function scenarioUserProfilePropagation(context: ScenarioContext): Promise<ScenarioResult> {
+  const [creator, joiner] = context.users;
+  const details: string[] = [];
+
+  const activityId = await createActivity(creator, {
+    title: `画像传播验收-${Date.now()}`,
+    type: 'boardgame',
+    locationName: '观音桥',
+    locationHint: '观音桥',
+  });
+
+  try {
+    await joinActivity(activityId, joiner);
+    await markActivityCompleted(activityId, creator);
+
+    const fulfillment = await confirmFulfillment({
+      activityId,
+      creator,
+      participants: [{ userId: joiner.user.id, fulfilled: true }],
+    });
+    assert(fulfillment.totalSubmitted === 2, `履约确认人数异常: ${fulfillment.totalSubmitted}`);
+
+    const outcome = await waitFor(
+      () => getUserActivityOutcome(joiner.user.id, activityId),
+      { retries: 8, delayMs: 300 },
+    );
+    assert(outcome, 'activityOutcome 未写入 userMemories');
+    assert(outcome.attended === true, `attended 写回异常: ${outcome?.attended}`);
+
+    const exploreTurn = await postAiAction({
+      user: joiner,
+      action: 'explore_nearby',
+      displayText: '附近有什么桌游局',
+      payload: {
+        lat: 29.563009,
+        lng: 106.551556,
+        locationHint: '观音桥',
+        type: 'boardgame',
+      },
+    });
+
+    assertNoLeakedToolText(exploreTurn.response.blocks, '画像传播 explore');
+    assert(hasVisibleFeedback(exploreTurn.response.blocks), '画像传播 explore 缺少可见反馈');
+
+    const exploreText = extractVisibleText(exploreTurn.response.blocks);
+    assert(exploreText.length > 10, `画像传播 explore 文本过短: "${exploreText}"`);
+
+    const hasMemorySignal = exploreText.includes('观音桥') || exploreText.includes('桌游');
+    details.push(`活动 ${activityId} 已写回 outcome，再次 explore 成功`);
+    details.push(`explore 文本长度=${exploreText.length}`);
+    details.push(`记忆信号检测=${hasMemorySignal ? '命中' : '未命中'}（文本: ${exploreText.slice(0, 60)}...）`);
+
+    return { name: 'user-profile-propagation', passed: true, details };
+  } finally {
+    await cancelActivity(activityId, creator).catch(() => null);
+  }
+}
+
+async function scenarioAiExploreMultiUser(context: ScenarioContext): Promise<ScenarioResult> {
+  const [userA, userB] = context.users;
+  const details: string[] = [];
+
+  const turnA = await postAiChat({ user: userA, text: '观音桥附近有什么活动' });
+  const turnB = await postAiChat({ user: userB, text: '南山附近有什么活动' });
+
+  assert(typeof turnA.conversationId === 'string', 'userA explore 未返回 conversationId');
+  assert(typeof turnB.conversationId === 'string', 'userB explore 未返回 conversationId');
+  assert(turnA.conversationId !== turnB.conversationId, '多用户 explore 不应共享 conversationId');
+
+  const convA = await getAiConversations(userA);
+  const convB = await getAiConversations(userB);
+
+  assert(convA.items.some((c) => c.id === turnA.conversationId), 'userA 应能看到自己的会话');
+  assert(convB.items.some((c) => c.id === turnB.conversationId), 'userB 应能看到自己的会话');
+  assert(!convA.items.some((c) => c.id === turnB.conversationId), 'userA 不应看到 userB 的会话');
+  assert(!convB.items.some((c) => c.id === turnA.conversationId), 'userB 不应看到 userA 的会话');
+
+  details.push(`userA conversation=${turnA.conversationId}, userB conversation=${turnB.conversationId}`);
+  details.push('多用户会话隔离通过');
+
+  return { name: 'ai-explore-multi-user', passed: true, details };
+}
+
 const coreScenarios = [
   scenarioBasicDiscussionFlow,
   scenarioCapacityLimit,
@@ -2889,6 +2040,8 @@ const coreScenarios = [
   scenarioPartnerActionGateFlow,
   scenarioAiDraftSettingsFormFlow,
   scenarioAiAccessFlow,
+  scenarioActionFastExitValidation,
+  scenarioUserProfilePropagation,
 ];
 
 const extendedScenarios = [
@@ -2900,6 +2053,7 @@ const extendedScenarios = [
   scenarioAiAnonymousLongFlow,
   scenarioAiErrorRecoveryFlow,
   scenarioAiRapidFireFlow,
+  scenarioAiExploreMultiUser,
 ];
 
 async function main() {
@@ -2908,6 +2062,8 @@ async function main() {
   await cleanupSandboxActivities(users);
   await cleanupSandboxPartnerIntents(users);
   await cleanupSandboxAgentTasks(users);
+  await cleanupSandboxConversations(users);
+  await cleanupSandboxUserMemories(users);
   const context: ScenarioContext = { users };
 
   const scenarioPool = scenarioSuite === 'all'
@@ -3015,6 +2171,8 @@ async function main() {
   await cleanupSandboxPartnerIntents(users);
   await cleanupSandboxAgentTasks(users);
   await cleanupSandboxActivities(users);
+  await cleanupSandboxConversations(users);
+  await cleanupSandboxUserMemories(users);
 
   const failed = results.filter((item) => !item.passed);
   if (failed.length > 0) {
@@ -3022,12 +2180,36 @@ async function main() {
   }
 }
 
-main()
-  .catch((error) => {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`sandbox-regression failed: ${message}`);
-    process.exit(1);
-  })
-  .then(() => {
+if (import.meta.main) {
+  if (Bun.argv.includes('--help') || Bun.argv.includes('-h')) {
+    console.log(`sandbox-regression.ts — 用户流程回归脚本
+
+用法: bun scripts/sandbox-regression.ts [选项]
+
+选项:
+  --help, -h            显示此帮助
+  --suite <name>        选择场景套件: core | extended | all (默认: core)
+  --scenario <keyword>  按名称关键字过滤场景
+
+套件说明:
+  core      主链路场景 (默认)
+  extended  扩展场景 (长对话、匿名、多意图切换等)
+  all       全部场景
+
+对应命令:
+  bun run regression:flow
+  bun run regression:flow:extended
+`);
     process.exit(0);
-  });
+  }
+
+  main()
+    .catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`sandbox-regression failed: ${message}`);
+      process.exit(1);
+    })
+    .then(() => {
+      process.exit(0);
+    });
+}

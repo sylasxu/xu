@@ -223,7 +223,6 @@ export async function joinActivity(activityId: string, userId: string): Promise<
               activityId,
               userId,
               status: 'waitlist',
-              joinedAt: null,
             })
             .returning({ id: participants.id });
 

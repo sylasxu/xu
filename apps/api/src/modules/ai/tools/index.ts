@@ -45,7 +45,6 @@ export {
   WIDGET_TOOL_NAMES,
   isWidgetTool,
   buildWidgetSpec,
-  generateWidgetCatalog,
   getCatalogEntryByToolName,
 } from './widgets';
 

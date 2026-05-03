@@ -216,10 +216,69 @@ bun run regression:coverage
 - 还不能回答“PRD 全量覆盖率百分比”
 - 后续继续补 state seed / H5 黑盒 / 多端视觉断点后，再升级成真正的产品覆盖报告
 
+## 开发者测试决策表
+
+改代码时按这张表决定写什么测试、跑哪条命令，不要凭记忆挑。
+
+| 改了什么 | 写什么测试 | 跑哪条命令 | 是否要更新矩阵 |
+|---------|-----------|-----------|--------------|
+| Controller / Service 纯函数、参数校验、状态机分支 | `bun test` 或 `vitest`（见下方运行器规则） | `bun run test:api` | 否 |
+| 数据库 Schema 变更 | `bun test` 集成测试验证字段流转 | `bun run test:api` | 否 |
+| 新增/修改用户可见流程（报名、讨论、通知、找搭子） | 补 `sandbox-regression` 场景 | `bun run regression:flow` | **是** |
+| 修改 AI 对话主链、Action handler、Processor | 补 `sandbox-regression` 场景 | `bun run regression:flow` | **是** |
+| 修改 SSE / GenUI block 协议、流式结构 | 补 `chat-regression` 场景 | `bun run regression:protocol` | **是** |
+| 修改找搭子匹配算法、任务运行时 | 补 `ten-user-world` 对应 Phase | `bun run regression:ten-user` | 否（世界脚本是聚合场景） |
+| 新增身份记忆/画像相关逻辑 | 补 `identity-memory-regression` | `bun run regression:identity-memory` | 否 |
+| 修改 shared 工具、常量、通用类型 | 跑全量单测 + 一条核心流程回归 | `bun run test:api && bun run regression:flow` | 视影响面 |
+| 准备合并/提测/发版 | 跑发布门禁 | `bun run release:gate` | 否 |
+
+**关键原则**：同一个需求如果只补了单测、却没有覆盖对应的用户旅程回归，不算验收完成。
+
+## 测试运行器选择规则
+
+`apps/api` 的测试文件混用 `bun:test` 和 `vitest`，选择规则如下：
+
+| 场景 | 运行器 | 原因 |
+|------|--------|------|
+| 纯函数、算法、业务规则、workflow 状态机 | `bun:test` | 不需要生命周期钩子和模块 mock，Bun 原生最快 |
+| 需要 `beforeAll` / `afterEach` 清理数据库 | `vitest` | bun:test 的生命周期钩子支持不完善 |
+| 需要 `vi.mock()` / `vi.fn()` 模拟模块 | `vitest` | bun:test 没有内置 mock 框架 |
+| Elysia 路由集成测试、DB 真实写入 | `vitest` | 需要生命周期确保每次测试后清理数据 |
+
+**默认优先 `bun:test`**。只有当测试需要生命周期钩子或模块 mock 时，才降级到 `vitest`。
+
+## 新增回归场景 Checklist
+
+补回归不是"加一段代码就行"，必须完成以下步骤：
+
+1. **判断影响域**：改了什么？影响的是用户旅程、协议契约、还是纯内部规则？
+2. **选择 runner**：
+   - 用户旅程 → `sandbox-regression.ts` 新增 `scenarioXxx` 函数
+   - 协议契约 → `chat-regression.ts` 新增 check
+   - 交叉用户世界 → `ten-user-world.ts` 新增 Phase
+3. **写断言**：不要只测"没报错"，要测"用户目标达成"
+   - 报名成功 → 验证 `joinResult === 'joined'` + 讨论区可见
+   - 活动发布 → 验证 `publicActivity.status === 'active'`
+   - 找搭子匹配 → 验证 `pendingMatches` 生成 + 确认后 `find_partner` 任务收口
+4. **更新矩阵**：在 `regression-scenario-matrix.ts` 中补一条 `ScenarioMatrixEntry`
+   - 必须填写 `domain`、`userMindsets`、`trustRisks`、`dropOffPoints`、`longFlowIds`
+   - 不要只写功能描述，要写"用户当时在想什么、怕什么"
+5. **本地验证**：
+   ```bash
+   bun run regression:flow --scenario xxx
+   ```
+   或
+   ```bash
+   bun run regression:protocol --scenario xxx
+   ```
+6. **跑 artifact**：确认 `.artifacts/regression/` 下生成了正确产物
+7. **跑全量门禁**：`bun run release:gate` 通过后再提交
+
 ## 使用建议
 
 - 只改 API 规则，先跑 `bun run test:api`
 - 改报名、讨论、通知、AI 会话等用户旅程，至少加跑 `bun run regression:flow`
+- 改多用户交叉状态（报名竞争、消息聚合、匹配密度），加跑 `bun run regression:ten-user`
 - 内部自测收口至少确认两条主流程回归通过：
   - `create_activity -> edit_draft/save_draft_settings -> confirm_publish`
   - `find_partner -> search_partners -> opt_in_partner_pool`

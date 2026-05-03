@@ -36,7 +36,6 @@ export const STRUCTURED_ACTION_TYPES = [
   'explore_nearby',          // 探索附近
   'ask_preference',          // 主动追问偏好/位置
   'expand_map',              // 展开地图
-  'filter_activities',       // 筛选活动
   // 找搭子相关
   'find_partner',            // 找搭子
   'search_partners',         // 搜索搭子结果
@@ -47,11 +46,8 @@ export const STRUCTURED_ACTION_TYPES = [
   'confirm_match',           // 确认匹配成局
   'cancel_match',            // 取消待确认匹配
   'select_preference',       // 选择偏好（多轮对话）
-  'skip_preference',         // 跳过偏好选择
   // 通用
-  'retry',                   // 重试上一次操作
   'cancel',                  // 取消当前操作
-  'quick_prompt',            // 快捷提示词
 ] as const;
 
 export type StructuredActionType = (typeof STRUCTURED_ACTION_TYPES)[number];
@@ -104,10 +100,6 @@ export interface StructuredActionResult {
   error?: string;
   /** 执行耗时（毫秒） */
   durationMs?: number;
-  /** 是否需要回退到 LLM 处理 */
-  fallbackToLLM?: boolean;
-  /** 回退时的提示文本 */
-  fallbackText?: string;
 }
 
 /**

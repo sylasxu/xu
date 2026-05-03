@@ -15,8 +15,6 @@ import { confirmMatch, cancelMatch, createManualPartnerMatch } from '../tools/pa
 import { buildCreateDraftParamsFromActionPayload, createActivityDraftRecord, publishActivityRecord, updateActivityDraftRecord } from '../tools/activity-tools';
 import { createPartnerIntent, ensureSearchDrivenPartnerIntent, searchPartnerCandidates } from '../tools/partner-tools';
 import { buildExploreNearbyResult, type ExploreResultItem } from '../tools/explore-nearby';
-import { getEnhancedUserProfile, type EnhancedUserProfile } from '../memory';
-import type { ActivityOutcome } from '../memory';
 import {
   buildPartnerAskPreferencePayload,
   buildPartnerIntentFormPayload,
@@ -50,115 +48,6 @@ function getPartnerSearchTargetLabel(activityType: string, sportType?: string): 
   }
 
   return `${getPartnerActivityTypeLabel(activityType)}搭子`;
-}
-
-function buildPartnerSearchMemoryHints(
-  profile: EnhancedUserProfile | null,
-  params: {
-    activityType: string;
-    locationHint: string;
-  }
-): string[] {
-  if (!profile) {
-    return [];
-  }
-
-  const hints: string[] = [];
-  const frequentLocation = profile.frequentLocations
-    .map((location) => location.trim())
-    .find((location) => location.length > 0);
-  if (frequentLocation && (!params.locationHint || params.locationHint.includes(frequentLocation) || frequentLocation.includes(params.locationHint))) {
-    hints.push(`常去${frequentLocation}`);
-  }
-
-  const socialPreference = profile.preferences
-    .filter((preference) => preference.sentiment === 'like' && preference.category === 'social')
-    .sort((left, right) => right.confidence - left.confidence)
-    .map((preference) => preference.value.trim())
-    .find((value) => value.length > 0);
-  if (socialPreference) {
-    hints.push(`偏好${socialPreference}`);
-  }
-
-  const timePreference = profile.preferences
-    .filter((preference) => preference.sentiment === 'like' && preference.category === 'time')
-    .sort((left, right) => right.confidence - left.confidence)
-    .map((preference) => preference.value.trim())
-    .find((value) => value.length > 0);
-  if (timePreference) {
-    hints.push(`常选${timePreference}`);
-  }
-
-  const positiveOutcome = selectRecentActivityOutcome(profile.activityOutcomes || [], {
-    activityType: params.activityType,
-    result: 'positive',
-  });
-  if (positiveOutcome) {
-    hints.push(`参考上次顺利的「${positiveOutcome.activityTitle}」`);
-  }
-
-  const failedOutcome = selectRecentActivityOutcome(profile.activityOutcomes || [], {
-    activityType: params.activityType,
-    result: 'failed',
-  });
-  if (failedOutcome) {
-    hints.push(`避开上次「${failedOutcome.activityTitle}」没成局的问题`);
-  }
-
-  return hints.slice(0, 3);
-}
-
-function selectRecentActivityOutcome(
-  outcomes: ActivityOutcome[],
-  params: {
-    activityType?: string;
-    result: 'positive' | 'failed';
-  },
-): ActivityOutcome | null {
-  const matchesResult = params.result === 'positive'
-    ? (outcome: ActivityOutcome) => outcome.attended === true || outcome.rebookTriggered
-    : (outcome: ActivityOutcome) => outcome.attended === false;
-
-  return outcomes
-    .filter(matchesResult)
-    .filter((outcome) => !params.activityType || outcome.activityType === params.activityType || Boolean(outcome.reviewSummary?.trim()))
-    .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())[0] ?? null;
-}
-
-function buildExploreMemorySignals(
-  profile: EnhancedUserProfile | null,
-  params: {
-    activityType?: string;
-    locationName: string;
-  },
-): string[] {
-  if (!profile) {
-    return [];
-  }
-
-  const signals: string[] = [];
-  const positiveOutcome = selectRecentActivityOutcome(profile.activityOutcomes || [], {
-    activityType: params.activityType,
-    result: 'positive',
-  });
-  if (positiveOutcome) {
-    const samePlace = positiveOutcome.locationName === params.locationName
-      || positiveOutcome.locationName.includes(params.locationName)
-      || params.locationName.includes(positiveOutcome.locationName);
-    signals.push(samePlace
-      ? `上次在${positiveOutcome.locationName}的「${positiveOutcome.activityTitle}」挺顺利`
-      : `参考上次顺利的「${positiveOutcome.activityTitle}」`);
-  }
-
-  const failedOutcome = selectRecentActivityOutcome(profile.activityOutcomes || [], {
-    activityType: params.activityType,
-    result: 'failed',
-  });
-  if (failedOutcome) {
-    signals.push(`会避开上次「${failedOutcome.activityTitle}」没成局的问题`);
-  }
-
-  return signals.slice(0, 2);
 }
 
 export function mergeExploreResultsWithNearbyFallback(params: {
@@ -206,6 +95,117 @@ export function mergeExploreResultsWithNearbyFallback(params: {
   }
 
   return merged;
+}
+
+type ActivityOutcomeItem = NonNullable<NonNullable<ActionHandlerContext['userProfile']>['activityOutcomes']>[number];
+
+function selectRecentActivityOutcome(
+  outcomes: ActivityOutcomeItem[],
+  params: {
+    activityType?: string;
+    result: 'positive' | 'failed';
+  },
+): ActivityOutcomeItem | null {
+  const matchesResult = params.result === 'positive'
+    ? (outcome: ActivityOutcomeItem) => outcome.attended === true || outcome.rebookTriggered
+    : (outcome: ActivityOutcomeItem) => outcome.attended === false;
+
+  return outcomes
+    .filter(matchesResult)
+    .filter((outcome) => !params.activityType || outcome.activityType === params.activityType || Boolean(outcome.activityTitle?.trim()))
+    .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime())[0] ?? null;
+}
+
+function buildExploreMemorySignals(
+  profile: ActionHandlerContext['userProfile'],
+  params: {
+    activityType?: string;
+    locationName: string;
+  },
+): string[] {
+  if (!profile?.activityOutcomes?.length) {
+    return [];
+  }
+
+  const signals: string[] = [];
+  const positiveOutcome = selectRecentActivityOutcome(profile.activityOutcomes, {
+    activityType: params.activityType,
+    result: 'positive',
+  });
+  if (positiveOutcome) {
+    const samePlace = positiveOutcome.locationName === params.locationName
+      || positiveOutcome.locationName.includes(params.locationName)
+      || params.locationName.includes(positiveOutcome.locationName);
+    signals.push(samePlace
+      ? `上次在${positiveOutcome.locationName}的「${positiveOutcome.activityTitle}」挺顺利`
+      : `参考上次顺利的「${positiveOutcome.activityTitle}」`);
+  }
+
+  const failedOutcome = selectRecentActivityOutcome(profile.activityOutcomes, {
+    activityType: params.activityType,
+    result: 'failed',
+  });
+  if (failedOutcome) {
+    signals.push(`会避开上次「${failedOutcome.activityTitle}」没成局的问题`);
+  }
+
+  return signals.slice(0, 2);
+}
+
+function buildPartnerSearchMemoryHints(
+  profile: ActionHandlerContext['userProfile'],
+  params: {
+    activityType: string;
+    locationHint: string;
+  },
+): string[] {
+  if (!profile) {
+    return [];
+  }
+
+  const hints: string[] = [];
+  const frequentLocation = profile.frequentLocations
+    ?.map((location) => location.trim())
+    .find((location) => location.length > 0);
+  if (frequentLocation && (!params.locationHint || params.locationHint.includes(frequentLocation) || frequentLocation.includes(params.locationHint))) {
+    hints.push(`常去${frequentLocation}`);
+  }
+
+  const socialPreference = profile.preferences
+    ?.filter((preference) => preference.sentiment === 'like' && preference.category === 'social')
+    .sort((left, right) => right.confidence - left.confidence)
+    .map((preference) => preference.value.trim())
+    .find((value) => value.length > 0);
+  if (socialPreference) {
+    hints.push(`偏好${socialPreference}`);
+  }
+
+  const timePreference = profile.preferences
+    ?.filter((preference) => preference.sentiment === 'like' && preference.category === 'time')
+    .sort((left, right) => right.confidence - left.confidence)
+    .map((preference) => preference.value.trim())
+    .find((value) => value.length > 0);
+  if (timePreference) {
+    hints.push(`常选${timePreference}`);
+  }
+
+  const positiveOutcome = selectRecentActivityOutcome(profile.activityOutcomes || [], {
+    activityType: params.activityType,
+    result: 'positive',
+  });
+  if (positiveOutcome) {
+    hints.push(`参考上次顺利的「${positiveOutcome.activityTitle}」`);
+  }
+
+  const failedOutcome = selectRecentActivityOutcome(profile.activityOutcomes || [], {
+    activityType: params.activityType,
+    result: 'failed',
+  });
+  if (failedOutcome) {
+    hints.push(`避开上次「${failedOutcome.activityTitle}」没成局的问题`);
+  }
+
+  return hints.slice(0, 3);
 }
 
 function buildPendingStructuredAction(action: StructuredAction): Record<string, unknown> {
@@ -256,7 +256,7 @@ function normalizeAuthRequiredResult(
  * Action 到 Tool 的映射表
  */
 const STRUCTURED_ACTION_HANDLERS: Record<StructuredActionType, {
-  handler: (payload: Record<string, unknown>, userId: string | null) => Promise<StructuredActionResult>;
+  handler: (payload: Record<string, unknown>, userId: string | null, context?: ActionHandlerContext) => Promise<StructuredActionResult>;
   requiresAuth: boolean;
   description: string;
 }> = {
@@ -330,12 +330,7 @@ const STRUCTURED_ACTION_HANDLERS: Record<StructuredActionType, {
     requiresAuth: false,
     description: '展开地图',
   },
-  filter_activities: {
-    handler: handleFilterActivities,
-    requiresAuth: false,
-    description: '筛选活动',
-  },
-  
+
   // 找搭子相关
   find_partner: {
     handler: handleFindPartner,
@@ -382,61 +377,65 @@ const STRUCTURED_ACTION_HANDLERS: Record<StructuredActionType, {
     requiresAuth: false,
     description: '选择偏好',
   },
-  skip_preference: {
-    handler: handleSkipPreference,
-    requiresAuth: false,
-    description: '跳过偏好',
-  },
-  
+
   // 通用
-  retry: {
-    handler: handleRetry,
-    requiresAuth: false,
-    description: '重试',
-  },
   cancel: {
     handler: handleCancel,
     requiresAuth: false,
     description: '取消',
-  },
-  quick_prompt: {
-    handler: handleQuickPrompt,
-    requiresAuth: false,
-    description: '快捷提示词',
   },
 };
 
 /**
  * 处理 Structured Action
  *
- * @returns StructuredActionResult，如果 fallbackToLLM=true 则需要回退到 LLM 处理
+ * @returns StructuredActionResult
  */
+export interface ActionHandlerContext {
+  recalledActivities?: { id: string; title: string; type: string; locationHint: string | null; startAt: Date; similarity: number }[];
+  userProfile?: {
+    hasProfile: boolean;
+    preferencesCount: number;
+    topPreferences?: string[];
+    frequentLocations?: string[];
+    preferences?: Array<{ sentiment: string; category: string; value: string; confidence: number }>;
+    activityOutcomes?: Array<{
+      attended: boolean;
+      activityTitle: string;
+      locationName: string;
+      activityType: string;
+      rebookTriggered?: boolean;
+      updatedAt: Date;
+    }>;
+  };
+}
+
 export async function handleStructuredAction(
   structuredAction: StructuredAction,
   userId: string | null,
-  location?: { lat: number; lng: number }
+  location?: { lat: number; lng: number },
+  context?: ActionHandlerContext,
 ): Promise<StructuredActionResult> {
   const startTime = Date.now();
   const { action: actionType, payload, source } = structuredAction;
-  
+
   logger.info('Processing structured action', {
-    actionType, 
-    source, 
+    actionType,
+    source,
     userId: userId || 'anon',
     hasLocation: !!location,
   });
-  
+
   // 查找处理器
   const handlerConfig = STRUCTURED_ACTION_HANDLERS[actionType];
   if (!handlerConfig) {
     logger.warn('Unknown structured action type', { actionType });
     return {
       success: false,
-      fallbackToLLM: true,
-      fallbackText: structuredAction.originalText || `执行 ${actionType}`,
+      error: `未知的操作类型: ${actionType}`,
     };
   }
-  
+
   // 检查认证
   if (handlerConfig.requiresAuth && !userId) {
     logger.warn('Action requires auth', { actionType });
@@ -446,38 +445,36 @@ export async function handleStructuredAction(
       data: { requiresAuth: true },
     }, structuredAction);
   }
-  
+
   try {
     // 注入位置信息到 payload
-    const enrichedPayload = location 
+    const enrichedPayload = location
       ? { ...payload, _location: location }
       : payload;
-    
-    const result = await handlerConfig.handler(enrichedPayload, userId);
-    
+
+    const result = await handlerConfig.handler(enrichedPayload, userId, context);
+
     const duration = Date.now() - startTime;
     logger.info('Structured action completed', {
-      actionType, 
+      actionType,
       success: result.success,
       duration,
-      fallbackToLLM: result.fallbackToLLM,
     });
-    
+
     return normalizeAuthRequiredResult({
       ...result,
       durationMs: duration,
     }, structuredAction);
   } catch (error) {
-    logger.error('Structured action failed', { 
-      actionType, 
+    logger.error('Structured action failed', {
+      actionType,
       error: getErrorMessage(error),
     });
-    
+
     return normalizeAuthRequiredResult({
       success: false,
       error: getErrorMessage(error),
       durationMs: Date.now() - startTime,
-      fallbackToLLM: false,
     }, structuredAction);
   }
 }
@@ -1189,7 +1186,8 @@ async function handleAskPreference(
 
 async function handleExploreNearby(
   payload: Record<string, unknown>,
-  userId: string | null
+  userId: string | null,
+  context?: ActionHandlerContext,
 ): Promise<StructuredActionResult> {
   const location = resolveActionLocation(payload);
 
@@ -1200,66 +1198,94 @@ async function handleExploreNearby(
     const semanticQuery = typeof payload.semanticQuery === 'string' && payload.semanticQuery.trim()
       ? payload.semanticQuery.trim()
       : `${locationName}附近的活动`;
-    const profile = userId ? await getEnhancedUserProfile(userId) : null;
-    const memoryHints = buildExploreMemorySignals(profile, {
+
+    const resultLimit = 10;
+    let results: ExploreResultItem[] = [];
+
+    // v5.3: 优先消费语义召回结果，避免重复 RAG 搜索
+    const recalled = context?.recalledActivities;
+    if (recalled && recalled.length > 0) {
+      const filtered = recalled
+        .filter((r) => !type || r.type === type)
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, resultLimit);
+
+      results = filtered.map((r) => ({
+        id: r.id,
+        title: r.title,
+        type: r.type,
+        lat: 0,
+        lng: 0,
+        locationName: r.locationHint ?? locationName,
+        distance: 0,
+        startAt: new Date(r.startAt).toISOString(),
+        currentParticipants: 0,
+        maxParticipants: 0,
+        score: r.similarity,
+      }));
+    }
+
+    // 召回结果为空时 fallback 到独立搜索
+    if (results.length === 0) {
+      const scoredResults = await search({
+        semanticQuery,
+        filters: {
+          ...(location
+            ? {
+                location: {
+                  lat: location.lat,
+                  lng: location.lng,
+                  radiusInKm: radius,
+                },
+              }
+            : {}),
+          type: type ?? undefined,
+        },
+        limit: resultLimit,
+        includeMatchReason: false,
+        userId: userId ?? undefined,
+      });
+
+      results = scoredResults.map((scored) => {
+        const { activity, score, distance } = scored;
+        const point = readActivityPoint(activity.location);
+
+        return {
+          id: activity.id,
+          title: activity.title,
+          type: activity.type,
+          lat: point?.lat ?? 0,
+          lng: point?.lng ?? 0,
+          locationName: activity.locationName,
+          distance: distance ? Math.round(distance) : 0,
+          startAt: new Date(activity.startAt).toISOString(),
+          currentParticipants: activity.currentParticipants,
+          maxParticipants: activity.maxParticipants,
+          score,
+        };
+      });
+
+      if (location && results.length < 2) {
+        const nearby = await getNearbyActivities({
+          lat: location.lat,
+          lng: location.lng,
+          radius: radius * 1000,
+          limit: resultLimit,
+          ...(type ? { type } : {}),
+        });
+
+        results = mergeExploreResultsWithNearbyFallback({
+          primary: results,
+          fallback: nearby.data,
+          limit: resultLimit,
+        });
+      }
+    }
+
+    const memoryHints = buildExploreMemorySignals(context?.userProfile, {
       ...(type ? { activityType: type } : {}),
       locationName,
     });
-
-    const resultLimit = 10;
-    const scoredResults = await search({
-      semanticQuery,
-      filters: {
-        ...(location
-          ? {
-              location: {
-                lat: location.lat,
-                lng: location.lng,
-                radiusInKm: radius,
-              },
-            }
-          : {}),
-        type: type ?? undefined,
-      },
-      limit: resultLimit,
-      includeMatchReason: false,
-      userId: userId ?? undefined,
-    });
-
-    let results: ExploreResultItem[] = scoredResults.map((scored) => {
-      const { activity, score, distance } = scored;
-      const point = readActivityPoint(activity.location);
-
-      return {
-        id: activity.id,
-        title: activity.title,
-        type: activity.type,
-        lat: point?.lat ?? 0,
-        lng: point?.lng ?? 0,
-        locationName: activity.locationName,
-        distance: distance ? Math.round(distance) : 0,
-        startAt: new Date(activity.startAt).toISOString(),
-        currentParticipants: activity.currentParticipants,
-        maxParticipants: activity.maxParticipants,
-        score,
-      };
-    });
-
-    if (location && results.length < 2) {
-      const nearby = await getNearbyActivities({
-        lat: location.lat,
-        lng: location.lng,
-        radius: radius * 1000,
-        limit: resultLimit,
-        ...(type ? { type } : {}),
-      });
-
-      results = mergeExploreResultsWithNearbyFallback({
-        primary: results,
-        fallback: nearby.data,
-        limit: resultLimit,
-      });
-    }
 
     return {
       success: true,
@@ -1293,21 +1319,10 @@ async function handleExpandMap(
   };
 }
 
-async function handleFilterActivities(
-  payload: Record<string, unknown>,
-  _userId: string | null
-): Promise<StructuredActionResult> {
-  // 筛选需要 LLM 理解筛选条件
-  return {
-    success: false,
-    fallbackToLLM: true,
-    fallbackText: `筛选${payload.type || ''}活动`,
-  };
-}
-
 async function handleFindPartner(
   payload: Record<string, unknown>,
-  userId: string | null
+  userId: string | null,
+  context?: ActionHandlerContext,
 ): Promise<StructuredActionResult> {
   const rawInput = typeof payload.rawInput === 'string' && payload.rawInput.trim()
     ? payload.rawInput.trim()
@@ -1347,7 +1362,7 @@ async function handleFindPartner(
   const askPreference = buildPartnerAskPreferencePayload(state);
 
   if (!askPreference) {
-    return handleSearchPartners(buildPartnerSearchPayloadFromState(state), userId);
+    return handleSearchPartners(buildPartnerSearchPayloadFromState(state), userId, context);
   }
 
   return {
@@ -1607,14 +1622,11 @@ async function createPartnerMatchFromSelectedCandidate(params: {
 
 async function handleSearchPartners(
   payload: Record<string, unknown>,
-  userId: string | null
+  userId: string | null,
+  context?: ActionHandlerContext,
 ): Promise<StructuredActionResult> {
   const normalized = normalizePartnerSearchPayload(payload);
-  const profile = userId ? await getEnhancedUserProfile(userId) : null;
-  const memoryLocation = profile?.frequentLocations
-    .map((location) => location.trim())
-    .find((location) => location.length > 0);
-  const locationHint = normalized.locationHint || memoryLocation || '';
+  const locationHint = normalized.locationHint || '';
 
   if (normalized.activityType === 'sports' && !normalized.sportType) {
     return { success: false, error: '还差一个运动类型，补完我就能开始搜索' };
@@ -1624,7 +1636,7 @@ async function handleSearchPartners(
     return { success: false, error: '还差一个方便区域，填完我就能帮你开始搜索' };
   }
 
-  const memoryHints = buildPartnerSearchMemoryHints(profile, {
+  const memoryHints = buildPartnerSearchMemoryHints(context?.userProfile, {
     activityType: normalized.activityType,
     locationHint,
   });
@@ -1877,7 +1889,8 @@ async function handleCancelMatch(
 
 async function handleSelectPreference(
   payload: Record<string, unknown>,
-  userId: string | null
+  userId: string | null,
+  context?: ActionHandlerContext,
 ): Promise<StructuredActionResult> {
   const questionType = toTextValue(payload.questionType);
   const selectedValue = toTextValue(payload.selectedValue) || toTextValue(payload.value);
@@ -1899,7 +1912,7 @@ async function handleSelectPreference(
           lng: presetLocation.lng,
           type: activityType,
           semanticQuery: buildExploreSemanticQueryFromSelection(presetLocation.name, activityType),
-        }, userId);
+        }, userId, context);
       }
 
       return {
@@ -1919,7 +1932,7 @@ async function handleSelectPreference(
           locationName,
           type: activityType,
           semanticQuery: buildExploreSemanticQueryFromSelection(locationName, activityType),
-        }, userId);
+        }, userId, context);
       }
 
       return {
@@ -1947,7 +1960,7 @@ async function handleSelectPreference(
         lng: resolvedLocation.lng,
         ...(activityType ? { type: activityType } : {}),
         semanticQuery: buildExploreSemanticQueryFromSelection(normalizedLocationName, activityType),
-      }, userId);
+      }, userId, context);
     }
 
     if (locationName) {
@@ -1956,39 +1969,13 @@ async function handleSelectPreference(
         locationName: normalizedLocationName,
         ...(activityType ? { type: activityType } : {}),
         semanticQuery: buildExploreSemanticQueryFromSelection(normalizedLocationName, activityType),
-      }, userId);
+      }, userId, context);
     }
   }
 
   return {
     success: false,
-    fallbackToLLM: true,
-    fallbackText: selectedLabel || selectedValue || '继续',
-  };
-}
-
-async function handleSkipPreference(
-  _payload: Record<string, unknown>,
-  _userId: string | null
-): Promise<StructuredActionResult> {
-  // 跳过偏好，用默认文本继续
-  return {
-    success: false,
-    fallbackToLLM: true,
-    fallbackText: '随便，你推荐吧',
-  };
-}
-
-async function handleRetry(
-  payload: Record<string, unknown>,
-  _userId: string | null
-): Promise<StructuredActionResult> {
-  const originalText = toTextValue(payload.originalText);
-  
-  return {
-    success: false,
-    fallbackToLLM: true,
-    fallbackText: originalText || '重试',
+    error: `不支持的偏好选择类型: ${questionType}`,
   };
 }
 
@@ -1999,23 +1986,5 @@ async function handleCancel(
   return {
     success: true,
     data: { action: 'cancelled' },
-  };
-}
-
-async function handleQuickPrompt(
-  payload: Record<string, unknown>,
-  _userId: string | null
-): Promise<StructuredActionResult> {
-  const prompt = toTextValue(payload.prompt);
-  
-  if (!prompt) {
-    return { success: false, error: '缺少提示词' };
-  }
-  
-  // 快捷提示词直接作为用户输入
-  return {
-    success: false,
-    fallbackToLLM: true,
-    fallbackText: prompt,
   };
 }

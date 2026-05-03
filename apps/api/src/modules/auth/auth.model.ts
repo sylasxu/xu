@@ -89,7 +89,7 @@ const AuthGateUi = t.Object({
 const TestUsersBootstrapRequest = t.Object({
   phone: t.String({ pattern: '^1[3-9]\\d{9}$', description: '具备运维权限的手机号' }),
   code: t.String({ minLength: 4, maxLength: 6, description: '超级验证码' }),
-  count: t.Optional(t.Number({ minimum: 1, maximum: 5, default: 5, description: '生成账号数量，最多 5 个' })),
+  count: t.Optional(t.Number({ minimum: 1, maximum: 10, default: 5, description: '生成账号数量，最多 10 个' })),
 });
 
 const TestUsersBootstrapResponse = t.Object({

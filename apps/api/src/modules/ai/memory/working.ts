@@ -12,6 +12,30 @@ import type { ActivityOutcome, InterestVector, UserProfile } from './types';
 import type { PreferenceExtraction, PreferenceCategory, PreferenceSentiment } from './extractor';
 import { calculatePreferenceScore } from './temporal-decay';
 
+// ============ 短期缓存 ============
+
+interface ProfileCacheEntry {
+  profile: EnhancedUserProfile;
+  expireAt: number;
+}
+
+const profileCache = new Map<string, ProfileCacheEntry>();
+const PROFILE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 分钟
+
+function getCachedProfile(userId: string): EnhancedUserProfile | undefined {
+  const entry = profileCache.get(userId);
+  if (!entry) return undefined;
+  if (Date.now() > entry.expireAt) {
+    profileCache.delete(userId);
+    return undefined;
+  }
+  return entry.profile;
+}
+
+function setCachedProfile(userId: string, profile: EnhancedUserProfile): void {
+  profileCache.set(userId, { profile, expireAt: Date.now() + PROFILE_CACHE_TTL_MS });
+}
+
 // ============ 类型定义 ============
 
 /**
@@ -987,9 +1011,12 @@ function getCategoryLabel(category: PreferenceCategory): string {
 // ============ 增强版数据库操作 ============
 
 /**
- * 获取增强版用户画像
+ * 获取增强版用户画像（带 5 分钟短期缓存）
  */
 export async function getEnhancedUserProfile(userId: string): Promise<EnhancedUserProfile> {
+  const cached = getCachedProfile(userId);
+  if (cached) return cached;
+
   const memories = await listActiveUserMemories(userId);
   const preferences = memories
     .map((record) => normalizeEnhancedPreference(record))
@@ -1017,7 +1044,7 @@ export async function getEnhancedUserProfile(userId: string): Promise<EnhancedUs
     ? memories.reduce((latest, record) => record.updatedAt > latest ? record.updatedAt : latest, memories[0].updatedAt)
     : new Date();
 
-  return {
+  const profile: EnhancedUserProfile = {
     version: 2,
     preferences,
     frequentLocations,
@@ -1026,6 +1053,9 @@ export async function getEnhancedUserProfile(userId: string): Promise<EnhancedUs
     lastUpdated,
     activityOutcomes,
   };
+
+  setCachedProfile(userId, profile);
+  return profile;
 }
 
 /**

@@ -20,6 +20,8 @@ import {
   resolveContinuationFromSuggestions,
 } from '../suggestions';
 import {
+  createTextBlock,
+  createListBlock,
   createChoiceBlock,
   createEntityCardBlock,
   createCtaGroupBlock,
@@ -115,7 +117,6 @@ interface ResolvedAiChatExecution {
   chatRequest: ChatRequest;
   resolvedStructuredAction?: ChatRequest['structuredAction'];
   resolutionTrace?: GenUITracePayload;
-  defaultExecutionPath: ExecutionPath;
 }
 
 type StreamEventArgs =
@@ -1336,7 +1337,6 @@ async function resolveAiChatExecution(
     userText,
     resolvedStructuredAction,
     ...(resolutionTrace ? { resolutionTrace } : {}),
-    defaultExecutionPath: resolvedStructuredAction ? 'structured_action' : 'llm_orchestrated',
     chatRequest: {
       messages: [
         ...conversation.historyMessages,
@@ -1761,16 +1761,6 @@ function normalizeChoiceOptions(
   return normalized.slice(0, 8);
 }
 
-function createTextBlock(content: string, traceRef: string, dedupeKey?: string): GenUIBlock {
-  return {
-    blockId: createId(ID_PREFIX.block),
-    type: 'text',
-    content,
-    ...(dedupeKey ? { dedupeKey, replacePolicy: 'replace' as const } : {}),
-    meta: { traceRef },
-  };
-}
-
 function compactBlockForStream<TBlock extends GenUIBlock>(block: TBlock): TBlock {
   const meta = isRecord(block.meta) ? block.meta : null;
   if (!meta || meta.traceRef === undefined) {
@@ -1791,37 +1781,6 @@ function compactResponseEnvelopeForStream(envelope: GenUIResponseEnvelope): GenU
     response: {
       ...envelope.response,
       blocks: envelope.response.blocks.map((block) => compactBlockForStream(block)),
-    },
-  };
-}
-
-function createListBlock(params: {
-  title?: string;
-  items: Record<string, unknown>[];
-  dedupeKey: string;
-  traceRef: string;
-  center?: { lat: number; lng: number; name: string };
-  semanticQuery?: string;
-  fetchConfig?: Record<string, unknown>;
-  interaction?: Record<string, unknown>;
-  preview?: Record<string, unknown>;
-  meta?: Record<string, unknown>;
-}): GenUIBlock {
-  return {
-    blockId: createId(ID_PREFIX.block),
-    type: 'list',
-    ...(params.title ? { title: params.title } : {}),
-    items: params.items,
-    ...(params.center ? { center: params.center } : {}),
-    ...(params.semanticQuery ? { semanticQuery: params.semanticQuery } : {}),
-    ...(params.fetchConfig ? { fetchConfig: params.fetchConfig } : {}),
-    ...(params.interaction ? { interaction: params.interaction } : {}),
-    ...(params.preview ? { preview: params.preview } : {}),
-    dedupeKey: params.dedupeKey,
-    replacePolicy: 'replace',
-    meta: {
-      ...(params.meta ?? {}),
-      traceRef: params.traceRef,
     },
   };
 }
@@ -2701,7 +2660,7 @@ function inferResultOutcome(
     if (action === 'cancel_match') {
       return { outcome: 'match_cancelled', confidence: 'high', evidence: 'input.action=cancel_match' };
     }
-    if (action === 'find_partner' || action === 'select_preference' || action === 'skip_preference') {
+    if (action === 'find_partner' || action === 'select_preference') {
       return { outcome: 'partner_progress', confidence: 'medium', evidence: `input.action=${action}` };
     }
   }

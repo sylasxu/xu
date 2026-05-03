@@ -98,6 +98,21 @@ export async function userProfileProcessor(context: ProcessorContext): Promise<P
           hasProfile: true,
           preferencesCount: profile.preferences.length,
           topPreferences,
+          frequentLocations: profile.frequentLocations,
+          preferences: profile.preferences.map((p) => ({
+            sentiment: p.sentiment,
+            category: p.category,
+            value: p.value,
+            confidence: p.confidence,
+          })),
+          activityOutcomes: (profile.activityOutcomes || []).map((o) => ({
+            attended: o.attended === true,
+            activityTitle: o.activityTitle,
+            locationName: o.locationName,
+            activityType: o.activityType,
+            rebookTriggered: o.rebookTriggered ?? undefined,
+            updatedAt: o.updatedAt,
+          })),
         },
       },
     };

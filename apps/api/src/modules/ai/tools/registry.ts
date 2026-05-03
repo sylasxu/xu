@@ -61,14 +61,14 @@ const INTENT_TOOL_MAP: Record<string, string[]> = {
 /**
  * Tool 工厂函数映射
  */
-type ToolFactory = (userId: string | null, location?: { lat: number; lng: number } | null) => unknown;
+type ToolFactory = (userId: string | null, location?: { lat: number; lng: number } | null, recalledActivities?: { id: string; title: string; type: string; locationHint: string | null; startAt: Date; similarity: number }[]) => unknown;
 
 const TOOL_FACTORIES: Record<string, ToolFactory> = {
   createActivityDraft: (userId) => createActivityDraftTool(userId),
   getDraft: (userId) => getDraftTool(userId),
   refineDraft: (userId) => refineDraftTool(userId),
   publishActivity: (userId) => publishActivityTool(userId),
-  exploreNearby: (userId) => exploreNearbyTool(userId),
+  exploreNearby: (userId, location, recalledActivities) => exploreNearbyTool(userId, location, recalledActivities),
   getActivityDetail: (userId) => getActivityDetailTool(userId),
   joinActivity: (userId) => joinActivityTool(userId),
   cancelActivity: (userId) => cancelActivityTool(userId),
@@ -167,6 +167,7 @@ export async function resolveToolsForIntent(
   options: {
     hasDraftContext?: boolean;
     location?: { lat: number; lng: number } | null;
+    recalledActivities?: { id: string; title: string; type: string; locationHint: string | null; startAt: Date; similarity: number }[];
   } = {},
 ): Promise<Record<string, any>> {
   const toolNames = await getToolNamesByIntent(intent, {
@@ -180,7 +181,7 @@ export async function resolveToolsForIntent(
   for (const name of toolNames) {
     const factory = TOOL_FACTORIES[name];
     if (factory) {
-      tools[name] = factory(userId, options.location);
+      tools[name] = factory(userId, options.location, options.recalledActivities);
     }
   }
 

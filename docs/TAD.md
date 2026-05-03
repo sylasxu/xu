@@ -200,7 +200,7 @@
 | 表 | 说明 | 核心字段 |
 |---|------|---------|
 | `users` | 用户表 | wxOpenId, phoneNumber, nickname, avatarUrl, aiCreateQuotaToday（创建活动额度） |
-| `activities` | 活动表 | title, location, locationName, locationHint, startAt, type, status, embedding, theme, themeConfig |
+| `activities` | 活动表 | id, creatorId, title, description, location, locationName, address, locationHint, startAt, type, maxParticipants, currentParticipants, status, embedding, theme, themeConfig, createdAt, updatedAt |
 | `participants` | 参与者表 | activityId, userId, status, joinedAt, lastReadAt |
 | `conversations` | AI 会话表 | userId, title, messageCount, lastMessageAt |
 | `conversation_messages` | 对话消息表 | conversationId, userId, role, messageType, content, activityId, embedding |
@@ -258,7 +258,7 @@ export const conversationRoleEnum = pgEnum('conversation_role', ['user', 'assist
 // 对话消息类型枚举（含 user_action）
 export const conversationMessageTypeEnum = pgEnum('conversation_message_type', [
   'text',              // 普通文本
-  'user_action',       // 结构化用户操作 (跳过 LLM 意图识别)
+  'user_action',       // 结构化用户操作（统一链路中的快速出口）
   'widget_dashboard',  // 进场欢迎卡片
   'widget_launcher',   // 组局发射台 (复合型卡片)
   'widget_action',     // 快捷操作按钮 (简单跳转)
@@ -860,7 +860,7 @@ GET  /content/analytics             // 内容效果统计（主路径，支持 c
 
 | 编号 | 接口/能力 | 合约增量 | 主要实现落点 |
 |------|----------|---------|-------------|
-| W1-1 | `GET /activities/nearby` | 为 `nearbyQuery` 增加可选 `keyword`，服务层按 `title/locationName/locationHint` 过滤并保留距离排序 | `apps/api/src/modules/activities/activity.model.ts`、`activity.service.ts`、`apps/miniprogram/pages/search/index.ts` |
+| W1-1 | `GET /activities/nearby` | 为 `nearbyQuery` 增加可选 `keyword`，服务层按 `title/locationName/locationHint` 过滤并保留距离排序 | `apps/api/src/modules/activities/activity.model.ts`、`activity.service.ts`、`apps/miniprogram/subpackages/activity/explore/index.ts` |
 | W1-2 | `POST /participants/confirm-fulfillment` | 新增履约确认请求体：`activityId + participants[{userId, fulfilled}]`；要求“登录 + 发起人权限” | `apps/api/src/modules/participants/participant.controller.ts`、`participant.model.ts`、`participant.service.ts`、`apps/miniprogram/subpackages/activity/confirm/index.ts` |
 | W1-3 | Temp_Organizer 重分配通知 | `intent-jobs` 重分配成功后，触发通知落库并回传可读文案 | `apps/api/src/jobs/intent-jobs.ts`、`apps/api/src/modules/notifications/notification.service.ts` |
 | W2-1 | 活动详情复制文案 | 复用详情接口，前端生成标准文案并调用复制能力 | `apps/miniprogram/subpackages/activity/detail/index.ts`、`index.wxml` |
@@ -1233,7 +1233,7 @@ apps/api/src/modules/ai/
 ├── user-action/          # v4.7 结构化用户操作模块
 │   ├── index.ts          # 模块导出
 │   ├── types.ts          # StructuredAction, StructuredActionType, StructuredActionResult
-│   └── handler.ts        # 结构化动作处理器 (跳过 LLM，直接调用 Service)
+│   └── handler.ts        # 结构化动作处理器（在统一链路 Pre-LLM 之后执行）
 │
 ├── rag/                  # v4.5 RAG 语义检索模块
 │   ├── index.ts          # 模块导出
@@ -1295,7 +1295,8 @@ apps/api/src/modules/ai/
 │
 ├── workflow/             # HITL 工作流模块
 │   ├── next-actions.ts   # 动作完成后的下一步 CTA 规则
-│   └── partner-matching.ts # 找搭子追问流程
+│   ├── partner-matching.ts # 找搭子追问流程
+│   └── partner-understanding.ts # 自然语言轻量结构化理解（抽取 scenarioType / activityType / locationText 等）
 │
 ├── guardrails/           # 安全护栏模块
 │   ├── types.ts          # GuardResult, RateLimitConfig
@@ -1307,8 +1308,7 @@ apps/api/src/modules/ai/
 │   ├── types.ts          # Span, LogEntry, MetricPoint
 │   ├── tracer.ts         # 追踪器
 │   ├── logger.ts         # 日志器
-│   ├── metrics.ts        # 指标收集
-│   ├── ai-metrics.service.ts # AI 请求统计持久化
+│   └── metrics.ts        # 指标收集（Token 用量 / Tool 调用统计 / 计数器上报）
 │
 ├── evals/                # 评估系统模块
 │   ├── types.ts          # EvalSample, Scorer
@@ -2174,10 +2174,7 @@ flowchart TD
 
     D --> E{"input.type === action ?"}
     E -->|Yes| F["构建 structuredAction + location 透传"]
-    F --> G["handleStructuredAction 结构化动作链路"]
-    G --> H{"fallbackToLLM ?"}
-    H -->|No| I["直接生成 GenUI blocks"]
-    H -->|Yes| J["回退到 LLM 主链路"]
+    F -.-> G["handleStructuredAction（Pre-LLM 后执行）"]
 
     E -->|No| J
 
@@ -2186,6 +2183,10 @@ flowchart TD
     L --> M["LLM + Tool 循环执行"]
     M --> N["Post/Async: 保存历史/偏好提取/指标"]
     N --> O["输出层: 映射为 response.blocks + traces"]
+
+    K --> H{"structuredAction && actionResult ?"}
+    H -->|Yes| I["Action Voice 层 → GenUI blocks"]
+    H -->|No| M
 
     I --> P["返回 /ai/chat (SSE 或非流式)"]
     O --> P
@@ -2203,382 +2204,463 @@ flowchart TD
 - **处理层**：`context.lat/lng -> ChatRequest.location([lng,lat])`，统一给 RAG/Tool/Action 使用
 - **结果层**：通过 `join/publish/match` 状态流转判断“找到局/找到搭子”是否完成
 
-### 6.12 入口层 → 理解层 → 处理层：请求流程（v5.3）
+### 6.12 AI Chat 主链路架构
+
+本章节描述从客户端输入到 SSE 响应的完整主链路架构，包含分层职责、分支判定、Processor 管线、RAG/Memory 双端介入、Task Runtime 追踪、Welcome 门面，以及函数级调用表。
+
+#### 6.12.1 架构概览
 
 ```
-客户端输入（text/action）
+客户端输入（text / action）
     │
     ▼
-┌──────────────────────────────────────────┐
-│ 0. 入口层：统一规范化                    │
-│ - normalizeActionDisplayText             │
-│ - 解析 context.lat/lng -> location       │
-│ - action -> ChatRequest.structuredAction │
-└────────┬─────────────────────────────────┘
+┌─────────────────────────────────────────┐
+│ 入口层：HTTP + GenUI 协议                │
+│ - ai.controller.ts 校验并路由            │
+│ - runtime/chat-response.ts 解析上下文    │
+│   (lat/lng, activityId, entry, action)   │
+└────────┬────────────────────────────────┘
          │
          ▼
-    input.type === action ?
-    ┌───────────────┴───────────────┐
-    ▼                               ▼
-┌─────────────────┐          ┌─────────────────┐
-│ A. 结构化动作链路│         │ B. 模型编排链路 │
-│ handleStructuredAction │    │ 频率限制/护栏   │
-└────────┬────────┘          └────────┬────────┘
-         │                             │
-    fallbackToLLM?                     ▼
-    ┌───────┴────────┐         ┌─────────────────┐
-    ▼                ▼         │ P0 热词匹配     │
-┌─────────────┐  ┌──────────┐  └────────┬────────┘
-│ 直接返回结果 │  │ 回退到 B │           │
-└─────────────┘  └──────────┘           ▼
-                                 ┌─────────────────┐
-                                 │ Processor 管线  │
-                                 │ intent/profile/ │
-                                 │ recall/token    │
-                                 └────────┬────────┘
-                                          │
-                                          ▼
-                                 ┌─────────────────┐
-                                 │ LLM + Tool 循环 │
-                                 └────────┬────────┘
-                                          │
-                                          ▼
-                                 ┌─────────────────┐
-                                 │ Post/Async 阶段 │
-                                 │ save/extract/   │
-                                 │ metric/eval     │
-                                 └────────┬────────┘
-                                          │
-                                          ▼
-                               GenUI response.blocks + SSE 输出
+┌─────────────────────────────────────────┐
+│ 主门面编排层：ai.service.ts              │
+│ - executeChatRequest 总入口              │
+│ - 限流 → 输入护栏                        │
+│ - System Prompt 基础组装（DB 模板 + 变量） │
+└────────┬────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────┐
+│ 统一上下文加载（所有人必经）              │
+│ - System Prompt 组装（DB 模板 + 变量）   │
+│ - conversationSummary 拼接              │
+│ - P0 热词匹配                           │
+│ - Pre-LLM Processor 管线                │
+│   intent → [user-profile ∥ semantic-recall] → token-limit │
+└────────┬────────────────────────────────┘
+         │
+         ▼
+    ┌─────────────────────────────────────┐
+    │ 分支判定（上下文已就绪）               │
+    │                                       │
+    │  structuredAction && actionResult ?    │
+    │    ┌──────┴──────┐                    │
+    │    ▼             ▼                    │
+    │  Action Voice   LLM + Tool 循环        │
+    │  （轻量 LLM）    streamText            │
+    │    │             │                    │
+    │    └──────┬──────┘                    │
+    │           ▼                           │
+    │    buildBlocksFromExecutionResult     │
+    └───────────┬───────────────────────────┘
+                │
+                ▼
+    ┌─────────────────────────────────────┐
+    │ Post-LLM + Async                     │
+    │ save / extract / metric / task-sync  │
+    └───────────┬─────────────────────────┘
+                │
+                ▼
+    ┌─────────────────────────────────────┐
+    │ Block 映射 + SSE 序列化输出           │
+    │ runtime/chat-response.ts             │
+    └─────────────────────────────────────┘
+                    └─────────────────────────────┘
 ```
 
-**关键结果约束（Result Constraints）**：
-- Action 分支优先，不允许按钮点击无故回退纯文本 NLP
-- 位置分支优先，`lat/lng` 缺失时才允许退化到默认地理中心
-- 每次响应必须产出可决策内容：文本解释 + 至少一个 CTA 或下一步建议
+**关键约束**：
+- Action 分支优先：按钮点击不无故回退纯文本 NLP
+- 位置分支优先：`lat/lng` 缺失时才退化到默认地理中心
+- 每次响应产出可决策内容：文本 + 至少一个 CTA
+- **上下文组装在分支判定之前**：所有请求先经过完整的 Pre-LLM 管线（userProfile、semanticRecall、intentClassify），Action 快速出口在上下文就绪后才判定，同样享受 memory 和 RAG 增强
 
-### 6.12.1 处理层：Processor 架构详解（纯函数 + 三阶段模型）
+---
 
-**设计理念**：
-Processor 是 AI 请求处理管道中的可插拔纯函数组件，每个 Processor 负责单一职责。当前采用纯函数签名，并通过 `runProcessors()` / `runPostLLMProcessors()` / `runAsyncProcessors()` 三个编排器分阶段执行。
+#### 6.12.2 入口层与主门面编排层
 
-**核心接口**：
+**HTTP 入口**：`ai.controller.ts` 校验 `conversationId? + input + context`，调用 `streamAiChatResponse`，返回 SSE `Stream`。
+
+**主门面** `ai.service.ts` 承担总线职责：
+
+| 函数 | 职责 |
+|------|------|
+| `streamAiChatResponse` | 总入口：trace 初始化 → `buildAiChatEnvelope` → `executeChatRequest` → `buildBlocksFromExecutionResult` → `finalizeAiChatResponse` → `createAiChatStreamResponse` |
+| `buildAiChatEnvelope` | `runtime/chat-response.ts`：解析 input.type、合并 context.lat/lng、构建 `ChatRequest` |
+| `resolveAiChatExecution` | `runtime/chat-response.ts`：解析 structuredAction，统一链路执行后在末端判定出口 |
+
+**上下文组装顺序**：`resolveConversationContext`（读取 conversation 历史消息）在 `executeChatRequest` 早期执行，为所有请求（包括 Action 快速出口）提供对话上下文。Action 出口的 `generateActionVoice` 同样消费 `messages` 来生成贴合对话上下文的回复，因此历史消息加载对全链路都有价值，并非仅 LLM 分支需要。
+
+`ChatRequest` 核心字段：
 
 ```typescript
-// processors/types.ts
-
-/** Processor 纯函数签名 */
-type ProcessorFn = {
-  (context: ProcessorContext): Promise<ProcessorResult>;
-  processorName: string;  // 元数据，用于日志和调试
-};
-
-/** Processor 上下文（处理器间唯一的数据传递通道） */
-interface ProcessorContext {
+interface ChatRequest {
+  messages: Array<{ role: 'user' | 'assistant' | 'system'; content?: string; parts?: Array<Record<string, unknown>> }>;
   userId: string | null;
-  rawUserInput: string;       // 原始输入（用于 trace/DB）
-  userInput: string;          // 净化后输入（用于后续处理）
-  systemPrompt: string;
-  messages: Message[];
-  metadata: ProcessorMetadata;  // 结构化元数据
-}
-
-/** 结构化元数据（处理器间类型安全的数据传递） */
-interface ProcessorMetadata {
-  keywordMatch?: { matched: boolean; keywordId?: string; keyword?: string; matchType?: string; priority?: number; responseType?: string };
-  intentClassify?: { intent: string; confidence: number; method: 'p0' | 'p1' | 'p2'; matchedPattern?: string; p1Features?: string[]; degraded?: boolean };
-  userProfile?: { injected: boolean; preferencesCount: number };
-  semanticRecall?: { resultsCount: number; avgSimilarity: number };
-  conversationSummary?: string;
-  [key: string]: unknown;
-}
-
-/** Processor 执行结果 */
-interface ProcessorResult {
-  success: boolean;
-  context: ProcessorContext;  // 更新后的上下文
-  data?: Record<string, unknown>;
-  error?: string;
-  executionTime: number;      // 毫秒
-}
-
-/** Processor 配置（支持条件执行和并行组） */
-interface ProcessorConfig {
-  processor: ProcessorFn;
-  condition?: (ctx: ProcessorContext) => boolean;  // 返回 false 时跳过
-  parallelGroup?: string;  // 相同 parallelGroup 的连续处理器并行执行
+  rateLimitUserId?: string | null;
+  conversationId?: string;
+  location?: [number, number];        // [lng, lat]
+  source: 'web' | 'miniprogram' | 'admin';
+  draftContext?: { activityId: string; currentDraft: ActivityDraftForPrompt };
+  structuredAction?: StructuredAction;   // Action 分支触发器
+  latestAssistantSuggestions?: GenUISuggestions;
+  conversationSummary?: string;       // 更早历史压缩摘要
+  trace?: boolean;
+  ai?: { model?: string; temperature?: number; maxTokens?: number };
+  abortSignal?: AbortSignal;
 }
 ```
 
-**8 个核心 Processor（纯函数）**：
+---
 
-| Processor | 阶段 | 职责 | 关键逻辑 |
-|-----------|------|------|---------|
-| `inputGuardProcessor` | Pre-LLM (预检查) | 安全检查 | 敏感词过滤、注入攻击检测、长度限制 |
-| `keywordMatchProcessor` | Pre-LLM (预检查) | P0 关键词匹配 | 全局热词精确匹配，命中后直接返回预设响应 |
-| `intentClassifyProcessor` | Pre-LLM (管线) | P1+P2 意图分类 | Feature_Combination → LLM Few-shot 级联 |
-| `userProfileProcessor` | Pre-LLM (管线, 并行) | 用户画像注入 | 从 `user_memories` 读取偏好，注入 System Prompt |
-| `semanticRecallProcessor` | Pre-LLM (管线, 并行) | 语义召回 | pgvector 搜索 + 本地轻量排序 |
-| `tokenLimitProcessor` | Pre-LLM (管线) | Token 限制 | 按模型上下文窗口截断消息历史 |
-| `saveHistoryProcessor` | Post-LLM | 保存对话 | 将用户消息和 AI 响应保存到 `conversation_messages` |
-| `extractPreferencesProcessor` | Async | 偏好提取 | 偏好信号前置检查 + LLM 异步提取，写入 `user_memories` |
+#### 6.12.3 分支判定：Action 分支 vs LLM 分支
+
+**统一链路原则**：所有请求先经过完整的上下文加载和 Processor 管线，Action 不是独立分支，而是统一链路末端的一个**快速出口**。Pre-LLM 管线先执行，产出 `userProfile`、`semanticRecall`、`intentClassify`；Action 预处理（`handleStructuredAction`）在 Pre-LLM 之后执行，直接消费 Pre-LLM 产物，不再内部补查数据库。
+
+```
+限流 → 输入护栏 → System Prompt 基础组装 → keywordMatchProcessor
+    │
+    ▼
+Pre-LLM Pipeline（intent → [user-profile ∥ semantic-recall] → token-limit）
+    │
+    ▼
+找搭子状态检查 → Action 预处理（若存在 structuredAction，消费 Pre-LLM 产物）
+    │
+    ▼
+structuredAction && actionResult ?
+    ┌───────────┴───────────┐
+    ▼                       ▼
+Action Voice 层          LLM + Tool 循环
+(轻量 LLM 生成回复)      (完整推理)
+    │                       │
+    └───────────┬───────────┘
+                ▼
+      buildBlocksFromExecutionResult
+```
+
+**Action 快速出口** (`ai.service.ts:681-690`)：
+- `structuredAction` 存在且 `actionResult` 有效时，直接调用 `generateActionVoice`
+- Voice 层使用 Kimi 轻量调用（~400 input tokens，max 80 output，约 50 中文字符），为 Action 结果生成人味回复
+- 然后调用 `buildStructuredActionResult(actionResult, structuredAction, voiceText)` 组装 `ChatExecutionResult`
+- Action 请求同样享受了 userProfile、semanticRecall、intentClassify 等上下文增强的好处
+- Action handler 通过 `ActionHandlerContext` 消费 Pre-LLM 产物：`recalledActivities`（语义召回结果）和 `userProfile`（画像元数据），不再在 handler 内部补查数据库
+
+**LLM 分支**：无结构化动作或 Action 执行失败时，进入完整的 `streamText` + Tool 循环。
+
+---
+
+#### 6.12.4 Processor 管线（纯函数 + 三阶段模型）
+
+Processor 是可插拔纯函数，通过 `runProcessors` / `runPostLLMProcessors` / `runAsyncProcessors` 分阶段编排。
+
+**核心接口** (`processors/types.ts`)：
+
+```typescript
+type ProcessorFn = {
+  (context: ProcessorContext): Promise<ProcessorResult>;
+  processorName: string;
+};
+
+interface ProcessorContext {
+  userId: string | null;
+  rawUserInput: string;
+  userInput: string;
+  systemPrompt: string;
+  messages: Array<{ role: string; content: string }>;
+  metadata: ProcessorMetadata;
+}
+
+interface ProcessorResult {
+  success: boolean;
+  context: ProcessorContext;
+  data?: Record<string, unknown>;
+  error?: string;
+  executionTime: number;
+}
+```
+
+**8 个核心 Processor**：
+
+| Processor | 阶段 | 职责 |
+|-----------|------|------|
+| `inputGuardProcessor` | 预检查 | 敏感词过滤、注入检测、长度限制 |
+| `keywordMatchProcessor` | 预检查 | P0 热词精确匹配，命中后补充 `metadata.keywordMatch` |
+| `intentClassifyProcessor` | Pre-LLM | P1 Feature Combination → P2 LLM Few-shot 级联意图分类 |
+| `userProfileProcessor` | Pre-LLM (并行) | 从 `user_memories` 读取偏好、常去地点、活动结果，注入 Prompt 并写入 metadata 供 Action handler 消费 |
+| `semanticRecallProcessor` | Pre-LLM (并行) | pgvector 语义召回 + 本地轻量排序，产出 `recalledActivities` |
+| `tokenLimitProcessor` | Pre-LLM | 按模型上下文窗口截断 messages |
+| `saveHistoryProcessor` | Post-LLM | 持久化用户输入与 AI 响应到 `conversation_messages` |
+| `extractPreferencesProcessor` | Async | LLM 异步提取偏好，写入 `user_memories` |
 
 **三阶段执行模型**：
 
-| 阶段 | 编排器 | 执行策略 | 失败行为 |
-|------|--------|---------|---------|
-| Pre-LLM | `runProcessors()` | 串行 + 条件并行（`parallelGroup`） | 任一失败 → 停止后续 + `createDirectResponse` |
-| Post-LLM | `runPostLLMProcessors()` | 串行 | 失败 → 记录日志，继续执行后续处理器 |
-| Async | `runAsyncProcessors()` | `Promise.allSettled` 并行 | 失败 → 静默记录日志，不影响响应 |
+| 阶段 | 编排器 | 策略 | 失败行为 |
+|------|--------|------|---------|
+| Pre-LLM | `runProcessors()` | 串行 + 条件并行 (`parallelGroup`) | 任一失败 → 停止并返回兜底响应 |
+| Post-LLM | `runPostLLMProcessors()` | 串行 | 失败记录日志，继续后续 |
+| Async | `runAsyncProcessors()` | `Promise.allSettled` | 失败静默，不影响响应 |
 
-**管线工厂函数**：
+**执行边界**：
+- **Pre-LLM**：所有请求必经（包括 Action 请求），确保 memory、RAG、意图分类等上下文已就绪
+- **Post-LLM / Async**：仅 LLM 分支执行。Action 快速出口在 Pre-LLM 后直接返回，不经过 Post-LLM 和 Async 阶段
+- Action 请求同样享受 userProfile 和 semanticRecall 的上下文增强，但由 `buildStructuredActionResult` 直接组装响应，不走 `streamText`
+
+**并行组合并策略**：相同 `parallelGroup` 用 `Promise.all` 并行执行
+- `systemPrompt`：按声明顺序拼接
+- `metadata`：浅合并各命名空间
+- 其他字段：取最后一个处理器的值
+
+**管线顺序** (`processors/pipeline.ts`)：
 
 ```typescript
-// processors/pipeline.ts
-// 内置处理器按设计文档顺序注册：
-//   intent-classify → [user-profile ∥ semantic-recall] → token-limit
-// 支持通过数据库配置禁用特定处理器
+// 固定顺序：intent-classify → [user-profile ∥ semantic-recall] → token-limit
 const preLLMConfigs = await buildPreLLMPipeline();
 ```
 
-**并行组 context 合并策略**：
+---
 
-相同 `parallelGroup` 的处理器使用 `Promise.all` 并行执行，结果合并策略：
-- `systemPrompt`：按声明顺序拼接各处理器注入的段落
-- `metadata`：浅合并各处理器的命名空间
-- 其他字段（`messages`、`userInput` 等）：取最后一个处理器的值
+#### 6.12.5 RAG / Memory 双端介入
 
-**与 `/ai/chat` 主链集成**：
+**最早端（Pre-LLM）—— `semanticRecallProcessor`**：
 
-```typescript
-// ai.service.ts 中的使用
-// 1. 预检查：input-guard + keyword-match（独立执行）
-const guardResult = await inputGuardProcessor(guardContext);
-const keywordResult = await keywordMatchProcessor(initialContext);
+同时搜索三张表，相似度阈值 0.5，返回 top-3（截断 120 字符）：
 
-// 2. Pre-LLM 管线：intent-classify → [user-profile ∥ semantic-recall] → token-limit
-const preLLMConfigs = await buildPreLLMPipeline();
-const { context, logs, success } = await runProcessors(preLLMConfigs, keywordResult.context);
+| 数据源 | 表 | 召回内容 |
+|--------|-----|---------|
+| 活动历史 | `activities` | `id, title, type, locationHint, startAt` |
+| 对话历史 | `conversation_messages` | `content, role, createdAt` |
+| 长期记忆 | `user_memories` | `content, memoryType`（过滤过期） |
 
-// 3. LLM 推理 (streamText)
-
-// 4. Post-LLM：save-history
-await runPostLLMProcessors([{ processor: saveHistoryProcessor }], postLLMContext);
-
-// 5. Async：extract-preferences（火并忘）
-runAsyncProcessors([{ processor: extractPreferencesProcessor }], postLLMContext);
-```
-
-### 6.12.2 理解层：结构化动作链路（Structured Action）- v5.3
-
-**设计理念**：
-当用户点击 Widget 按钮时，发送结构化动作数据而非文本消息，优先走结构化动作链路并直达 Service 执行；仅在 `fallbackToLLM=true` 时回退到模型编排链路。
-
-**当前边界约束**：
-- `/ai/chat` 统一入口会先过限流与输入护栏，再决定走结构化动作链路还是模型编排链路
-- 结构化动作集合以 `apps/api/src/modules/ai/user-action/types.ts` 为唯一真源
-- 已删除 fallback wizard / shadow actions；当前不再允许 `choose_location`、`choose_activity_type`、`choose_time_slot` 这类非正式动作混入主链
-
-**当前关键补齐**：
-- `/ai/chat` 入口层显式透传 `input.type='action' -> ChatRequest.structuredAction`
-- GenUI `context` 新增 `lat/lng`，并在入口层映射为 `ChatRequest.location=[lng,lat]`
-- GenUI `context` 支持 `activityId + followUpMode + entry`，用于 post_activity / discussion 等后续承接场景
-- 小程序 `sendMessage/sendAction` 均携带当前定位上下文，保障“附近推荐/找搭子”一致性
-- 结构化动作响应支持 `nextActions`，并在入口层映射为 `cta-group`，形成“操作成功 → 下一步”闭环
-- 找搭子追问输出 `匹配进度 x/2` 与完成态分流选项，降低用户在“等待匹配”阶段流失
-- 找搭子首轮提交默认执行 `search_partners`，仅在用户明确选择“继续帮我留意”时才进入 `createPartnerIntent`
-
-**当前实现映射**：
-- **结构化动作链路**：`apps/api/src/modules/ai/ai.service.ts` + `apps/api/src/modules/ai/runtime/chat-response.ts`
-- **位置上下文**：`packages/genui-contract/src/protocol.ts` + `apps/api/src/modules/ai/ai.controller.ts` + 小程序 `stores/chat.ts`
-- **成功态下一步**：`apps/api/src/modules/ai/workflow/next-actions.ts` 输出 `nextActions`，`ai.service.ts` 复用该策略层并由入口层映射 `cta-group`
-- **找搭子进度**：`apps/api/src/modules/ai/ai.service.ts` 在 partner flow 输出 `匹配进度 x/2`
-- **找搭子搜索先行**：`apps/api/src/modules/ai/user-action/handler.ts` 将找搭子表单提交从“默认入池”拆为“先搜索、后决定是否入池”
-- **搭子搜索结果卡**：新增 `widget_partner_search_results`，由 API 返回候选列表、匹配理由与登录前可见摘要，小程序/H5 统一消费
-- **Web 定位接入**：`apps/web/app/chat/page.tsx` 获取浏览器定位并透传到 welcome/chat context
-- **报名后协同统一**：小程序 `join-flow.ts` 收口所有报名成功后的跳转，统一进入 `/subpackages/activity/discussion/index?entry=join_success`，讨论区首屏展示轻引导与一条集合 / 时间 / 地点确认提示
-- **pending match 详情态**：`apps/api/src/modules/notifications/notification.controller.ts` 新增 `/notifications/pending-matches/:id`；小程序消息中心弹层与 H5 `MessageCenterDrawer` 二级态统一消费详情接口
-- **活动结果写回 memory**：`apps/api/src/modules/participants/participant.service.ts` 在 `confirm-fulfillment` 后写入 `activityOutcomes`，`/participants/rebook-follow-up` 补充 `rebookTriggered`，并移除报名时的强正反馈向量写入
-- **匹配确认通知卡**：`apps/api/src/modules/notifications/notification.controller.ts` 新增 `/notifications/pending-matches`，小程序 `pages/message/index.ts` 渲染“确认/取消”卡片并通过消息中心承接
-- **post_activity 回流**：小程序 `pages/message/index.ts`、`subpackages/activity/confirm/index.ts` 与 H5 `message-center-drawer.tsx` 在 post_activity / 再约承接时透传 `activityId + followUpMode`，点击后直接触发对话反馈 / 再约 prompt，并将 review 结果回写 `activityOutcomes.reviewSummary`
-- **活动后真实反馈直达化**：新增 `POST /participants/self-feedback`，H5 `message-center-drawer.tsx` 将 `post_activity` 的首屏动作收口为 `挺顺利 / 一般 / 没成局`，复盘或再约由接口返回的 `nextAction` 继续承接
-- **活动后下一步建议**：`POST /participants/self-feedback` 返回 `nextAction`，基于真实反馈给出复盘或再约 prompt；H5 和小程序可以直接把这条建议续回 `/chat`
-- **群聊列表接口规范化**：新增 `GET /chat/activities?userId=...`（显式参数，禁止 `my-*` 路由语义），小程序消息页切换为标准接口
-- **未读真实统计收口**：消息中心不再本地累加/清零，统一使用服务端统计；`participants.lastReadAt` 作为读游标，`GET /chat/activities` 返回每个群聊 `unreadCount` 与 `totalUnread`
-- **消息中心聚合接口**：新增 `GET /notifications/message-center?userId=...`，一次返回系统通知、待确认匹配、通知未读与群聊未读，前端消息页改为单接口渲染
-- **讨论区历史分页**：`GET /chat/:activityId/messages` 补充 `before` 游标与 `historyCursor/hasMoreHistory`，H5 `discussion-runtime-panel.tsx` 支持“查看更多历史消息”并保持加载前后的滚动位置
-- **讨论区离线提醒**：讨论区新消息统一走 `createChatMessage` 落库路径；对当前不在线、且从 0 未读变成 1 未读的已报名成员，补发 `discussion_reply` 服务提醒，避免报名成功后协同链路在离线阶段掉线
-- **讨论承接状态收口**：H5 讨论区在成功加载消息、发送消息、收到新消息后，通过轻量 discussion-state 事件主动刷新 `/chat` welcome focus 与消息中心，降低“已经接手但首页仍催我”的滞后感
-
-#### 通知模块当前实现判断
-
-当前实现已经具备“可发送、可承接、可挂回任务”的基础能力，但仍属于第一阶段产品化：
-
-- **已落地能力**
-  - `apps/api/src/modules/wechat/wechat-notification.service.ts` 已支持 `post_activity / activity_reminder / discussion_reply / match_reassigned / partner_connect_request / partner_group_up_request`
-  - 小程序 `pages/message/index.ts` 与 H5 `message-center-drawer.tsx` 已形成统一的站内承接面
-  - `discussion_reply` 已具备离线提醒与讨论区深链承接，`post_activity` 已具备真实结果直写与 follow-up 入口
-- **仍需继续补强**
-  - 通知模板字段、落地页动作与文案语气仍需按主场景统一，不应继续按单个接口零散生长
-  - 小程序订阅授权时机仍需明确产品化设计，否则服务通知能力无法稳定转化成真实触达
-  - 指标不应只停留在“发送成功”，还需补齐点击、进入承接页、动作完成、结果闭环等漏斗
-  - 当前先通过结构化 `NotificationFunnel` 日志记录 `send / open / landed / acted` 四层事件，后续可再落独立统计表或 Admin 看板
-
-#### 通知模块主场景约束
-
-当前阶段，通知模块优先只围绕 3 条高价值主链持续打磨：
-
-1. `activity_reminder`
-目标是把活动开始前的掉线参与者拉回到场景中。当前实现中，未读 `activity_reminder` 会被提升为消息中心 `actionItems` 顶部任务卡，动作固定为进入活动协同入口；微信服务通知 deep link 默认直达讨论区。
-
-2. `discussion_reply`
-目标是保证报名成功后的协同链不断线，避免“进了活动但没跟上讨论”。当前实现中，讨论区未读信号会进入消息中心 `actionItems`，动作为进入讨论区继续回应。
-
-3. `post_activity`
-目标是把真实结果、复盘、再约和 memory 写回收束到同一条后续链路。当前实现中，`post_activity` 会进入消息中心活动后承接层，支持快速反馈、复盘和再约，并回写 activity outcome memory。
-
-#### 微信通知实现约束
-
-微信通知当前仅将 `activity_reminder / discussion_reply / post_activity` 视为第一优先级强触达场景；其余 scene 可以继续保留发送能力，但不应先于这 3 条主链扩张产品复杂度。
-
-**订阅授权时机约束**：
-
-- `discussion_reply`：报名成功后进入讨论区或 join-success 承接页时申请
-- `activity_reminder`：报名成功后申请；若用户当下未授权，可在活动开始前的详情/讨论区再申请一次
-- `post_activity`：报名成功后或活动进行中的 discussion 承接页申请
-- 禁止在首页空态、泛浏览态、无明确任务归属时主动申请微信订阅
-
-**模板字段约束**：
-
-- `activity_reminder`：固定映射为“活动标题 + 开始时间 + 地点”
-- `discussion_reply`：固定映射为“活动标题 + 回复人/摘要”
-- `post_activity`：固定映射为“活动标题 + 结束提示 + 下一步轻提示”
-- 字段长度需要在发送前统一裁切与清洗，避免每个调用方自行决定模板填充方式
-- 三条主通知的站内标题、正文、服务通知字段和默认落地页统一由通知触点构造函数生成，避免 H5、小程序和发送器各写一套语义
-
-**Deep Link 约束**：
-
-- `activity_reminder`：默认跳到活动详情或讨论区，且首屏必须能直接继续安排到场
-- `discussion_reply`：默认跳到 `subpackages/activity/discussion/index?id={activityId}`
-- `post_activity`：默认跳到消息中心或活动后承接页，但首屏必须直接出现反馈动作，不允许只展示一条普通通知列表
-
-**降级约束**：
-
-- 未拿到订阅授权、缺少模板 ID、缺少 `wxOpenId` 或微信凭证时，服务通知可跳过，但消息中心承接必须继续成立
-- 发送成功不等于完成；后续分析至少要覆盖 send / open / landed / acted 四层漏斗
-
-**核心类型**：
+`semanticRecallProcessor` 产出两类数据：
+1. `metadata.semanticRecallPrompt`：格式化的历史信息文本，注入 System Prompt
+2. `metadata.semanticRecall.recalledActivities`：**结构化活动召回结果**，供 Tool 层直接消费
 
 ```typescript
-// StructuredAction - 前端发送的结构化动作
-interface StructuredAction {
-  action: StructuredActionType;           // 操作类型
-  payload: Record<string, unknown>;       // 操作参数
-  source: 'widget' | 'quick_action' | 'keyboard';
-  originalText?: string;                  // 原始文本（用于 fallback）
-}
-
-// StructuredActionType - 支持的操作类型（动作码 + 中文语义）
-type StructuredActionType = 
-  | 'join_activity'      // 报名活动
-  | 'view_activity'      // 查看详情
-  | 'cancel_join'        // 取消报名
-  | 'share_activity'     // 分享活动
-  | 'create_activity'    // 创建活动
-  | 'edit_draft'         // 编辑草稿
-  | 'publish_draft'      // 发布草稿
-  | 'explore_nearby'     // 探索附近
-  | 'expand_map'         // 展开地图
-  | 'filter_activities'  // 筛选活动
-  | 'find_partner'       // 找搭子
-  | 'search_partners'    // 提交偏好并搜索搭子结果
-  | 'connect_partner'    // 对某个候选人发起“搭一下”
-  | 'request_partner_group_up' // 询问是否组局
-  | 'opt_in_partner_pool' // 继续帮我留意（显式入池）
-  | 'submit_partner_intent_form' // 找搭子表单提交动作
-  | 'confirm_match'      // 确认匹配成局
-  | 'cancel_match'       // 取消待确认匹配
-  | 'select_preference'  // 选择偏好
-  | 'skip_preference'    // 跳过偏好
-  | 'retry'              // 重试
-  | 'cancel'             // 取消
-  | 'quick_prompt';      // 快捷提示词
-
-**主流程相关动作码**：
-
-- `explore_nearby`：探索附近有什么局
-- `join_activity`：报名参加一个局
-- `create_activity`：开始组一个新局
-- `publish_draft`：把草稿正式发布出去
-- `find_partner`：进入找搭子主链
-- `search_partners`：先按条件搜索搭子结果
-
-// StructuredActionResult - 处理结果
-interface StructuredActionResult {
-  success: boolean;
-  data?: Record<string, unknown>;
-  error?: string;
-  fallbackToLLM?: boolean;  // 是否需要回退到 LLM 处理
-  fallbackText?: string;    // 回退时使用的文本
+// recalledActivities 结构
+{
+  id: string;
+  title: string;
+  type: string;
+  locationHint: string | null;
+  startAt: Date;
+  similarity: number;
 }
 ```
 
-**处理流程**：
+**最晚端（Tool 执行时）—— `exploreNearbyTool`**：
 
+`exploreNearby` Tool 优先消费 `ToolContext.recalledActivities`，避免重复 RAG 搜索：
+
+```typescript
+// tools/explore-nearby.ts
+const recalled = context.recalledActivities;
+if (recalled && recalled.length > 0) {
+  const filtered = recalled
+    .filter((r) => !type || r.type === type)
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, 10);
+  results = filtered.map((r) => ({ ... }));
+}
+// 召回为空时才 fallback 到 rag.search()
+if (results.length === 0) {
+  results = await search({ semanticQuery, filters, limit: 10 });
+}
 ```
-Widget 按钮点击
-       │
-       ▼
-┌─────────────────┐
-│ sendAction()    │  小程序 chat.ts
-│ 发送 structuredAction │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ /ai/chat        │  API Controller
-│ 检测 structuredAction │
-└────────┬────────┘
-         │
-    有 structuredAction?
-    ┌────┴────┐
-    │ Yes     │ No
-    ▼         ▼
-┌─────────┐  ┌─────────┐
-│ handler │  │ LLM     │
-│ 直接执行│  │ 意图识别│
-└────┬────┘  └─────────┘
-     │
-     ▼
-┌─────────────────┐
-│ 调用 Service    │  activity.service / rag/search
-│ 函数执行操作    │
-└────────┬────────┘
-         │
-    fallbackToLLM?
-    ┌────┴────┐
-    │ Yes     │ No
-    ▼         ▼
-┌─────────┐  ┌─────────┐
-│ 继续 LLM│  │ 直接返回│
-│ 处理    │  │ 结果    │
-└─────────┘  └─────────┘
+
+`recalledActivities` 通过 `resolveToolsForIntent` 注入 Tool 上下文：
+
+```typescript
+const tools = await resolveToolsForIntent(userId, intent, {
+  hasDraftContext: !!draftContext,
+  location: userLocation,
+  recalledActivities: preLLMContext.metadata.semanticRecall?.recalledActivities,
+});
 ```
+
+**设计意图**：Pre-LLM 做一次语义召回，结果既给 LLM 做上下文增强，又给 Tool 做数据预热；Tool 层不再对同一意图重复查询 pgvector。
+
+---
+
+#### 6.12.6 LLM 执行层
+
+`executeChatRequest` (`ai.service.ts`) 执行流程：
+
+1. **限流检查**：`checkRateLimit`，超限返回兜底响应
+2. **输入护栏**：`inputGuardProcessor`
+3. **System Prompt 基础组装**：`getSystemPrompt`（DB 模板 + 插值变量）+ 地理位置反解 + `conversationSummary`
+4. **P0 热词匹配**：`keywordMatchProcessor`
+5. **Pre-LLM 管线**：`buildPreLLMPipeline` → `runProcessors`，产出 `userProfile`、`semanticRecall`、`intentClassify`
+6. **意图分类读取**：从 `metadata.intentClassify` 提取 `intent`
+7. **找搭子状态机检查**：`recoverPartnerMatchingState` → 若处于追问态则直接返回
+8. **Action 预处理**：若存在 `structuredAction`，执行 `handleStructuredAction`，传入 `actionHandlerContext`（含 Pre-LLM 产出的 `recalledActivities` 和 `userProfile`）
+9. **Action 快速出口**：若 `structuredAction && actionResult`，调用 `generateActionVoice`（Kimi 轻量调用，~50 字）→ `buildStructuredActionResult` → 直接返回
+10. **Tools 解析**：`resolveToolsForIntent`，注入 `recalledActivities`
+11. **Prompt 拼接 + Audit**：System Prompt + `userProfilePrompt` + `semanticRecallPrompt`，并记录 `system_prompt_audit` 日志（totalLength / baseLength / enrichmentLength / enrichmentCount）
+12. **模型选择**：`resolveChatModelSelection`，默认 `kimi-k2.5`，失败时 `resolveFallbackChatModelSelection`
+13. **`streamText` 执行**：`runText`，`stopWhen: [stepCountIs(5), hasToolCall('askPreference')]`
+14. **Tool 循环**：收集 tool calls → 执行 → 结果回注 messages → 再次 streamText
+15. **结果包装**：`ChatExecutionResult`
+
+---
+
+#### 6.12.7 Post-LLM 与 Async 阶段
+
+**Post-LLM**（串行，阻塞响应）：
+- `outputGuardProcessor`：输出安全检查
+
+**Async**（并行，不阻塞响应）：
+- `extractPreferencesProcessor`：偏好提取写入 `user_memories`
+- `recordMetricsProcessor`：token 用量、延迟等指标记录
+- `persistRequestProcessor`：请求日志持久化
+
+---
+
+#### 6.12.8 Block 映射与 SSE 输出
+
+`runtime/chat-response.ts` 负责将执行结果映射为 GenUI Block 并序列化 SSE：
+
+| 函数 | 职责 |
+|------|------|
+| `buildBlocksFromExecutionResult` | 将 `ChatExecutionResult` 映射为 `Block[]`（text / choice / entity-card / list / form / cta-group / alert / widget_*） |
+| `finalizeAiChatResponse` | 补全 traceId、modelUsed、tokenUsage、processorLogs、task 同步 |
+| `createAiChatStreamResponse` | SSE 序列化：`response-start → block-append × N → response-status → response-complete` |
+| `createAiChatErrorStreamResponse` | 错误降级：返回带 `alert` block 的 SSE 流 |
+
+SSE 事件序列保证客户端始终有体面降级，末尾统一发送 `data: [DONE]`。
+
+---
+
+#### 6.12.9 Task Runtime 追踪
+
+`task-runtime/agent-task.service.ts` 维护三条主线任务的状态机：
+
+| 任务类型 | 阶段序列 | 触发场景 |
+|----------|---------|---------|
+| `join_activity` | intent_captured → explore → action_selected → auth_gate → joined → discussion → post_activity → done | 探索附近、报名、讨论、活动后 |
+| `create_activity` | intent_captured → draft_collecting → auth_gate → draft_ready → published → done | 创建草稿、编辑、发布 |
+| `find_partner` | intent_captured → preference_collecting → auth_gate → intent_posted → awaiting_match → match_ready → activity_created → done | 找搭子、入池、匹配确认 |
 
 **关键设计**：
-- Handler 调用现有 Service 函数（如 `joinActivity`, `quitActivity`），不直接调用 AI SDK Tool
-- 部分操作（如 `create_activity`, `find_partner`）需要 LLM 理解上下文，设置 `fallbackToLLM: true`
-- 前端通过 `sendAction()` 方法发送结构化操作，而非 `sendMessage()`
+- `appendAgentTaskEvent`：每次任务状态变更写入 `agent_task_events` 表，同时调用 `incrementCounter` 上报 metrics
+- `syncJoinTaskFromChatResponse`、`syncPartnerTaskFromChatResponse`、`syncCreateTaskFromChatResponse`：由 `finalizeAiChatResponse` 在响应组装后调用，根据 blocks 内容推断任务推进点
+- `withSpan`：三个 `sync*Task` 函数均用 `withSpan` 包装，注入 OpenTracing 链路追踪
+- 结构化动作链不只是”把动作做了”，还要把”这件事推进到了哪”同步到任务中枢
 
-**v5.4 新增：join_activity 任务推进点**：
-- `explore`：`/ai/chat` 在返回可参加活动列表后，为 authenticated 用户创建或更新 `join_activity` 任务
-- `action_selected`：`input.action='join_activity'` 时，任务记录用户已明确选择某个活动
-- `auth_gate`：结构化动作或 chat policy 返回 auth required block 时，任务挂起为 `waiting_auth`
-- `joined`：报名成功并返回 `navigationPayload.activityId` 后，任务写入真实 `activityId`
-- `create_activity`：结构化动作和 Tool 在草稿创建/修改时推进到 `draft_collecting / draft_ready`
-- `publish_draft / confirm_publish`：发布成功后，任务必须记录 `published` 和 `done`
-- 这样结构化动作链不只是“把动作做了”，还要把“这件事推进到了哪”同步到任务中枢
+---
+
+#### 6.12.10 Welcome 门面
+
+`welcome/welcome.service.ts` 是独立的欢迎卡片门面，从 `ai.service.ts` 分离以保持内聚：
+
+| 函数 | 职责 |
+|------|------|
+| `getWelcomeCard` | 组装完整 `WelcomeResponse`：问候语、状态区、快捷入口、UI 文案 |
+| `generateGreeting` | 按时段生成问候语 |
+| `selectWelcomeFocus` | 优先级判定：post_activity_feedback → discussion_reply → draft_continue → recruiting_result → unfinished_intent |
+
+`ai.service.ts` 通过 re-export 暴露 Welcome 接口：
+
+```typescript
+export {
+  getWelcomeCard, generateGreeting,
+  type WelcomeResponse, type WelcomeSection, ...
+} from './welcome/welcome.service';
+```
+
+---
+
+#### 6.12.11 函数级全链路调用表
+
+以下按调用顺序列出从 `/ai/chat` HTTP 入口到 SSE 输出的关键函数。
+
+**第一层：HTTP 入口层**
+
+| 函数 | 文件 | 职责 |
+|------|------|------|
+| `aiChat` (Controller handler) | `ai.controller.ts` | 校验请求体，调用 `streamAiChatResponse`，返回 `Stream` |
+
+**第二层：主门面编排层**
+
+| 函数 | 文件 | 职责 |
+|------|------|------|
+| `streamAiChatResponse` | `ai.service.ts` | 总线编排：trace → envelope → execute → blocks → finalize → SSE |
+| `buildAiChatEnvelope` | `runtime/chat-response.ts` | 请求规范化、上下文组装、历史消息加载 |
+| `resolveAiChatExecution` | `runtime/chat-response.ts` | 解析 structuredAction / suggestion 续接 / 状态推断，统一链路执行 |
+
+**第三层：Action 快速出口**
+
+| 函数 | 文件 | 职责 |
+|------|------|------|
+| `handleStructuredAction` | `user-action/handler.ts` | 将结构化动作映射到领域 Service（在统一链路 Pre-LLM 之后执行） |
+| `generateActionVoice` | `ai.service.ts` | 为 Action 结果生成人味回复（Kimi 轻量调用，~50 字） |
+| `buildStructuredActionResult` | `ai.service.ts` | 将 Service 结果 + Voice 文本包装为 `ChatExecutionResult` |
+
+**第四层：LLM 分支 — 预检查**
+
+| 函数 | 文件 | 职责 |
+|------|------|------|
+| `inputGuardProcessor` | `processors/input-guard.ts` | 敏感词、注入检测、长度限制 |
+| `keywordMatchProcessor` | `processors/keyword-match.ts` | P0 热词精确匹配 |
+
+**第四层：LLM 分支 — Pre-LLM 管线**
+
+| 函数 | 文件 | 职责 |
+|------|------|------|
+| `buildPreLLMPipeline` | `processors/pipeline.ts` | 返回 ProcessorConfig 数组：intent-classify → [profile ∥ recall] → token-limit |
+| `runProcessors` | `processors/index.ts` | 串行 + 条件并行编排 |
+| `intentClassifyProcessor` | `processors/intent-classify.ts` | P1+P2 级联意图分类 |
+| `userProfileProcessor` | `processors/user-profile.ts` | 从 `user_memories` 读取偏好、常去地点、活动结果，注入 Prompt 并写入 metadata 供 Action handler 消费 |
+| `semanticRecallProcessor` | `processors/semantic-recall.ts` | pgvector 搜索 activities / messages / memories，产出 recalledActivities |
+| `tokenLimitProcessor` | `processors/token-limit.ts` | 按模型窗口截断 messages |
+
+**第四层：LLM 分支 — 模型执行**
+
+| 函数 | 文件 | 职责 |
+|------|------|------|
+| `executeChatRequest` | `ai.service.ts` | LLM 主执行器：模型选择 → 组装 Prompt + Tools → streamText → Tool 循环 |
+| `resolveChatModelSelection` | `models/router.ts` | 按 intent 选择模型，默认 `kimi-k2.5` |
+| `resolveFallbackChatModelSelection` | `models/router.ts` | 主模型失败时降级 |
+| `runText` | `models/runtime.ts` | 封装 `streamText`，统一 error / timeout / retry |
+| `resolveToolsForIntent` | `tools/registry.ts` | 按 intent 动态加载 Tools 子集，注入 recalledActivities |
+| `executeTool` | `tools/executor.ts` | 单 Tool 执行器 |
+
+**第四层：LLM 分支 — Post-LLM / Async**
+
+| 函数 | 文件 | 职责 |
+|------|------|------|
+| `runPostLLMProcessors` | `processors/index.ts` | 串行执行 Post-LLM 处理器 |
+| `outputGuardProcessor` | `processors/output-guard.ts` | 输出安全检查 |
+| `runAsyncProcessors` | `processors/index.ts` | `Promise.allSettled` 执行 Async 处理器 |
+| `extractPreferencesProcessor` | `processors/extract-preferences.ts` | 异步偏好提取写入 `user_memories` |
+| `recordMetricsProcessor` | `processors/record-metrics.ts` | 指标记录 |
+| `persistRequestProcessor` | `processors/persist-request.ts` | 请求日志持久化 |
+
+**第五层：Block 映射与响应组装**
+
+| 函数 | 文件 | 职责 |
+|------|------|------|
+| `buildBlocksFromExecutionResult` | `runtime/chat-response.ts` | `ChatExecutionResult` → GenUI `Block[]` |
+| `finalizeAiChatResponse` | `ai.service.ts` | 补全元数据、同步 Task、持久化对话快照 |
+| `createAiChatStreamResponse` | `runtime/chat-response.ts` | `AiChatResponse` → SSE 事件流 |
+| `createAiChatErrorStreamResponse` | `runtime/chat-response.ts` | 错误降级 SSE |
+
+**第六层：客户端消费**
+
+| 函数 | 文件 | 职责 |
+|------|------|------|
+| `readResponseCompleteEnvelopeFromStream` | 小程序 / Web SDK | 消费 SSE，解析 `response-complete` envelope |
+| `parseGenUIBlocks` | 客户端 | `blocks[]` 按类型分发到 Widget 组件 |
+
+**支撑子系统**
+
+| 子系统 | 关键函数 | 文件 |
+|--------|---------|------|
+| Memory | `getConversationMessages`, `saveMessage`, `getEnhancedUserProfile` | `memory/store.ts`, `memory/working.ts` |
+| RAG | `search`, `generateEmbedding` | `rag/search.ts`, `rag/utils.ts` |
+| Task Runtime | `syncJoinTaskFromChatResponse`, `syncPartnerTaskFromChatResponse`, `syncCreateTaskFromChatResponse`, `appendAgentTaskEvent` | `task-runtime/agent-task.service.ts` |
+| Welcome | `getWelcomeCard`, `selectWelcomeFocus` | `welcome/welcome.service.ts` |
+| Partner Matching | `createPartnerMatchingState`, `getNextQuestion`, `parseUserAnswer`, `persistPartnerMatchingState` | `workflow/partner-matching.ts` |
+
+---
 
 ### 6.13 执行层：Prompt 工程
 
@@ -2624,7 +2706,7 @@ Widget 按钮点击
 
 ```mermaid
 sequenceDiagram
-    participant LLM as Qwen-Max
+    participant LLM as Kimi
     participant Search as PartnerSearchService
     participant API as PartnerIntentService
     participant DB as PGVector (partner_intents)
@@ -2723,11 +2805,11 @@ sequenceDiagram
 
 #### 6.15.2 核心逻辑实现
 
-位置：`apps/api/src/modules/ai/tools/activity.ts`
+位置：`apps/api/src/modules/ai/tools/activity-tools.ts`
 
 1.  **意图解析 (Intent Parsing)**：
     - 优先使用正则 `/(约|组|我想去).+/` 快速命中
-    - 兜底使用 Qwen-Max 进行语义理解
+    - 兜底使用 Kimi 进行语义理解
     - **时间归一化**：将 "明晚" 解析为具体 ISO 时间戳
 
 2.  **草稿机制 (Draft Mechanism)**：

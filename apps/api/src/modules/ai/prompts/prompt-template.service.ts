@@ -8,7 +8,6 @@
 import { getRequiredConfigValue } from '../config/config.service';
 import { formatDateTime, getTomorrowStr, escapeXml } from './builder';
 import { interpolateTemplate } from './interpolator';
-import { generateWidgetCatalog } from '../tools/widgets';
 import type { PromptContext } from './types';
 
 /** ai_configs 中的 configKey */
@@ -74,7 +73,6 @@ export function getPromptTemplateMetadata(config: PromptTemplateConfig): {
 export function buildTemplateVariables(
   ctx: PromptContext,
   contextXml?: string,
-  widgetCatalog?: string,
 ): Record<string, string> {
   const { currentTime, userLocation, userNickname, draftContext, memoryContext } = ctx;
 
@@ -104,7 +102,6 @@ export function buildTemplateVariables(
     draftJson: draftVar,
     tomorrowStr,
     enrichmentXml: contextXml || '',
-    widgetCatalog: widgetCatalog || '',
     memoryContext: memoryContext || '',
   };
 }
@@ -117,8 +114,7 @@ export async function getSystemPrompt(
   contextXml?: string,
 ): Promise<string> {
   const config = await getPromptTemplateConfig();
-  const catalog = generateWidgetCatalog();
-  const variables = buildTemplateVariables(ctx, contextXml, catalog);
+  const variables = buildTemplateVariables(ctx, contextXml);
 
   return interpolateTemplate(config.template, variables);
 }
@@ -135,8 +131,7 @@ export function getTemplatePreview(template: string): string {
     memoryContext: '喜欢火锅，不喝酒，周末有空',
   };
 
-  const catalog = generateWidgetCatalog();
-  const variables = buildTemplateVariables(mockCtx, '', catalog);
+  const variables = buildTemplateVariables(mockCtx, '');
 
   return interpolateTemplate(template, variables);
 }

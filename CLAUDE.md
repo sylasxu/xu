@@ -236,10 +236,12 @@ bunx <package>       # 执行包命令
 ## 🧪 测试与回归规范
 
 - **测试栈统一使用 Bun First**：默认使用 `bun test`、`bun scripts/*.ts`、`bunx tsc`；禁止为了测试主链路额外引入 Jest / Vitest 作为默认方案
+- **运行器选择规则**：`apps/api` 内优先 `bun:test`，仅在需要生命周期钩子（`beforeAll`/`afterEach`）或模块 mock（`vi.mock`/`vi.fn`）时降级到 `vitest`
 - **API 集成测试优先走 Elysia 原生方式**：对路由、鉴权、参数校验、响应结构、状态流转的测试，优先直接调用 `app.handle(new Request(...))`，不要先起一层自定义测试服务器
 - **结果导向回归保留为 Bun 脚本**：`sandbox-regression`、`five-user-smoke`、`genui/chat regression` 这类脚本属于产品验收，不要硬塞回通用单测抽象
 - **SSE / 流式 / 协议契约必须保留黑盒验证**：像 `/ai/chat` 的 SSE 顺序、`[DONE]`、GenUI blocks、真实 HTTP 头与流式分块，必须至少有一层真实 HTTP / curl 回归，不能只靠内存态测试
 - **新增需求必须补对应回归**：只要改动影响 PRD / TAD 里的用户旅程、AI 对话、动作闸门、分享承接、post-activity 等流程，必须同步补一条能证明链路没断的测试或回归脚本
+- **新增回归场景 checklist**：写断言 → 选 runner → 更新矩阵 → 本地验证 `--scenario` → 跑 `release:gate`
 - **测试分层要清楚**：
   - `bun test` 负责业务规则、服务函数、API 集成
   - `bun scripts/*.ts` 负责多用户流程、结果漏斗、发布前验收
@@ -247,6 +249,7 @@ bunx <package>       # 执行包命令
 - **内部自测默认流程**：
   - 改 API 或业务规则后先跑：`bun run test:api`
   - 改用户主流程后至少加跑：`bun run regression:flow`
+  - 改多用户交叉状态（报名竞争、消息聚合、匹配密度）后加跑：`bun run regression:ten-user`
   - 改 `/ai/chat`、SSE、GenUI blocks、多端流解析后至少加跑：`bun run regression:protocol`
   - 准备收口一个迭代时统一跑：`bun run release:gate`
   - 内部自测必须覆盖两条关键 AI 主流程：

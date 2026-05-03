@@ -17,6 +17,15 @@ export interface ToolContext {
   threadId?: string | null;
   /** 用户位置 */
   location?: { lat: number; lng: number } | null;
+  /** 语义召回的活动结果（供 Tool 优先消费，避免重复 RAG 搜索） */
+  recalledActivities?: Array<{
+    id: string;
+    title: string;
+    type: string;
+    locationHint: string | null;
+    startAt: Date;
+    similarity: number;
+  }>;
 }
 
 /**

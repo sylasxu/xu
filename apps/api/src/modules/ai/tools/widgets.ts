@@ -355,52 +355,6 @@ export function buildWidgetSpec(
   };
 }
 
-// ── Widget Catalog Generator ──
-
-/**
- * 从 TypeBox Schema 提取字段描述
- */
-function extractSchemaFields(schema: TObject): string {
-  const properties = isRecord(schema.properties) ? schema.properties : {};
-
-  return Object.entries(properties)
-    .map(([key, prop]) => {
-      if (!isRecord(prop)) return `${key}(unknown)`;
-      if (Array.isArray(prop.anyOf) || Array.isArray(prop.oneOf)) return `${key}(union)`;
-
-      const typeName = typeof prop.type === 'string' ? prop.type : 'unknown';
-      if (typeName === 'object') return `${key}(object)`;
-      if (typeName === 'array') return `${key}(array)`;
-      if (typeName === 'string') return `${key}(string)`;
-      if (typeName === 'number') return `${key}(number)`;
-      if (typeName === 'boolean') return `${key}(boolean)`;
-      return `${key}(${typeName})`;
-    })
-    .join(', ');
-}
-
-/**
- * 从 WIDGET_CATALOG 自动生成 Widget 类型描述文本
- * 供 prompt-db-template 的 {{widgetCatalog}} 变量使用
- *
- * 纯函数，无副作用
- */
-export function generateWidgetCatalog(): string {
-  const lines = WIDGET_CATALOG
-    .filter(entry => entry.toolNames.length > 0)
-    .map(entry => {
-      const fields = entry.payloadSchema
-        ? extractSchemaFields(entry.payloadSchema)
-        : '(无固定 Schema)';
-      const actions = entry.interactions?.length
-        ? `。交互: ${entry.interactions.map(i => i.label).join(', ')}`
-        : '';
-      return `- ${entry.widgetType}: ${entry.description}。字段: ${fields}${actions}`;
-    });
-
-  return `<widget_catalog>\n${lines.join('\n')}\n</widget_catalog>`;
-}
-
 
 // ==========================================
 // Widget 构建函数

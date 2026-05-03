@@ -8,6 +8,7 @@ import { runText } from '../models/runtime';
 import { resolveChatModelSelection, shouldOmitTemperatureForModelId } from '../models/router';
 import type { IntentType, ClassifyResult, ClassifyContext } from './types';
 import { intentPatterns, intentPriority, draftModifyPatterns } from './definitions';
+import type { PatternDefinition } from './definitions';
 
 const VALID_INTENTS: IntentType[] = [
   'create', 'explore', 'manage', 'partner', 'chitchat',
@@ -89,6 +90,10 @@ export async function classifyIntent(
   return await classifyByLLM(message, context);
 }
 
+function compilePattern(def: PatternDefinition): RegExp {
+  return new RegExp(def.pattern, def.flags ?? '');
+}
+
 /**
  * 正则快速分类（纯函数）
  */
@@ -98,13 +103,14 @@ export function classifyByRegex(message: string): ClassifyResult {
   // 按优先级顺序检查
   for (const intent of intentPriority) {
     const patterns = intentPatterns[intent];
-    for (const pattern of patterns) {
-      if (pattern.test(lowerText)) {
+    for (const def of patterns) {
+      const regex = compilePattern(def);
+      if (regex.test(lowerText)) {
         return {
           intent,
           confidence: 0.9,
           method: 'regex',
-          matchedPattern: pattern.source,
+          matchedPattern: def.pattern,
         };
       }
     }
@@ -123,8 +129,9 @@ export function classifyByRegex(message: string): ClassifyResult {
 export function classifyDraftContext(message: string): ClassifyResult | null {
   const lowerText = message.toLowerCase();
 
-  for (const pattern of draftModifyPatterns) {
-    if (pattern.test(lowerText)) {
+  for (const def of draftModifyPatterns) {
+    const regex = compilePattern(def);
+    if (regex.test(lowerText)) {
       return {
         intent: 'create',
         confidence: 0.85,

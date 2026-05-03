@@ -8,7 +8,6 @@ import {
   getTokenUsageStats,
   getTokenUsageSummary,
   getToolCallStats,
-  getWelcomeCard,
   getActivityConversationMessages,
   listConversationMessages,
   listCurrentAgentTaskSnapshots,
@@ -19,6 +18,7 @@ import {
   resolveCurrentTaskHomeState,
   streamAiChatResponse,
 } from './ai.service';
+import { getWelcomeCard } from './welcome/welcome.service';
 import type { GenUIRequest } from '@xu/genui-contract';
 import { db, users, activities, eq } from '@xu/db';
 

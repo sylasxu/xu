@@ -257,29 +257,52 @@ export const exploreNearbyTool = createToolFactory<ExploreNearbyParams, ExploreD
   
   execute: async ({ center, semanticQuery, type, radius = 5 }, context) => {
     try {
-      // 构建搜索查询
-      // 如果没有 semanticQuery，使用地点名称作为默认查询
-      const query = semanticQuery || `${center.name}附近的活动`;
-      
-      // 调用 RAG 语义搜索（传递 userId 用于 MaxSim 个性化）
-      const scoredResults = await search({
-        semanticQuery: query,
-        filters: {
-          location: {
-            lat: center.lat,
-            lng: center.lng,
-            radiusInKm: radius,
+      let results: ExploreResultItem[] = [];
+
+      // v5.3: 优先消费语义召回结果，避免重复 RAG 搜索
+      const recalled = context.recalledActivities;
+      if (recalled && recalled.length > 0) {
+        // 按类型过滤并按相似度排序
+        const filtered = recalled
+          .filter((r) => !type || r.type === type)
+          .sort((a, b) => b.similarity - a.similarity)
+          .slice(0, 10);
+
+        results = filtered.map((r) => ({
+          id: r.id,
+          title: r.title,
+          type: r.type,
+          lat: 0,
+          lng: 0,
+          locationName: r.locationHint ?? center.name,
+          distance: 0,
+          startAt: new Date(r.startAt).toISOString(),
+          currentParticipants: 0,
+          maxParticipants: 0,
+          similarity: r.similarity,
+        }));
+      }
+
+      // 召回结果为空时 fallback 到独立搜索
+      if (results.length === 0) {
+        const query = semanticQuery || `${center.name}附近的活动`;
+        const scoredResults = await search({
+          semanticQuery: query,
+          filters: {
+            location: {
+              lat: center.lat,
+              lng: center.lng,
+              radiusInKm: radius,
+            },
+            type: type ?? undefined,
           },
-          type: type ?? undefined,
-        },
-        limit: 10,
-        includeMatchReason: !!semanticQuery, // 有语义查询时才生成理由
-        userId: context.userId, // v4.5: 传递 userId 用于 MaxSim 个性化
-      });
-      
-      // 转换结果格式
-      const results = scoredResults.map(toExploreResultItem);
-      
+          limit: 10,
+          includeMatchReason: !!semanticQuery,
+          userId: context.userId,
+        });
+        results = scoredResults.map(toExploreResultItem);
+      }
+
       return {
         success: true as const,
         ...buildExploreNearbyResult({

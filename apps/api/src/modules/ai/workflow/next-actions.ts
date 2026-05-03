@@ -189,9 +189,9 @@ export function buildNextBestActions(params: NextBestActionInput): NextBestActio
             ...(exploreType ? { params: { type: exploreType } } : {}),
           },
           {
-            label: '换个关键词重搜',
-            action: 'quick_prompt',
-            params: { prompt: '换个类型再帮我找找' },
+            label: '换个类型再找找',
+            action: 'explore_nearby',
+            ...(exploreType ? { params: { type: exploreType } } : {}),
           },
         ];
       }
@@ -203,9 +203,9 @@ export function buildNextBestActions(params: NextBestActionInput): NextBestActio
           ...(exploreType ? { params: { type: exploreType } } : {}),
         },
         {
-          label: '换个关键词重搜',
-          action: 'quick_prompt',
-          params: { prompt: '换个类型再帮我找找' },
+          label: '换个类型再找找',
+          action: 'explore_nearby',
+          ...(exploreType ? { params: { type: exploreType } } : {}),
         },
       ];
     case 'cancel_join':
@@ -216,22 +216,14 @@ export function buildNextBestActions(params: NextBestActionInput): NextBestActio
         },
       ];
     case 'record_activity_feedback': {
-      const items: NextBestActionItem[] = [
-        {
-          label: '补一句具体感受',
-          action: 'quick_prompt',
-          params: {
-            prompt: '我想补充这次活动的具体感受：',
-          },
-        },
-      ];
+      const items: NextBestActionItem[] = [];
 
       if (activityId) {
         items.push({
           label: '想再约一次',
-          action: 'quick_prompt',
+          action: 'create_activity',
           params: {
-            prompt: `基于这次活动（activityId: ${activityId}），帮我快速再约一场。`,
+            description: activityId ? `基于这次活动再约一场` : '帮我再组一个类似的局',
           },
         });
       }
@@ -253,9 +245,8 @@ export function buildNextBestActions(params: NextBestActionInput): NextBestActio
         });
       }
       items.push({
-        label: '去群里招呼大家',
-        action: 'quick_prompt',
-        params: { prompt: '我已经确认匹配了，帮我写一句开场招呼' },
+        label: '继续找新局',
+        action: 'explore_nearby',
       });
       return items;
     }
@@ -267,8 +258,8 @@ export function buildNextBestActions(params: NextBestActionInput): NextBestActio
         },
         {
           label: '改一下我的偏好',
-          action: 'quick_prompt',
-          params: { prompt: '我想调整找搭子的偏好' },
+          action: 'find_partner',
+          params: { renderMode: 'full-form', partnerStage: 'refine_form' },
         },
       ];
     case 'search_partners': {
@@ -325,8 +316,7 @@ export function buildNextBestActions(params: NextBestActionInput): NextBestActio
       if (typeof data?.matchId === 'string') {
         items.push({
           label: '看看我的搭子进展',
-          action: 'quick_prompt',
-          params: { prompt: '看看我的搭子进度' },
+          action: 'find_partner',
         });
       }
 

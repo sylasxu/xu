@@ -18,8 +18,10 @@ import { getConfigValue } from '../config/config.service';
 export interface FeatureSignal {
   /** 关键词匹配（任一命中即算） */
   keywords: string[];
-  /** 句式结构模式 */
-  syntaxPattern?: RegExp;
+  /** 句式结构模式（正则字符串） */
+  syntaxPattern?: string;
+  /** 正则 flags（如 'i' 表示忽略大小写） */
+  syntaxPatternFlags?: string;
   /** 上下文信号（如最近意图） */
   contextSignal?: (history: Array<{ role: string; content: string }>) => boolean;
 }
@@ -52,6 +54,11 @@ const ACTIVITY_TYPE_WORDS = [
   '喝酒', '喝咖啡', '下午茶', '宵夜',
 ];
 
+/** 找搭子规则中使用的活动类型 + 搭子组合模式 */
+const PARTNER_ACTIVITY_PATTERN = `${ACTIVITY_TYPE_WORDS.join('|')}.{0,6}搭子|搭子.{0,6}${ACTIVITY_TYPE_WORDS.join('|')}`;
+
+/** 创建/探索规则中使用的活动类型匹配模式（取前20个，已转义） */
+const ACTIVITY_TYPE_PATTERN = ACTIVITY_TYPE_WORDS.slice(0, 20).map(escapeRegExp).join('|');
 
 /**
  * 默认特征组合规则集
@@ -67,7 +74,7 @@ export const DEFAULT_FEATURE_RULES: FeatureCombinationRule[] = [
     intent: 'confirm',
     signals: [
       { keywords: ['对', '是的', '没问题', '可以', '行', '好的', '确认', '就这样', '就是这个', 'ok', 'yes'] },
-      { keywords: [], syntaxPattern: /^(对|是|好|嗯|行|没问题|可以|ok|yes)$/i },
+      { keywords: [], syntaxPattern: '^(对|是|好|嗯|行|没问题|可以|ok|yes)$', syntaxPatternFlags: 'i' },
     ],
     baseConfidence: 0.7,
     signalBoost: 0.15,
@@ -77,7 +84,7 @@ export const DEFAULT_FEATURE_RULES: FeatureCombinationRule[] = [
     intent: 'deny',
     signals: [
       { keywords: ['不是', '不行', '不好', '不对', '不要', '换一个', '不太行'] },
-      { keywords: [], syntaxPattern: /^(不|不是|不行|no|不好|不对|不要)$/i },
+      { keywords: [], syntaxPattern: '^(不|不是|不行|no|不好|不对|不要)$', syntaxPatternFlags: 'i' },
     ],
     baseConfidence: 0.7,
     signalBoost: 0.15,
@@ -87,7 +94,7 @@ export const DEFAULT_FEATURE_RULES: FeatureCombinationRule[] = [
     intent: 'cancel',
     signals: [
       { keywords: ['算了', '不找了', '取消', '不用了', '改天', '下次再说', '先这样'] },
-      { keywords: [], syntaxPattern: /算了|不找了|取消|不用了/ },
+      { keywords: [], syntaxPattern: '算了|不找了|取消|不用了' },
     ],
     baseConfidence: 0.7,
     signalBoost: 0.15,
@@ -97,8 +104,8 @@ export const DEFAULT_FEATURE_RULES: FeatureCombinationRule[] = [
     intent: 'modify',
     signals: [
       { keywords: ['改成', '换成', '不是.*是', '错了', '改一下'] },
-      { keywords: [], syntaxPattern: /(人数|时间|地点|地方).*(改|换)/ },
-      { keywords: [], syntaxPattern: /改成|换成|换个/ },
+      { keywords: [], syntaxPattern: '(人数|时间|地点|地方).*(改|换)' },
+      { keywords: [], syntaxPattern: '改成|换成|换个' },
     ],
     baseConfidence: 0.6,
     signalBoost: 0.15,
@@ -110,7 +117,7 @@ export const DEFAULT_FEATURE_RULES: FeatureCombinationRule[] = [
     intent: 'share',
     signals: [
       { keywords: ['分享', '发给', '邀请', '生成海报', '海报'] },
-      { keywords: [], syntaxPattern: /分享|发给|邀请|海报/ },
+      { keywords: [], syntaxPattern: '分享|发给|邀请|海报' },
     ],
     baseConfidence: 0.75,
     signalBoost: 0.1,
@@ -120,7 +127,7 @@ export const DEFAULT_FEATURE_RULES: FeatureCombinationRule[] = [
     intent: 'join',
     signals: [
       { keywords: ['我也去', '算我一个', '报名', '上车', '加我', '带我一个', '参加'] },
-      { keywords: [], syntaxPattern: /我也去|算我一个|报名|上车/ },
+      { keywords: [], syntaxPattern: '我也去|算我一个|报名|上车' },
     ],
     baseConfidence: 0.75,
     signalBoost: 0.1,
@@ -130,7 +137,7 @@ export const DEFAULT_FEATURE_RULES: FeatureCombinationRule[] = [
     intent: 'show_activity',
     signals: [
       { keywords: ['我的活动', '我发布的', '历史活动', '发过哪些', '看看活动'] },
-      { keywords: [], syntaxPattern: /我的活动|我发布的|历史活动/ },
+      { keywords: [], syntaxPattern: '我的活动|我发布的|历史活动' },
     ],
     baseConfidence: 0.75,
     signalBoost: 0.1,
@@ -143,7 +150,7 @@ export const DEFAULT_FEATURE_RULES: FeatureCombinationRule[] = [
     signals: [
       { keywords: ['你是谁', '你叫什么', '讲个笑话', '今天天气', '你好厉害', '你真棒'] },
       { keywords: ['无聊', '聊聊天', '陪我聊', '说说话'] },
-      { keywords: [], syntaxPattern: /哈哈|嘿嘿|呵呵/ },
+      { keywords: [], syntaxPattern: '哈哈|嘿嘿|呵呵' },
     ],
     baseConfidence: 0.6,
     signalBoost: 0.15,
@@ -155,7 +162,7 @@ export const DEFAULT_FEATURE_RULES: FeatureCombinationRule[] = [
     intent: 'idle',
     signals: [
       { keywords: ['谢谢', '拜拜', '再见', '88', 'byebye'] },
-      { keywords: [], syntaxPattern: /好的.*谢|谢谢.*不|拜拜|再见|88|byebye/i },
+      { keywords: [], syntaxPattern: '好的.*谢|谢谢.*不|拜拜|再见|88|byebye', syntaxPatternFlags: 'i' },
     ],
     baseConfidence: 0.7,
     signalBoost: 0.1,
@@ -167,7 +174,7 @@ export const DEFAULT_FEATURE_RULES: FeatureCombinationRule[] = [
     intent: 'manage',
     signals: [
       { keywords: ['取消活动', '不办了', '管理活动'] },
-      { keywords: [], syntaxPattern: /取消活动|不办了/ },
+      { keywords: [], syntaxPattern: '取消活动|不办了' },
     ],
     baseConfidence: 0.7,
     signalBoost: 0.15,
@@ -180,8 +187,8 @@ export const DEFAULT_FEATURE_RULES: FeatureCombinationRule[] = [
     signals: [
       { keywords: ['找搭子', '求搭子', '谁组我就去', '懒得组局', '等人约'] },
       { keywords: ['我的意向', '我的搭子意向', '确认匹配', '确认发布'] },
-      { keywords: [], syntaxPattern: /找搭子|求搭子|找[^，。！？\s]{0,12}搭子|谁组我就去|等人约/ },
-      { keywords: [], syntaxPattern: new RegExp(`${ACTIVITY_TYPE_WORDS.join('|')}.{0,6}搭子|搭子.{0,6}${ACTIVITY_TYPE_WORDS.join('|')}`) },
+      { keywords: [], syntaxPattern: '找搭子|求搭子|找[^，。！？\\s]{0,12}搭子|谁组我就去|等人约' },
+      { keywords: [], syntaxPattern: PARTNER_ACTIVITY_PATTERN },
     ],
     baseConfidence: 0.65,
     signalBoost: 0.15,
@@ -195,12 +202,12 @@ export const DEFAULT_FEATURE_RULES: FeatureCombinationRule[] = [
       // 信号 1：明确的组局动词
       { keywords: ['帮我组', '帮我创建', '自己组', '我来组', '我要组', '我想组', '发布活动', '创建活动'] },
       // 信号 2：组局动词 + 活动类型（句式模式）
-      { keywords: [], syntaxPattern: /(帮我|我想|我要|我来|自己).*(组|创建|发布)/ },
+      { keywords: [], syntaxPattern: '(帮我|我想|我要|我来|自己).*(组|创建|发布)' },
       // 信号 3：包含活动类型词（作为辅助信号提升置信度）
       {
         keywords: [],
         contextSignal: (_history) => false, // 占位，实际通过 syntaxPattern 检测
-        syntaxPattern: new RegExp(ACTIVITY_TYPE_WORDS.slice(0, 20).map(escapeRegExp).join('|')),
+        syntaxPattern: ACTIVITY_TYPE_PATTERN,
       },
     ],
     baseConfidence: 0.55,
@@ -215,11 +222,11 @@ export const DEFAULT_FEATURE_RULES: FeatureCombinationRule[] = [
       // 信号 1：明确的探索词
       { keywords: ['想找', '找人', '附近', '推荐', '有什么活动', '看看附近'] },
       // 信号 2："想/约" + 活动类型词（复合信号）
-      { keywords: [], syntaxPattern: /(想|约).*(打|吃|玩|去|来)/ },
+      { keywords: [], syntaxPattern: '(想|约).*(打|吃|玩|去|来)' },
       // 信号 3：包含活动类型词
       {
         keywords: [],
-        syntaxPattern: new RegExp(ACTIVITY_TYPE_WORDS.slice(0, 20).map(escapeRegExp).join('|')),
+        syntaxPattern: ACTIVITY_TYPE_PATTERN,
       },
       // 信号 4：上下文中最近有 explore 意图（连续性）
       {
@@ -272,8 +279,11 @@ function matchSignal(
   }
 
   // 句式结构匹配
-  if (signal.syntaxPattern && signal.syntaxPattern.test(input)) {
-    return true;
+  if (signal.syntaxPattern) {
+    const regex = new RegExp(signal.syntaxPattern, signal.syntaxPatternFlags ?? '');
+    if (regex.test(input)) {
+      return true;
+    }
   }
 
   // 上下文信号匹配

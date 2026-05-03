@@ -164,9 +164,8 @@ bun run release:gate
 ```text
 用户输入
   -> 对话运行时（Chat Runtime）
-  -> 动作推断（Action Inference）
-  -> 处理管线（Processing Pipeline）
-  -> 工具 / 工作流 / 模型路由（Tool / Workflow / Model Router）
+  -> 处理管线（Processing Pipeline：护栏、画像、召回、意图分类）
+  -> Action 快速出口 / 工具 / 工作流 / 模型路由
   -> 任务运行时 / 持久化（Task Runtime / Persistence）
   -> 界面块 / 流式响应（UI Blocks / Stream Response）
 ```
@@ -180,8 +179,10 @@ bun run release:gate
 - `apps/api/src/modules/ai/ai.controller.ts`
 - `apps/api/src/modules/ai/ai.model.ts`
 
-### 2. 理解层：结构化动作优先，意图识别兜底
-这一层先判断能不能直接落成结构化动作、是不是在续接已有任务、是否只缺一个关键信息。
+### 2. 理解层：统一上下文加载，Action 作为快速出口
+所有请求先经过同一套上下文加载和 Processor 管线（护栏、画像、召回、意图分类）。
+结构化动作不是独立分支，而是在统一链路末端的一个快速出口：
+若存在 `structuredAction` 且执行成功，用轻量 LLM（Voice 层，~50 字）生成人味回复后直接返回，不走完整 LLM 推理。
 
 当前主动作包括：
 
@@ -219,7 +220,7 @@ bun run release:gate
 ### 4. 执行层：工具、工作流和模型路由一起决定怎么把事办下去
 这一层根据场景决定：
 
-- 直接走结构化动作
+- Action 快速出口（轻量 LLM Voice 层）
 - 走工具调用
 - 走工作流
 - 走哪一个模型

@@ -12,7 +12,6 @@ export const SYSTEM_TEMPLATE_SUPPORTED_VARIABLES = [
   'draftJson',
   'tomorrowStr',
   'enrichmentXml',
-  'widgetCatalog',
   'memoryContext',
 ] as const;
 
@@ -33,8 +32,6 @@ export const systemTemplateConfigSeed = {
 {{enrichmentXml}}
 
 
-{{widgetCatalog}}
-
 {{memoryContext}}
 
 <rules>
@@ -50,7 +47,7 @@ export const systemTemplateConfigSeed = {
 10. 其他 Tool: 调用前不要输出"收到/正在整理"这类空过渡；真正有结果后再用文字承接
 11. 回答不要只停在"没有了/下一步/请选择"。要说清楚发生了什么、用户现在能怎么继续、也支持直接补一句自然语言
 12. 纯文字回复: 禁止在回复中使用任何 Emoji 或 Unicode 图标符号（如 🎉🏸🍲✨😅 等），只用纯文字表达
-13. 严禁调用任何以 "widget_" 开头的名称；widget_catalog 仅用于前端展示说明，不是可调用 Tool
+13. 严禁调用任何以 "widget_" 开头的名称，这些不是可调用 Tool
 </rules>
 
 <partner_matching>

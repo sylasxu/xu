@@ -24,11 +24,6 @@ export {
   formatDateTime,
   getTomorrowStr,
   escapeXml,
-  buildContextSection,
-  buildRoleSection,
-  buildRulesSection,
-  buildExamplesSection,
-  combinePromptSections,
 } from './builder';
 
 export { interpolateTemplate } from './interpolator';

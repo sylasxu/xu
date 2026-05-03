@@ -63,6 +63,7 @@
     "regression:protocol": "bun scripts/chat-regression.ts --suite core",
     "regression:protocol:extended": "bun scripts/chat-regression.ts --suite all",
     "regression:protocol:snapshot": "bun scripts/genui-turns-snapshot.ts",
+    "regression:ten-user": "bun scripts/ten-user-world.ts",
     "release:gate": "bun scripts/release-gate.ts"
   },
   "keywords": [

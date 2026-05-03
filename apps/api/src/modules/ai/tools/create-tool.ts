@@ -105,11 +105,13 @@ export function createToolFactory<TParams, TResult>(
 ) {
   return (
     userId: string | null,
-    location?: { lat: number; lng: number } | null
+    location?: { lat: number; lng: number } | null,
+    recalledActivities?: ToolContext['recalledActivities']
   ) => {
     const context: ToolContext = {
       userId,
       location: location ?? null,
+      recalledActivities,
     };
     return createTool(config, context);
   };

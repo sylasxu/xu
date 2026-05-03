@@ -5,8 +5,12 @@ import type {
   GenUIChoiceOption,
 } from '@xu/genui-contract';
 
+const ID_PREFIX = {
+  block: 'block',
+} as const;
+
 function createBlockId(): string {
-  return `block_${randomUUID().slice(0, 8)}`;
+  return `${ID_PREFIX.block}_${randomUUID().slice(0, 8)}`;
 }
 
 export function createChoiceBlock(params: {
@@ -80,6 +84,51 @@ export function createFormBlock(params: {
     ...(params.title ? { title: params.title } : {}),
     schema: params.schema,
     ...(params.initialValues ? { initialValues: params.initialValues } : {}),
+    dedupeKey: params.dedupeKey,
+    replacePolicy: 'replace',
+    meta: {
+      ...(params.meta ?? {}),
+      traceRef: params.traceRef,
+    },
+  };
+}
+
+export function createTextBlock(
+  content: string,
+  traceRef: string,
+  dedupeKey?: string
+): GenUIBlock {
+  return {
+    blockId: createBlockId(),
+    type: 'text',
+    content,
+    ...(dedupeKey ? { dedupeKey, replacePolicy: 'replace' as const } : {}),
+    meta: { traceRef },
+  };
+}
+
+export function createListBlock(params: {
+  title?: string;
+  items: Record<string, unknown>[];
+  dedupeKey: string;
+  traceRef: string;
+  center?: { lat: number; lng: number; name: string };
+  semanticQuery?: string;
+  fetchConfig?: Record<string, unknown>;
+  interaction?: Record<string, unknown>;
+  preview?: Record<string, unknown>;
+  meta?: Record<string, unknown>;
+}): GenUIBlock {
+  return {
+    blockId: createBlockId(),
+    type: 'list',
+    ...(params.title ? { title: params.title } : {}),
+    items: params.items,
+    ...(params.center ? { center: params.center } : {}),
+    ...(params.semanticQuery ? { semanticQuery: params.semanticQuery } : {}),
+    ...(params.fetchConfig ? { fetchConfig: params.fetchConfig } : {}),
+    ...(params.interaction ? { interaction: params.interaction } : {}),
+    ...(params.preview ? { preview: params.preview } : {}),
     dedupeKey: params.dedupeKey,
     replacePolicy: 'replace',
     meta: {

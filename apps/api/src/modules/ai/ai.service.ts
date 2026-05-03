@@ -56,16 +56,10 @@ import { generateText } from 'ai';
 import { checkRateLimit } from './guardrails/rate-limiter';
 // 辅助函数（从独立模块导入）
 import { getUserNickname } from '../users/user.service';
-import { getDiscussionReplySignals } from '../chat/chat.service';
 import { reverseGeocode } from './utils/geo';
 // Observability
 import { createLogger } from './observability/logger';
 import { runWithTrace } from './observability/tracer';
-// WorkingMemory (Enhanced)
-import {
-  getEnhancedUserProfile,
-  buildProfilePrompt,
-} from './memory/working';
 import type { EnhancedUserProfile } from './memory';
 // Processors (v4.9 管线架构)
 import {
@@ -110,7 +104,6 @@ import {
   syncJoinTaskFromChatResponse,
   syncPartnerTaskFromChatResponse,
 } from './task-runtime/agent-task.service';
-import { isIdentityMemoryQuestion } from './identity-reply';
 import { applyAiChatResponsePolicies } from './runtime/response-policy';
 import {
   buildAiChatEnvelope,
@@ -415,211 +408,6 @@ function shouldEmitExploreWidgetPayload(payload: unknown): boolean {
   return results.length > 0 || !!fetchConfig || !!preview;
 }
 
-function getExploreTypeLabel(type: string | undefined): string | null {
-  switch (type) {
-    case 'sports':
-      return '运动';
-    case 'food':
-      return '约饭';
-    case 'boardgame':
-      return '桌游';
-    case 'entertainment':
-      return '娱乐';
-    case 'other':
-      return '活动';
-    default:
-      return null;
-  }
-}
-
-function formatNextActionLabels(items: NextBestActionItem[]): string {
-  const labels = items
-    .map((item) => item.label.trim())
-    .filter(Boolean)
-    .slice(0, 3);
-
-  if (labels.length === 0) {
-    return '';
-  }
-
-  if (labels.length === 1) {
-    return `“${labels[0]}”`;
-  }
-
-  if (labels.length === 2) {
-    return `“${labels[0]}”或“${labels[1]}”`;
-  }
-
-  return `“${labels[0]}”、“${labels[1]}”或“${labels[2]}”`;
-}
-
-function normalizeSourceText(text: string | undefined): string {
-  return typeof text === 'string' ? text.trim() : '';
-}
-
-function looksLikeAvailabilityQuestion(text: string): boolean {
-  return /有没有|有吗|能不能|还有吗/.test(text);
-}
-
-function looksLikeBrowseRequest(text: string): boolean {
-  return /看看|看下|瞅瞅|刷刷|先看/.test(text);
-}
-
-function looksLikeFillSeatRequest(text: string): boolean {
-  return /三缺一|差一个|缺人|补位/.test(text);
-}
-
-function buildExploreOpening(params: {
-  originalText: string;
-  locationLabel: string;
-  targetLabel: string;
-  hasResults: boolean;
-  actionLabels: string;
-}): string {
-  const { originalText, locationLabel, targetLabel, hasResults, actionLabels } = params;
-
-  if (hasResults) {
-    if (looksLikeAvailabilityQuestion(originalText)) {
-      return `${locationLabel}这边有，我先替你筛了一轮，下面这些${targetLabel}你先看看有没有想继续接的。`;
-    }
-
-    if (looksLikeBrowseRequest(originalText)) {
-      return `先把${locationLabel}这边能接得上的${targetLabel}给你摆出来了，你先往下看。`;
-    }
-
-    return `${locationLabel}这边我先给你收了一批${targetLabel}，你先看看哪几个更对味。`;
-  }
-
-  const nextStepText = actionLabels
-    ? `你可以先试试${actionLabels}，`
-    : '';
-
-  if (looksLikeAvailabilityQuestion(originalText)) {
-    return `${locationLabel}这会儿我还没替你刷到特别合适的${targetLabel}。${nextStepText}也可以直接告诉我想换的地方、时间、类型或预算，我继续帮你找。`;
-  }
-
-  return `${locationLabel}这会儿还没刷到合适的${targetLabel}。${nextStepText}你也可以直接把条件改细一点，我继续往下筛。`;
-}
-
-function buildPartnerOpening(params: {
-  originalText: string;
-  locationLabel: string;
-  targetLabel: string;
-  hasResults: boolean;
-  actionLabels: string;
-}): string {
-  const { originalText, locationLabel, targetLabel, hasResults, actionLabels } = params;
-  const searchTargetLabel = looksLikeFillSeatRequest(originalText) ? '能来补位的人' : targetLabel;
-
-  if (hasResults) {
-    if (looksLikeFillSeatRequest(originalText)) {
-      return `${locationLabel}这边我先按补位方向筛了一圈，下面这几位你先看看能不能接上这桌。`;
-    }
-
-    if (looksLikeAvailabilityQuestion(originalText)) {
-      return `${locationLabel}这边有，我先按${searchTargetLabel}这个方向筛了一轮，你先看看下面这些合不合适。`;
-    }
-
-    return `${locationLabel}这边我先帮你筛了一圈${searchTargetLabel}，你先看看下面这几位顺不顺眼。`;
-  }
-
-  const nextStepText = actionLabels
-    ? `你可以先试试${actionLabels}，`
-    : '';
-
-  if (looksLikeFillSeatRequest(originalText)) {
-    return `${locationLabel}这边我先按补位方向找过一轮了，暂时还没碰到特别合适的人。${nextStepText}你也可以补一句时间、牌风或者具体在哪一片，我继续帮你捞。`;
-  }
-
-  return `${locationLabel}这边我先筛过一轮，暂时还没碰到特别合适的${searchTargetLabel}。${nextStepText}也可以直接告诉我你想找的人是什么样、一般在哪片活动方便，我继续帮你收窄。`;
-}
-
-function buildStructuredActionReplyText(params: {
-  actionType: StructuredAction['action'] | undefined;
-  data: Record<string, unknown> | undefined;
-  defaultMessage: string;
-  nextActions: NextBestActionItem[];
-  originalText?: string;
-}): string {
-  const { actionType, data, defaultMessage, nextActions, originalText } = params;
-  const trimmedDefaultMessage = defaultMessage.trim();
-  const actionLabels = formatNextActionLabels(nextActions);
-  const sourceText = normalizeSourceText(originalText);
-  const locationName = typeof data?.locationName === 'string' ? data.locationName.trim() : '';
-  const exploreType = typeof data?.type === 'string' ? data.type : undefined;
-  const exploreTypeLabel = getExploreTypeLabel(exploreType);
-  const explorePayload = isRecord(data?.explore) ? data.explore : null;
-  const exploreCenter = isRecord(explorePayload?.center) ? explorePayload.center : null;
-  const exploreLocationName = typeof exploreCenter?.name === 'string' && exploreCenter.name.trim()
-    ? exploreCenter.name.trim()
-    : locationName;
-  const exploreResults = Array.isArray(explorePayload?.results) ? explorePayload.results : [];
-
-  if (actionType === 'explore_nearby') {
-    const locationLabel = exploreLocationName || '附近';
-    const targetLabel = exploreTypeLabel ? `${exploreTypeLabel}局` : '局';
-    return buildExploreOpening({
-      originalText: sourceText,
-      locationLabel,
-      targetLabel,
-      hasResults: exploreResults.length > 0,
-      actionLabels,
-    });
-  }
-
-  if (actionType === 'find_partner' || actionType === 'search_partners' || actionType === 'submit_partner_intent_form') {
-    if (isRecord(data?.partnerIntentForm)) {
-      const partnerStage = typeof data.partnerIntentForm.partnerStage === 'string'
-        ? data.partnerIntentForm.partnerStage
-        : '';
-      if (partnerStage === 'intent_pool') {
-        return `${trimmedDefaultMessage || '我把可补充的偏好都展开了。'}填得越具体，后面替你留意时就会越准。`;
-      }
-
-      return `${trimmedDefaultMessage || '我把可调整的偏好都展开了。'}你可以直接细化这些条件，我会按新的要求继续筛。`;
-    }
-
-    if (isRecord(data?.askPreference)) {
-      const actionGuidance = actionLabels
-        ? `你可以先试试${actionLabels}，`
-        : '';
-      return `${trimmedDefaultMessage || '我先按你刚才说的方向收一收，再补一个最关键的条件。'}${actionGuidance}也可以直接告诉我你想找的人是什么样、一般在哪片活动方便，我继续帮你往下接。`;
-    }
-
-    const partnerResults = isRecord(data?.partnerSearchResults) && Array.isArray(data.partnerSearchResults.items)
-      ? data.partnerSearchResults.items
-      : [];
-    const locationLabel = locationName || '你这附近';
-    const targetLabel = exploreTypeLabel ? `${exploreTypeLabel}搭子` : '搭子';
-    return buildPartnerOpening({
-      originalText: sourceText,
-      locationLabel,
-      targetLabel,
-      hasResults: partnerResults.length > 0,
-      actionLabels,
-    });
-  }
-
-  if (actionType === 'create_activity' || actionType === 'save_draft_settings' || actionType === 'publish_draft' || actionType === 'confirm_publish') {
-    const actionGuidance = actionLabels
-      ? `你可以直接试试${actionLabels}，`
-      : '';
-    return `${trimmedDefaultMessage || '我先把这场局替你整理好了。'}${actionGuidance}也可以直接告诉我还想改哪里，我继续帮你调。`;
-  }
-
-  if (actionType === 'join_activity' || actionType === 'confirm_match' || actionType === 'cancel_match' || actionType === 'cancel_join' || actionType === 'record_activity_feedback') {
-    const actionGuidance = actionLabels
-      ? `你可以先试试${actionLabels}，`
-      : '';
-    return `${trimmedDefaultMessage || '这一步已经接上了。'}${actionGuidance}也可以直接告诉我你接下来想看什么，我继续陪你往下走。`;
-  }
-
-  if (actionLabels) {
-    return `${trimmedDefaultMessage || '我先把接下来能做的路给你收好了。'}你可以先试试${actionLabels}，也可以直接告诉我还想怎么改，我继续帮你处理。`;
-  }
-
-  return trimmedDefaultMessage;
-}
 
 function getCacheHitTokens(usage: LanguageModelUsage): number | undefined {
   return usage.inputTokenDetails.cacheReadTokens ?? usage.cachedInputTokens;
@@ -648,7 +436,6 @@ function inferIntentFromStructuredAction(actionType: StructuredAction['action'] 
     actionType === 'explore_nearby'
     || actionType === 'ask_preference'
     || actionType === 'expand_map'
-    || actionType === 'filter_activities'
   ) {
     return 'explore';
   }
@@ -663,7 +450,6 @@ function inferIntentFromStructuredAction(actionType: StructuredAction['action'] 
     || actionType === 'confirm_match'
     || actionType === 'cancel_match'
     || actionType === 'select_preference'
-    || actionType === 'skip_preference'
   ) {
     return 'partner';
   }
@@ -744,54 +530,6 @@ export async function executeChatRequest(request: ChatRequest): Promise<ChatExec
 
     let sanitizedInput = initialGuardResult.context.userInput;
 
-    if (structuredAction) {
-      logger.info('Processing structured action', {
-        action: structuredAction.action,
-        source: structuredAction.source,
-        userId: userId || 'anon',
-      });
-
-      const actionResult = await handleStructuredAction(
-        structuredAction,
-        userId,
-        location ? { lat: location[1], lng: location[0] } : undefined
-      );
-
-      if (!actionResult.fallbackToLLM) {
-        return buildStructuredActionResult(actionResult, structuredAction);
-      }
-
-      if (actionResult.fallbackToLLM && actionResult.fallbackText) {
-        const modifiedMessages = [...effectiveMessages];
-        if (modifiedMessages.length > 0) {
-          const lastMsg = modifiedMessages[modifiedMessages.length - 1];
-          if (lastMsg.role === 'user') {
-            modifiedMessages[modifiedMessages.length - 1] = replaceMessageTextContent(lastMsg, actionResult.fallbackText);
-          }
-        }
-        effectiveMessages = modifiedMessages;
-
-        if (actionResult.fallbackText !== currentInputText) {
-          const fallbackGuardResult = await inputGuardProcessor(createGuardContext(actionResult.fallbackText));
-          processorLogs.push({
-            processorName: inputGuardProcessor.processorName,
-            executionTime: fallbackGuardResult.executionTime,
-            success: fallbackGuardResult.success,
-            data: fallbackGuardResult.data,
-            error: fallbackGuardResult.error,
-            timestamp: new Date().toISOString(),
-          });
-
-          if (!fallbackGuardResult.success) {
-            logger.warn('Fallback input blocked', { userId, error: fallbackGuardResult.error });
-            return buildDirectResponseResult({ type: 'blocked' });
-          }
-
-          sanitizedInput = fallbackGuardResult.context.userInput;
-        }
-      }
-    }
-
     const conversationHistory: Array<{
       role: ChatRequest['messages'][number]['role'];
       content: string;
@@ -803,19 +541,13 @@ export async function executeChatRequest(request: ChatRequest): Promise<ChatExec
 
     const locationName = location ? await reverseGeocode(location[1], location[0]) : undefined;
     const userNickname = userId ? await getUserNickname(userId) : undefined;
-    const userProfile = userId ? await getEnhancedUserProfile(userId) : null;
-
-    const baseMemory = userProfile ? buildProfilePrompt(userProfile) : null;
-    const memoryContext = [baseMemory]
-      .filter((section): section is string => Boolean(section))
-      .join('\n\n') || null;
 
     const promptContext: PromptContext = {
       currentTime: new Date(),
       userLocation: location ? { lat: location[1], lng: location[0], name: locationName } : undefined,
       userNickname,
       draftContext,
-      memoryContext,
+      memoryContext: null,
     };
 
     const baseSystemPrompt = await getSystemPrompt(promptContext);
@@ -854,6 +586,28 @@ export async function executeChatRequest(request: ChatRequest): Promise<ChatExec
       return buildDirectResponseResult({ type: 'fallback', context: 'Pre-LLM pipeline failed' });
     }
 
+    const actionHandlerContext: import('./user-action').ActionHandlerContext = {
+      recalledActivities: preLLMContext.metadata.semanticRecall?.recalledActivities,
+      userProfile: preLLMContext.metadata.userProfile,
+    };
+
+    let actionResult: import('./user-action').StructuredActionResult | undefined;
+
+    if (structuredAction) {
+      logger.info('Processing structured action', {
+        action: structuredAction.action,
+        source: structuredAction.source,
+        userId: userId || 'anon',
+      });
+
+      actionResult = await handleStructuredAction(
+        structuredAction,
+        userId,
+        location ? { lat: location[1], lng: location[0] } : undefined,
+        actionHandlerContext,
+      );
+    }
+
     const intentClassifyMeta = preLLMContext.metadata.intentClassify;
     const intentResult: ClassifyResult = intentClassifyMeta ? {
       intent: intentClassifyMeta.intent,
@@ -886,19 +640,31 @@ export async function executeChatRequest(request: ChatRequest): Promise<ChatExec
       if (partnerMatchingState) {
         const currentQuestion = getNextQuestion(partnerMatchingState);
         if (looksLikePartnerAnswer(sanitizedInput, currentQuestion)) {
-          return handlePartnerMatchingFlowResult(request, partnerMatchingState, partnerThreadId, sanitizedInput);
+          return handlePartnerMatchingFlowResult(request, partnerMatchingState, partnerThreadId, sanitizedInput, actionHandlerContext);
         }
       }
 
       if (intentResult.intent === 'partner' && shouldStartPartnerMatching('partner', partnerMatchingState)) {
-        return handlePartnerMatchingFlowResult(request, partnerMatchingState, partnerThreadId, sanitizedInput);
+        return handlePartnerMatchingFlowResult(request, partnerMatchingState, partnerThreadId, sanitizedInput, actionHandlerContext);
       }
+    }
+
+    // Action 快速出口：使用 Voice 层生成人味回复
+    if (structuredAction && actionResult) {
+      const voiceText = await generateActionVoice({
+        actionType: structuredAction.action,
+        result: actionResult,
+        userNickname: userNickname ?? undefined,
+        locationName: locationName ?? undefined,
+      });
+      return buildStructuredActionResult(actionResult, structuredAction, voiceText);
     }
 
     const userLocation = location ? { lat: location[1], lng: location[0] } : null;
     const tools = await resolveToolsForIntent(userId, intentResult.intent, {
       hasDraftContext: !!draftContext,
       location: userLocation,
+      recalledActivities: preLLMContext.metadata.semanticRecall?.recalledActivities,
     });
 
     const injectedPrompts: string[] = [];
@@ -911,6 +677,13 @@ export async function executeChatRequest(request: ChatRequest): Promise<ChatExec
     const systemPrompt = injectedPrompts.length > 0
       ? `${preLLMContext.systemPrompt}\n\n${injectedPrompts.join('\n\n')}`
       : preLLMContext.systemPrompt;
+
+    logger.info('system_prompt_audit', {
+      totalLength: systemPrompt.length,
+      baseLength: preLLMContext.systemPrompt.length,
+      enrichmentLength: injectedPrompts.join('\n\n').length,
+      enrichmentCount: injectedPrompts.length,
+    });
 
     const uiMessages: UIMessage[] = effectiveMessages.map((m, i) => ({
       id: `msg-${i}`,
@@ -1135,58 +908,71 @@ const XU_PERSONA = `你是"xu"，一个碎片化社交助理。你帮用户把�
 记住：你是 xu，一个会帮用户张罗但懂分寸的社交助理。`;
 
 /**
- * 轻量 LLM 生成自然回复
- * 默认跟随当前主聊天链路的 Kimi 路由
+ * Action Voice 层 — 为 Action 执行结果生成人味回复
+ *
+ * 使用 Kimi 轻量调用，prompt 极简，输出严格控制在 50 字以内。
+ * 失败时降级到系统消息，不阻塞主链路。
  */
-async function generateSoulfulResponse(
-  userInput: string,
-  context: {
-    keyword: string;
-    intent: string;
-    responseHint: string;
-  }
-): Promise<string> {
+async function generateActionVoice(params: {
+  actionType: string;
+  result: import('./user-action').StructuredActionResult;
+  userNickname?: string;
+  locationName?: string;
+}): Promise<string> {
   const startTime = Date.now();
-  try {
-    const { model, modelId } = await resolveChatModelSelection({ routeKey: 'chat' });
+  const { actionType, result, userNickname, locationName } = params;
+  const data = asRecord(result.data);
+  const hasError = !result.success;
+  const systemMessage = typeof result.error === 'string' && result.error.trim()
+    ? result.error.trim()
+    : (typeof data?.message === 'string' && data.message.trim() ? data.message.trim() : '');
+  const loc = locationName || (typeof data?.locationName === 'string' ? data.locationName : '');
 
-    const prompt = `用户说："${userInput}"
+  const contextLines: string[] = [];
+  if (userNickname) contextLines.push(`用户昵称：${userNickname}`);
+  if (loc) contextLines.push(`地点：${loc}`);
+  if (systemMessage) contextLines.push(`操作反馈：${systemMessage}`);
 
-触发了热词"${context.keyword}"，意图是${context.intent}。
-参考信息：${context.responseHint}
+  const prompt = `用户刚刚执行了操作：${actionType}
+操作结果：${hasError ? '失败' : '成功'}
+${contextLines.join('\n')}
 
-请用一句话回应用户，体现 xu 的碎片化社交助理气质。要求：
-1. 自然、有边界、不装熟
-2. 少用表情符号，不要过度热情
-3. 不要机械复述参考信息，要转化成自己的话
-4. 如果是活动相关，优先给出可继续推进的感觉
-5. 直接输出回应文字，不要解释
+请用一句话自然回应，要求：
+1. 你是 xu，碎片化社交助理，短句、直接、不装熟
+2. 严格不超过 50 个中文字符
+3. 不要重复操作反馈里的具体数据（时间、地点、人数）
+4. ${hasError ? '温和告知失败，给一个轻松的替代建议' : '轻松确认成功，暗示下一步可以做什么'}
+5. 直接输出文字，不要解释
 
 回应：`;
 
-    const result = await generateText({
+  try {
+    const { model, modelId } = await resolveChatModelSelection({ routeKey: 'chat' });
+
+    const { text } = await generateText({
       model,
       system: XU_PERSONA,
       prompt,
-      ...(shouldOmitTemperatureForModelId(modelId) ? {} : { temperature: 0.8 }),
-      maxOutputTokens: 150,
+      ...(shouldOmitTemperatureForModelId(modelId) ? {} : { temperature: 0.7 }),
+      maxOutputTokens: 80,
     });
 
     const latency = Date.now() - startTime;
-    logger.info('p0_soulful_response_generated', {
-      keyword: context.keyword,
-      intent: context.intent,
+    logger.info('action_voice_generated', {
+      actionType,
       model: modelId,
       latencyMs: latency,
-      responseLength: result.text.trim().length,
+      responseLength: text.trim().length,
+      hasError,
     });
-    return result.text.trim() || context.responseHint;
+
+    return text.trim() || systemMessage || '已处理';
   } catch (error) {
-    // 降级到默认提示
-    logger.error('p0_soulful_response_failed', { error: String(error), keyword: context.keyword });
-    return context.responseHint;
+    logger.error('action_voice_failed', { actionType, error: String(error) });
+    return systemMessage || '已处理';
   }
 }
+
 
 // ==========================================
 // 辅助函数
@@ -1312,7 +1098,8 @@ async function buildDirectResponseResult(
 
 function buildStructuredActionResult(
   result: import('./user-action').StructuredActionResult,
-  structuredAction?: StructuredAction
+  structuredAction?: StructuredAction,
+  voiceText?: string,
 ): ChatExecutionResult {
   const data = asRecord(result.data);
   const pendingAction = asRecord(data?.pendingAction);
@@ -1381,15 +1168,10 @@ function buildStructuredActionResult(
         message: actionMessage,
       }
     : null;
-  const shouldWritePrimaryText = !authRequiredPayload && !successWidgetPayload;
+  // v5.5: Voice 层存在时总是输出文本，否则按原逻辑判断
+  const shouldWritePrimaryText = voiceText ? true : (!authRequiredPayload && !successWidgetPayload);
   const nextActions = buildNextBestActions({ actionType, data });
-  const assistantReplyText = buildStructuredActionReplyText({
-    actionType,
-    data,
-    defaultMessage: actionMessage,
-    nextActions,
-    originalText: structuredAction?.originalText,
-  });
+  const assistantReplyText = voiceText ?? actionMessage;
   const structuredIntent = inferIntentFromStructuredAction(actionType);
   const activityId = typeof data?.activityId === 'string' ? data.activityId : null;
 
@@ -1456,7 +1238,8 @@ async function handlePartnerMatchingFlowResult(
   request: ChatRequest,
   existingState: PartnerMatchingState | null,
   threadId: string,
-  userMessage: string
+  userMessage: string,
+  context?: import('./user-action').ActionHandlerContext,
 ): Promise<ChatExecutionResult> {
   const { userId } = request;
 
@@ -1500,21 +1283,18 @@ async function handlePartnerMatchingFlowResult(
     }
 
     const payload = buildPartnerSearchPayloadFromState(completedState);
-    const actionResult = await handleStructuredAction(
-      {
-        action: 'search_partners',
-        payload,
-        source: 'partner_matching_workflow',
-        originalText: completedState.rawInput,
-      },
-      userId,
-    );
-    return buildStructuredActionResult(actionResult, {
-      action: 'search_partners',
+    const partnerAction = {
+      action: 'search_partners' as const,
       payload,
       source: 'partner_matching_workflow',
       originalText: completedState.rawInput,
+    };
+    const actionResult = await handleStructuredAction(partnerAction, userId, undefined, context);
+    const voiceText = await generateActionVoice({
+      actionType: partnerAction.action,
+      result: actionResult,
     });
+    return buildStructuredActionResult(actionResult, partnerAction, voiceText);
   }
 
   if (userId) {
@@ -1873,7 +1653,8 @@ export async function getConversationMessages(conversationId: string) {
       sql`${conversationMessages.conversationId} = ${conversationId}
         AND (${conversationMessages.expiresAt} IS NULL OR ${conversationMessages.expiresAt} > NOW())`
     )
-    .orderBy(conversationMessages.createdAt);
+    .orderBy(conversationMessages.createdAt)
+    .limit(50);
 
   return {
     conversation: {
@@ -2315,958 +2096,23 @@ export async function getActivityConversationMessages(activityId: string) {
   };
 }
 
+// Welcome Card 已迁移到 ./welcome/welcome.service.ts
+export {
+  getWelcomeCard,
+  generateGreeting,
+  type WelcomeResponse,
+  type WelcomeSection,
+  type WelcomeFocus,
+  type WelcomePendingActivity,
+  type QuickPrompt,
+  type SocialProfile,
+  type WelcomeFocusType,
+} from './welcome/welcome.service';
+
 // ==========================================
-// Welcome Card
+// End of Welcome Card re-exports
 // ==========================================
 
-export interface WelcomeSection {
-  id: string;
-  title: string;
-  icon?: string;
-  items: Array<{
-    type: 'draft' | 'suggestion' | 'explore';
-    label: string;
-    prompt: string;
-    icon?: string;
-    context?: unknown;
-  }>;
-}
-
-// 社交档案 (v4.4 新增)
-export interface SocialProfile {
-  joinedActivities: number;
-  hostedActivities: number;
-  preferenceCompleteness: number;
-}
-
-export interface WelcomePendingActivity {
-  id: string;
-  title: string;
-  type: string;
-  startAt: string;
-  locationName: string;
-  locationHint: string;
-  currentParticipants: number;
-  maxParticipants: number;
-  status: string;
-}
-
-// 快捷入口 (v4.4 新增)
-export interface QuickPrompt {
-  icon: string;
-  text: string;
-  prompt: string;
-  action?: string;
-  params?: Record<string, unknown>;
-}
-
-export type WelcomeFocusType =
-  | 'post_activity_feedback'
-  | 'discussion_reply'
-  | 'draft_continue'
-  | 'recruiting_result'
-  | 'unfinished_intent';
-
-export interface WelcomeFocus {
-  type: WelcomeFocusType;
-  label: string;
-  prompt: string;
-  priority: number;
-  context?: unknown;
-}
-
-export interface WelcomeResponse {
-  greeting: string;
-  subGreeting?: string;
-  sections: WelcomeSection[];
-  pendingActivities?: WelcomePendingActivity[] | undefined;
-  welcomeFocus?: WelcomeFocus | undefined;
-  quickPrompts: QuickPrompt[];
-  ui?: {
-    composerPlaceholder: string;
-    bottomQuickActions: string[];
-    chatShell?: {
-      composerHint: string;
-      pendingActionTitle: string;
-      pendingActionDefaultMessage: string;
-      pendingActionLoginHint: string;
-      pendingActionBindPhoneHint: string;
-      pendingActionResumeLabel: string;
-    };
-    sidebar?: {
-      title: string;
-      messageCenterLabel: string;
-      currentTasksTitle: string;
-      currentTasksEmpty: string;
-      historyTitle: string;
-      searchPlaceholder: string;
-      emptySearchResult: string;
-      emptyHistory: string;
-    };
-  };
-}
-
-async function getUserActivityStats(userId: string): Promise<{
-  joinedActivities: number;
-  hostedActivities: number;
-}> {
-  const [createdResult, joinedResult] = await Promise.all([
-    db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(activities)
-      .where(eq(activities.creatorId, userId)),
-    db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(participants)
-      .where(and(eq(participants.userId, userId), eq(participants.status, 'joined'))),
-  ]);
-
-  return {
-    joinedActivities: joinedResult[0]?.count ?? 0,
-    hostedActivities: createdResult[0]?.count ?? 0,
-  };
-}
-
-type WelcomeGreetingPeriod =
-  | 'lateNight'
-  | 'morning'
-  | 'forenoon'
-  | 'noon'
-  | 'afternoon'
-  | 'evening'
-  | 'night';
-
-interface WelcomeCopyConfig {
-  fallbackNickname: string;
-  subGreeting: string;
-  stateSubGreetings: {
-    hasDraft: string;
-    pendingActivities: string;
-    lowPreference: string;
-    nearbyExplore: string;
-  };
-  greetingTemplates: Record<WelcomeGreetingPeriod, string>;
-}
-
-interface WelcomeUiConfig {
-  composerPlaceholder: string;
-  sectionTitles: {
-    suggestions: string;
-    explore: string;
-  };
-  exploreTemplates: {
-    label: string;
-    prompt: string;
-  };
-  suggestionItems: Array<{
-    label: string;
-    prompt: string;
-    icon?: string;
-  }>;
-  quickPrompts: QuickPrompt[];
-  bottomQuickActions: string[];
-  chatShell: {
-    composerHint: string;
-    pendingActionTitle: string;
-    pendingActionDefaultMessage: string;
-    pendingActionLoginHint: string;
-    pendingActionBindPhoneHint: string;
-    pendingActionResumeLabel: string;
-    runtimeStatus: {
-      networkOfflineText: string;
-      networkRetryText: string;
-      networkRestoredToast: string;
-      widgetErrorMessage: string;
-      widgetErrorRetryText: string;
-    };
-  };
-  sidebar: {
-    title: string;
-    messageCenterLabel: string;
-    currentTasksTitle: string;
-    currentTasksEmpty: string;
-    historyTitle: string;
-    searchPlaceholder: string;
-    emptySearchResult: string;
-    emptyHistory: string;
-  };
-}
-
-const DEFAULT_WELCOME_COPY_CONFIG: WelcomeCopyConfig = {
-  fallbackNickname: '朋友',
-  subGreeting: '今天想约什么局？',
-  stateSubGreetings: {
-    hasDraft: '你有一个草稿还没发出去，要不要现在继续？',
-    pendingActivities: '你有 {count} 个待参加活动，先看看接下来怎么安排？',
-    lowPreference: '告诉我你偏爱什么，我会更懂你。',
-    nearbyExplore: '附近有新局，想直接看看吗？',
-  },
-  greetingTemplates: {
-    lateNight: '夜深了，{nickname}～',
-    morning: '早上好，{nickname}！',
-    forenoon: '上午好，{nickname}！',
-    noon: '中午好，{nickname}！',
-    afternoon: '下午好，{nickname}！',
-    evening: '晚上好，{nickname}！',
-    night: '夜深了，{nickname}～',
-  },
-};
-
-const DEFAULT_WELCOME_UI_CONFIG: WelcomeUiConfig = {
-  composerPlaceholder: '你想找什么活动？',
-  sectionTitles: {
-    suggestions: '快速组局',
-    explore: '探索附近',
-  },
-  exploreTemplates: {
-    label: '看看{locationName}有什么局',
-    prompt: '看看{locationName}附近有什么活动',
-  },
-  suggestionItems: [
-    { label: '约饭局', prompt: '帮我组一个吃饭的局', icon: '🍜' },
-    { label: '打游戏', prompt: '想找人一起打游戏', icon: '🎮' },
-    { label: '运动', prompt: '想找人一起运动', icon: '🏃' },
-    { label: '喝咖啡', prompt: '想约人喝咖啡聊天', icon: '☕' },
-  ],
-  quickPrompts: [
-    { icon: '📍', text: '周末附近有什么活动？', prompt: '周末附近有什么活动' },
-    { icon: '🏸', text: '帮我找个运动搭子', prompt: '帮我找个运动搭子' },
-    { icon: '✨', text: '想组个周五晚的局', prompt: '想组个周五晚的局' },
-  ],
-  bottomQuickActions: ['快速组局', '找搭子', '附近活动', '我的草稿'],
-  chatShell: {
-    composerHint: '也可以直接说地方、时间、类型或你想找的人',
-    pendingActionTitle: '待恢复动作',
-    pendingActionDefaultMessage: '这一步已经挂起，登录后会继续替你办完。',
-    pendingActionLoginHint: '完成登录后回到这里，我会自动继续。',
-    pendingActionBindPhoneHint: '完成绑定手机号后回到这里，我会自动继续。',
-    pendingActionResumeLabel: '我已完成，继续',
-    runtimeStatus: {
-      networkOfflineText: '网络连接已断开',
-      networkRetryText: '重试',
-      networkRestoredToast: '网络已恢复',
-      widgetErrorMessage: '出了点问题',
-      widgetErrorRetryText: '重试',
-    },
-  },
-  sidebar: {
-    title: 'xu',
-    messageCenterLabel: '消息中心',
-    currentTasksTitle: '现在最需要继续的事',
-    currentTasksEmpty: '当前没有需要继续推进的事，新的进展会先出现在这里。',
-    historyTitle: '历史会话',
-    searchPlaceholder: '搜索历史会话',
-    emptySearchResult: '没有找到匹配的历史会话。',
-    emptyHistory: '还没有历史会话，发起第一条消息后这里就会出现。',
-  },
-};
-
-const WELCOME_GREETING_PERIODS: WelcomeGreetingPeriod[] = [
-  'lateNight',
-  'morning',
-  'forenoon',
-  'noon',
-  'afternoon',
-  'evening',
-  'night',
-];
-
-function getNonEmptyString(value: unknown): string | null {
-  if (typeof value !== 'string') {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-}
-
-function normalizeWelcomeCopyConfig(raw: unknown): WelcomeCopyConfig {
-  if (!isRecord(raw)) {
-    return DEFAULT_WELCOME_COPY_CONFIG;
-  }
-
-  const greetingTemplates = { ...DEFAULT_WELCOME_COPY_CONFIG.greetingTemplates };
-  const greetingTemplatesInput = isRecord(raw.greetingTemplates) ? raw.greetingTemplates : null;
-  if (greetingTemplatesInput) {
-    for (const key of WELCOME_GREETING_PERIODS) {
-      const next = getNonEmptyString(greetingTemplatesInput[key]);
-      if (next) {
-        greetingTemplates[key] = next;
-      }
-    }
-  }
-
-  return {
-    fallbackNickname: getNonEmptyString(raw.fallbackNickname) ?? DEFAULT_WELCOME_COPY_CONFIG.fallbackNickname,
-    subGreeting: getNonEmptyString(raw.subGreeting) ?? DEFAULT_WELCOME_COPY_CONFIG.subGreeting,
-    stateSubGreetings: {
-      hasDraft: getNonEmptyString(isRecord(raw.stateSubGreetings) ? raw.stateSubGreetings.hasDraft : null) ?? DEFAULT_WELCOME_COPY_CONFIG.stateSubGreetings.hasDraft,
-      pendingActivities: getNonEmptyString(isRecord(raw.stateSubGreetings) ? raw.stateSubGreetings.pendingActivities : null) ?? DEFAULT_WELCOME_COPY_CONFIG.stateSubGreetings.pendingActivities,
-      lowPreference: getNonEmptyString(isRecord(raw.stateSubGreetings) ? raw.stateSubGreetings.lowPreference : null) ?? DEFAULT_WELCOME_COPY_CONFIG.stateSubGreetings.lowPreference,
-      nearbyExplore: getNonEmptyString(isRecord(raw.stateSubGreetings) ? raw.stateSubGreetings.nearbyExplore : null) ?? DEFAULT_WELCOME_COPY_CONFIG.stateSubGreetings.nearbyExplore,
-    },
-    greetingTemplates,
-  };
-}
-
-function normalizeWelcomeUiConfig(raw: unknown): WelcomeUiConfig {
-  if (!isRecord(raw)) {
-    return DEFAULT_WELCOME_UI_CONFIG;
-  }
-
-  const sectionTitlesInput = isRecord(raw.sectionTitles) ? raw.sectionTitles : null;
-  const exploreTemplatesInput = isRecord(raw.exploreTemplates) ? raw.exploreTemplates : null;
-
-  const suggestionItems = Array.isArray(raw.suggestionItems)
-    ? raw.suggestionItems
-      .map((item) => {
-        if (!isRecord(item)) {
-          return null;
-        }
-
-        const label = getNonEmptyString(item.label);
-        const prompt = getNonEmptyString(item.prompt);
-        const icon = getNonEmptyString(item.icon) ?? undefined;
-        if (!label || !prompt) {
-          return null;
-        }
-
-        return {
-          label,
-          prompt,
-          ...(icon ? { icon } : {}),
-        };
-      })
-      .filter((item): item is { label: string; prompt: string; icon?: string } => Boolean(item?.label && item.prompt))
-    : [];
-
-  const quickPrompts = Array.isArray(raw.quickPrompts)
-    ? raw.quickPrompts
-      .map((item) => {
-        if (!isRecord(item)) {
-          return null;
-        }
-
-        const text = getNonEmptyString(item.text);
-        const prompt = getNonEmptyString(item.prompt);
-        const icon = getNonEmptyString(item.icon);
-        if (!text || !prompt || !icon) {
-          return null;
-        }
-
-        return {
-          icon,
-          text,
-          prompt,
-        };
-      })
-      .filter((item): item is QuickPrompt => Boolean(item?.icon && item.text && item.prompt))
-    : [];
-
-  const bottomQuickActions = Array.isArray(raw.bottomQuickActions)
-    ? raw.bottomQuickActions
-      .map((item) => getNonEmptyString(item) ?? '')
-      .filter(Boolean)
-    : [];
-
-  const sectionTitles = {
-    suggestions: getNonEmptyString(sectionTitlesInput?.suggestions) ?? DEFAULT_WELCOME_UI_CONFIG.sectionTitles.suggestions,
-    explore: getNonEmptyString(sectionTitlesInput?.explore) ?? DEFAULT_WELCOME_UI_CONFIG.sectionTitles.explore,
-  };
-
-  const exploreTemplates = {
-    label: getNonEmptyString(exploreTemplatesInput?.label) ?? DEFAULT_WELCOME_UI_CONFIG.exploreTemplates.label,
-    prompt: getNonEmptyString(exploreTemplatesInput?.prompt) ?? DEFAULT_WELCOME_UI_CONFIG.exploreTemplates.prompt,
-  };
-
-  const composerPlaceholder = getNonEmptyString(raw.composerPlaceholder) ?? DEFAULT_WELCOME_UI_CONFIG.composerPlaceholder;
-  const chatShellInput = isRecord(raw.chatShell) ? raw.chatShell : null;
-  const sidebarInput = isRecord(raw.sidebar) ? raw.sidebar : null;
-
-  return {
-    composerPlaceholder,
-    sectionTitles,
-    exploreTemplates,
-    suggestionItems: suggestionItems.length ? suggestionItems : DEFAULT_WELCOME_UI_CONFIG.suggestionItems,
-    quickPrompts: quickPrompts.length ? quickPrompts : DEFAULT_WELCOME_UI_CONFIG.quickPrompts,
-    bottomQuickActions: bottomQuickActions.length ? bottomQuickActions : DEFAULT_WELCOME_UI_CONFIG.bottomQuickActions,
-    chatShell: {
-      composerHint: getNonEmptyString(chatShellInput?.composerHint) ?? DEFAULT_WELCOME_UI_CONFIG.chatShell.composerHint,
-      pendingActionTitle: getNonEmptyString(chatShellInput?.pendingActionTitle) ?? DEFAULT_WELCOME_UI_CONFIG.chatShell.pendingActionTitle,
-      pendingActionDefaultMessage: getNonEmptyString(chatShellInput?.pendingActionDefaultMessage) ?? DEFAULT_WELCOME_UI_CONFIG.chatShell.pendingActionDefaultMessage,
-      pendingActionLoginHint: getNonEmptyString(chatShellInput?.pendingActionLoginHint) ?? DEFAULT_WELCOME_UI_CONFIG.chatShell.pendingActionLoginHint,
-      pendingActionBindPhoneHint: getNonEmptyString(chatShellInput?.pendingActionBindPhoneHint) ?? DEFAULT_WELCOME_UI_CONFIG.chatShell.pendingActionBindPhoneHint,
-      pendingActionResumeLabel: getNonEmptyString(chatShellInput?.pendingActionResumeLabel) ?? DEFAULT_WELCOME_UI_CONFIG.chatShell.pendingActionResumeLabel,
-      runtimeStatus: {
-        networkOfflineText: getNonEmptyString(isRecord(chatShellInput?.runtimeStatus) ? chatShellInput.runtimeStatus.networkOfflineText : null) ?? DEFAULT_WELCOME_UI_CONFIG.chatShell.runtimeStatus.networkOfflineText,
-        networkRetryText: getNonEmptyString(isRecord(chatShellInput?.runtimeStatus) ? chatShellInput.runtimeStatus.networkRetryText : null) ?? DEFAULT_WELCOME_UI_CONFIG.chatShell.runtimeStatus.networkRetryText,
-        networkRestoredToast: getNonEmptyString(isRecord(chatShellInput?.runtimeStatus) ? chatShellInput.runtimeStatus.networkRestoredToast : null) ?? DEFAULT_WELCOME_UI_CONFIG.chatShell.runtimeStatus.networkRestoredToast,
-        widgetErrorMessage: getNonEmptyString(isRecord(chatShellInput?.runtimeStatus) ? chatShellInput.runtimeStatus.widgetErrorMessage : null) ?? DEFAULT_WELCOME_UI_CONFIG.chatShell.runtimeStatus.widgetErrorMessage,
-        widgetErrorRetryText: getNonEmptyString(isRecord(chatShellInput?.runtimeStatus) ? chatShellInput.runtimeStatus.widgetErrorRetryText : null) ?? DEFAULT_WELCOME_UI_CONFIG.chatShell.runtimeStatus.widgetErrorRetryText,
-      },
-    },
-    sidebar: {
-      title: getNonEmptyString(sidebarInput?.title) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.title,
-      messageCenterLabel: getNonEmptyString(sidebarInput?.messageCenterLabel) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.messageCenterLabel,
-      currentTasksTitle: getNonEmptyString(sidebarInput?.currentTasksTitle) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.currentTasksTitle,
-      currentTasksEmpty: getNonEmptyString(sidebarInput?.currentTasksEmpty) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.currentTasksEmpty,
-      historyTitle: getNonEmptyString(sidebarInput?.historyTitle) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.historyTitle,
-      searchPlaceholder: getNonEmptyString(sidebarInput?.searchPlaceholder) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.searchPlaceholder,
-      emptySearchResult: getNonEmptyString(sidebarInput?.emptySearchResult) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.emptySearchResult,
-      emptyHistory: getNonEmptyString(sidebarInput?.emptyHistory) ?? DEFAULT_WELCOME_UI_CONFIG.sidebar.emptyHistory,
-    },
-  };
-}
-
-function resolveWelcomePeriod(hour: number): WelcomeGreetingPeriod {
-  if (hour < 6) return 'lateNight';
-  if (hour < 9) return 'morning';
-  if (hour < 12) return 'forenoon';
-  if (hour < 14) return 'noon';
-  if (hour < 18) return 'afternoon';
-  if (hour < 22) return 'evening';
-  return 'night';
-}
-
-function renderTemplate(template: string, vars: Record<string, string>): string {
-  let output = template;
-  for (const [key, value] of Object.entries(vars)) {
-    output = output.split(`{${key}}`).join(value);
-  }
-  return output;
-}
-
-function renderWelcomeTemplate(template: string, nickname: string): string {
-  return renderTemplate(template, {
-    nickname,
-    name: nickname,
-  });
-}
-
-function clampWelcomeTitle(title: string, maxLength = 12): string {
-  const normalized = title.trim();
-  if (normalized.length <= maxLength) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, Math.max(maxLength - 1, 1))}…`;
-}
-
-const OPEN_WELCOME_TASK_STATUSES = ['active', 'waiting_auth', 'waiting_async_result'] as const;
-
-function buildActivityOutcomeWelcomeFocus(
-  profile: EnhancedUserProfile,
-  now: Date,
-): WelcomeFocus | undefined {
-  const recentOutcome = (profile.activityOutcomes || [])
-    .filter((outcome) => {
-      const ageMs = now.getTime() - outcome.updatedAt.getTime();
-      return ageMs >= 0 && ageMs <= 30 * 24 * 60 * 60 * 1000;
-    })
-    .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())
-    .find((outcome) => outcome.attended !== null);
-
-  if (!recentOutcome) {
-    return undefined;
-  }
-
-  const title = clampWelcomeTitle(recentOutcome.activityTitle, 10);
-  const context = {
-    activityId: recentOutcome.activityId,
-    activityTitle: recentOutcome.activityTitle,
-    activityType: recentOutcome.activityType,
-    locationName: recentOutcome.locationName,
-    entry: 'activity_outcome_memory',
-    outcome: recentOutcome.attended === false ? 'failed' : 'attended',
-    rebookTriggered: recentOutcome.rebookTriggered,
-    ...(recentOutcome.reviewSummary ? { reviewSummary: recentOutcome.reviewSummary } : {}),
-  };
-
-  if (recentOutcome.attended === false) {
-    return {
-      type: 'post_activity_feedback',
-      label: `换个方式再组「${title}」`,
-      prompt: `上次「${recentOutcome.activityTitle}」没成局，结合这次真实结果，帮我换个更容易成局的新方案。`,
-      priority: 6,
-      context,
-    };
-  }
-
-  if (recentOutcome.rebookTriggered) {
-    return {
-      type: 'post_activity_feedback',
-      label: `继续沿用「${title}」的经验`,
-      prompt: `结合上次「${recentOutcome.activityTitle}」的真实结果，帮我找一个相近但更合适的下一场活动。`,
-      priority: 6,
-      context,
-    };
-  }
-
-  return {
-    type: 'post_activity_feedback',
-    label: `顺着「${title}」再约`,
-    prompt: `上次「${recentOutcome.activityTitle}」挺顺利，结合地点、类型和反馈，帮我快速再约一场。`,
-    priority: 6,
-    context,
-  };
-}
-
-function buildPostActivityFeedbackPrompts(activityTitle: string, activityId: string): QuickPrompt[] {
-  const title = clampWelcomeTitle(activityTitle, 16);
-  return [
-    {
-      icon: '✓',
-      text: '挺顺利',
-      prompt: `这次「${title}」挺顺利，帮我记录一下反馈。`,
-      action: 'record_activity_feedback',
-      params: {
-        activityId,
-        feedback: 'positive',
-        reviewSummary: `这次「${title}」挺顺利。`,
-      },
-    },
-    {
-      icon: '·',
-      text: '一般',
-      prompt: `这次「${title}」一般，帮我记录一下并看看要不要调整。`,
-      action: 'record_activity_feedback',
-      params: {
-        activityId,
-        feedback: 'neutral',
-        reviewSummary: `这次「${title}」一般，需要后续再优化。`,
-      },
-    },
-    {
-      icon: '×',
-      text: '没成局',
-      prompt: `这次「${title}」没成局，帮我记录一下并分析原因。`,
-      action: 'record_activity_feedback',
-      params: {
-        activityId,
-        feedback: 'failed',
-        reviewSummary: `这次「${title}」没成局。`,
-      },
-    },
-  ];
-}
-
-function buildActivityOutcomeMemoryQuickPrompts(params: {
-  activityTitle: string;
-  outcome: 'attended' | 'failed';
-  rebookTriggered?: boolean;
-  prompt: string;
-}): QuickPrompt[] {
-  if (params.outcome === 'failed') {
-    return [
-      {
-        icon: '↺',
-        text: '换个方式再组',
-        prompt: params.prompt,
-      },
-      ...DEFAULT_WELCOME_UI_CONFIG.quickPrompts.slice(0, 2),
-    ];
-  }
-
-  if (params.rebookTriggered) {
-    return [
-      {
-        icon: '↺',
-        text: '沿用上次经验',
-        prompt: params.prompt,
-      },
-      ...DEFAULT_WELCOME_UI_CONFIG.quickPrompts.slice(0, 2),
-    ];
-  }
-
-  return [
-    {
-      icon: '↺',
-      text: '顺着这次再约',
-      prompt: params.prompt,
-    },
-    ...DEFAULT_WELCOME_UI_CONFIG.quickPrompts.slice(0, 2),
-  ];
-}
-
-function buildUnfinishedIntentLabel(stage: string, status: string): string {
-  if (stage === 'match_ready') {
-    return '有新匹配';
-  }
-
-  if (stage === 'draft_ready') {
-    return '草稿待确认';
-  }
-
-  if (status === 'waiting_async_result') {
-    return '结果待查看';
-  }
-
-  return '继续这件事';
-}
-
-async function selectWelcomeFocus(userId: string, now: Date): Promise<WelcomeFocus | undefined> {
-  const [postActivityTask] = await db
-    .select({
-      taskId: agentTasks.id,
-      activityId: agentTasks.activityId,
-      goalText: agentTasks.goalText,
-      activityTitle: activities.title,
-    })
-    .from(agentTasks)
-    .innerJoin(activities, eq(agentTasks.activityId, activities.id))
-    .where(and(
-      eq(agentTasks.userId, userId),
-      eq(agentTasks.taskType, 'join_activity'),
-      eq(agentTasks.currentStage, 'post_activity'),
-      inArray(agentTasks.status, OPEN_WELCOME_TASK_STATUSES),
-    ))
-    .orderBy(desc(agentTasks.updatedAt))
-    .limit(1);
-
-  if (postActivityTask) {
-    const title = postActivityTask.activityTitle || postActivityTask.goalText;
-    return {
-      type: 'post_activity_feedback',
-      label: `这次「${clampWelcomeTitle(title, 10)}」怎么样？`,
-      prompt: `这次「${title}」怎么样？帮我记录这次活动反馈。`,
-      priority: 1,
-      context: {
-        taskId: postActivityTask.taskId,
-        activityId: postActivityTask.activityId,
-        activityTitle: title,
-      },
-    };
-  }
-
-  const [discussionFocus] = await getDiscussionReplySignals({
-    userId,
-    limit: 1,
-  });
-
-  if (discussionFocus) {
-    const senderPrefix = discussionFocus.lastMessageSenderNickname
-      ? `${discussionFocus.lastMessageSenderNickname}：`
-      : '';
-    return {
-      type: 'discussion_reply',
-      label: `去接「${clampWelcomeTitle(discussionFocus.activityTitle, 10)}」的讨论`,
-      prompt: discussionFocus.lastMessage || '进入讨论区',
-      priority: 2,
-      context: {
-        activityId: discussionFocus.activityId,
-        activityTitle: discussionFocus.activityTitle,
-        entry: 'welcome_discussion_reply',
-        unreadCount: discussionFocus.unreadCount,
-        summary: discussionFocus.lastMessage
-          ? `${senderPrefix}${discussionFocus.lastMessage}`
-          : undefined,
-      },
-    };
-  }
-
-  const [draftTask] = await db
-    .select({
-      taskId: agentTasks.id,
-      currentStage: agentTasks.currentStage,
-      goalText: agentTasks.goalText,
-      activityId: agentTasks.activityId,
-      activityTitle: activities.title,
-    })
-    .from(agentTasks)
-    .leftJoin(activities, eq(agentTasks.activityId, activities.id))
-    .where(and(
-      eq(agentTasks.userId, userId),
-      eq(agentTasks.taskType, 'create_activity'),
-      inArray(agentTasks.status, OPEN_WELCOME_TASK_STATUSES),
-      inArray(agentTasks.currentStage, ['draft_collecting', 'draft_ready']),
-    ))
-    .orderBy(desc(agentTasks.updatedAt))
-    .limit(1);
-
-  if (draftTask) {
-    const title = draftTask.activityTitle || draftTask.goalText;
-    return {
-      type: 'draft_continue',
-      label: draftTask.currentStage === 'draft_ready'
-        ? `确认「${clampWelcomeTitle(title, 10)}」草稿`
-        : `继续完善「${clampWelcomeTitle(title, 10)}」`,
-      prompt: `继续处理：${draftTask.goalText}`,
-      priority: 3,
-      context: {
-        taskId: draftTask.taskId,
-        activityId: draftTask.activityId,
-        activityTitle: title,
-      },
-    };
-  }
-
-  const [recruitingActivity] = await db
-    .select({
-      id: activities.id,
-      title: activities.title,
-      currentParticipants: activities.currentParticipants,
-      maxParticipants: activities.maxParticipants,
-    })
-    .from(activities)
-    .where(and(
-      eq(activities.creatorId, userId),
-      eq(activities.status, 'active'),
-      gt(activities.startAt, now),
-      sql`${activities.currentParticipants} < ${activities.maxParticipants}`,
-    ))
-    .orderBy(sql`${activities.startAt} ASC`)
-    .limit(1);
-
-  if (recruitingActivity) {
-    const remaining = Math.max(recruitingActivity.maxParticipants - recruitingActivity.currentParticipants, 0);
-    return {
-      type: 'recruiting_result',
-      label: `「${clampWelcomeTitle(recruitingActivity.title, 10)}」还差 ${remaining} 人`,
-      prompt: `继续处理「${recruitingActivity.title}」的招人结果，还差 ${remaining} 人，帮我看看下一步怎么推进。`,
-      priority: 4,
-      context: {
-        activityId: recruitingActivity.id,
-        remaining,
-      },
-    };
-  }
-
-  const openTasks = await db
-    .select({
-      taskId: agentTasks.id,
-      taskType: agentTasks.taskType,
-      currentStage: agentTasks.currentStage,
-      status: agentTasks.status,
-      goalText: agentTasks.goalText,
-      activityId: agentTasks.activityId,
-      partnerIntentId: agentTasks.partnerIntentId,
-      intentMatchId: agentTasks.intentMatchId,
-    })
-    .from(agentTasks)
-    .where(and(
-      eq(agentTasks.userId, userId),
-      inArray(agentTasks.status, OPEN_WELCOME_TASK_STATUSES),
-    ))
-    .orderBy(desc(agentTasks.updatedAt))
-    .limit(5);
-
-  const unfinishedTask = openTasks.find((task) => task.currentStage !== 'post_activity');
-  if (!unfinishedTask) {
-    return undefined;
-  }
-
-  return {
-    type: 'unfinished_intent',
-    label: buildUnfinishedIntentLabel(unfinishedTask.currentStage, unfinishedTask.status),
-    prompt: `继续处理：${unfinishedTask.goalText}`,
-    priority: 5,
-    context: {
-      taskId: unfinishedTask.taskId,
-      taskType: unfinishedTask.taskType,
-      currentStage: unfinishedTask.currentStage,
-      status: unfinishedTask.status,
-      activityId: unfinishedTask.activityId,
-      partnerIntentId: unfinishedTask.partnerIntentId,
-      intentMatchId: unfinishedTask.intentMatchId,
-    },
-  };
-}
-
-export function generateGreeting(
-  nickname: string | null,
-  config: WelcomeCopyConfig = DEFAULT_WELCOME_COPY_CONFIG,
-): string {
-  const hour = new Date().getHours();
-  const name = nickname?.trim() || config.fallbackNickname;
-  const period = resolveWelcomePeriod(hour);
-  return renderWelcomeTemplate(config.greetingTemplates[period], name);
-}
-
-export async function getWelcomeCard(
-  userId: string | null,
-  nickname: string | null,
-  location: { lat: number; lng: number } | null
-): Promise<WelcomeResponse> {
-  const welcomeCopyRaw = await getConfigValue<unknown>('welcome.copy', DEFAULT_WELCOME_COPY_CONFIG);
-  const welcomeCopy = normalizeWelcomeCopyConfig(welcomeCopyRaw);
-  const welcomeUiRaw = await getConfigValue<unknown>('welcome.ui', DEFAULT_WELCOME_UI_CONFIG);
-  const welcomeUi = normalizeWelcomeUiConfig(welcomeUiRaw);
-  const greeting = generateGreeting(nickname, welcomeCopy);
-  const sections: WelcomeSection[] = [];
-  const now = new Date();
-
-  // 已登录用户的状态判断
-  let preferenceCompleteness: number | null = null;
-  let pendingActivities: WelcomePendingActivity[] = [];
-  let hasDraftActivity = false;
-  let welcomeFocus: WelcomeFocus | undefined;
-
-  if (userId) {
-    const [profile, selectedWelcomeFocus] = await Promise.all([
-      getEnhancedUserProfile(userId),
-      selectWelcomeFocus(userId, now),
-    ]);
-    welcomeFocus = selectedWelcomeFocus ?? buildActivityOutcomeWelcomeFocus(profile, now);
-
-    const preferencesCount = profile.preferences.length;
-    const locationsCount = profile.frequentLocations.length;
-    const preferenceCompleteness = Math.min(100, preferencesCount * 15 + locationsCount * 10);
-
-    const [draftRows, activeRows] = await Promise.all([
-      db
-        .select({
-          id: activities.id,
-          title: activities.title,
-        })
-        .from(activities)
-        .where(and(
-          eq(activities.creatorId, userId),
-          eq(activities.status, 'draft'),
-          gt(activities.startAt, now),
-        ))
-        .orderBy(desc(activities.updatedAt))
-        .limit(1),
-      db
-        .select({
-          id: activities.id,
-          title: activities.title,
-          type: activities.type,
-          startAt: activities.startAt,
-          locationName: activities.locationName,
-          locationHint: activities.locationHint,
-          currentParticipants: activities.currentParticipants,
-          maxParticipants: activities.maxParticipants,
-          status: activities.status,
-        })
-        .from(participants)
-        .innerJoin(activities, eq(participants.activityId, activities.id))
-        .where(and(
-          eq(participants.userId, userId),
-          eq(participants.status, 'joined'),
-          eq(activities.status, 'active'),
-          gt(activities.startAt, now),
-        ))
-        .orderBy(sql`${activities.startAt} ASC`)
-        .limit(3),
-    ]);
-
-    if (draftRows.length > 0) {
-      const draft = draftRows[0];
-      hasDraftActivity = true;
-      sections.push({
-        id: 'draft',
-        title: '继续上次草稿',
-        items: [
-          {
-            type: 'draft',
-            label: `继续完善「${clampWelcomeTitle(draft.title)}」`,
-            prompt: `继续完善我的活动草稿：${draft.title}`,
-            context: { activityId: draft.id },
-          },
-        ],
-      });
-    }
-
-    pendingActivities = activeRows.map((item) => ({
-      id: item.id,
-      title: item.title,
-      type: item.type,
-      startAt: item.startAt.toISOString(),
-      locationName: item.locationName,
-      locationHint: item.locationHint,
-      currentParticipants: item.currentParticipants,
-      maxParticipants: item.maxParticipants,
-      status: item.status,
-    }));
-  }
-
-  // 快速组局建议
-  const suggestions: WelcomeSection = {
-    id: 'suggestions',
-    title: welcomeUi.sectionTitles.suggestions,
-    icon: '✨',
-    items: welcomeUi.suggestionItems.map((item) => ({
-      type: 'suggestion' as const,
-      label: item.label,
-      prompt: item.prompt,
-      ...(item.icon ? { icon: item.icon } : {}),
-    })),
-  };
-  sections.push(suggestions);
-
-  // 探索附近（有位置时显示）
-  if (location) {
-    const locationName = await reverseGeocode(location.lat, location.lng);
-    const explore: WelcomeSection = {
-      id: 'explore',
-      title: welcomeUi.sectionTitles.explore,
-      icon: '📍',
-      items: [
-        {
-          type: 'explore',
-          label: renderTemplate(welcomeUi.exploreTemplates.label, { locationName, location: locationName }),
-          prompt: renderTemplate(welcomeUi.exploreTemplates.prompt, { locationName, location: locationName }),
-          icon: '🗺️',
-          context: { locationName, lat: location.lat, lng: location.lng },
-        },
-      ],
-    };
-    sections.push(explore);
-  }
-
-  let subGreeting = welcomeCopy.subGreeting;
-
-  if (hasDraftActivity) {
-    subGreeting = welcomeCopy.stateSubGreetings.hasDraft;
-  } else if (pendingActivities.length > 0) {
-    subGreeting = renderTemplate(welcomeCopy.stateSubGreetings.pendingActivities, { count: String(pendingActivities.length) });
-  } else if (preferenceCompleteness !== null && preferenceCompleteness < 30) {
-    subGreeting = welcomeCopy.stateSubGreetings.lowPreference;
-  } else if (location) {
-    subGreeting = welcomeCopy.stateSubGreetings.nearbyExplore;
-  }
-
-  // 快捷入口（v4.4 新增）
-  const focusContext = isRecord(welcomeFocus?.context) ? welcomeFocus.context : null;
-  const focusActivityTitle = getNonEmptyString(focusContext?.activityTitle);
-  const focusActivityId = getNonEmptyString(focusContext?.activityId);
-  const focusEntry = getNonEmptyString(focusContext?.entry);
-  const focusOutcome = getNonEmptyString(focusContext?.outcome);
-  const focusRebookTriggered = typeof focusContext?.rebookTriggered === 'boolean'
-    ? focusContext.rebookTriggered
-    : false;
-  const quickPrompts = welcomeFocus?.type === 'post_activity_feedback'
-    && focusEntry !== 'activity_outcome_memory'
-    && focusActivityTitle
-    && focusActivityId
-    ? buildPostActivityFeedbackPrompts(focusActivityTitle, focusActivityId)
-    : welcomeFocus?.type === 'post_activity_feedback'
-      && focusEntry === 'activity_outcome_memory'
-      && focusActivityTitle
-      && (focusOutcome === 'attended' || focusOutcome === 'failed')
-      ? buildActivityOutcomeMemoryQuickPrompts({
-          activityTitle: focusActivityTitle,
-          outcome: focusOutcome,
-          rebookTriggered: focusRebookTriggered,
-          prompt: welcomeFocus.prompt,
-        })
-    : hasDraftActivity ? [] : welcomeUi.quickPrompts;
-
-  return {
-    greeting,
-    subGreeting,
-    sections,
-    pendingActivities,
-    welcomeFocus,
-    quickPrompts,
-    ui: {
-      composerPlaceholder: welcomeUi.composerPlaceholder,
-      bottomQuickActions: welcomeUi.bottomQuickActions,
-      chatShell: welcomeUi.chatShell,
-      sidebar: welcomeUi.sidebar,
-    },
-  };
-}
 
 async function finalizeAiChatResponse(params: {
   request: GenUIRequest;

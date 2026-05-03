@@ -272,6 +272,7 @@ bunx <package>       # 执行包命令
 - **内部自测默认流程**：
   - 改 API 或业务规则后先跑：`bun run test:api`
   - 改用户主流程后至少加跑：`bun run regression:sandbox`
+  - 改多用户交叉状态（报名竞争、消息聚合、匹配密度）后加跑：`bun run regression:ten-user`
   - 改 `/ai/chat`、SSE、GenUI blocks、多端流解析后至少加跑：`bun run regression:protocol`
   - 准备收口一个迭代时统一跑：`bun run release:gate`
   - 内部自测必须覆盖两条关键 AI 主流程：

@@ -124,6 +124,7 @@ bun run release:gate
 - `test:api`
 - `regression:sandbox`
 - `regression:protocol`
+- `regression:ten-user`
 
 建议使用时机：
 
@@ -134,11 +135,13 @@ bun run release:gate
 ## 当前脚本归属
 
 - [sandbox-regression.ts](../../scripts/sandbox-regression.ts)：用户流程回归层（`--suite core` 为默认门禁，`--suite all` 为扩展）
+- [ten-user-world.ts](../../scripts/ten-user-world.ts)：10 用户交叉世界回归（并发、竞态、密度、消息中心聚合）
 - [chat-regression.ts](../../scripts/chat-regression.ts)：协议与流式回归层
-- [release-gate.ts](../../scripts/release-gate.ts)：发布门禁统一入口
-- [regression-scenario-matrix.ts](../../scripts/regression-scenario-matrix.ts)：PRD 场景矩阵真源（场景 id -> 主域 / 分支长度 / 用户心路 / 信任风险 / 长流程编号 / 对应 PRD）
+- [identity-memory-regression.ts](../../scripts/identity-memory-regression.ts)：身份记忆专项回归
+- [regression-sandbox-utils.ts](../../scripts/regression-sandbox-utils.ts)：回归共享工具层（类型、请求辅助、清理、断言）
+- [regression-scenario-matrix.ts](../../scripts/regression-scenario-matrix.ts)：PRD 场景矩阵真源
 - [scenario-matrix-report.ts](../../scripts/scenario-matrix-report.ts)：输出当前场景矩阵概览
-- [identity-memory-regression.ts](../../scripts/identity-memory-regression.ts)：身份记忆专项回归（同样输出 artifact）
+- [release-gate.ts](../../scripts/release-gate.ts)：发布门禁统一入口
 
 ## 产物与矩阵
 

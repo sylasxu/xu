@@ -1,175 +1,40 @@
 #!/usr/bin/env bun
 
-import { app } from '../apps/api/src/index';
+import {
+  assert,
+  bootstrapUsers,
+  buildCreatePayload,
+  requestJson,
+} from './regression-sandbox-utils';
+import type {
+  BootstrappedUser,
+  ChatActivitiesResponse,
+  ChatMessagesResponse,
+  PublicActivityResponse,
+} from './regression-sandbox-utils';
 import { writeRegressionArtifact } from './regression-artifact';
 import { findScenarioMatrixEntry } from './regression-scenario-matrix';
 
-interface ApiError {
-  code?: number;
-  msg?: string;
-}
-
-interface BootstrappedUser {
-  user: {
-    id: string;
-    wxOpenId: string | null;
-    phoneNumber: string | null;
-    nickname: string | null;
-  };
-  token: string;
-  isNewUser: boolean;
-}
-
-interface BootstrapResponse {
-  users: BootstrappedUser[];
-  msg: string;
-}
-
-interface LoginResponse {
-  token: string;
-}
-
-interface CreateActivityResponse {
-  id: string;
-  msg: string;
-}
-
-interface PublicActivityResponse {
-  id: string;
-  title: string;
-  status: string;
-  currentParticipants: number;
-  participants: Array<{ userId: string; nickname: string | null }>;
-  recentMessages: Array<{ content: string; createdAt: string }>;
-}
-
-interface ChatMessagesResponse {
-  messages: Array<{
-    id: string;
-    senderId: string | null;
-    content: string;
-    type: string;
-    createdAt: string;
-  }>;
-  isArchived: boolean;
-}
-
-interface ChatActivitiesResponse {
-  items: Array<{
-    activityId: string;
-    activityTitle: string;
-    participantCount: number;
-    lastMessage: string | null;
-  }>;
-  total: number;
-  page: number;
-  totalPages: number;
-  totalUnread: number;
-}
-
-const ADMIN_PHONE = process.env.SMOKE_ADMIN_PHONE?.trim()
-  || process.env.ADMIN_PHONE_WHITELIST?.split(',').map((phone) => phone.trim()).find(Boolean)
-  || '13996092317';
-const ADMIN_CODE = process.env.SMOKE_ADMIN_CODE?.trim()
-  || process.env.ADMIN_SUPER_CODE?.trim()
-  || '9999';
 const USER_COUNT = Number.parseInt(process.env.SMOKE_USER_COUNT?.trim() || '5', 10);
 const CLEANUP = Bun.argv.includes('--cleanup');
-const BASE_URL = 'http://localhost';
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(message);
-  }
-}
-
-async function requestJson<T>(params: {
-  method: 'GET' | 'POST' | 'DELETE' | 'PATCH';
-  path: string;
-  token?: string;
-  payload?: Record<string, unknown>;
-}): Promise<T> {
-  const response = await app.handle(
-    new Request(`${BASE_URL}${params.path}`, {
-      method: params.method,
-      headers: {
-        'content-type': 'application/json',
-        ...(params.token ? { authorization: `Bearer ${params.token}` } : {}),
-      },
-      body: params.payload ? JSON.stringify(params.payload) : undefined,
-    })
-  );
-
-  const bodyText = await response.text();
-  const parsed = bodyText ? JSON.parse(bodyText) as T | ApiError : {};
-
-  if (!response.ok) {
-    const apiError = parsed as ApiError;
-    throw new Error(`${params.method} ${params.path} 失败: HTTP ${response.status} ${apiError.msg || bodyText}`);
-  }
-
-  return parsed as T;
-}
-
-async function getAdminToken(): Promise<string> {
-  const response = await requestJson<LoginResponse>({
-    method: 'POST',
-    path: '/auth/login',
-    payload: {
-      grantType: 'phone_otp',
-      phone: ADMIN_PHONE,
-      code: ADMIN_CODE,
-    },
-  });
-
-  assert(response.token, '管理员登录后未返回 token');
-  return response.token;
-}
-
-function buildCreatePayload() {
-  const startAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
-  const titleSuffix = new Date().toISOString().replace(/[:.]/g, '-');
-
-  return {
-    title: `五人验收局-${titleSuffix}`,
-    description: '用于本地验收创建活动、报名和讨论区主链路。',
-    location: [106.551556, 29.563009],
-    locationName: '重庆观音桥',
-    address: '观音桥步行街',
-    locationHint: '地铁站 3 号口见',
-    startAt,
-    type: 'food',
-    maxParticipants: 5,
-  } as const;
-}
 
 async function main(): Promise<void> {
   const startedAt = new Date();
   assert(Number.isFinite(USER_COUNT) && USER_COUNT >= 2 && USER_COUNT <= 5, 'SMOKE_USER_COUNT 必须在 2-5 之间');
 
   console.log('1/6 准备测试账号...');
-  const adminToken = await getAdminToken();
-  const bootstrap = await requestJson<BootstrapResponse>({
-    method: 'POST',
-    path: '/auth/test-users/bootstrap',
-    token: adminToken,
-    payload: {
-      phone: ADMIN_PHONE,
-      code: ADMIN_CODE,
-      count: USER_COUNT,
-    },
-  });
+  const users = await bootstrapUsers(USER_COUNT);
+  console.log(`   已准备 ${users.length} 个账号`);
 
-  assert(bootstrap.users.length === USER_COUNT, `期望准备 ${USER_COUNT} 个账号，实际得到 ${bootstrap.users.length}`);
-  console.log(`   ${bootstrap.msg}`);
-
-  const [creator, ...joiners] = bootstrap.users;
+  const [creator, ...joiners] = users;
   assert(creator, '缺少发起人账号');
   assert(joiners.length > 0, '至少需要 1 个报名用户');
 
   console.log('2/6 创建活动...');
-  const createPayload = buildCreatePayload();
-  const created = await requestJson<CreateActivityResponse>({
+  const createPayload = buildCreatePayload({
+    title: `五人验收局-${new Date().toISOString().replace(/[:.]/g, '-')}`,
+  });
+  const created = await requestJson<{ id: string; msg: string }>({
     method: 'POST',
     path: '/activities',
     token: creator.token,
@@ -202,8 +67,8 @@ async function main(): Promise<void> {
     method: 'GET',
     path: `/activities/${activityId}/public`,
   });
-  assert(publicAfterJoin.currentParticipants === bootstrap.users.length, `报名后人数应为 ${bootstrap.users.length}，实际为 ${publicAfterJoin.currentParticipants}`);
-  assert(publicAfterJoin.participants.length === bootstrap.users.length, `公开参与者数量异常: ${publicAfterJoin.participants.length}`);
+  assert(publicAfterJoin.currentParticipants === users.length, `报名后人数应为 ${users.length}，实际为 ${publicAfterJoin.currentParticipants}`);
+  assert(publicAfterJoin.participants.length === users.length, `公开参与者数量异常: ${publicAfterJoin.participants.length}`);
 
   console.log('5/6 发送讨论区消息...');
   const discussionSenders = [creator, joiners[0], joiners[1]].filter(Boolean) as BootstrappedUser[];

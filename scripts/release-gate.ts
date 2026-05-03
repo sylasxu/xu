@@ -51,6 +51,11 @@ function main(): void {
       command: 'bun',
       args: ['run', 'regression:protocol'],
     },
+    {
+      name: 'Ten-user world regression',
+      command: 'bun',
+      args: ['run', 'regression:ten-user'],
+    },
   ];
 
   for (const task of tasks) {

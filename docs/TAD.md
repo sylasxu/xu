@@ -3867,7 +3867,7 @@ bun run release:gate
 - `regression-scenario-matrix` 是当前回归场景真源；每个主流程脚本都应尽量映射到明确的 `domain / userGoal / prdSections / userMindsets / trustRisks / longFlowIds`
 - `sandbox-regression`、`chat-regression`、`identity-memory-regression` 必须输出结构化 artifact，供后续复盘“最近一次到底跑到了哪些真实场景”
 - 评估主流程是否完成时，优先回答“哪些产品主域、用户心路、信任风险、长流程最近一次已被 artifact 覆盖”，而不是只回答“有多少测试通过”
-- `five-user-smoke` 保留为人工联调 / 演示工具，不作为默认发布门禁主依据
+- `regression:sandbox` 为流程回归默认门禁，`regression:sandbox:extended` 覆盖全部扩展场景
 - `.artifacts/regression/*` 是本地复盘产物，不进入提交；提交前应清理或保持未跟踪
 
 ---

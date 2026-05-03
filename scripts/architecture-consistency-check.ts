@@ -320,9 +320,9 @@ const requiredChecks: Array<{ name: string; ok: boolean; hint: string }> = [
     hint: '根脚本必须暴露 `test:api`，统一入口跑 API bun test。',
   },
   {
-    name: 'root-flow-regression-script-exists',
-    ok: readFileSync(resolve('package.json'), 'utf8').includes('"regression:flow": "bun scripts/flow-regression.ts"'),
-    hint: '根脚本必须暴露 `regression:flow`，统一跑用户主流程回归。',
+    name: 'root-sandbox-regression-script-exists',
+    ok: readFileSync(resolve('package.json'), 'utf8').includes('"regression:sandbox": "bun scripts/sandbox-regression.ts --suite core"'),
+    hint: '根脚本必须暴露 `regression:sandbox`，统一跑用户主流程回归。',
   },
   {
     name: 'root-protocol-regression-script-exists',

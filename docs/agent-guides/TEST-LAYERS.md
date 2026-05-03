@@ -59,17 +59,6 @@ bun run regression:flow:extended
 - 错误恢复
 - rapid-fire 连发
 
-手动冒烟工具：
-
-```bash
-bun run smoke:five-users
-```
-
-说明：
-
-- `five-user-smoke` 保留为人工联调和演示用冒烟工具
-- 它不再进入默认发布门禁，避免和 `sandbox-regression` 重复验证同一条主链路
-
 适用改动：
 
 - 活动、报名、讨论区、通知
@@ -144,10 +133,8 @@ bun run release:gate
 
 ## 当前脚本归属
 
-- [five-user-smoke.ts](../../scripts/five-user-smoke.ts)：手动联调和演示用冒烟工具
-- [sandbox-regression.ts](../../scripts/sandbox-regression.ts)：用户流程回归层
+- [sandbox-regression.ts](../../scripts/sandbox-regression.ts)：用户流程回归层（`--suite core` 为默认门禁，`--suite all` 为扩展）
 - [chat-regression.ts](../../scripts/chat-regression.ts)：协议与流式回归层
-- [flow-regression.ts](../../scripts/flow-regression.ts)：流程回归统一入口
 - [release-gate.ts](../../scripts/release-gate.ts)：发布门禁统一入口
 - [regression-scenario-matrix.ts](../../scripts/regression-scenario-matrix.ts)：PRD 场景矩阵真源（场景 id -> 主域 / 分支长度 / 用户心路 / 信任风险 / 长流程编号 / 对应 PRD）
 - [scenario-matrix-report.ts](../../scripts/scenario-matrix-report.ts)：输出当前场景矩阵概览

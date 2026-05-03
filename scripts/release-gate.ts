@@ -42,9 +42,9 @@ function main(): void {
       args: ['run', 'test:api'],
     },
     {
-      name: 'Product flow regression',
+      name: 'Sandbox core regression',
       command: 'bun',
-      args: ['run', 'regression:flow'],
+      args: ['run', 'regression:sandbox'],
     },
     {
       name: 'Protocol regression',

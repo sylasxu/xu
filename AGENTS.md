@@ -262,7 +262,7 @@ bunx <package>       # 执行包命令
 
 - **测试栈统一使用 Bun First**：默认使用 `bun test`、`bun scripts/*.ts`、`bunx tsc`；禁止为了测试主链路额外引入 Jest / Vitest 作为默认方案
 - **API 集成测试优先走 Elysia 原生方式**：对路由、鉴权、参数校验、响应结构、状态流转的测试，优先直接调用 `app.handle(new Request(...))`，不要先起一层自定义测试服务器
-- **结果导向回归保留为 Bun 脚本**：`sandbox-regression`、`five-user-smoke`、`genui/chat regression` 这类脚本属于产品验收，不要硬塞回通用单测抽象
+- **结果导向回归保留为 Bun 脚本**：`sandbox-regression`、`ten-user-world`、`genui/chat regression` 这类脚本属于产品验收，不要硬塞回通用单测抽象
 - **SSE / 流式 / 协议契约必须保留黑盒验证**：像 `/ai/chat` 的 SSE 顺序、`[DONE]`、GenUI blocks、真实 HTTP 头与流式分块，必须至少有一层真实 HTTP / curl 回归，不能只靠内存态测试
 - **新增需求必须补对应回归**：只要改动影响 PRD / TAD 里的用户旅程、AI 对话、动作闸门、分享承接、post-activity 等流程，必须同步补一条能证明链路没断的测试或回归脚本
 - **测试分层要清楚**：

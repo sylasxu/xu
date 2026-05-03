@@ -271,7 +271,7 @@ bunx <package>       # 执行包命令
   - 黑盒 HTTP 回归负责流式协议、多端 GenUI 契约、真实 transport 边界
 - **内部自测默认流程**：
   - 改 API 或业务规则后先跑：`bun run test:api`
-  - 改用户主流程后至少加跑：`bun run regression:flow`
+  - 改用户主流程后至少加跑：`bun run regression:sandbox`
   - 改 `/ai/chat`、SSE、GenUI blocks、多端流解析后至少加跑：`bun run regression:protocol`
   - 准备收口一个迭代时统一跑：`bun run release:gate`
   - 内部自测必须覆盖两条关键 AI 主流程：

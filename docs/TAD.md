@@ -3854,8 +3854,8 @@ bun run gen:genui-contract
 
 ```bash
 bun run regression:matrix
-bun run regression:flow
-bun run regression:flow:extended
+bun run regression:sandbox
+bun run regression:sandbox:extended
 bun run regression:protocol
 bun run regression:identity-memory
 bun run regression:coverage

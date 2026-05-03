@@ -27,7 +27,7 @@ bun run test:api
 ### 2. 用户流程回归层
 
 ```bash
-bun run regression:flow
+bun run regression:sandbox
 ```
 
 职责：
@@ -47,7 +47,7 @@ bun run regression:flow
 扩展入口：
 
 ```bash
-bun run regression:flow:extended
+bun run regression:sandbox:extended
 ```
 
 扩展层覆盖：
@@ -122,7 +122,7 @@ bun run release:gate
 - `arch:check`
 - `type-check`
 - `test:api`
-- `regression:flow`
+- `regression:sandbox`
 - `regression:protocol`
 
 建议使用时机：
@@ -211,12 +211,12 @@ bun run regression:coverage
 |---------|-----------|-----------|--------------|
 | Controller / Service 纯函数、参数校验、状态机分支 | `bun test` 或 `vitest`（见下方运行器规则） | `bun run test:api` | 否 |
 | 数据库 Schema 变更 | `bun test` 集成测试验证字段流转 | `bun run test:api` | 否 |
-| 新增/修改用户可见流程（报名、讨论、通知、找搭子） | 补 `sandbox-regression` 场景 | `bun run regression:flow` | **是** |
-| 修改 AI 对话主链、Action handler、Processor | 补 `sandbox-regression` 场景 | `bun run regression:flow` | **是** |
+| 新增/修改用户可见流程（报名、讨论、通知、找搭子） | 补 `sandbox-regression` 场景 | `bun run regression:sandbox` | **是** |
+| 修改 AI 对话主链、Action handler、Processor | 补 `sandbox-regression` 场景 | `bun run regression:sandbox` | **是** |
 | 修改 SSE / GenUI block 协议、流式结构 | 补 `chat-regression` 场景 | `bun run regression:protocol` | **是** |
 | 修改找搭子匹配算法、任务运行时 | 补 `ten-user-world` 对应 Phase | `bun run regression:ten-user` | 否（世界脚本是聚合场景） |
 | 新增身份记忆/画像相关逻辑 | 补 `identity-memory-regression` | `bun run regression:identity-memory` | 否 |
-| 修改 shared 工具、常量、通用类型 | 跑全量单测 + 一条核心流程回归 | `bun run test:api && bun run regression:flow` | 视影响面 |
+| 修改 shared 工具、常量、通用类型 | 跑全量单测 + 一条核心流程回归 | `bun run test:api && bun run regression:sandbox` | 视影响面 |
 | 准备合并/提测/发版 | 跑发布门禁 | `bun run release:gate` | 否 |
 
 **关键原则**：同一个需求如果只补了单测、却没有覆盖对应的用户旅程回归，不算验收完成。
@@ -252,7 +252,7 @@ bun run regression:coverage
    - 不要只写功能描述，要写"用户当时在想什么、怕什么"
 5. **本地验证**：
    ```bash
-   bun run regression:flow --scenario xxx
+   bun run regression:sandbox --scenario xxx
    ```
    或
    ```bash
@@ -264,11 +264,11 @@ bun run regression:coverage
 ## 使用建议
 
 - 只改 API 规则，先跑 `bun run test:api`
-- 改报名、讨论、通知、AI 会话等用户旅程，至少加跑 `bun run regression:flow`
+- 改报名、讨论、通知、AI 会话等用户旅程，至少加跑 `bun run regression:sandbox`
 - 改多用户交叉状态（报名竞争、消息聚合、匹配密度），加跑 `bun run regression:ten-user`
 - 内部自测收口至少确认两条主流程回归通过：
   - `create_activity -> edit_draft/save_draft_settings -> confirm_publish`
   - `find_partner -> search_partners -> opt_in_partner_pool`
-- 只有改长对话、复杂追问、跨意图切换等高波动 AI 体验时，再加跑 `bun run regression:flow:extended`
+- 只有改长对话、复杂追问、跨意图切换等高波动 AI 体验时，再加跑 `bun run regression:sandbox:extended`
 - 改 `/ai/chat`、SSE、GenUI blocks、多端解析，至少加跑 `bun run regression:protocol`
 - 准备收口一个迭代时，跑 `bun run release:gate`

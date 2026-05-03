@@ -130,8 +130,8 @@ bun run test:api
 bun run type-check
 bun run arch:check
 bun run regression:matrix
-bun run regression:flow
-bun run regression:flow:extended
+bun run regression:sandbox
+bun run regression:sandbox:extended
 bun run regression:protocol
 bun run regression:coverage
 bun run release:gate
@@ -276,8 +276,8 @@ bun run release:gate
 bun run test:api
 bun run type-check
 bun run regression:matrix
-bun run regression:flow
-bun run regression:flow:extended
+bun run regression:sandbox
+bun run regression:sandbox:extended
 bun run regression:protocol
 bun run regression:coverage
 ```

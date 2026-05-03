@@ -2197,8 +2197,8 @@ if (import.meta.main) {
   all       全部场景
 
 对应命令:
-  bun run regression:flow
-  bun run regression:flow:extended
+  bun run regression:sandbox
+  bun run regression:sandbox:extended
 `);
     process.exit(0);
   }

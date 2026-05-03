@@ -653,8 +653,6 @@ const scenarioMatrixEntries: ScenarioMatrixEntry[] = [
     expectedFeeling: '被拦截时协议形态也稳定，不破坏客户端',
   },
   {
-    id: 'stream-guardrail',
-
     id: 'five-user-smoke',
     runner: 'five-user-smoke',
     layer: 'manual',

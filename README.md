@@ -62,15 +62,15 @@ API 一条 `/ai/chat` SSE 主链 + 一套自研 GenUI Block 协议(`text` / `cho
 
 ```mermaid
 graph LR
-    A[用户输入<br/>text + action + context] --> B[/ai/chat<br/>SSE 入口]
-    B --> C[Processor 管线<br/>护栏 / 画像 / 召回 / 意图]
-    C --> D{Action<br/>快速出口?}
-    D -->|是| E[Voice 层<br/>轻量 LLM]
-    D -->|否| F[Tool / Workflow<br/>Model Router]
-    F --> G[Agent Task Runtime]
-    E --> H[GenUI Blocks]
+    A["用户输入<br/>text + action + context"] --> B["/ai/chat<br/>SSE 入口"]
+    B --> C["Processor 管线<br/>护栏 / 画像 / 召回 / 意图"]
+    C --> D{"Action<br/>快速出口?"}
+    D -->|是| E["Voice 层<br/>轻量 LLM"]
+    D -->|否| F["Tool / Workflow<br/>Model Router"]
+    F --> G["Agent Task Runtime"]
+    E --> H["GenUI Blocks"]
     G --> H
-    H --> I[Web / H5 / 小程序 / Admin]
+    H --> I["Web / H5 / 小程序 / Admin"]
 ```
 
 完整 7 层链路、Processor 设计、模型路由、记忆架构详见 [docs/TAD.md](./docs/TAD.md)。

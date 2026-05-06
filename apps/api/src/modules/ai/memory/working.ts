@@ -36,6 +36,10 @@ function setCachedProfile(userId: string, profile: EnhancedUserProfile): void {
   profileCache.set(userId, { profile, expireAt: Date.now() + PROFILE_CACHE_TTL_MS });
 }
 
+function invalidateCachedProfile(userId: string): void {
+  profileCache.delete(userId);
+}
+
 // ============ 类型定义 ============
 
 /**
@@ -1401,6 +1405,7 @@ export async function upsertActivityOutcomeMemory(
         updatedAt: merged.updatedAt,
       })
       .where(eq(userMemories.id, existing.id));
+    invalidateCachedProfile(userId);
     return;
   }
 
@@ -1412,6 +1417,7 @@ export async function upsertActivityOutcomeMemory(
     importance: 3,
     updatedAt: merged.updatedAt,
   });
+  invalidateCachedProfile(userId);
 }
 
 export async function markActivityOutcomeRebookTriggered(

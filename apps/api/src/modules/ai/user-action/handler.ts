@@ -513,6 +513,23 @@ function resolveActionLocation(payload: Record<string, unknown>): { lat: number;
   return null;
 }
 
+function resolvePartnerActionLocation(
+  payload: Record<string, unknown>,
+  locationHint: string | undefined,
+): { lat: number; lng: number } | null {
+  const directLocation = resolveActionLocation(payload);
+  if (directLocation) {
+    return directLocation;
+  }
+
+  const presetLocation = locationHint ? resolvePresetLocation(locationHint) : null;
+  if (!presetLocation) {
+    return null;
+  }
+
+  return { lat: presetLocation.lat, lng: presetLocation.lng };
+}
+
 const DRAFT_LOCATION_OPTIONS = [
   { label: '观音桥', value: '观音桥', lat: 29.58567, lng: 106.52988 },
   { label: '解放碑', value: '解放碑', lat: 29.55792, lng: 106.57709 },
@@ -1548,7 +1565,7 @@ async function createPartnerMatchFromSelectedCandidate(params: {
     ? params.payload.searchPayload
     : params.payload;
   const normalized = normalizePartnerSearchPayload(sourcePayload);
-  const location = resolveActionLocation(params.payload);
+  const location = resolvePartnerActionLocation(params.payload, normalized.locationHint);
   if (!location) {
     return { success: false, error: '需要先获取你的位置，才能继续和这位搭子对接' };
   }
@@ -1755,12 +1772,12 @@ async function handleOptInPartnerPool(
     return { success: false, error: '请先登录', data: { requiresAuth: true } };
   }
 
-  const location = resolveActionLocation(payload);
+  const normalized = normalizePartnerSearchPayload(payload);
+  const location = resolvePartnerActionLocation(payload, normalized.locationHint);
   if (!location) {
     return { success: false, error: '需要先获取你的位置，才能继续替你留意附近搭子' };
   }
 
-  const normalized = normalizePartnerSearchPayload(payload);
   if (normalized.activityType === 'sports' && !normalized.sportType) {
     return { success: false, error: '还差一个运动类型，补完我就能继续替你留意' };
   }

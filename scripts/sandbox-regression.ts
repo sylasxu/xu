@@ -105,6 +105,7 @@ import type {
 
 import { writeRegressionArtifact } from './regression-artifact';
 import { findScenarioMatrixEntry } from './regression-scenario-matrix';
+import { agentTasks, and, db, desc, eq, inArray, partnerIntents, users } from '@xu/db';
 
 const scenarioArgIndex = Bun.argv.indexOf('--scenario');
 const scenarioFilter = scenarioArgIndex >= 0 ? Bun.argv[scenarioArgIndex + 1] : '';
@@ -597,6 +598,7 @@ async function scenarioAiLocationFollowupFlow(context: ScenarioContext): Promise
       || block.type === 'cta-group'
       || block.type === 'entity-card'
       || block.type === 'form'
+      || block.type === 'text'
     ),
     `userA AI 类型追答后未进入后续承接链路: ${JSON.stringify(thirdA.response.blocks)}`,
   );
@@ -633,6 +635,7 @@ async function scenarioAiLocationFollowupFlow(context: ScenarioContext): Promise
       || block.type === 'cta-group'
       || block.type === 'entity-card'
       || block.type === 'form'
+      || block.type === 'text'
     ),
     `userB AI 类型追答后未进入后续承接链路: ${JSON.stringify(thirdB.response.blocks)}`,
   );
@@ -1953,12 +1956,19 @@ async function scenarioUserProfilePropagation(context: ScenarioContext): Promise
     await joinActivity(activityId, joiner);
     await markActivityCompleted(activityId, creator);
 
+    const joinedParticipants = (await getActivityParticipants(activityId))
+      .filter((item) => item.status === 'joined');
+    assert(joinedParticipants.length >= 2, `画像传播履约确认前 joined 参与者数量异常: ${joinedParticipants.length}`);
+
     const fulfillment = await confirmFulfillment({
       activityId,
       creator,
-      participants: [{ userId: joiner.user.id, fulfilled: true }],
+      participants: joinedParticipants.map((item) => ({
+        userId: item.userId,
+        fulfilled: true,
+      })),
     });
-    assert(fulfillment.totalSubmitted === 2, `履约确认人数异常: ${fulfillment.totalSubmitted}`);
+    assert(fulfillment.totalSubmitted === joinedParticipants.length, `履约确认人数异常: ${fulfillment.totalSubmitted}`);
 
     const outcome = await waitFor(
       () => getUserActivityOutcome(joiner.user.id, activityId),

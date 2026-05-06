@@ -958,12 +958,40 @@ export async function getAiWelcome(user?: BootstrappedUser) {
   });
 }
 
+function isUuidLike(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+async function ensureSandboxConversation(user: BootstrappedUser | undefined, conversationId: string | undefined, title: string): Promise<void> {
+  if (!user || !conversationId || !isUuidLike(conversationId)) {
+    return;
+  }
+
+  const [existing] = await db
+    .select({ id: conversations.id })
+    .from(conversations)
+    .where(eq(conversations.id, conversationId))
+    .limit(1);
+
+  if (existing) {
+    return;
+  }
+
+  await db.insert(conversations).values({
+    id: conversationId,
+    userId: user.user.id,
+    title: title.slice(0, 40),
+  });
+}
+
 export async function postAiChat(params: {
   user?: BootstrappedUser;
   text: string;
   conversationId?: string;
   context?: AiChatRequestContext;
 }) {
+  await ensureSandboxConversation(params.user, params.conversationId, params.text);
+
   const response = await requestText({
     method: 'POST',
     path: '/ai/chat',
@@ -997,6 +1025,8 @@ export async function postAiAction(params: {
   displayText?: string;
   context?: AiChatRequestContext;
 }) {
+  await ensureSandboxConversation(params.user, params.conversationId, params.displayText || params.action);
+
   const response = await requestText({
     method: 'POST',
     path: '/ai/chat',
@@ -1195,4 +1225,3 @@ export async function withActivity<T>(creator: BootstrappedUser, run: (activityI
     await cancelActivity(activityId, creator).catch(() => null);
   }
 }
-

@@ -553,6 +553,48 @@ function resolveCreateLocationFollowUpAction(
   };
 }
 
+function resolveCreateTypeFollowUpAction(
+  inputText: string,
+  historyMessages: ChatRequest['messages']
+): ChatRequest['structuredAction'] | undefined {
+  const normalizedText = inputText.trim();
+  const activityType = inferActivityTypeFromText(normalizedText);
+  if (!activityType || findKnownLocationCenter(normalizedText)) {
+    return undefined;
+  }
+
+  if (!hasRecentCreatePrompt(historyMessages)) {
+    return undefined;
+  }
+
+  const { center } = extractSearchContextFromHistory(historyMessages);
+  if (!center) {
+    return undefined;
+  }
+
+  const recentCreatePrompt = readRecentCreatePrompt(historyMessages) || normalizedText;
+  return {
+    action: 'select_preference',
+    source: 'conversation_state',
+    originalText: normalizedText,
+    payload: {
+      questionType: 'type',
+      selectedValue: activityType,
+      selectedLabel: normalizedText,
+      activityType,
+      locationName: center.name,
+      lat: center.lat,
+      lng: center.lng,
+      semanticQuery: buildTaskFirstSemanticQuery({
+        inputText: normalizedText,
+        taskSemanticQuery: recentCreatePrompt,
+        locationName: center.name,
+        activityType,
+      }),
+    },
+  };
+}
+
 function looksLikePartnerQuestion(text: string): boolean {
   return /(搭子|想玩什么运动|想玩点什么|想在哪儿玩|在哪片活动方便|想找什么样的搭子)/.test(text);
 }
@@ -1278,6 +1320,7 @@ async function resolveAiChatExecution(
     : undefined;
   const stateResolution = request.input.type === 'text'
     ? resolveCreateLocationFollowUpAction(request.input.text, conversation.historyMessages)
+      ?? resolveCreateTypeFollowUpAction(request.input.text, conversation.historyMessages)
     : undefined;
   const exploreLocationResolution = request.input.type === 'text'
     ? resolveExploreLocationPreferenceAction(request.input.text, requestLocation)

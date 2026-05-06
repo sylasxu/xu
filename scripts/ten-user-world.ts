@@ -63,6 +63,7 @@ import type {
   ScenarioResult,
 } from './regression-sandbox-utils';
 import { writeRegressionArtifact } from './regression-artifact';
+import { findScenarioMatrixEntry } from './regression-scenario-matrix';
 
 const USER_COUNT = 10;
 
@@ -664,26 +665,43 @@ async function main() {
 
   const artifactPath = await writeRegressionArtifact({
     runner: 'ten-user-world',
-    suite: 'core',
+    suite: 'extended',
     startedAt: startedAt.toISOString(),
     completedAt: completedAt.toISOString(),
     durationMs: completedAt.getTime() - startedAt.getTime(),
-    scenarioCount: results.length,
-    passedCount: totalPassed,
-    failedCount: results.length - totalPassed,
-    scenarios: results.map((r) => ({
-      id: r.phase,
-      passed: r.passed,
-      details: r.details,
-      ...(r.error ? { error: r.error } : {}),
-      ...(typeof r.durationMs === 'number' ? { durationMs: r.durationMs } : {}),
-    })),
+    scenarioCount: results.length + 1,
+    passedCount: totalPassed === results.length ? totalPassed + 1 : totalPassed,
+    failedCount: results.length - totalPassed + (totalPassed === results.length ? 0 : 1),
+    scenarios: [
+      {
+        id: 'ten-user-world',
+        passed: totalPassed === results.length,
+        details: [
+          `${USER_COUNT} 个用户完成 ${results.length} 个交叉世界 phase`,
+          ...results.map((result) => `${result.phase}: ${result.passed ? 'passed' : 'failed'}`),
+        ],
+        durationMs: completedAt.getTime() - startedAt.getTime(),
+        matrix: findScenarioMatrixEntry('ten-user-world') ?? null,
+      },
+      ...results.map((r) => ({
+        id: r.phase,
+        passed: r.passed,
+        details: r.details,
+        ...(r.error ? { error: r.error } : {}),
+        ...(typeof r.durationMs === 'number' ? { durationMs: r.durationMs } : {}),
+      })),
+    ],
+    metadata: {
+      phases: results.map((result) => result.phase),
+    },
   });
   console.log(`\nArtifact: ${artifactPath}`);
 
   if (totalPassed < results.length) {
     process.exit(1);
   }
+
+  process.exit(0);
 }
 
 if (import.meta.main) {

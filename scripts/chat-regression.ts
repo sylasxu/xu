@@ -239,6 +239,7 @@ function buildTurnPayload(
       locale: 'zh-CN',
       timezone: 'Asia/Shanghai',
       platformVersion: 'chat-full-regression',
+      regressionMode: 'protocol',
     },
     ...(options?.trace === true ? { trace: true } : {}),
     ai,

@@ -28,17 +28,36 @@ flowchart TB
 
 ## 产品截图
 
+### 深色模式
+
 <table>
   <tr>
     <td width="30%" valign="top" align="center">
       <b>H5 · <code>/chat</code> 状态首页</b><br/>
-      <img src="./docs/assets/readme/h5-home.png" alt="H5 Chat Home" />
+      <img src="./docs/assets/readme/h5-home-dark.png" alt="H5 Chat Home (dark)" />
     </td>
     <td width="70%" valign="top">
       <b>Admin · 组局工作台</b><br/>
-      <img src="./docs/assets/readme/admin-activities.png" alt="Admin Activities" /><br/><br/>
+      <img src="./docs/assets/readme/admin-activities-dark.png" alt="Admin Activities (dark)" /><br/><br/>
       <b>API · OpenAPI 文档</b><br/>
-      <img src="./docs/assets/readme/api-docs.png" alt="API Docs" />
+      <img src="./docs/assets/readme/api-docs-dark.png" alt="API Docs (dark)" />
+    </td>
+  </tr>
+</table>
+
+### 浅色模式
+
+<table>
+  <tr>
+    <td width="30%" valign="top" align="center">
+      <b>H5 · <code>/chat</code> 状态首页</b><br/>
+      <img src="./docs/assets/readme/h5-home-light.png" alt="H5 Chat Home (light)" />
+    </td>
+    <td width="70%" valign="top">
+      <b>Admin · 组局工作台</b><br/>
+      <img src="./docs/assets/readme/admin-activities-light.png" alt="Admin Activities (light)" /><br/><br/>
+      <b>API · OpenAPI 文档</b><br/>
+      <img src="./docs/assets/readme/api-docs-light.png" alt="API Docs (light)" />
     </td>
   </tr>
 </table>

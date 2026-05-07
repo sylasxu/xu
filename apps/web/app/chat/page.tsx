@@ -770,8 +770,8 @@ function buildEnvelopeFromStreamMessage(message: ChatStreamMessage): GenUIRespon
   };
 }
 
-function trimStructuredTextContent(text: string, blocks: GenUIBlock[]): string {
-  return text.trim();
+function trimStructuredTextContent(text: string, _blocks: GenUIBlock[]): string {
+  return text.trim().replace(/\n{2,}/g, " ");
 }
 
 function getRenderableBlocks(blocks: GenUIBlock[]): GenUIBlock[] {

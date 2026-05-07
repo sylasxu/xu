@@ -27,11 +27,22 @@ flowchart TB
 ---
 
 <details>
-<summary><b>产品截图(占位预览,补完中)</b></summary>
+<summary><b>产品截图</b></summary>
 
-| Home Chat | Activity Detail | Partner Flow | Admin Overview | Admin AI Ops |
-|-----------|-----------------|--------------|----------------|--------------|
-| ![home](https://placehold.co/240x520/1a1a1a/aaa?text=Home+Chat) | ![detail](https://placehold.co/240x520/1a1a1a/aaa?text=Activity+Detail) | ![partner](https://placehold.co/240x520/1a1a1a/aaa?text=Find+Partner) | ![admin](https://placehold.co/520x320/1a1a1a/aaa?text=Admin+Overview) | ![ai-ops](https://placehold.co/520x320/1a1a1a/aaa?text=AI+Playground) |
+<table>
+  <tr>
+    <td width="30%" valign="top" align="center">
+      <b>H5 · <code>/chat</code> 状态首页</b><br/>
+      <img src="./docs/assets/readme/h5-home.png" alt="H5 Chat Home" />
+    </td>
+    <td width="70%" valign="top">
+      <b>Admin · 组局工作台</b><br/>
+      <img src="./docs/assets/readme/admin-activities.png" alt="Admin Activities" /><br/><br/>
+      <b>API · OpenAPI 文档</b><br/>
+      <img src="./docs/assets/readme/api-docs.png" alt="API Docs" />
+    </td>
+  </tr>
+</table>
 
 </details>
 

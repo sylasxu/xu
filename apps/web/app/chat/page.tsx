@@ -2000,7 +2000,7 @@ export default function ChatPage() {
             id: assistantMessageId,
             role: "assistant",
             pending,
-            turn: nextEnvelope,
+            response: nextEnvelope,
           }));
         };
 
@@ -2720,7 +2720,7 @@ export default function ChatPage() {
             >
             {messages.length === 0 ? (
               <ConversationEmptyState className="justify-start px-4 pt-3">
-                <div className="relative isolate min-h-[544px] w-full overflow-visible pt-[128px]">
+                <div className="relative isolate min-h-[544px] w-full overflow-visible pt-[224px]">
                   <div
                     aria-hidden="true"
                     className={cn(

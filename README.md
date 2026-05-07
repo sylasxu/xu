@@ -26,8 +26,7 @@ flowchart TB
 
 ---
 
-<details>
-<summary><b>产品截图</b></summary>
+## 产品截图
 
 <table>
   <tr>
@@ -43,8 +42,6 @@ flowchart TB
     </td>
   </tr>
 </table>
-
-</details>
 
 ---
 

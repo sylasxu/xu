@@ -80,7 +80,7 @@ export function buildTemplateVariables(
   const tomorrowStr = getTomorrowStr(currentTime);
 
   const locationStr = userLocation
-    ? `${userLocation.lat.toFixed(4)},${userLocation.lng.toFixed(4)} (${escapeXml(userLocation.name || '当前位置')})`
+    ? escapeXml(userLocation.name || '未提供')
     : '未提供';
 
   const nicknameVar = userNickname ? `用户: ${escapeXml(userNickname)}` : '';

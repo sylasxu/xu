@@ -167,7 +167,10 @@ export function buildExploreNearbyResult(params: {
   memoryHints?: string[];
 }): ExploreNearbyResultPayload {
   const { center, locationName, results, radiusKm, semanticQuery, type, memoryHints } = params;
-  const locationLabel = locationName.trim() || center?.name || '附近';
+  const sanitizedLocationName = locationName.trim();
+  const locationLabel = (sanitizedLocationName === 'current' || sanitizedLocationName === '当前位置'
+    ? '你附近'
+    : sanitizedLocationName) || center?.name || '附近';
   const title = results.length > 0
     ? `为你找到${locationLabel}附近的 ${results.length} 个活动`
     : `${locationLabel}附近暂时没有活动`;

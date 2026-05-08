@@ -680,6 +680,18 @@ function toTextValue(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value.trim() : fallback;
 }
 
+/**
+ * 净化用户可见的位置名称。
+ * 将模型生成的技术值（如 "current"）或空值转换为自然语言。
+ */
+function sanitizeDisplayLocationName(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed || trimmed === 'current' || trimmed === '当前位置') {
+    return '你附近';
+  }
+  return trimmed;
+}
+
 function toNumericValue(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value;
@@ -1914,10 +1926,11 @@ async function handleSelectPreference(
   const selectedLabel = toTextValue(payload.selectedLabel) || toTextValue(payload.label);
 
   if (questionType === 'location') {
-    const locationName = toTextValue(payload.locationName)
+    const rawLocationName = toTextValue(payload.locationName)
       || toTextValue(payload.location)
       || selectedLabel
       || selectedValue;
+    const locationName = sanitizeDisplayLocationName(rawLocationName);
     const activityType = normalizeExploreActivityType(toTextValue(payload.activityType));
     const presetLocation = resolvePresetLocation(locationName);
     if (presetLocation) {
@@ -1962,7 +1975,8 @@ async function handleSelectPreference(
   }
 
   if (questionType === 'type') {
-    const locationName = toTextValue(payload.locationName) || toTextValue(payload.location);
+    const rawLocationName = toTextValue(payload.locationName) || toTextValue(payload.location);
+    const locationName = sanitizeDisplayLocationName(rawLocationName);
     const resolvedLocation = resolveActionLocation(payload) || resolvePresetLocation(locationName);
     const normalizedLocationName = locationName || '附近';
     const activityType = normalizeExploreActivityType(

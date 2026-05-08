@@ -198,7 +198,7 @@ export function HomeStateCard({ task, homeState, isDarkMode, disabled, onAction 
 
       {/* 动作按钮 */}
       {(task.primaryAction || task.secondaryAction) && (
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div className="mt-4 flex flex-nowrap gap-2 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {task.primaryAction && (
             <button
               type="button"

@@ -17,6 +17,7 @@ import {
   Plus,
   Sparkles,
   Sun,
+  X,
 } from "lucide-react";
 
 import {
@@ -2632,96 +2633,100 @@ export default function ChatPage() {
         </header>
 
         {pendingAgentAction ? (
-          <div className="shrink-0 space-y-2 px-3 pb-2 pt-[76px]">
-            {pendingAgentAction ? (
-              <section
+          <div className="absolute inset-x-0 top-[76px] z-30 px-3 pb-2">
+            <section
+              className={cn(
+                "relative rounded-[24px] border px-4 py-3 shadow-[0_20px_36px_-30px_rgba(0,0,0,0.78)] backdrop-blur-md",
+                isDarkMode
+                  ? "border-white/10 bg-white/[0.04] text-white/88"
+                  : "border-black/10 bg-white/85 text-black/88"
+              )}
+            >
+              <button
+                type="button"
+                title="忽略此任务"
+                onClick={() => {
+                  setPendingAgentAction(null);
+                  persistPendingAgentActionStateInBrowser(null);
+                }}
                 className={cn(
-                  "rounded-[24px] border px-4 py-3 shadow-[0_20px_36px_-30px_rgba(0,0,0,0.78)] backdrop-blur-md",
+                  "absolute right-2 top-2 rounded-full p-1 transition",
                   isDarkMode
-                    ? "border-white/10 bg-white/[0.04] text-white/88"
-                    : "border-black/10 bg-white/85 text-black/88"
+                    ? "text-white/40 hover:bg-white/[0.08] hover:text-white/70"
+                    : "text-black/40 hover:bg-black/[0.06] hover:text-black/70"
                 )}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="space-y-1">
-                    <p className="text-[12px] font-semibold tracking-wide">{welcomeUi.chatShell.pendingActionTitle}</p>
-                    <p className="text-sm font-medium">
-                      {pendingAgentAction.message || welcomeUi.chatShell.pendingActionDefaultMessage}
-                    </p>
-                    <p className={cn("text-xs leading-5", isDarkMode ? "text-white/54" : "text-black/52")}>
-                      {pendingAgentAction.action.authMode === "bind_phone"
-                        ? welcomeUi.chatShell.pendingActionBindPhoneHint
-                        : welcomeUi.chatShell.pendingActionLoginHint}
-                    </p>
-                    {pendingActionNotice ? (
-                      <p className={cn("text-xs", isDarkMode ? "text-white/54" : "text-black/52")}>{pendingActionNotice}</p>
-                    ) : null}
-                  </div>
-                  {authToken ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void resumeStructuredPendingAction();
-                      }}
-                      disabled={isSending}
-                      className={cn(
-                        "shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition disabled:opacity-45",
-                        isDarkMode ? "bg-white text-[#111111] hover:bg-white/92" : "bg-black text-white hover:bg-black/92"
-                      )}
-                    >
-                      {welcomeUi.chatShell.pendingActionResumeLabel}
-                    </button>
-                  ) : (
-                    <AuthSheet
-                      mode={pendingAgentAction.action.authMode ?? "login"}
-                      isDarkMode={isDarkMode}
-                      reason={pendingAgentAction.message || welcomeUi.chatShell.pendingActionDefaultMessage}
-                      onAuthenticated={async () => {
-                        setPendingActionNotice(null);
-                        setAuthToken(readClientToken());
-                      }}
-                      trigger={
-                        <button
-                          type="button"
-                          disabled={isSending}
-                          className={cn(
-                            "shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition disabled:opacity-45",
-                            isDarkMode ? "bg-white text-[#111111] hover:bg-white/92" : "bg-black text-white hover:bg-black/92"
-                          )}
-                        >
-                          {welcomeUi.chatShell.pendingActionResumeLabel}
-                        </button>
-                      }
-                    />
-                  )}
+                <X className="h-3.5 w-3.5" />
+              </button>
+              <div className="flex items-start justify-between gap-3 pr-6">
+                <div className="space-y-1">
+                  <p className="text-[12px] font-semibold tracking-wide">{welcomeUi.chatShell.pendingActionTitle}</p>
+                  <p className="text-sm font-medium">
+                    {pendingAgentAction.message || welcomeUi.chatShell.pendingActionDefaultMessage}
+                  </p>
+                  <p className={cn("text-xs leading-5", isDarkMode ? "text-white/54" : "text-black/52")}>
+                    {pendingAgentAction.action.authMode === "bind_phone"
+                      ? welcomeUi.chatShell.pendingActionBindPhoneHint
+                      : welcomeUi.chatShell.pendingActionLoginHint}
+                  </p>
+                  {pendingActionNotice ? (
+                    <p className={cn("text-xs", isDarkMode ? "text-white/54" : "text-black/52")}>{pendingActionNotice}</p>
+                  ) : null}
                 </div>
-              </section>
-            ) : null}
+                {authToken ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void resumeStructuredPendingAction();
+                    }}
+                    disabled={isSending}
+                    className={cn(
+                      "shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition disabled:opacity-45",
+                      isDarkMode ? "bg-white text-[#111111] hover:bg-white/92" : "bg-black text-white hover:bg-black/92"
+                    )}
+                  >
+                    {welcomeUi.chatShell.pendingActionResumeLabel}
+                  </button>
+                ) : (
+                  <AuthSheet
+                    mode={pendingAgentAction.action.authMode ?? "login"}
+                    isDarkMode={isDarkMode}
+                    reason={pendingAgentAction.message || welcomeUi.chatShell.pendingActionDefaultMessage}
+                    onAuthenticated={async () => {
+                      setPendingActionNotice(null);
+                      setAuthToken(readClientToken());
+                    }}
+                    trigger={
+                      <button
+                        type="button"
+                        disabled={isSending}
+                        className={cn(
+                          "shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition disabled:opacity-45",
+                          isDarkMode ? "bg-white text-[#111111] hover:bg-white/92" : "bg-black text-white hover:bg-black/92"
+                        )}
+                      >
+                        {welcomeUi.chatShell.pendingActionResumeLabel}
+                      </button>
+                    }
+                  />
+                )}
+              </div>
+            </section>
           </div>
         ) : null}
 
-        <div className="relative min-h-0 flex-1">
+        <div className={cn("relative min-h-0 flex-1", messages.length > 0 ? (pendingAgentAction ? "pt-[170px]" : "pt-[76px]") : "overflow-hidden")}>
           {messages.length > 0 ? (
             <>
               <div className={cn("pointer-events-none absolute inset-x-0 top-0 z-10 h-14 bg-gradient-to-b to-transparent", isDarkMode ? "from-black via-black/70" : "from-white via-white/88")} />
               <div className={cn("pointer-events-none absolute inset-x-0 bottom-0 z-10 h-24 bg-gradient-to-t to-transparent", isDarkMode ? "from-black via-black/82" : "from-white via-white/92")} />
             </>
           ) : null}
-          <Conversation className="relative h-full">
-            <ConversationContent
-              className="w-full gap-4"
-              scrollClassName={cn(
-                "px-3 pb-32",
-                messages.length > 0 ? "pt-[88px]" : "pt-1",
-                messages.length > 0 &&
-                  (isDarkMode
-                    ? "[scrollbar-color:rgba(255,255,255,0.16)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/12 [&::-webkit-scrollbar-thumb:hover]:bg-white/20"
-                    : "[scrollbar-color:rgba(0,0,0,0.16)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-black/12 [&::-webkit-scrollbar-thumb:hover]:bg-black/20")
-              )}
-            >
-            {messages.length === 0 ? (
-              <ConversationEmptyState className="justify-start px-4 pt-3">
-                <div className="relative isolate min-h-[544px] w-full overflow-visible pt-[224px]">
+          {messages.length === 0 ? (
+            <div className="relative h-full overflow-hidden px-3 pt-1">
+              <div className="flex h-full flex-col gap-4">
+                <ConversationEmptyState className="justify-start px-4 pt-3">
+                  <div className="relative isolate min-h-[544px] w-full overflow-visible pt-[224px]">
                   <div
                     aria-hidden="true"
                     className={cn(
@@ -2892,7 +2897,7 @@ export default function ChatPage() {
                                   </p>
 
                                   {task.primaryAction || task.secondaryAction ? (
-                                    <div className="mt-3 flex flex-wrap gap-2">
+                                    <div className="mt-3 flex flex-nowrap gap-2 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                                       {task.primaryAction ? (
                                         <button
                                           type="button"
@@ -3011,8 +3016,20 @@ export default function ChatPage() {
                   </div>
                 </div>
               </ConversationEmptyState>
-            ) : (
-              messages.map((message, index) => {
+            </div>
+          </div>
+        ) : (
+          <Conversation className="relative h-full">
+            <ConversationContent
+              className="w-full gap-4"
+              scrollClassName={cn(
+                "px-3 pb-32 pt-3",
+                isDarkMode
+                  ? "[scrollbar-color:rgba(255,255,255,0.16)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/12 [&::-webkit-scrollbar-thumb:hover]:bg-white/20"
+                  : "[scrollbar-color:rgba(0,0,0,0.16)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-black/12 [&::-webkit-scrollbar-thumb:hover]:bg-black/20"
+              )}
+            >
+              {messages.map((message, index) => {
                 if (message.role === "user") {
                   return <UserMessage key={message.id} text={message.text} />;
                 }
@@ -3026,10 +3043,10 @@ export default function ChatPage() {
                     onActionSelect={handleActionSelect}
                   />
                 );
-              })
-            )}
+              })}
             </ConversationContent>
           </Conversation>
+        )}
         </div>
 
         <div

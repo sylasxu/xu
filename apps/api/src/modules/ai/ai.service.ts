@@ -35,6 +35,8 @@ import {
   hasToolCall,
   type LanguageModelUsage,
   type UIMessage,
+  generateObject,
+  jsonSchema,
 } from 'ai';
 import { randomUUID } from 'crypto';
 import type { ProcessorLogEntry } from '@xu/db';
@@ -53,6 +55,7 @@ import {
   normalizeAiProviderErrorMessage as normalizeProviderError,
 } from './models/provider-error';
 import { generateText } from 'ai';
+import { resolveFollowupActions } from './shared/action-outcomes';
 // Guardrails
 import { checkRateLimit } from './guardrails/rate-limiter';
 // 辅助函数（从独立模块导入）
@@ -95,7 +98,6 @@ import {
 import { handleStructuredAction, type StructuredAction } from './user-action';
 import { buildSuggestionsFromBlocks } from './suggestions';
 import { getConfigValue } from './config/config.service';
-import { buildNextBestActions, type NextBestActionItem } from './workflow/next-actions';
 import {
   listCurrentAgentTaskSnapshots,
   markJoinTaskDiscussionEntered,
@@ -671,15 +673,15 @@ export async function executeChatRequest(request: ChatRequest): Promise<ChatExec
       }
     }
 
-    // Action 快速出口：使用 Voice 层生成人味回复
+    // Action 快速出口：使用 Voice 层生成人味回复 + 动态按钮
     if (structuredAction && actionResult) {
-      const voiceText = await generateActionVoice({
+      const { text, nextActions } = await generateActionResponse({
         actionType: structuredAction.action,
         result: actionResult,
         userNickname: userNickname ?? undefined,
         locationName: locationName ?? undefined,
       });
-      return buildStructuredActionResult(actionResult, structuredAction, voiceText);
+      return buildStructuredActionResult(actionResult, structuredAction, text, nextActions);
     }
 
     const userLocation = location ? { lat: location[1], lng: location[0] } : null;
@@ -919,17 +921,18 @@ const XU_PERSONA = `你是"xu"，一个碎片化社交助理。你帮用户把�
 记住：你是 xu，一个会帮用户张罗但懂分寸的社交助理。`;
 
 /**
- * Action Voice 层 — 为 Action 执行结果生成人味回复
+ * Action Response 层 — 为 Action 执行结果生成人味回复 + 上下文按钮
  *
- * 使用 Kimi 轻量调用，prompt 极简，输出严格控制在 50 字以内。
- * 失败时降级到系统消息，不阻塞主链路。
+ * v6.0: 按钮文案不再硬编码，由 LLM 根据上下文动态生成。
+ * 使用 generateObject 同时输出 text + labels，一轮调用搞定。
+ * 失败时降级到系统消息 + 默认按钮，不阻塞主链路。
  */
-async function generateActionVoice(params: {
+async function generateActionResponse(params: {
   actionType: string;
   result: import('./user-action').StructuredActionResult;
   userNickname?: string;
   locationName?: string;
-}): Promise<string> {
+}): Promise<{ text: string; nextActions: Array<{ label: string; action: string; params?: Record<string, unknown> }> }> {
   const startTime = Date.now();
   const { actionType, result, userNickname, locationName } = params;
   const data = asRecord(result.data);
@@ -939,16 +942,21 @@ async function generateActionVoice(params: {
     : (typeof data?.message === 'string' && data.message.trim() ? data.message.trim() : '');
   const loc = locationName || (typeof data?.locationName === 'string' ? data.locationName : '');
 
-  const localVoice = buildDeterministicActionVoice({
-    actionType,
-    data,
-    hasError,
-    systemMessage,
-    locationName: loc,
-  });
-  if (localVoice && isTestRuntime()) {
-    logger.info('action_voice_preset', { actionType, source: 'test_runtime' });
-    return localVoice;
+  const followupActions = resolveFollowupActions({ actionType, data });
+
+  // 测试运行时直接走本地兜底，不调 LLM
+  if (isTestRuntime()) {
+    const localVoice = buildDeterministicActionVoice({
+      actionType,
+      data,
+      hasError,
+      systemMessage,
+      locationName: loc,
+    });
+    return {
+      text: localVoice || systemMessage || '已处理',
+      nextActions: followupActions.map((a) => ({ label: a.action, ...a })),
+    };
   }
 
   const contextLines: string[] = [];
@@ -956,43 +964,76 @@ async function generateActionVoice(params: {
   if (loc) contextLines.push(`地点：${loc}`);
   if (systemMessage) contextLines.push(`操作反馈：${systemMessage}`);
 
+  const actionDescriptions = followupActions
+    .map((a, i) => `${i + 1}. ${a.action}${a.params ? `（参数：${JSON.stringify(a.params)}）` : ''}`)
+    .join('\n');
+
   const prompt = `用户刚刚执行了操作：${actionType}
 操作结果：${hasError ? '失败' : '成功'}
 ${contextLines.join('\n')}
 
-请用一句话自然回应，要求：
-1. 你是 xu，碎片化社交助理，短句、直接、不装熟
-2. 严格不超过 50 个中文字符
-3. 不要重复操作反馈里的具体数据（时间、地点、人数）
-4. ${hasError ? '温和告知失败，给一个轻松的替代建议' : '轻松确认成功，暗示下一步可以做什么'}
-5. 直接输出文字，不要解释
+可用的下一步操作：
+${actionDescriptions || '（无）'}
 
-回应：`;
+请生成：
+1. 一句自然回应（短句、直接、不装熟，不超过50字）
+2. 为每个可用操作写一个自然的按钮标签（每个不超过12字）。如果某个操作不适合当前语境，对应位置放空字符串。
+
+要求：
+- 你是 xu，碎片化社交助理
+- 不要重复操作反馈里的具体数据
+- ${hasError ? '温和告知失败，给一个轻松的替代建议' : '轻松确认成功，暗示下一步可以做什么'}`;
 
   try {
     const { model, modelId } = await resolveChatModelSelection({ routeKey: 'chat' });
 
-    const { text } = await generateText({
+    const { object } = await generateObject({
       model,
       system: XU_PERSONA,
       prompt,
+      schema: jsonSchema<{ text: string; labels: string[] }>({
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: '自然回应文字，不超过50字' },
+          labels: {
+            type: 'array',
+            items: { type: 'string', description: '按钮标签，不超过12字，不适合时为空字符串' },
+            description: `按钮标签数组，长度必须等于可用操作数量(${followupActions.length})`,
+          },
+        },
+        required: ['text', 'labels'],
+      }),
       ...(shouldOmitTemperatureForModelId(modelId) ? {} : { temperature: 0.7 }),
-      maxOutputTokens: 80,
     });
 
     const latency = Date.now() - startTime;
-    logger.info('action_voice_generated', {
+    const nextActions = followupActions
+      .map((action, index) => ({
+        label: (object.labels[index] || '').trim() || action.action,
+        action: action.action,
+        ...(action.params ? { params: action.params } : {}),
+      }))
+      .filter((item) => item.label);
+
+    logger.info('action_response_generated', {
       actionType,
       model: modelId,
       latencyMs: latency,
-      responseLength: text.trim().length,
+      responseLength: object.text.trim().length,
+      nextActionCount: nextActions.length,
       hasError,
     });
 
-    return text.trim() || systemMessage || '已处理';
+    return {
+      text: object.text.trim() || systemMessage || '已处理',
+      nextActions,
+    };
   } catch (error) {
-    logger.error('action_voice_failed', { actionType, error: String(error) });
-    return systemMessage || '已处理';
+    logger.error('action_response_failed', { actionType, error: String(error) });
+    return {
+      text: systemMessage || '已处理',
+      nextActions: followupActions.map((a) => ({ label: a.action, ...a })),
+    };
   }
 }
 
@@ -1193,6 +1234,7 @@ function buildStructuredActionResult(
   result: import('./user-action').StructuredActionResult,
   structuredAction?: StructuredAction,
   voiceText?: string,
+  nextActions?: Array<{ label: string; action: string; params?: Record<string, unknown> }>,
 ): ChatExecutionResult {
   const data = asRecord(result.data);
   const pendingAction = asRecord(data?.pendingAction);
@@ -1263,7 +1305,6 @@ function buildStructuredActionResult(
     : null;
   // v5.5: Voice 层存在时总是输出文本，否则按原逻辑判断
   const shouldWritePrimaryText = voiceText ? true : (!authRequiredPayload && !successWidgetPayload);
-  const nextActions = buildNextBestActions({ actionType, data });
   const assistantReplyText = voiceText ?? actionMessage;
   const structuredIntent = inferIntentFromStructuredAction(actionType);
   const activityId = typeof data?.activityId === 'string' ? data.activityId : null;
@@ -1314,7 +1355,7 @@ function buildStructuredActionResult(
     actionResults: [{
       success: result.success,
       ...(typeof result.error === 'string' ? { error: result.error } : {}),
-      ...(nextActions.length > 0 ? { nextActions } : {}),
+      ...(nextActions && nextActions.length > 0 ? { nextActions } : {}),
     }],
     traces: [
       createExecutionTrace('structured_action', {
@@ -1383,11 +1424,11 @@ async function handlePartnerMatchingFlowResult(
       originalText: completedState.rawInput,
     };
     const actionResult = await handleStructuredAction(partnerAction, userId, undefined, context);
-    const voiceText = await generateActionVoice({
+    const { text, nextActions } = await generateActionResponse({
       actionType: partnerAction.action,
       result: actionResult,
     });
-    return buildStructuredActionResult(actionResult, partnerAction, voiceText);
+    return buildStructuredActionResult(actionResult, partnerAction, text, nextActions);
   }
 
   if (userId) {

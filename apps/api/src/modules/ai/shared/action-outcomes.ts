@@ -1,41 +1,27 @@
-import type { StructuredAction } from '../user-action';
-
-export interface NextBestActionItem {
-  label: string;
-  action: string;
-  params?: Record<string, unknown>;
-}
-
-interface NextBestActionInput {
-  actionType: StructuredAction['action'] | undefined;
-  data: Record<string, unknown> | undefined;
-}
+/**
+ * Action Outcomes
+ *
+ * 将结构化动作的结果映射为可能的下一步操作（action + params）。
+ * 按钮文案（label）不再在此硬编码，由 LLM 根据上下文动态生成。
+ */
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function getDraftActivityTypeLabel(type: string): string {
-  switch (type) {
-    case 'boardgame':
-      return '桌游';
-    case 'sports':
-      return '运动';
-    case 'food':
-      return '美食';
-    case 'entertainment':
-      return '娱乐';
-    default:
-      return '其他';
-  }
+export interface ActionOutcome {
+  action: string;
+  params?: Record<string, unknown>;
+}
+
+interface ActionOutcomeInput {
+  actionType: string | undefined;
+  data: Record<string, unknown> | undefined;
 }
 
 function buildDraftActionPayload(data: Record<string, unknown> | undefined): Record<string, unknown> | null {
   const draft = isRecord(data?.draft) ? data.draft : null;
-
-  if (!draft) {
-    return null;
-  }
+  if (!draft) return null;
 
   const location = Array.isArray(draft.location) ? draft.location : [];
   const lng = typeof location[0] === 'number'
@@ -57,7 +43,6 @@ function buildDraftActionPayload(data: Record<string, unknown> | undefined): Rec
     ...(typeof data?.activityId === 'string' ? { activityId: data.activityId } : {}),
     title: typeof draft.title === 'string' && draft.title.trim() ? draft.title.trim() : '活动草稿',
     type: draftType,
-    activityType: getDraftActivityTypeLabel(draftType),
     startAt: typeof draft.startAt === 'string' && draft.startAt.trim() ? draft.startAt.trim() : '',
     locationName,
     locationHint: typeof draft.locationHint === 'string' && draft.locationHint.trim()
@@ -74,17 +59,11 @@ function buildConfirmPublishParams(data: Record<string, unknown> | undefined): R
   const activityId = typeof data?.activityId === 'string' && data.activityId.trim()
     ? data.activityId.trim()
     : '';
-
-  if (!activityId) {
-    return null;
-  }
-
-  return {
-    activityId,
-  };
+  if (!activityId) return null;
+  return { activityId };
 }
 
-export function buildNextBestActions(params: NextBestActionInput): NextBestActionItem[] {
+export function resolveFollowupActions(params: ActionOutcomeInput): ActionOutcome[] {
   const { actionType, data } = params;
   const activityId = typeof data?.activityId === 'string' ? data.activityId : undefined;
   const locationName = typeof data?.locationName === 'string' ? data.locationName : undefined;
@@ -101,20 +80,13 @@ export function buildNextBestActions(params: NextBestActionInput): NextBestActio
 
   switch (actionType) {
     case 'join_activity': {
-      const items: NextBestActionItem[] = [];
+      const items: ActionOutcome[] = [];
       if (activityId) {
-        items.push({
-          label: '看看活动详情',
-          action: 'view_activity',
-          params: { activityId },
-        });
+        items.push({ action: 'view_activity', params: { activityId } });
       }
       items.push({
-        label: '继续找附近的局',
         action: 'explore_nearby',
-        params: {
-          ...(locationName ? { locationName } : {}),
-        },
+        params: { ...(locationName ? { locationName } : {}) },
       });
       return items;
     }
@@ -122,50 +94,25 @@ export function buildNextBestActions(params: NextBestActionInput): NextBestActio
     case 'save_draft_settings': {
       const draftActionPayload = buildDraftActionPayload(data);
       const confirmPublishParams = buildConfirmPublishParams(data);
-      if (!draftActionPayload || !confirmPublishParams) {
-        return [];
-      }
+      if (!draftActionPayload || !confirmPublishParams) return [];
 
       return [
-        {
-          label: '确认发布',
-          action: 'confirm_publish',
-          params: confirmPublishParams,
-        },
-        {
-          label: '改下地点',
-          action: 'edit_draft',
-          params: { ...draftActionPayload, field: 'location' },
-        },
-        {
-          label: '改下时间',
-          action: 'edit_draft',
-          params: { ...draftActionPayload, field: 'time' },
-        },
-        {
-          label: '改下人数设置',
-          action: 'edit_draft',
-          params: { ...draftActionPayload, field: 'participants' },
-        },
+        { action: 'confirm_publish', params: confirmPublishParams },
+        { action: 'edit_draft', params: { ...draftActionPayload, field: 'location' } },
+        { action: 'edit_draft', params: { ...draftActionPayload, field: 'time' } },
+        { action: 'edit_draft', params: { ...draftActionPayload, field: 'participants' } },
       ];
     }
     case 'publish_draft':
     case 'confirm_publish': {
-      const items: NextBestActionItem[] = [];
+      const items: ActionOutcome[] = [];
       if (activityId) {
-        items.push({
-          label: '去分享这个局',
-          action: 'share_activity',
-          params: { activityId },
-        });
+        items.push({ action: 'share_activity', params: { activityId } });
       }
-      items.push({
-        label: '再看看附近活动',
-        action: 'explore_nearby',
-      });
+      items.push({ action: 'explore_nearby' });
       return items;
     }
-    case 'explore_nearby':
+    case 'explore_nearby': {
       if (exploreResults.length === 0) {
         const promptParts = [
           exploreLocationName ? `附近还没有合适的局，我想在${exploreLocationName}发起一个新的线下活动。` : '附近还没有合适的局，我想自己发起一个新的线下活动。',
@@ -175,7 +122,6 @@ export function buildNextBestActions(params: NextBestActionInput): NextBestActio
 
         return [
           {
-            label: '那我自己组一个',
             action: 'create_activity',
             params: {
               description: promptParts.filter((item) => item).join(''),
@@ -184,12 +130,10 @@ export function buildNextBestActions(params: NextBestActionInput): NextBestActio
             },
           },
           {
-            label: '帮我找同类搭子',
             action: 'find_partner',
             ...(exploreType ? { params: { type: exploreType } } : {}),
           },
           {
-            label: '换个类型再找找',
             action: 'explore_nearby',
             ...(exploreType ? { params: { type: exploreType } } : {}),
           },
@@ -197,85 +141,47 @@ export function buildNextBestActions(params: NextBestActionInput): NextBestActio
       }
 
       return [
-        {
-          label: '帮我找同类搭子',
-          action: 'find_partner',
-          ...(exploreType ? { params: { type: exploreType } } : {}),
-        },
-        {
-          label: '换个类型再找找',
-          action: 'explore_nearby',
-          ...(exploreType ? { params: { type: exploreType } } : {}),
-        },
+        { action: 'find_partner', ...(exploreType ? { params: { type: exploreType } } : {}) },
+        { action: 'explore_nearby', ...(exploreType ? { params: { type: exploreType } } : {}) },
       ];
+    }
     case 'cancel_join':
-      return [
-        {
-          label: '重新找个局',
-          action: 'explore_nearby',
-        },
-      ];
+      return [{ action: 'explore_nearby' }];
     case 'record_activity_feedback': {
-      const items: NextBestActionItem[] = [];
-
+      const items: ActionOutcome[] = [];
       if (activityId) {
         items.push({
-          label: '想再约一次',
           action: 'create_activity',
           params: {
             description: activityId ? `基于这次活动再约一场` : '帮我再组一个类似的局',
           },
         });
       }
-
-      items.push({
-        label: '继续找新局',
-        action: 'explore_nearby',
-      });
-
+      items.push({ action: 'explore_nearby' });
       return items;
     }
     case 'confirm_match': {
-      const items: NextBestActionItem[] = [];
+      const items: ActionOutcome[] = [];
       if (activityId) {
-        items.push({
-          label: '进入新局详情',
-          action: 'view_activity',
-          params: { activityId },
-        });
+        items.push({ action: 'view_activity', params: { activityId } });
       }
-      items.push({
-        label: '继续找新局',
-        action: 'explore_nearby',
-      });
+      items.push({ action: 'explore_nearby' });
       return items;
     }
     case 'cancel_match':
       return [
-        {
-          label: '继续找搭子',
-          action: 'find_partner',
-        },
-        {
-          label: '改一下我的偏好',
-          action: 'find_partner',
-          params: { renderMode: 'full-form', partnerStage: 'refine_form' },
-        },
+        { action: 'find_partner' },
+        { action: 'find_partner', params: { renderMode: 'full-form', partnerStage: 'refine_form' } },
       ];
     case 'search_partners': {
-      const items: NextBestActionItem[] = [];
+      const items: ActionOutcome[] = [];
       const searchPayload = isRecord(data?.searchPayload) ? data.searchPayload : null;
 
       if (searchPayload) {
-        items.push({
-          label: '这轮没有就继续帮我留意',
-          action: 'opt_in_partner_pool',
-          params: searchPayload,
-        });
+        items.push({ action: 'opt_in_partner_pool', params: searchPayload });
       }
 
       items.push({
-        label: '改一下条件再搜',
         action: 'find_partner',
         params: {
           ...(searchPayload ?? {}),
@@ -289,10 +195,9 @@ export function buildNextBestActions(params: NextBestActionInput): NextBestActio
       return items;
     }
     case 'submit_partner_intent_form': {
-      const items: NextBestActionItem[] = [];
+      const items: ActionOutcome[] = [];
       if (locationName) {
         items.push({
-          label: '看看附近同类局',
           action: 'explore_nearby',
           params: {
             locationName,
@@ -302,7 +207,6 @@ export function buildNextBestActions(params: NextBestActionInput): NextBestActio
       }
 
       items.push({
-        label: '改一下条件再搜',
         action: 'find_partner',
         params: {
           ...(isRecord(data?.searchPayload) ? data.searchPayload : {}),
@@ -314,10 +218,7 @@ export function buildNextBestActions(params: NextBestActionInput): NextBestActio
       });
 
       if (typeof data?.matchId === 'string') {
-        items.push({
-          label: '看看我的搭子进展',
-          action: 'find_partner',
-        });
+        items.push({ action: 'find_partner' });
       }
 
       return items;

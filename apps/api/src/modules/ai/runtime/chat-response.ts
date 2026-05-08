@@ -1786,7 +1786,8 @@ function normalizeChoiceOptions(
 
     if (action === 'select_preference') {
       if (questionType === 'location' && params.location === undefined) {
-        params.location = rawValue;
+        const isTechnicalValue = rawValue === 'current' || rawValue === 'nearby' || rawValue === 'here';
+        params.location = isTechnicalValue ? label : rawValue;
       } else if (questionType === 'type' && params.activityType === undefined) {
         params.activityType = rawValue;
       } else if (questionType === 'time' && params.slot === undefined) {

@@ -2710,8 +2710,8 @@ export default function ChatPage() {
           <Conversation className="relative h-full">
             <ConversationContent
               className={cn(
-                "w-full gap-4 px-3 pb-4",
-                messages.length > 0 ? "pt-[76px]" : "pt-1",
+                "w-full gap-4 px-3 pb-32",
+                messages.length > 0 ? "pt-[88px]" : "pt-1",
                 messages.length > 0 &&
                   (isDarkMode
                     ? "[scrollbar-color:rgba(255,255,255,0.16)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/12 [&::-webkit-scrollbar-thumb:hover]:bg-white/20"

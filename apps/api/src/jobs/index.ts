@@ -12,3 +12,5 @@ export { expireOldIntents, handleExpiredMatches } from './intent-jobs';
 // AI 运营任务
 export { runAnomalyDetection } from './anomaly-detection';
 export { runContentModeration } from './content-moderation';
+// Memory 汇总
+export { summarizeUserMemories } from './memory-summarize';

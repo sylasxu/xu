@@ -160,7 +160,7 @@ export type User = typeof users.$inferSelect;
    ↓
 /ai/chat SSE 入口  ──  规范化请求语义
    ↓
-Processor 管线  ──  输入护栏 / 用户画像 / 语义召回 / 意图分类 / Token 限制 / 输出护栏
+Processor 管线  ──  输入护栏 / 意图分类 / 用户画像 / Token 限制 / 输出护栏
    ↓
 是结构化动作?
    ├─ 是  →  Voice 层(轻量 LLM 兜回复)
@@ -177,7 +177,7 @@ SSE 流式返回  →  Web / 小程序 / Admin
 
 | 子目录 | 职责 |
 |--------|------|
-| `processors/` | Processor 管线(纯函数):`input-guard / user-profile / semantic-recall / intent-classify / token-limit / save-history / extract-preferences / output-guard` |
+| `processors/` | Processor 管线(纯函数):`input-guard / keyword-match / intent-classify / user-profile / token-limit / save-history / output-guard` |
 | `tools/` | Tool 实现:`explore_nearby / find_partner / search_partners / create_activity / join_activity / publish_draft` |
 | `workflow/` | 多步任务编排 |
 | `models/` | 模型路由:Moonshot Kimi(主力)+ Qwen `text-embedding-v4`(仅向量) |

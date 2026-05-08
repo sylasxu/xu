@@ -301,12 +301,8 @@ function matchSignal(
 /**
  * 基于特征组合的意图分类（纯函数）
  *
- * 遍历所有规则，计算每条规则的命中信号数和置信度，
- * 返回置信度最高的匹配结果。
- *
- * 置信度公式：min(baseConfidence + hitCount × signalBoost, maxConfidence)
- * - hitCount = 该规则中命中的信号数量
- * - 至少命中 1 个信号才计入候选
+ * 遍历所有规则，统计每条规则命中的信号数量，
+ * 返回命中信号最多的意图。不计算 confidence，只计数。
  *
  * @param input - 用户输入（已净化）
  * @param conversationHistory - 最近对话历史
@@ -318,14 +314,11 @@ export async function classifyByFeatureCombination(
 ): Promise<ClassifyResult> {
   const rules = await loadFeatureRules();
 
-  let bestResult: ClassifyResult = {
-    intent: 'unknown',
-    confidence: 0,
-    method: 'regex',
-  };
+  let bestIntent: IntentType = 'unknown';
+  let bestHits = 0;
+  let bestFeatures: string[] = [];
 
   for (const rule of rules) {
-    // 统计命中的信号数量
     let hitCount = 0;
     const hitFeatures: string[] = [];
 
@@ -336,34 +329,21 @@ export async function classifyByFeatureCombination(
       }
     }
 
-    // 至少命中 1 个信号才计入候选
-    if (hitCount === 0) continue;
-
-    // 置信度公式：min(baseConfidence + hitCount × signalBoost, maxConfidence)
-    const confidence = Math.min(
-      rule.baseConfidence + hitCount * rule.signalBoost,
-      rule.maxConfidence,
-    );
-
-    // 取置信度最高的结果
-    if (confidence > bestResult.confidence) {
-      bestResult = {
-        intent: rule.intent,
-        confidence,
-        method: 'regex',
-        matchedPattern: hitFeatures.join(','),
-        p1Features: hitFeatures,
-      };
+    // 命中更多信号的意图优先；平局时先定义的规则优先
+    if (hitCount > bestHits) {
+      bestIntent = rule.intent;
+      bestHits = hitCount;
+      bestFeatures = hitFeatures;
     }
   }
 
-  // P1 对语义类意图只做特征提示，不直接判案，强制走到 P2 LLM
-  const SEMANTIC_INTENTS = new Set<IntentType>(['chitchat', 'explore', 'create', 'partner', 'manage']);
-  if (SEMANTIC_INTENTS.has(bestResult.intent) && bestResult.confidence >= 0.7) {
-    bestResult.confidence = Math.min(bestResult.confidence, 0.65);
-  }
-
-  return bestResult;
+  return {
+    intent: bestIntent,
+    confidence: bestHits > 0 ? 1.0 : 0,
+    method: 'regex',
+    matchedPattern: bestFeatures.join(','),
+    p1Features: bestFeatures,
+  };
 }
 
 // ============================================================

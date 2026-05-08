@@ -15,6 +15,7 @@ import {
   users,
   conversations,
   conversationMessages,
+  userMemories,
   activityMessages,
   activities,
   participants,
@@ -65,7 +66,6 @@ import type { EnhancedUserProfile } from './memory';
 import {
   inputGuardProcessor,
   keywordMatchProcessor,
-  extractPreferencesProcessor,
   outputGuardProcessor,
   recordMetricsProcessor,
   persistRequestProcessor,
@@ -471,6 +471,22 @@ function inferIntentFromStructuredAction(actionType: StructuredAction['action'] 
 // AI Chat 核心
 // ==========================================
 
+async function loadUserMemoryContext(userId: string | null): Promise<string | null> {
+  if (!userId || !isUuidLike(userId)) return null;
+
+  const memories = await db
+    .select({ content: userMemories.content, memoryType: userMemories.memoryType })
+    .from(userMemories)
+    .where(eq(userMemories.userId, userId))
+    .orderBy(desc(userMemories.updatedAt))
+    .limit(3);
+
+  if (memories.length === 0) return null;
+
+  const lines = memories.map((m, i) => `${i + 1}. [${m.memoryType}] ${m.content}`);
+  return `## 关于这位用户的历史记忆\n${lines.join('\n')}`;
+}
+
 export async function executeChatRequest(request: ChatRequest): Promise<ChatExecutionResult> {
   return runWithTrace(async () => {
     const {
@@ -541,13 +557,14 @@ export async function executeChatRequest(request: ChatRequest): Promise<ChatExec
 
     const locationName = location ? await reverseGeocode(location[1], location[0]) : undefined;
     const userNickname = isUuidLike(userId) ? await getUserNickname(userId) : undefined;
+    const memoryContext = await loadUserMemoryContext(userId);
 
     const promptContext: PromptContext = {
       currentTime: new Date(),
       userLocation: location ? { lat: location[1], lng: location[0], name: locationName } : undefined,
       userNickname,
       draftContext,
-      memoryContext: null,
+      memoryContext,
     };
 
     const baseSystemPrompt = await getSystemPrompt(promptContext);
@@ -588,16 +605,11 @@ export async function executeChatRequest(request: ChatRequest): Promise<ChatExec
       }
       return true;
     });
-    const { context: preLLMContext, logs: pipelineLogs, success: pipelineSuccess } = await runProcessors(preLLMConfigs, keywordResult.context);
+    const { context: preLLMContext, logs: pipelineLogs } = await runProcessors(preLLMConfigs, keywordResult.context);
     processorLogs.push(...pipelineLogs);
 
-    if (!pipelineSuccess) {
-      logger.warn('Pre-LLM pipeline failed', { logs: pipelineLogs.filter(l => !l.success) });
-      return buildDirectResponseResult({ type: 'fallback', context: 'Pre-LLM pipeline failed' });
-    }
-
     const actionHandlerContext: import('./user-action').ActionHandlerContext = {
-      recalledActivities: preLLMContext.metadata.semanticRecall?.recalledActivities,
+      recalledActivities: undefined,
       userProfile: preLLMContext.metadata.userProfile,
     };
 
@@ -674,15 +686,12 @@ export async function executeChatRequest(request: ChatRequest): Promise<ChatExec
     const tools = await resolveToolsForIntent(userId, intentResult.intent, {
       hasDraftContext: !!draftContext,
       location: userLocation,
-      recalledActivities: preLLMContext.metadata.semanticRecall?.recalledActivities,
+      recalledActivities: undefined,
     });
 
     const injectedPrompts: string[] = [];
     if (preLLMContext.metadata.userProfilePrompt) {
       injectedPrompts.push(preLLMContext.metadata.userProfilePrompt as string);
-    }
-    if (preLLMContext.metadata.semanticRecallPrompt) {
-      injectedPrompts.push(preLLMContext.metadata.semanticRecallPrompt as string);
     }
     const systemPrompt = injectedPrompts.length > 0
       ? `${preLLMContext.systemPrompt}\n\n${injectedPrompts.join('\n\n')}`
@@ -855,14 +864,6 @@ export async function executeChatRequest(request: ChatRequest): Promise<ChatExec
       );
       processorLogs.push(...postLLMLogs);
 
-      runAsyncProcessors(
-        [{ processor: extractPreferencesProcessor }],
-        postLLMContext
-      ).then(({ logs: asyncLogs }) => {
-        processorLogs.push(...asyncLogs);
-      }).catch((err: Error) => {
-        logger.warn('Async processors failed', { error: err.message });
-      });
     }
 
     runAsyncProcessors(

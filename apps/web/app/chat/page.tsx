@@ -676,7 +676,7 @@ async function readChatResponseErrorMessage(response: Response): Promise<string>
 }
 
 function splitTextForUiStreaming(text: string): string[] {
-  const chunks = text.match(/.{1,8}(?:[，。！？；：,.!?;:\n\s]+|$)/gu);
+  const chunks = text.match(/.{1,8}(?:[，。！？；：,.!?;:\n\s]+|$)|.{8}/gu);
   return chunks && chunks.length > 0 ? chunks : [text];
 }
 
@@ -2636,10 +2636,10 @@ export default function ChatPage() {
             {pendingAgentAction ? (
               <section
                 className={cn(
-                  "rounded-[24px] border px-4 py-3 shadow-[0_20px_36px_-30px_rgba(0,0,0,0.78)]",
+                  "rounded-[24px] border px-4 py-3 shadow-[0_20px_36px_-30px_rgba(0,0,0,0.78)] backdrop-blur-md",
                   isDarkMode
                     ? "border-white/10 bg-white/[0.04] text-white/88"
-                    : "border-black/10 bg-white text-black/88"
+                    : "border-black/10 bg-white/85 text-black/88"
                 )}
               >
                 <div className="flex items-start justify-between gap-3">
@@ -2788,7 +2788,7 @@ export default function ChatPage() {
                               "mb-7 inline-flex max-w-[300px] items-center gap-2 rounded-full border px-3.5 py-1.5 text-[12px] font-medium tracking-[-0.01em] backdrop-blur-md transition-all",
                               isDarkMode
                                 ? "border-white/10 bg-white/[0.035] text-white/64 hover:bg-white/[0.07] hover:text-white/80"
-                                : "border-black/10 bg-white text-black/58 hover:bg-black/[0.03] hover:text-black/78"
+                                : "border-black/10 bg-white/85 text-black/58 hover:bg-white/95 hover:text-black/78"
                             )}
                           >
                             <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", isDarkMode ? "bg-white/42" : "bg-black/36")} />
@@ -2831,10 +2831,10 @@ export default function ChatPage() {
                     {homeState === "H0" && authToken && (isCurrentTasksLoading || visibleCurrentTasks.length > 0) ? (
                       <section
                         className={cn(
-                          "mx-auto mb-4 w-full max-w-[348px] rounded-[28px] border px-4 py-4 text-left",
+                          "mx-auto mb-4 w-full max-w-[348px] rounded-[28px] border px-4 py-4 text-left backdrop-blur-md",
                           isDarkMode
                             ? "border-white/10 bg-white/[0.04] shadow-[0_20px_36px_-30px_rgba(0,0,0,0.78)]"
-                            : "border-black/8 bg-white shadow-[0_18px_36px_-30px_rgba(0,0,0,0.12)]"
+                            : "border-black/8 bg-white/85 shadow-[0_18px_36px_-30px_rgba(0,0,0,0.12)]"
                         )}
                       >
                         <div className="flex items-start justify-between gap-3">
@@ -2939,10 +2939,10 @@ export default function ChatPage() {
                           <div
                             key={`welcome-skeleton-${index}`}
                             className={cn(
-                              "mx-auto flex w-full max-w-[348px] items-center gap-3.5 rounded-[26px] border px-5 py-4.5",
+                              "mx-auto flex w-full max-w-[348px] items-center gap-3.5 rounded-[26px] border px-5 py-4.5 backdrop-blur-md",
                               isDarkMode
                                 ? "border-white/8 bg-white/[0.03]"
-                                : "border-black/8 bg-white shadow-[0_18px_36px_-30px_rgba(0,0,0,0.12)]"
+                                : "border-black/8 bg-white/85 shadow-[0_18px_36px_-30px_rgba(0,0,0,0.12)]"
                             )}
                           >
                             <div
@@ -2988,7 +2988,7 @@ export default function ChatPage() {
                               "mx-auto flex w-full max-w-[348px] items-center gap-3.5 rounded-[26px] border px-5 py-4.5 text-left text-[17px] backdrop-blur-md transition-all duration-200",
                               isDarkMode
                                 ? "border-white/10 bg-white/[0.035] text-white/92 hover:bg-white/[0.06]"
-                                : "border-black/8 bg-white text-black/86 shadow-[0_18px_36px_-32px_rgba(0,0,0,0.14)] hover:bg-black/[0.02] hover:shadow-[0_22px_42px_-34px_rgba(0,0,0,0.16)]"
+                                : "border-black/8 bg-white/85 text-black/86 shadow-[0_18px_36px_-32px_rgba(0,0,0,0.14)] hover:bg-white/95 hover:shadow-[0_22px_42px_-34px_rgba(0,0,0,0.16)]"
                             )}
                           >
                             <span
@@ -3252,7 +3252,7 @@ function TurnBlockRenderer({
   const isDarkMode = useChatTheme();
   if (block.type === "text") {
     return (
-      <MessageResponse className={cn("w-full max-w-none text-[15px] leading-7", isDarkMode ? "text-white/88" : "text-black/78")}>
+      <MessageResponse className={cn("w-full max-w-none text-[15px] leading-7", isDarkMode ? "text-white/92" : "text-black/88")}>
         {block.content}
       </MessageResponse>
     );

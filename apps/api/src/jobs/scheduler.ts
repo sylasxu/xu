@@ -17,6 +17,7 @@ import { processActivityReminder } from './activity-reminder';
 import { expireOldIntents, handleExpiredMatches } from './intent-jobs';
 import { runAnomalyDetection } from './anomaly-detection';
 import { runContentModeration } from './content-moderation';
+import { summarizeUserMemories } from './memory-summarize';
 import { jobLogger } from '../lib/logger';
 
 interface ScheduledJob {
@@ -76,6 +77,13 @@ const jobs: ScheduledJob[] = [
     name: '内容审核扫描',
     interval: 60 * 60 * 1000, // 每小时执行
     handler: runContentModeration,
+    isRunning: false,
+  },
+  // Memory 汇总任务
+  {
+    name: '用户记忆汇总',
+    interval: 24 * 60 * 60 * 1000, // 每24小时执行
+    handler: summarizeUserMemories,
     isRunning: false,
   },
 ];

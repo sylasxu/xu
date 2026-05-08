@@ -2709,8 +2709,9 @@ export default function ChatPage() {
           ) : null}
           <Conversation className="relative h-full">
             <ConversationContent
-              className={cn(
-                "w-full gap-4 px-3 pb-32",
+              className="w-full gap-4"
+              scrollClassName={cn(
+                "px-3 pb-32",
                 messages.length > 0 ? "pt-[88px]" : "pt-1",
                 messages.length > 0 &&
                   (isDarkMode

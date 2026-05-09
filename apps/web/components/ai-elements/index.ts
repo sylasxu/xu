@@ -1,5 +1,5 @@
 /**
- * AI SDK Elements（项目当前使用子集）
+ * AI SDK Elements（官方 registry 版本）
  */
 
 export {

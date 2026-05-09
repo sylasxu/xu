@@ -2,14 +2,6 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
-  isDataUIPart,
-  isTextUIPart,
-  readUIMessageStream,
-  simulateReadableStream,
-  type UIMessage as AISDKUIMessage,
-  type UIMessageChunk,
-} from "ai";
-import {
   ArrowUp,
   ChevronRight,
   Clock3,
@@ -19,6 +11,21 @@ import {
   Sun,
   X,
 } from "lucide-react";
+import {
+  API_BASE,
+  buildChatStreamMessageFromStoredMessage,
+  buildEnvelopeFromStreamMessage,
+  extractUIMessageText,
+  getRenderableBlocks,
+  isRecord,
+  normalizeChatErrorMessage,
+  randomId,
+  readChatResponseErrorMessage,
+  type ActionOption,
+  type ActivityContextOverrides,
+  type ChatStreamMessage,
+} from "./chat-core";
+import { useXuChat } from "./use-xu-chat";
 
 import {
   Conversation,
@@ -76,7 +83,6 @@ import type {
   GenUIResponseEnvelope,
 } from "@/src/gen/genui-contract";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:1996";
 const DEFAULT_PROMPTS = [
   "周末想找个轻松局",
   "想认识附近同频的人",
@@ -114,27 +120,7 @@ const DEFAULT_SIDEBAR_UI = {
 };
 const COMPOSER_EXPAND_THRESHOLD = 10;
 const THEME_STORAGE_KEY = "xu:web:theme";
-const TEXT_STREAM_CHUNK_DELAY_MS = 60;  // v5.5: 调慢打字机速度，提升可读性
 const ChatThemeContext = createContext(true);
-
-type ComposerStatus = "ready" | "submitted";
-type ActivityContextOverrides = Pick<GenUIRequestContext, "activityId" | "activityMode" | "entry">;
-type GenUIRecentMessage = NonNullable<GenUIRequestContext["recentMessages"]>[number];
-type LocalStructuredAction = {
-  action: string;
-  actionId: string;
-  params?: Record<string, unknown>;
-  source?: string;
-  displayText?: string;
-};
-type LocalGenUIRecentMessage = GenUIRecentMessage & {
-  action?: string;
-  actionId?: string;
-  params?: Record<string, unknown>;
-  source?: string;
-  displayText?: string;
-};
-const MAX_TRANSIENT_TURNS = 10;
 
 type MessageCenterFocusIntent = {
   taskId?: string;
@@ -174,39 +160,6 @@ type GenUIFormSchemaConfig = {
   fields: GenUIFormField[];
 };
 
-type ChatRecord =
-  | {
-      id: string;
-      role: "user";
-      text: string;
-      structuredAction?: LocalStructuredAction;
-    }
-  | {
-      id: string;
-      role: "assistant";
-      pending?: boolean;
-      response?: GenUIResponseEnvelope;
-      error?: string;
-    };
-
-type AssistantRecord = Extract<ChatRecord, { role: "assistant" }>;
-type ActionOption = Pick<GenUIChoiceOption, "label" | "action" | "params"> | GenUICtaItem;
-type ChatStreamMessageMetadata = {
-  traceId?: string;
-  conversationId?: string;
-  responseId?: string;
-  status?: GenUIResponseEnvelope["response"]["status"];
-  suggestions?: GenUIResponseEnvelope["response"]["suggestions"];
-  assistantTextOverride?: string;
-};
-type ChatStreamDataTypes = {
-  genui_block: {
-    block: GenUIBlock;
-    mode: "append" | "replace";
-  };
-};
-type ChatStreamMessage = AISDKUIMessage<ChatStreamMessageMetadata, ChatStreamDataTypes>;
-type ChatStreamChunk = UIMessageChunk<ChatStreamMessageMetadata, ChatStreamDataTypes>;
 type WelcomeUiPayload = {
   composerPlaceholder: string;
   bottomQuickActions: string[];
@@ -293,10 +246,6 @@ type StoredConversationMessagesPayload = {
 
 const WELCOME_LOCATION_WAIT_MS = 600;
 
-function randomId(prefix: string): string {
-  return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
-}
-
 function useChatTheme() {
   return useContext(ChatThemeContext);
 }
@@ -314,10 +263,6 @@ function syncComposerHeight(element: HTMLTextAreaElement, value: string) {
   element.style.height = "0px";
   const nextHeight = Math.min(112, Math.max(36, element.scrollHeight));
   element.style.height = `${nextHeight}px`;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }
 
 function readString(value: unknown): string | null {
@@ -579,561 +524,6 @@ function countGenUIFormMissingRequiredFields(
   return missingCount;
 }
 
-function parseSSEPacket(packet: string): { eventName: string; dataText: string } | null {
-  const trimmed = packet.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  const lines = trimmed.split(/\r?\n/);
-  let eventName = "message";
-  const dataLines: string[] = [];
-
-  for (const line of lines) {
-    if (line.startsWith("event:")) {
-      eventName = line.slice(6).trim();
-      continue;
-    }
-
-    if (line.startsWith("data:")) {
-      dataLines.push(line.slice(5).trim());
-    }
-  }
-
-  return {
-    eventName,
-    dataText: dataLines.join("\n"),
-  };
-}
-
-function readStreamEventData(payload: unknown): unknown {
-  if (isRecord(payload) && payload.data !== undefined) {
-    return payload.data;
-  }
-
-  return payload;
-}
-
-function normalizeChatErrorMessage(message: string): string {
-  const normalized = message.trim();
-  const lowerCased = normalized.toLowerCase();
-
-  if (
-    lowerCased.includes("free tier of the model has been exhausted") ||
-    (lowerCased.includes("use free tier only") &&
-      lowerCased.includes("management console"))
-  ) {
-    return "AI 服务额度暂时用完了，请稍后再试。";
-  }
-
-  return normalized || "请求失败，请稍后再试";
-}
-
-function createEmptyEnvelope(params: {
-  traceId: string;
-  conversationId: string;
-  responseId: string;
-}): GenUIResponseEnvelope {
-  return {
-    traceId: params.traceId,
-    conversationId: params.conversationId,
-    response: {
-      responseId: params.responseId,
-      role: "assistant",
-      status: "streaming",
-      blocks: [],
-    },
-  };
-}
-
-function resolvePrimaryBlockType(blocks: GenUIBlock[]): GenUIRecentMessage["primaryBlockType"] {
-  const primaryBlock = blocks.find((block) => block.type !== "text") ?? blocks[0];
-  return primaryBlock?.type ?? null;
-}
-
-async function readChatResponseErrorMessage(response: Response): Promise<string> {
-  try {
-    const text = await response.text();
-    if (!text.trim()) {
-      return `请求失败（${response.status}）`;
-    }
-
-    try {
-      const payload = JSON.parse(text) as unknown;
-      if (isRecord(payload) && typeof payload.msg === "string") {
-        return normalizeChatErrorMessage(payload.msg);
-      }
-      if (isRecord(payload) && typeof payload.message === "string") {
-        return normalizeChatErrorMessage(payload.message);
-      }
-    } catch {
-      return normalizeChatErrorMessage(text);
-    }
-
-    return normalizeChatErrorMessage(text);
-  } catch {
-    return `请求失败（${response.status}）`;
-  }
-}
-
-function splitTextForUiStreaming(text: string): string[] {
-  const chunks = text.match(/.{1,8}(?:[，。！？；：,.!?;:\n\s]+|$)|.{8}/gu);
-  return chunks && chunks.length > 0 ? chunks : [text];
-}
-
-async function enqueueSimulatedTextDeltaChunks(
-  enqueue: (chunk: ChatStreamChunk) => void,
-  params: {
-    textPartId: string;
-    deltaText: string;
-  }
-): Promise<void> {
-  const slices = splitTextForUiStreaming(params.deltaText).filter(Boolean);
-  if (slices.length === 0) {
-    return;
-  }
-
-  const stream = simulateReadableStream({
-    chunks: slices,
-    initialDelayInMs: 0,
-    chunkDelayInMs: TEXT_STREAM_CHUNK_DELAY_MS,
-  });
-  const reader = stream.getReader();
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-
-    enqueue({
-      type: "text-delta",
-      id: params.textPartId,
-      delta: value,
-    });
-  }
-}
-
-function buildEnvelopeFromStreamMessage(message: ChatStreamMessage): GenUIResponseEnvelope {
-  const metadata = message.metadata;
-  const blocks = message.parts.reduce<GenUIBlock[]>((result, part, index) => {
-    if (isTextUIPart(part)) {
-      const content =
-        typeof metadata?.assistantTextOverride === "string"
-          ? metadata.assistantTextOverride
-          : part.text;
-      if (!content.trim()) {
-        return result;
-      }
-
-      result.push({
-        blockId: `${message.id}_text_${index}`,
-        type: "text",
-        content,
-      });
-      return result;
-    }
-
-    if (isDataUIPart<ChatStreamDataTypes>(part) && part.type === "data-genui_block") {
-      const payload = part.data;
-      if (!isRecord(payload) || !isGenUIBlock(payload.block)) {
-        return result;
-      }
-
-      const mode = payload.mode === "replace" ? "replace" : "append";
-      return upsertBlockWithMode(result, payload.block, mode).blocks;
-    }
-
-    return result;
-  }, []);
-  const hasTextBlock = blocks.some((block) => block.type === "text");
-  if (!hasTextBlock && typeof metadata?.assistantTextOverride === "string") {
-    const content = metadata.assistantTextOverride.trim();
-    if (content) {
-      blocks.unshift({
-        blockId: `${message.id}_text_override`,
-        type: "text",
-        content,
-      });
-    }
-  }
-
-  return {
-    traceId: metadata?.traceId ?? `trace_${message.id}`,
-    conversationId: metadata?.conversationId ?? `conv_${message.id}`,
-    response: {
-      responseId: metadata?.responseId ?? message.id,
-      role: "assistant",
-      status: metadata?.status ?? "streaming",
-      blocks,
-      ...(metadata?.suggestions ? { suggestions: metadata.suggestions } : {}),
-    },
-  };
-}
-
-function trimStructuredTextContent(text: string, _blocks: GenUIBlock[]): string {
-  return text.trim().replace(/\n{2,}/g, " ");
-}
-
-function getRenderableBlocks(blocks: GenUIBlock[]): GenUIBlock[] {
-  return blocks.reduce<GenUIBlock[]>((result, block) => {
-    if (block.type !== "text") {
-      result.push(block);
-      return result;
-    }
-
-    const content = trimStructuredTextContent(block.content, blocks);
-    if (!content) {
-      return result;
-    }
-
-    result.push({
-      ...block,
-      content,
-    });
-    return result;
-  }, []);
-}
-
-function summarizeAssistantBlocks(blocks: GenUIBlock[]): string {
-  const textBlocks = getRenderableBlocks(blocks)
-    .filter((block): block is GenUITextBlock => block.type === "text")
-    .map((block) => block.content.trim())
-    .filter(Boolean);
-
-  if (textBlocks.length > 0) {
-    return textBlocks.join("\n\n");
-  }
-
-  for (const block of blocks) {
-    if (block.type === "choice" && block.question.trim()) {
-      return block.question.trim();
-    }
-
-    if (block.type === "list") {
-      if (typeof block.title === "string" && block.title.trim()) {
-        return block.title.trim();
-      }
-
-      const firstItem = block.items.find((item) => isRecord(item) && typeof item.title === "string" && item.title.trim());
-      if (firstItem && typeof firstItem.title === "string") {
-        return firstItem.title.trim();
-      }
-    }
-
-    if (block.type === "entity-card" && block.title.trim()) {
-      return block.title.trim();
-    }
-
-    if (block.type === "form" && typeof block.title === "string" && block.title.trim()) {
-      return block.title.trim();
-    }
-
-    if (block.type === "cta-group" && block.items.length > 0) {
-      return block.items[0]?.label?.trim() || "";
-    }
-
-    if (block.type === "alert" && block.message.trim()) {
-      return block.message.trim();
-    }
-  }
-
-  return "";
-}
-
-function extractRecordText(record: ChatRecord): string {
-  if (record.role === "user") {
-    return record.text.trim();
-  }
-
-  if (record.response) {
-    return summarizeAssistantBlocks(record.response.response.blocks);
-  }
-
-  if (typeof record.error === "string" && record.error.trim()) {
-    return record.error.trim();
-  }
-
-  return "";
-}
-
-function buildRecentMessages(records: ChatRecord[]): LocalGenUIRecentMessage[] {
-  return records
-    .slice(-MAX_TRANSIENT_TURNS)
-    .map((record): LocalGenUIRecentMessage | null => {
-      const text = extractRecordText(record);
-      if (!text) {
-        return null;
-      }
-
-      if (record.role === "user") {
-        return {
-          messageId: record.id,
-          role: "user",
-          text,
-          ...(record.structuredAction
-            ? {
-                action: record.structuredAction.action,
-                actionId: record.structuredAction.actionId,
-                ...(record.structuredAction.params ? { params: record.structuredAction.params } : {}),
-                ...(record.structuredAction.source ? { source: record.structuredAction.source } : {}),
-                ...(record.structuredAction.displayText ? { displayText: record.structuredAction.displayText } : {}),
-              }
-            : {}),
-        };
-      }
-
-      const primaryBlockType = record.response
-        ? resolvePrimaryBlockType(record.response.response.blocks)
-        : null;
-
-      return {
-        messageId: record.id,
-        role: "assistant",
-        text,
-        ...(primaryBlockType !== undefined ? { primaryBlockType } : {}),
-        ...(record.response?.response.suggestions ? { suggestions: record.response.response.suggestions } : {}),
-      };
-    })
-    .filter((turn): turn is LocalGenUIRecentMessage => Boolean(turn));
-}
-
-function isGenUIAlertLevel(value: unknown): value is GenUIAlertBlock["level"] {
-  return value === "info" || value === "warning" || value === "error" || value === "success";
-}
-
-function isGenUIResponseStatus(value: unknown): value is GenUIResponseEnvelope["response"]["status"] {
-  return value === "streaming" || value === "completed" || value === "error";
-}
-
-function isGenUIChoiceOption(value: unknown): value is GenUIChoiceOption {
-  return (
-    isRecord(value) &&
-    typeof value.label === "string" &&
-    typeof value.action === "string" &&
-    (value.params === undefined || isRecord(value.params))
-  );
-}
-
-function isGenUICtaItem(value: unknown): value is GenUICtaItem {
-  return (
-    isRecord(value) &&
-    typeof value.label === "string" &&
-    typeof value.action === "string" &&
-    (value.params === undefined || isRecord(value.params))
-  );
-}
-
-function isGenUIBlock(value: unknown): value is GenUIBlock {
-  if (!isRecord(value) || typeof value.blockId !== "string") {
-    return false;
-  }
-
-  if (value.dedupeKey !== undefined && typeof value.dedupeKey !== "string") {
-    return false;
-  }
-
-  if (
-    value.replacePolicy !== undefined &&
-    value.replacePolicy !== "append" &&
-    value.replacePolicy !== "replace" &&
-    value.replacePolicy !== "ignore-if-exists"
-  ) {
-    return false;
-  }
-
-  if (value.meta !== undefined && !isRecord(value.meta)) {
-    return false;
-  }
-
-  switch (value.type) {
-    case "text":
-      return typeof value.content === "string";
-    case "choice":
-      return typeof value.question === "string" && Array.isArray(value.options) && value.options.every(isGenUIChoiceOption);
-    case "entity-card":
-      return typeof value.title === "string" && isRecord(value.fields);
-    case "list":
-      return (
-        (value.title === undefined || typeof value.title === "string") &&
-        Array.isArray(value.items) &&
-        value.items.every(isRecord)
-      );
-    case "form":
-      return (
-        (value.title === undefined || typeof value.title === "string") &&
-        isRecord(value.schema) &&
-        (value.initialValues === undefined || isRecord(value.initialValues))
-      );
-    case "cta-group":
-      return Array.isArray(value.items) && value.items.every(isGenUICtaItem);
-    case "alert":
-      return isGenUIAlertLevel(value.level) && typeof value.message === "string";
-    default:
-      return false;
-  }
-}
-
-function isGenUITextBlock(block: GenUIBlock): block is GenUITextBlock {
-  return block.type === "text";
-}
-
-function isGenUISuggestions(value: unknown): value is NonNullable<GenUIResponseEnvelope["response"]["suggestions"]> {
-  if (!isRecord(value) || typeof value.kind !== "string") {
-    return false;
-  }
-
-  if (value.kind === "choice") {
-    return Array.isArray(value.options);
-  }
-
-  if (value.kind === "list") {
-    return Array.isArray(value.items);
-  }
-
-  if (value.kind === "cta-group") {
-    return Array.isArray(value.items);
-  }
-
-  return false;
-}
-
-function isGenUIResponseEnvelope(value: unknown): value is GenUIResponseEnvelope {
-  if (!isRecord(value) || typeof value.traceId !== "string" || typeof value.conversationId !== "string") {
-    return false;
-  }
-
-  if (!isRecord(value.response)) {
-    return false;
-  }
-
-  return (
-    typeof value.response.responseId === "string" &&
-    value.response.role === "assistant" &&
-    isGenUIResponseStatus(value.response.status) &&
-    Array.isArray(value.response.blocks) &&
-    value.response.blocks.every(isGenUIBlock)
-  );
-}
-
-function readStoredConversationText(content: unknown): string {
-  if (typeof content === "string") {
-    return content.trim();
-  }
-
-  if (!isRecord(content)) {
-    return "";
-  }
-
-  if (typeof content.text === "string" && content.text.trim()) {
-    return content.text.trim();
-  }
-
-  if (typeof content.message === "string" && content.message.trim()) {
-    return content.message.trim();
-  }
-
-  return "";
-}
-
-function buildEnvelopeFromStoredAssistantMessage(params: {
-  conversationId: string;
-  messageId: string;
-  content: unknown;
-}): GenUIResponseEnvelope | null {
-  if (isRecord(params.content) && isRecord(params.content.response)) {
-    const storedResponse = params.content.response;
-    const blocks = Array.isArray(storedResponse.blocks) ? storedResponse.blocks.filter(isGenUIBlock) : [];
-
-    if (blocks.length > 0) {
-      return {
-        traceId:
-          typeof storedResponse.traceId === "string" && storedResponse.traceId.trim()
-            ? storedResponse.traceId
-            : `history_trace_${params.messageId}`,
-        conversationId: params.conversationId,
-        response: {
-          responseId:
-            typeof storedResponse.responseId === "string" && storedResponse.responseId.trim()
-              ? storedResponse.responseId
-              : `history_response_${params.messageId}`,
-          role: "assistant",
-          status: isGenUIResponseStatus(storedResponse.status) ? storedResponse.status : "completed",
-          ...(isGenUISuggestions(storedResponse.suggestions) ? { suggestions: storedResponse.suggestions } : {}),
-          blocks,
-        },
-      };
-    }
-  }
-
-  const text = readStoredConversationText(params.content);
-  if (!text) {
-    return null;
-  }
-
-  return {
-    traceId: `history_trace_${params.messageId}`,
-    conversationId: params.conversationId,
-    response: {
-      responseId: `history_response_${params.messageId}`,
-      role: "assistant",
-      status: "completed",
-      blocks: [
-        {
-          blockId: `${params.messageId}_text`,
-          type: "text",
-          content: text,
-        },
-      ],
-    },
-  };
-}
-
-function buildChatRecordFromStoredMessage(
-  conversationId: string,
-  item: StoredConversationMessage
-): ChatRecord | null {
-  if (item.role === "user") {
-    const text = readStoredConversationText(item.content);
-    if (!text) {
-      return null;
-    }
-
-    const structuredAction =
-      item.type === "user_action" && isRecord(item.content) && typeof item.content.action === "string"
-        ? {
-            action: item.content.action,
-            actionId: item.id,
-            ...(isRecord(item.content.payload) ? { params: item.content.payload } : {}),
-            ...(typeof item.content.source === "string" ? { source: item.content.source } : {}),
-            displayText: text,
-          }
-        : undefined;
-
-    return {
-      id: item.id,
-      role: "user",
-      text,
-      ...(structuredAction ? { structuredAction } : {}),
-    };
-  }
-
-  const response = buildEnvelopeFromStoredAssistantMessage({
-    conversationId,
-    messageId: item.id,
-    content: item.content,
-  });
-  if (!response) {
-    return null;
-  }
-
-  return {
-    id: item.id,
-    role: "assistant",
-    response,
-  };
-}
-
 function extractWelcomePrompts(payload: unknown): WelcomePromptEntry[] {
   if (!isRecord(payload) || !Array.isArray(payload.quickPrompts)) {
     return [];
@@ -1328,24 +718,6 @@ function extractWelcomeUi(payload: unknown): WelcomeUiPayload {
   };
 }
 
-function upsertBlockWithMode(
-  blocks: GenUIBlock[],
-  block: GenUIBlock,
-  mode: "append" | "replace"
-): { blocks: GenUIBlock[]; index: number } {
-  if (mode === "replace") {
-    const targetIndex = blocks.findIndex((item) => item.blockId === block.blockId);
-    if (targetIndex >= 0) {
-      const nextBlocks = [...blocks];
-      nextBlocks[targetIndex] = block;
-      return { blocks: nextBlocks, index: targetIndex };
-    }
-  }
-
-  const nextBlocks = [...blocks, block];
-  return { blocks: nextBlocks, index: nextBlocks.length - 1 };
-}
-
 function isRuntimeHomeState(value: unknown): value is RuntimeHomeState {
   return value === "H0" || value === "H1" || value === "H2" || value === "H3" || value === "H4";
 }
@@ -1450,10 +822,7 @@ function readActivityContextOverridesFromTaskAction(
 }
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState<ChatRecord[]>([]);
-  const [conversationId, setConversationId] = useState<string | null>(null);
-  const [input, setInput] = useState("");
-  const [status, setStatus] = useState<ComposerStatus>("ready");
+  const clientLocationRef = useRef<{ lat: number; lng: number } | null>(null);
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [quickPrompts, setQuickPrompts] = useState<WelcomePromptEntry[]>(DEFAULT_PROMPT_ENTRIES);
   const [welcomeGreeting, setWelcomeGreeting] = useState(DEFAULT_WELCOME_GREETING);
@@ -1481,8 +850,68 @@ export default function ChatPage() {
   const requestedWelcomeKeyRef = useRef<string | null>(null);
   const lastHandledDiscussionUpdateAtRef = useRef(0);
 
-  const isSending = status === "submitted";
-  const showComposerHint = shouldExpandComposer(input);
+  const applyCompletionEffectsFromBlocks = useCallback((blocks: GenUIBlock[]) => {
+    for (const block of blocks) {
+      if (block.type !== "alert") {
+        continue;
+      }
+
+      const meta = isRecord(block.meta) ? block.meta : null;
+      const authRequiredMeta = isRecord(meta?.authRequired) ? meta.authRequired : null;
+      if (authRequiredMeta) {
+        const pendingAction = readStructuredPendingAction(authRequiredMeta.pendingAction);
+        const authMode = authRequiredMeta.mode === "login" || authRequiredMeta.mode === "bind_phone"
+          ? authRequiredMeta.mode
+          : null;
+        if (pendingAction) {
+          setPendingAgentAction({
+            action: {
+              ...pendingAction,
+              ...(authMode ? { authMode } : {}),
+            },
+            ...(block.message.trim() ? { message: block.message.trim() } : {}),
+          });
+          setPendingActionNotice(null);
+        }
+        return;
+      }
+
+      if (meta?.navigationIntent === "open_discussion") {
+        const payload = readDiscussionNavigationPayload(meta.navigationPayload);
+        if (payload && typeof window !== "undefined") {
+          const entry = resolveActivityEntry(payload.entry, payload.source ?? "join_success");
+          window.setTimeout(() => {
+            window.location.href = buildActivityDetailPath(payload.activityId, { entry });
+          }, 360);
+        }
+        return;
+      }
+
+      if (meta?.navigationIntent === "open_message_center") {
+        const focusIntent = readMessageCenterFocusIntent(meta.navigationPayload);
+        setMessageCenterFocusMatchId(focusIntent?.matchId ?? null);
+        setMessageCenterOpenSignal((value) => value + 1);
+        return;
+      }
+    }
+  }, []);
+
+  const chat = useXuChat({
+    getClientLocation: () => clientLocationRef.current,
+    onFinish: (envelope: GenUIResponseEnvelope) => {
+      applyCompletionEffectsFromBlocks(envelope.response.blocks);
+      void refreshCurrentTasks();
+    },
+  });
+
+  const isSending = chat.isSending;
+  const showComposerHint = shouldExpandComposer(chat.input);
+  const messages = chat.messages;
+  const input = chat.input;
+  const setInput = chat.setInput;
+  const conversationId = chat.conversationId;
+  const sendText = chat.sendText;
+  const sendAction = chat.sendAction;
   const currentUserId = useMemo(() => readClientUserId(authToken), [authToken]);
   const visibleCurrentTasks = useMemo(() => currentTasks.slice(0, 1), [currentTasks]);
   const visibleWelcomeFocus = useMemo(
@@ -1642,21 +1071,14 @@ export default function ChatPage() {
   }, [authToken, clientLocation, welcomeLocationResolved]);
 
   const handleStartNewConversation = useCallback(() => {
-    if (isSending) {
-      return;
-    }
-
-    setMessages([]);
-    setConversationId(null);
-    setInput("");
-    setStatus("ready");
+    chat.startNewConversation();
     setPendingActionNotice(null);
     setMessageCenterFocusMatchId(null);
-  }, [isSending]);
+  }, [chat]);
 
   const handleSelectConversation = useCallback(
     async (targetConversationId: string) => {
-      if (isSending || !authToken || !currentUserId) {
+      if (chat.isSending || !authToken || !currentUserId) {
         return;
       }
 
@@ -1678,17 +1100,14 @@ export default function ChatPage() {
       const payload = (await response.json()) as StoredConversationMessagesPayload;
       const nextMessages = [...payload.items]
         .reverse()
-        .map((item) => buildChatRecordFromStoredMessage(payload.conversationId, item))
-        .filter((item): item is ChatRecord => item !== null);
+        .map((item) => buildChatStreamMessageFromStoredMessage(payload.conversationId, item))
+        .filter((item): item is ChatStreamMessage => item !== null);
 
-      setMessages(nextMessages);
-      setConversationId(payload.conversationId);
-      setInput("");
-      setStatus("ready");
+      chat.selectConversation(nextMessages, payload.conversationId);
       setPendingActionNotice(null);
       setMessageCenterFocusMatchId(null);
     },
-    [authToken, currentUserId, isSending]
+    [authToken, currentUserId, chat]
   );
 
   useEffect(() => {
@@ -1740,10 +1159,12 @@ export default function ChatPage() {
 
         settled = true;
         window.clearTimeout(fallbackTimer);
-        setClientLocation({
+        const loc = {
           lat: position.coords.latitude,
           lng: position.coords.longitude,
-        });
+        };
+        clientLocationRef.current = loc;
+        setClientLocation(loc);
         setWelcomeLocationResolved(true);
       },
       () => {
@@ -1881,506 +1302,6 @@ export default function ChatPage() {
     };
   }, [refreshCurrentTasks, refreshWelcomeSnapshot]);
 
-  const applyCompletionEffectsFromBlocks = useCallback((blocks: GenUIBlock[]) => {
-    for (const block of blocks) {
-      if (block.type !== "alert") {
-        continue;
-      }
-
-      const meta = isRecord(block.meta) ? block.meta : null;
-      const authRequiredMeta = isRecord(meta?.authRequired) ? meta.authRequired : null;
-      if (authRequiredMeta) {
-        const pendingAction = readStructuredPendingAction(authRequiredMeta.pendingAction);
-        const authMode = authRequiredMeta.mode === "login" || authRequiredMeta.mode === "bind_phone"
-          ? authRequiredMeta.mode
-          : null;
-        if (pendingAction) {
-          setPendingAgentAction({
-            action: {
-              ...pendingAction,
-              ...(authMode ? { authMode } : {}),
-            },
-            ...(block.message.trim() ? { message: block.message.trim() } : {}),
-          });
-          setPendingActionNotice(null);
-        }
-        return;
-      }
-
-      if (meta?.navigationIntent === "open_discussion") {
-        const payload = readDiscussionNavigationPayload(meta.navigationPayload);
-        if (payload && typeof window !== "undefined") {
-          const entry = resolveActivityEntry(payload.entry, payload.source ?? "join_success");
-          window.setTimeout(() => {
-            window.location.href = buildActivityDetailPath(payload.activityId, { entry });
-          }, 360);
-        }
-        return;
-      }
-
-      if (meta?.navigationIntent === "open_message_center") {
-        const focusIntent = readMessageCenterFocusIntent(meta.navigationPayload);
-        setMessageCenterFocusMatchId(focusIntent?.matchId ?? null);
-        setMessageCenterOpenSignal((value) => value + 1);
-        return;
-      }
-    }
-  }, []);
-
-
-  const sendChatRequest = useCallback(
-    async (
-      nextInput: GenUIInput,
-      userDisplayText: string,
-      contextOverrides?: ActivityContextOverrides
-    ) => {
-      if (isSending) {
-        return;
-      }
-
-      const userMessageId = randomId("user");
-      const assistantMessageId = randomId("assistant");
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: userMessageId,
-          role: "user",
-          text: userDisplayText,
-          ...(nextInput.type === "action"
-            ? {
-                structuredAction: {
-                  action: nextInput.action,
-                  actionId: nextInput.actionId,
-                  ...(isRecord(nextInput.params) ? { params: nextInput.params } : {}),
-                  ...(typeof contextOverrides?.entry === "string"
-                    ? { source: contextOverrides.entry }
-                    : isRecord(nextInput.params) && typeof nextInput.params.source === "string"
-                      ? { source: nextInput.params.source }
-                      : {}),
-                  ...(typeof nextInput.displayText === "string" ? { displayText: nextInput.displayText } : {}),
-                },
-              }
-            : {}),
-        },
-        {
-          id: assistantMessageId,
-          role: "assistant",
-          pending: true,
-        },
-      ]);
-      setStatus("submitted");
-
-      let uiChunkController: ReadableStreamDefaultController<ChatStreamChunk> | null =
-        null;
-      let uiMessageReader: Promise<void> | null = null;
-      let closeUiChunkStream = () => {};
-      let errorUiChunkStream = (_reason: unknown) => {};
-
-      try {
-        const streamState: { envelope: GenUIResponseEnvelope | null } = {
-          envelope: null,
-        };
-
-        const patchAssistantMessage = (
-          updater: (message: AssistantRecord) => AssistantRecord
-        ) => {
-          setMessages((prev) =>
-            prev.map((message) => {
-              if (message.id !== assistantMessageId || message.role !== "assistant") {
-                return message;
-              }
-              return updater(message);
-            })
-          );
-        };
-
-        const applyEnvelope = (nextEnvelope: GenUIResponseEnvelope, pending = true) => {
-          streamState.envelope = nextEnvelope;
-          patchAssistantMessage(() => ({
-            id: assistantMessageId,
-            role: "assistant",
-            pending,
-            response: nextEnvelope,
-          }));
-        };
-
-        const effectiveAuthToken = authToken ?? readClientToken();
-        const recentMessages = !effectiveAuthToken ? buildRecentMessages(messages) : undefined;
-        const headers: Record<string, string> = {
-          "Content-Type": "application/json",
-        };
-        if (effectiveAuthToken) {
-          headers.Authorization = `Bearer ${effectiveAuthToken}`;
-        }
-
-        const response = await fetch(`${API_BASE}/ai/chat`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            ...(conversationId ? { conversationId } : {}),
-            input: nextInput,
-            trace: false,
-            context: {
-              client: "web",
-              locale: "zh-CN",
-              timezone: "Asia/Shanghai",
-              platformVersion: "web-vnext",
-              ...(clientLocation
-                ? {
-                    lat: clientLocation.lat,
-                    lng: clientLocation.lng,
-                  }
-                : {}),
-              ...(recentMessages && recentMessages.length > 0
-                ? {
-                    recentMessages,
-                  }
-                : {}),
-              ...(contextOverrides || {}),
-            },
-          }),
-        });
-
-        if (!response.ok || !response.body) {
-          throw new Error(await readChatResponseErrorMessage(response));
-        }
-
-        const uiStreamState: {
-          metadata: ChatStreamMessageMetadata;
-          started: boolean;
-          textPartStarted: boolean;
-          assistantText: string;
-          textBlocks: GenUITextBlock[];
-        } = {
-          metadata: {
-            traceId: randomId("trace"),
-            conversationId: conversationId ?? randomId("conv"),
-            responseId: randomId("turn"),
-            status: "streaming",
-          },
-          started: false,
-          textPartStarted: false,
-          assistantText: "",
-          textBlocks: [],
-        };
-        const uiChunkStream = new ReadableStream<ChatStreamChunk>({
-          start(controller) {
-            uiChunkController = controller;
-            closeUiChunkStream = () => {
-              controller.close();
-            };
-            errorUiChunkStream = (reason) => {
-              controller.error(reason);
-            };
-          },
-        });
-        const enqueueChunk = (chunk: ChatStreamChunk) => {
-          uiChunkController?.enqueue(chunk);
-        };
-        const startAssistantUiMessage = () => {
-          if (uiStreamState.started) {
-            return;
-          }
-
-          enqueueChunk({
-            type: "start",
-            messageId: assistantMessageId,
-            messageMetadata: uiStreamState.metadata,
-          });
-          uiStreamState.started = true;
-        };
-        const updateAssistantUiMetadata = (
-          patch: Partial<ChatStreamMessageMetadata>
-        ) => {
-          uiStreamState.metadata = {
-            ...uiStreamState.metadata,
-            ...patch,
-          };
-          startAssistantUiMessage();
-          enqueueChunk({
-            type: "message-metadata",
-            messageMetadata: uiStreamState.metadata,
-          });
-        };
-        const ensureTextPartStarted = () => {
-          if (uiStreamState.textPartStarted) {
-            return;
-          }
-
-          startAssistantUiMessage();
-          enqueueChunk({
-            type: "text-start",
-            id: `${assistantMessageId}_text`,
-          });
-          uiStreamState.textPartStarted = true;
-        };
-        const syncAssistantTextBlock = async (
-          block: GenUITextBlock,
-          mode: "append" | "replace"
-        ) => {
-          uiStreamState.textBlocks = upsertBlockWithMode(
-            uiStreamState.textBlocks,
-            block,
-            mode
-          ).blocks.filter((item): item is GenUITextBlock => item.type === "text");
-
-          const nextAssistantText = uiStreamState.textBlocks
-            .map((item) => item.content)
-            .filter(Boolean)
-            .join("\n\n");
-
-          if (nextAssistantText === uiStreamState.assistantText) {
-            return;
-          }
-
-          if (!nextAssistantText.startsWith(uiStreamState.assistantText)) {
-            uiStreamState.assistantText = nextAssistantText;
-            updateAssistantUiMetadata({
-              assistantTextOverride: nextAssistantText,
-            });
-            return;
-          }
-
-          const deltaText = nextAssistantText.slice(uiStreamState.assistantText.length);
-          if (!deltaText) {
-            return;
-          }
-
-          ensureTextPartStarted();
-          await enqueueSimulatedTextDeltaChunks(enqueueChunk, {
-            textPartId: `${assistantMessageId}_text`,
-            deltaText,
-          });
-          uiStreamState.assistantText = nextAssistantText;
-        };
-        const appendStructuredBlockToUiMessage = (
-          block: GenUIBlock,
-          mode: "append" | "replace"
-        ) => {
-          startAssistantUiMessage();
-          enqueueChunk({
-            type: "data-genui_block",
-            id: block.blockId,
-            data: {
-              block,
-              mode,
-            },
-          });
-        };
-        uiMessageReader = (async () => {
-          for await (const streamMessage of readUIMessageStream<ChatStreamMessage>({
-            stream: uiChunkStream,
-            terminateOnError: true,
-          })) {
-            const nextEnvelope = buildEnvelopeFromStreamMessage(streamMessage);
-            setConversationId(nextEnvelope.conversationId);
-            // v5.5: 一旦有内容（特别是文字），立即隐藏 loading，打字机效果和 loading 互斥
-            const hasTextContent = nextEnvelope.response.blocks.some(
-              (b) => b.type === "text" && typeof b.content === "string" && b.content.trim().length > 0
-            );
-            applyEnvelope(nextEnvelope, !hasTextContent && nextEnvelope.response.status !== "completed");
-          }
-        })();
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let sawResponseComplete = false;
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) {
-            break;
-          }
-
-          buffer += decoder.decode(value, { stream: true });
-
-          let separatorIndex = buffer.indexOf("\n\n");
-          while (separatorIndex >= 0) {
-            const packet = buffer.slice(0, separatorIndex);
-            buffer = buffer.slice(separatorIndex + 2);
-
-            const parsed = parseSSEPacket(packet);
-            if (!parsed || !parsed.dataText) {
-              separatorIndex = buffer.indexOf("\n\n");
-              continue;
-            }
-
-            if (parsed.dataText === "[DONE]") {
-              separatorIndex = buffer.indexOf("\n\n");
-              continue;
-            }
-
-            let payload: unknown = parsed.dataText;
-            try {
-              payload = JSON.parse(parsed.dataText);
-            } catch {
-              payload = { raw: parsed.dataText };
-            }
-
-            const eventName =
-              isRecord(payload) && typeof payload.event === "string"
-                ? payload.event
-                : parsed.eventName;
-            const eventData = readStreamEventData(payload);
-
-            if (eventName === "response-start" && isRecord(eventData)) {
-              const traceId =
-                typeof eventData.traceId === "string"
-                  ? eventData.traceId
-                  : randomId("trace");
-              const streamConversationId =
-                typeof eventData.conversationId === "string"
-                  ? eventData.conversationId
-                  : conversationId ?? randomId("conv");
-              const responseId =
-                typeof eventData.responseId === "string"
-                  ? eventData.responseId
-                  : randomId("response");
-
-              setConversationId(streamConversationId);
-              updateAssistantUiMetadata({
-                traceId,
-                conversationId: streamConversationId,
-                responseId,
-                status: "streaming",
-                assistantTextOverride: undefined,
-              });
-            }
-
-            if (
-              (eventName === "block-append" || eventName === "block-replace") &&
-              isRecord(eventData) &&
-              isGenUIBlock(eventData.block)
-            ) {
-              const block = eventData.block;
-              const mode = eventName === "block-replace" ? "replace" : "append";
-              if (block.type === "text") {
-                await syncAssistantTextBlock(block, mode);
-              } else {
-                appendStructuredBlockToUiMessage(block, mode);
-              }
-            }
-
-            if (eventName === "response-status" && isRecord(eventData)) {
-              const statusText =
-                eventData.status === "streaming" ||
-                eventData.status === "completed" ||
-                eventData.status === "error"
-                  ? eventData.status
-                  : null;
-              if (statusText) {
-                updateAssistantUiMetadata({
-                  status: statusText,
-                });
-              }
-            }
-
-            if (eventName === "response-complete" && isGenUIResponseEnvelope(eventData)) {
-              const completeEnvelope = eventData;
-              sawResponseComplete = true;
-              setConversationId(completeEnvelope.conversationId);
-              updateAssistantUiMetadata({
-                traceId: completeEnvelope.traceId,
-                conversationId: completeEnvelope.conversationId,
-                responseId: completeEnvelope.response.responseId,
-                status: completeEnvelope.response.status,
-                suggestions: completeEnvelope.response.suggestions,
-              });
-
-              const finalAssistantText = completeEnvelope.response.blocks
-                .filter((block): block is GenUITextBlock => block.type === "text")
-                .map((block) => block.content)
-                .filter(Boolean)
-                .join("\n\n");
-              if (
-                finalAssistantText &&
-                finalAssistantText !== uiStreamState.assistantText
-              ) {
-                if (finalAssistantText.startsWith(uiStreamState.assistantText)) {
-                  ensureTextPartStarted();
-                  await enqueueSimulatedTextDeltaChunks(enqueueChunk, {
-                    textPartId: `${assistantMessageId}_text`,
-                    deltaText: finalAssistantText.slice(uiStreamState.assistantText.length),
-                  });
-                } else {
-                  updateAssistantUiMetadata({
-                    assistantTextOverride: finalAssistantText,
-                  });
-                }
-                uiStreamState.assistantText = finalAssistantText;
-              }
-            }
-
-            if (eventName === "response-error" && isRecord(eventData)) {
-              const message =
-                typeof eventData.message === "string"
-                  ? normalizeChatErrorMessage(eventData.message)
-                  : "生成失败，请稍后再试";
-              throw new Error(message);
-            }
-
-            separatorIndex = buffer.indexOf("\n\n");
-          }
-        }
-
-        if (!sawResponseComplete) {
-          updateAssistantUiMetadata({
-            status: "completed",
-          });
-        }
-
-        if (uiStreamState.textPartStarted) {
-          enqueueChunk({
-            type: "text-end",
-            id: `${assistantMessageId}_text`,
-          });
-        }
-        startAssistantUiMessage();
-        enqueueChunk({
-          type: "finish",
-          finishReason: "stop",
-          messageMetadata: uiStreamState.metadata,
-        });
-        closeUiChunkStream();
-        await uiMessageReader;
-
-        const completedEnvelope = streamState.envelope;
-        if (completedEnvelope) {
-          applyEnvelope(completedEnvelope, false);
-          applyCompletionEffectsFromBlocks(completedEnvelope.response.blocks);
-          void refreshCurrentTasks(effectiveAuthToken);
-        }
-      } catch (error) {
-        errorUiChunkStream(error);
-        if (uiMessageReader) {
-          await uiMessageReader.catch(() => undefined);
-        }
-
-        const errorMessage = normalizeChatErrorMessage(
-          error instanceof Error ? error.message : "请求失败，请稍后再试"
-        );
-
-        setMessages((prev) =>
-          prev.map((message) =>
-            message.id === assistantMessageId
-              ? {
-                  id: assistantMessageId,
-                  role: "assistant",
-                  pending: false,
-                  error: errorMessage,
-                }
-              : message
-          )
-        );
-      } finally {
-        setStatus("ready");
-      }
-    },
-    [applyCompletionEffectsFromBlocks, authToken, clientLocation, conversationId, isSending, messages, refreshCurrentTasks]
-  );
-
   const resumeStructuredPendingAction = useCallback(async () => {
     const nextToken = readClientToken();
     if (!pendingAgentAction) {
@@ -2401,17 +1322,12 @@ export default function ChatPage() {
     setPendingAgentAction(null);
     setPendingActionNotice(null);
 
-    await sendChatRequest(
-      {
-        type: "action",
-        action: actionToResume.action,
-        actionId: randomId("action"),
-        params: actionToResume.payload,
-        displayText: actionToResume.originalText || "继续刚才那步",
-      },
-      actionToResume.originalText || "继续刚才那步"
-    );
-  }, [pendingAgentAction, sendChatRequest]);
+    await sendAction({
+      label: actionToResume.originalText || "继续刚才那步",
+      action: actionToResume.action,
+      params: actionToResume.payload,
+    });
+  }, [pendingAgentAction, sendAction]);
 
   useEffect(() => {
     if (!authToken || !pendingAgentAction || isSending || hasResumedPendingActionRef.current) {
@@ -2432,15 +1348,9 @@ export default function ChatPage() {
       }
 
       setInput("");
-      await sendChatRequest(
-        {
-          type: "text",
-          text: value,
-        },
-        value
-      );
+      await sendText(value);
     },
-    [isSending, sendChatRequest]
+    [isSending, sendText, setInput]
   );
 
   const handleActionSelect = useCallback(
@@ -2449,18 +1359,9 @@ export default function ChatPage() {
         return;
       }
 
-      await sendChatRequest(
-        {
-          type: "action",
-          action: option.action,
-          actionId: randomId("action"),
-          params: option.params,
-          displayText: option.label,
-        },
-        option.label
-      );
+      await sendAction(option);
     },
-    [isSending, sendChatRequest]
+    [isSending, sendAction]
   );
 
   const handleRuntimeTaskAction = useCallback(
@@ -2518,14 +1419,7 @@ export default function ChatPage() {
           return;
         }
 
-        await sendChatRequest(
-          {
-            type: "text",
-            text: prompt,
-          },
-          taskAction.originalText || taskAction.label,
-          readActivityContextOverridesFromTaskAction(taskAction)
-        );
+        await sendText(prompt, readActivityContextOverridesFromTaskAction(taskAction));
         return;
       }
 
@@ -2533,18 +1427,13 @@ export default function ChatPage() {
         return;
       }
 
-      await sendChatRequest(
-        {
-          type: "action",
-          action: taskAction.action,
-          actionId: randomId("action"),
-          params: taskAction.payload,
-          displayText: taskAction.originalText || taskAction.label,
-        },
-        taskAction.originalText || taskAction.label
-      );
+      await sendAction({
+        label: taskAction.originalText || taskAction.label,
+        action: taskAction.action,
+        params: taskAction.payload,
+      });
     },
-    [isSending, sendChatRequest]
+    [isSending, sendText, sendAction]
   );
 
   return (
@@ -2569,15 +1458,8 @@ export default function ChatPage() {
           onTaskStateChanged={() => {
             void refreshCurrentTasks();
           }}
-          onSendPrompt={async (prompt, displayText, contextOverrides) => {
-            await sendChatRequest(
-              {
-                type: "text",
-                text: prompt,
-              },
-              displayText || prompt,
-              contextOverrides
-            );
+          onSendPrompt={async (prompt, _displayText, contextOverrides) => {
+            await sendText(prompt, contextOverrides);
           }}
         />
 
@@ -2782,13 +1664,7 @@ export default function ChatPage() {
                                 return;
                               }
 
-                              void sendChatRequest(
-                                {
-                                  type: "text",
-                                  text: visibleWelcomeFocus.prompt,
-                                },
-                                visibleWelcomeFocus.prompt
-                              );
+                              void sendText(visibleWelcomeFocus.prompt);
                             }}
                             className={cn(
                               "mb-7 inline-flex max-w-[300px] items-center gap-2 rounded-full border px-3.5 py-1.5 text-[12px] font-medium tracking-[-0.01em] backdrop-blur-md transition-all",
@@ -2974,21 +1850,15 @@ export default function ChatPage() {
                             key={`${entry.action ?? "prompt"}-${entry.prompt}`}
                             type="button"
                             onClick={() => {
-                              void sendChatRequest(
-                                entry.action
-                                  ? {
-                                      type: "action",
-                                      action: entry.action,
-                                      actionId: randomId("action"),
-                                      params: entry.params,
-                                      displayText: entry.prompt,
-                                    }
-                                  : {
-                                      type: "text",
-                                      text: entry.prompt,
-                                    },
-                                entry.prompt
-                              );
+                              if (entry.action) {
+                                void sendAction({
+                                  label: entry.prompt,
+                                  action: entry.action,
+                                  params: entry.params,
+                                });
+                              } else {
+                                void sendText(entry.prompt);
+                              }
                             }}
                             className={cn(
                               "mx-auto flex w-full max-w-[348px] items-center gap-3.5 rounded-[26px] border px-5 py-4.5 text-left text-[17px] backdrop-blur-md transition-all duration-200",
@@ -3031,19 +1901,42 @@ export default function ChatPage() {
             >
               {messages.map((message, index) => {
                 if (message.role === "user") {
-                  return <UserMessage key={message.id} text={message.text} />;
+                  const text = extractUIMessageText(message);
+                  return <UserMessage key={message.id} text={text} />;
                 }
 
+                const isLast = index === messages.length - 1;
                 return (
                   <AssistantMessage
                     key={message.id}
                     message={message}
-                    isLast={index === messages.length - 1}
+                    isLast={isLast}
                     disabled={isSending}
                     onActionSelect={handleActionSelect}
+                    errorMessage={
+                      isLast && chat.status === "error"
+                        ? chat.error?.message
+                        : undefined
+                    }
                   />
                 );
               })}
+              {chat.status === "submitted" && (
+                <Message from="assistant" className="w-full max-w-none pr-0">
+                  <MessageContent className="w-full overflow-visible rounded-none bg-transparent px-0 py-0 shadow-none">
+                    <ThinkingDots />
+                  </MessageContent>
+                </Message>
+              )}
+              {chat.status === "error" && messages[messages.length - 1]?.role === "user" && (
+                <Message from="assistant" className="w-full max-w-none pr-0">
+                  <MessageContent className={cn("w-full overflow-visible rounded-none bg-transparent px-0 py-0 shadow-none", isDarkMode ? "text-zinc-100" : "text-slate-900")}>
+                    <p className={cn("text-sm", isDarkMode ? "text-white/68" : "text-black/56")}>
+                      {normalizeChatErrorMessage(chat.error?.message || "请求失败，请稍后再试")}
+                    </p>
+                  </MessageContent>
+                </Message>
+              )}
             </ConversationContent>
           </Conversation>
         )}
@@ -3219,23 +2112,26 @@ function AssistantMessage({
   isLast,
   disabled,
   onActionSelect,
+  errorMessage,
 }: {
-  message: Extract<ChatRecord, { role: "assistant" }>;
+  message: ChatStreamMessage;
   isLast: boolean;
   disabled: boolean;
   onActionSelect: (option: ActionOption) => Promise<void>;
+  errorMessage?: string;
 }) {
   const isDarkMode = useChatTheme();
-  const renderableBlocks = message.response ? getRenderableBlocks(message.response.response.blocks) : [];
+  const envelope = buildEnvelopeFromStreamMessage(message);
+  const renderableBlocks = getRenderableBlocks(envelope.response.blocks);
   const hasRenderableBlocks = renderableBlocks.length > 0;
-  // 非最后一条消息或正在发送中时，禁用交互
   const isDisabled = disabled || !isLast;
+  const isPending = isLast && disabled && !hasRenderableBlocks;
 
   return (
     <Message from="assistant" className="w-full max-w-none pr-0">
       <MessageContent className={cn("w-full overflow-visible rounded-none bg-transparent px-0 py-0 shadow-none", isDarkMode ? "text-zinc-100" : "text-slate-900")}>
-        {message.error ? (
-          <p className={cn("text-sm", isDarkMode ? "text-white/68" : "text-black/56")}>{message.error}</p>
+        {errorMessage ? (
+          <p className={cn("text-sm", isDarkMode ? "text-white/68" : "text-black/56")}>{errorMessage}</p>
         ) : hasRenderableBlocks ? (
           <div className="space-y-3">
             {renderableBlocks.map((block) => (
@@ -3246,9 +2142,9 @@ function AssistantMessage({
                 onActionSelect={onActionSelect}
               />
             ))}
-            {message.pending && isLast ? <ThinkingDots /> : null}
+            {isPending ? <ThinkingDots /> : null}
           </div>
-        ) : message.pending && isLast ? (
+        ) : isPending ? (
           <ThinkingDots />
         ) : (
           <p className={cn("text-sm", isDarkMode ? "text-white/45" : "text-black/42")}>这条消息暂时没有可展示内容</p>

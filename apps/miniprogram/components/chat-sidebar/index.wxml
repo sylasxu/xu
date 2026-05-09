@@ -1,0 +1,119 @@
+<!--
+  对话侧边栏抽屉
+  - 用户资料卡
+  - 快捷操作行
+  - 按时间分组的历史会话列表
+-->
+<view wx:if="{{visible}}" class="chat-sidebar-overlay {{showContent ? 'show' : ''}}" bindtap="onOverlayTap"></view>
+
+<view wx:if="{{visible}}" class="chat-sidebar {{showContent ? 'show' : ''}}" catchtouchmove="preventTouchMove">
+  <!-- 用户资料卡 -->
+  <view class="chat-sidebar__profile" bindtap="onProfileTap">
+    <view class="chat-sidebar__avatar-wrap">
+      <image
+        wx:if="{{userAvatar}}"
+        class="chat-sidebar__avatar"
+        src="{{userAvatar}}"
+        mode="aspectFill"
+      />
+      <view wx:else class="chat-sidebar__avatar chat-sidebar__avatar--placeholder">
+        <t-icon name="user" size="40rpx" color="#94A3B8" />
+      </view>
+      <view class="chat-sidebar__badge">Pro</view>
+    </view>
+    <view class="chat-sidebar__profile-info">
+      <text class="chat-sidebar__nickname">{{userNickname}}</text>
+      <text class="chat-sidebar__subtitle">碎片化社交助理</text>
+    </view>
+    <view class="chat-sidebar__settings-btn" catchtap="onSettingsTap">
+      <t-icon name="setting" size="36rpx" color="#94A3B8" />
+    </view>
+  </view>
+
+  <!-- 快捷操作行 -->
+  <view class="chat-sidebar__quick-actions">
+    <view class="chat-sidebar__quick-btn" bindtap="onNewChatTap">
+      <view class="chat-sidebar__quick-icon">
+        <t-icon name="add" size="36rpx" color="#F1F5F9" />
+      </view>
+      <text class="chat-sidebar__quick-label">新对话</text>
+    </view>
+    <view class="chat-sidebar__quick-btn" bindtap="onProfileTap">
+      <view class="chat-sidebar__quick-icon">
+        <t-icon name="user" size="36rpx" color="#F1F5F9" />
+      </view>
+      <text class="chat-sidebar__quick-label">个人中心</text>
+    </view>
+    <view class="chat-sidebar__quick-btn" bindtap="onSettingsTap">
+      <view class="chat-sidebar__quick-icon">
+        <t-icon name="setting" size="36rpx" color="#F1F5F9" />
+      </view>
+      <text class="chat-sidebar__quick-label">设置</text>
+    </view>
+  </view>
+
+  <!-- 历史会话 Header -->
+  <view class="chat-sidebar__section-header">
+    <text class="chat-sidebar__section-title">历史会话</text>
+    <view class="chat-sidebar__search-wrap">
+      <t-icon name="search" size="28rpx" color="#64748B" />
+      <input
+        class="chat-sidebar__search-input"
+        placeholder="搜索会话"
+        placeholder-class="chat-sidebar__search-placeholder"
+        value="{{searchQuery}}"
+        bindinput="onSearchInput"
+      />
+      <view wx:if="{{searchQuery}}" class="chat-sidebar__search-clear" bindtap="onSearchClear">
+        <t-icon name="close-circle-filled" size="28rpx" color="#64748B" />
+      </view>
+    </view>
+  </view>
+
+  <!-- 会话列表 -->
+  <scroll-view
+    class="chat-sidebar__scroll"
+    scroll-y
+    enhanced
+    show-scrollbar="{{false}}"
+    bindscrolltolower="onLoadMore"
+  >
+    <block wx:if="{{conversationGroups.length > 0}}">
+      <block wx:for="{{conversationGroups}}" wx:for-item="group" wx:key="label">
+        <view class="chat-sidebar__group">
+          <text class="chat-sidebar__group-label">{{group.label}}</text>
+          <block wx:for="{{group.conversations}}" wx:for-item="conv" wx:key="id">
+            <view
+              class="chat-sidebar__conv-item"
+              data-id="{{conv.id}}"
+              bindtap="onConversationTap"
+              hover-class="chat-sidebar__conv-item--hover"
+            >
+              <view class="chat-sidebar__conv-icon">
+                <t-icon name="chat" size="28rpx" color="{{conv.hasError ? '#EF4444' : '#94A3B8'}}" />
+              </view>
+              <view class="chat-sidebar__conv-body">
+                <text class="chat-sidebar__conv-title {{conv.hasError ? 'chat-sidebar__conv-title--error' : ''}}">{{conv.title || '新对话'}}</text>
+                <text class="chat-sidebar__conv-meta">{{conv.messageCount}} 条消息</text>
+              </view>
+            </view>
+          </block>
+        </view>
+      </block>
+
+      <!-- 加载更多 -->
+      <view wx:if="{{isLoading}}" class="chat-sidebar__loading">
+        <t-loading theme="circular" size="32rpx" text="加载中..." />
+      </view>
+      <view wx:elif="{{!hasMore && conversations.length > 0}}" class="chat-sidebar__no-more">
+        <text>没有更多了</text>
+      </view>
+    </block>
+
+    <!-- 空状态 -->
+    <view wx:elif="{{!isLoading}}" class="chat-sidebar__empty">
+      <t-icon name="chat-bubble" size="64rpx" color="#334155" />
+      <text class="chat-sidebar__empty-text">暂无历史会话</text>
+    </view>
+  </scroll-view>
+</view>

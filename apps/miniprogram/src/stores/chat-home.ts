@@ -28,7 +28,7 @@ interface HomeState {
   error: string | null
   loadConversations: () => Promise<void>
   loadMoreConversations: () => Promise<void>
-  clearConversations: () => Promise<void>
+  deleteAllConversations: () => Promise<void>
   setError: (error: string | null) => void
 }
 
@@ -172,7 +172,7 @@ export const useChatHomeStore = createStore<HomeState>()(
         }
       },
 
-      clearConversations: async () => {
+      deleteAllConversations: async () => {
         set((draft) => {
           draft.isLoading = true
           draft.error = null

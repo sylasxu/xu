@@ -12,6 +12,7 @@
     "widget-skeleton": "/components/widget-skeleton/index",
     "agent-task-panel": "/components/agent-task-panel/index",
     "auth-sheet": "/components/auth-sheet/index",
-    "network-status": "/components/network-status/index"
+    "network-status": "/components/network-status/index",
+    "chat-sidebar": "/components/chat-sidebar/index"
   }
 }

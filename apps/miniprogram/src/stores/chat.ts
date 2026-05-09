@@ -18,7 +18,6 @@
  * ```
  */
 import { createStore } from 'zustand/vanilla.js'
-import { createJSONStorage, persist } from 'zustand/middleware.js'
 import { immer } from 'zustand/middleware/immer.js'
 import type { SSEController, UIMessagePart } from '../utils/sse-request'
 import { API_CONFIG } from '../config/index'
@@ -37,6 +36,7 @@ import type {
   GenUIResponseEnvelope,
 } from '../gen/genui-contract'
 import { buildDiscussionEntryUrl, type JoinFlowPayload } from '../utils/join-flow'
+import { getAiConversationsByConversationIdMessages } from '../api/endpoints/ai/ai'
 
 // ============================================================================
 // Types - 与 AI SDK v6 UIMessage 保持一致，扩展 Widget 支持
@@ -1394,13 +1394,65 @@ function streamChatRuntimeResponse(
 }
 
 // ============================================================================
-// 微信小程序存储适配器
+// 服务端消息 → UIMessage 转换
 // ============================================================================
 
-const wechatStorage = {
-  getItem: (name: string) => wx.getStorageSync(name) || null,
-  setItem: (name: string, value: string) => wx.setStorageSync(name, value),
-  removeItem: (name: string) => wx.removeStorageSync(name),
+interface ServerMessageItem {
+  id: string
+  role: string
+  type: string
+  content: unknown
+  createdAt: string
+}
+
+function hydrateMessagesFromServer(items: ServerMessageItem[]): UIMessage[] {
+  return items.map((item) => {
+    const content = isRecord(item.content) ? item.content : {}
+
+    if (item.role === 'user') {
+      const text = typeof content.text === 'string' ? content.text : ''
+      const parts: UIMessage['parts'] = text ? [{ type: 'text', text }] : []
+
+      const structuredAction =
+        item.type === 'user_action' && typeof content.action === 'string'
+          ? {
+              action: content.action,
+              payload: isRecord(content.payload) ? content.payload : {},
+              source: typeof content.source === 'string' ? content.source : undefined,
+              originalText: typeof content.originalText === 'string' ? content.originalText : text,
+              displayText: text,
+            }
+          : undefined
+
+      return {
+        id: item.id,
+        role: 'user',
+        parts,
+        ...(structuredAction ? { structuredAction } : {}),
+        createdAt: new Date(item.createdAt),
+      }
+    }
+
+    // assistant: 优先从 content.response.blocks 取，fallback 到 content.blocks
+    const blocksSource =
+      isRecord(content.response) && Array.isArray(content.response.blocks)
+        ? content.response.blocks
+        : Array.isArray(content.blocks)
+          ? content.blocks
+          : []
+    const validBlocks = blocksSource.filter(isGenUIBlock)
+    const assistantParts = buildAssistantPartsFromBlocks(validBlocks)
+
+    return {
+      id: item.id,
+      role: 'assistant',
+      parts: assistantParts,
+      suggestions: isRecord(content.suggestions)
+        ? (content.suggestions as GenUISuggestions)
+        : undefined,
+      createdAt: new Date(item.createdAt),
+    }
+  })
 }
 
 // ============================================================================
@@ -1447,7 +1499,11 @@ interface ChatState {
   sendAction: (action: StructuredActionInput) => void
   /** 追加 Widget 操作结果到对话历史（让 AI 下次对话时感知用户的卡内操作） */
   appendActionResult: (actionType: string, params: Record<string, unknown>, success: boolean, summary: string) => void
-  
+  /** 加载已有会话的历史消息 */
+  loadConversation: (conversationId: string) => Promise<void>
+  /** 直接设置会话 ID（用于从会话列表切换） */
+  setConversationId: (conversationId: string | null) => void
+
   // ========== Internal ==========
   /** SSE 控制器（内部使用） */
   _controller: SSEController | null
@@ -1456,9 +1512,8 @@ interface ChatState {
 }
 
 export const useChatStore = createStore<ChatState>()(
-  persist(
-    immer((set, get) => {
-      const streamAssistantResponse = (params: {
+  immer((set, get) => {
+    const streamAssistantResponse = (params: {
         aiMessageId: string
         chatRequest: ChatRuntimeRequest
         fallbackConversationId: string
@@ -2090,23 +2145,64 @@ export const useChatStore = createStore<ChatState>()(
         })
       },
       
+      /**
+       * 加载已有会话的历史消息
+       */
+      loadConversation: async (conversationId: string) => {
+        // 先停止当前可能正在进行的请求
+        get().stop()
+
+        set((draft) => {
+          draft.status = 'idle'
+          draft.error = null
+          draft.streamingMessageId = null
+          draft._controller = null
+        })
+
+        try {
+          const response = await getAiConversationsByConversationIdMessages(
+            conversationId,
+            { limit: 50 }
+          )
+
+          if (response.status !== 200 || !response.data) {
+            throw new Error('加载会话消息失败')
+          }
+
+          const messages = hydrateMessagesFromServer(
+            response.data.items as ServerMessageItem[]
+          )
+
+          set((draft) => {
+            draft.messages = messages
+            draft.conversationId = conversationId
+            draft.error = null
+          })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : '加载失败'
+          set((draft) => {
+            draft.error = new Error(message)
+          })
+        }
+      },
+
+      /**
+       * 直接设置会话 ID（用于从会话列表切换）
+       */
+      setConversationId: (conversationId: string | null) => {
+        set((draft) => {
+          draft.conversationId = conversationId
+        })
+      },
+
       // ========== Internal ==========
       _setController: (controller) => {
         set((draft) => {
           draft._controller = controller
         })
       },
-      })
-    }),
-    {
-      name: 'chat-store',
-      storage: createJSONStorage(() => wechatStorage),
-      version: 2,
-      migrate: () => ({}),
-      // 匿名与登录聊天都只保留当前页内存，不做本地持久化恢复
-      partialize: () => ({}),
-    }
-  )
+    })
+  })
 )
 
 // ============================================================================

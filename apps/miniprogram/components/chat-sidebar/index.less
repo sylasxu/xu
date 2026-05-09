@@ -1,0 +1,301 @@
+@import '/styles/tokens.less';
+
+// ==================== Overlay ====================
+.chat-sidebar-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  transition: opacity 300ms @ease-out;
+  z-index: 500;
+
+  &.show {
+    opacity: 1;
+  }
+}
+
+// ==================== Sidebar Container ====================
+.chat-sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 640rpx;
+  max-width: 80vw;
+  background: #0a0a0a;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(-100%);
+  transition: transform 300ms @ease-out-expo;
+  z-index: 501;
+  border-right: 1rpx solid rgba(255, 255, 255, 0.06);
+
+  &.show {
+    transform: translateX(0);
+  }
+}
+
+// ==================== Profile Card ====================
+.chat-sidebar__profile {
+  display: flex;
+  align-items: center;
+  gap: @spacing-3;
+  padding: calc(env(safe-area-inset-top) + @spacing-6) @spacing-4 @spacing-4;
+  border-bottom: 1rpx solid rgba(255, 255, 255, 0.06);
+}
+
+.chat-sidebar__avatar-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.chat-sidebar__avatar {
+  width: 80rpx;
+  height: 80rpx;
+  border-radius: @radius-full;
+  background: #1E293B;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+
+  &--placeholder {
+    border: 2rpx solid rgba(255, 255, 255, 0.08);
+  }
+}
+
+.chat-sidebar__badge {
+  position: absolute;
+  bottom: -4rpx;
+  right: -4rpx;
+  padding: 2rpx 10rpx;
+  background: @gradient-primary;
+  border-radius: @radius-full;
+  font-size: 18rpx;
+  font-weight: 600;
+  color: #fff;
+  line-height: 1.4;
+  border: 2rpx solid #0a0a0a;
+}
+
+.chat-sidebar__profile-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.chat-sidebar__nickname {
+  font-size: @text-lg;
+  font-weight: 600;
+  color: @text-main-dark;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-sidebar__subtitle {
+  font-size: @text-xs;
+  color: @text-tertiary-dark;
+}
+
+.chat-sidebar__settings-btn {
+  width: 64rpx;
+  height: 64rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: @radius-full;
+  background: rgba(255, 255, 255, 0.04);
+
+  &:active {
+    background: rgba(255, 255, 255, 0.08);
+  }
+}
+
+// ==================== Quick Actions ====================
+.chat-sidebar__quick-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: @spacing-4 @spacing-3;
+  border-bottom: 1rpx solid rgba(255, 255, 255, 0.06);
+}
+
+.chat-sidebar__quick-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: @spacing-1;
+  padding: @spacing-2 @spacing-3;
+  border-radius: @radius-md;
+
+  &:active {
+    background: rgba(255, 255, 255, 0.04);
+  }
+}
+
+.chat-sidebar__quick-icon {
+  width: 72rpx;
+  height: 72rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: @radius-full;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.chat-sidebar__quick-label {
+  font-size: @text-xs;
+  color: @text-secondary-dark;
+}
+
+// ==================== Section Header ====================
+.chat-sidebar__section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: @spacing-4 @spacing-4 @spacing-3;
+  gap: @spacing-3;
+}
+
+.chat-sidebar__section-title {
+  font-size: @text-sm;
+  font-weight: 600;
+  color: @text-secondary-dark;
+  flex-shrink: 0;
+}
+
+.chat-sidebar__search-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: @spacing-2;
+  padding: @spacing-1 @spacing-3;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: @radius-full;
+  height: 56rpx;
+}
+
+.chat-sidebar__search-input {
+  flex: 1;
+  font-size: @text-sm;
+  color: @text-main-dark;
+  height: 100%;
+  min-height: 0;
+}
+
+.chat-sidebar__search-placeholder {
+  color: @text-tertiary-dark;
+  font-size: @text-sm;
+}
+
+.chat-sidebar__search-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4rpx;
+}
+
+// ==================== Scroll Area ====================
+.chat-sidebar__scroll {
+  flex: 1;
+  overflow: hidden;
+  padding: 0 @spacing-4;
+}
+
+// ==================== Group ====================
+.chat-sidebar__group {
+  margin-bottom: @spacing-4;
+}
+
+.chat-sidebar__group-label {
+  display: block;
+  font-size: @text-xs;
+  color: @text-tertiary-dark;
+  padding: @spacing-2 0;
+  margin-bottom: @spacing-1;
+}
+
+// ==================== Conversation Item ====================
+.chat-sidebar__conv-item {
+  display: flex;
+  align-items: center;
+  gap: @spacing-3;
+  padding: @spacing-3 @spacing-3;
+  border-radius: @radius-base;
+  margin-bottom: @spacing-1;
+
+  &--hover {
+    background: rgba(255, 255, 255, 0.05);
+  }
+}
+
+.chat-sidebar__conv-icon {
+  width: 56rpx;
+  height: 56rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: @radius-full;
+  background: rgba(255, 255, 255, 0.04);
+  flex-shrink: 0;
+}
+
+.chat-sidebar__conv-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.chat-sidebar__conv-title {
+  font-size: @text-base;
+  color: @text-main-dark;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  &--error {
+    color: @error-color;
+  }
+}
+
+.chat-sidebar__conv-meta {
+  font-size: @text-xs;
+  color: @text-tertiary-dark;
+}
+
+// ==================== Loading / Empty ====================
+.chat-sidebar__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: @spacing-4 0;
+}
+
+.chat-sidebar__no-more {
+  text-align: center;
+  padding: @spacing-4 0;
+  font-size: @text-xs;
+  color: @text-tertiary-dark;
+}
+
+.chat-sidebar__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: @spacing-12 0;
+  gap: @spacing-3;
+}
+
+.chat-sidebar__empty-text {
+  font-size: @text-sm;
+  color: @text-tertiary-dark;
+}

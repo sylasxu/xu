@@ -1974,7 +1974,7 @@ async function handleSelectPreference(
     }
   }
 
-  if (questionType === 'type') {
+  if (questionType === 'type' || questionType === 'action') {
     const rawLocationName = toTextValue(payload.locationName) || toTextValue(payload.location);
     const locationName = sanitizeDisplayLocationName(rawLocationName);
     const resolvedLocation = resolveActionLocation(payload) || resolvePresetLocation(locationName);
@@ -1982,6 +1982,19 @@ async function handleSelectPreference(
     const activityType = normalizeExploreActivityType(
       toTextValue(payload.activityType) || selectedValue || selectedLabel
     );
+
+    // 对 'action' 类型的通用选择，优先识别为跳过/取消类意图
+    if (questionType === 'action' && !activityType && !resolvedLocation) {
+      const skipPatterns = ['cancel', 'skip', 'none', 'pass', 'quit', 'exit'];
+      const isSkip = skipPatterns.includes((selectedValue || '').toLowerCase())
+        || skipPatterns.includes((selectedLabel || '').toLowerCase());
+      if (isSkip) {
+        return {
+          success: true,
+          data: { message: '好的，有需要随时叫我～' },
+        };
+      }
+    }
 
     if (resolvedLocation) {
       return handleExploreNearby({
@@ -2001,6 +2014,14 @@ async function handleSelectPreference(
         ...(activityType ? { type: activityType } : {}),
         semanticQuery: buildExploreSemanticQueryFromSelection(normalizedLocationName, activityType),
       }, userId, context);
+    }
+
+    // action 类型兜底：如果既没位置也没类型，返回通用成功让 AI 继续对话
+    if (questionType === 'action') {
+      return {
+        success: true,
+        data: { message: '收到，我帮你继续看看～' },
+      };
     }
   }
 

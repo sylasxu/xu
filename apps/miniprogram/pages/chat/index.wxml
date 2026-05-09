@@ -149,12 +149,28 @@
   />
   
   <!-- 手机号绑定半屏 -->
-  <auth-sheet 
+  <auth-sheet
     show="{{isAuthSheetVisible}}"
     bind:success="onAuthSuccess"
     bind:pendingaction="onPendingAction"
     bind:viewagreement="onAuthSheetViewAgreement"
     bind:viewpolicy="onAuthSheetViewPolicy"
   />
-  
+
+  <!-- 历史会话侧边栏 -->
+  <chat-sidebar
+    id="chatSidebar"
+    conversations="{{sidebarConversations}}"
+    userAvatar="{{userAvatar}}"
+    userNickname="{{userNickname}}"
+    isLoading="{{sidebarIsLoading}}"
+    hasMore="{{sidebarHasMore}}"
+    bind:close="onSidebarClose"
+    bind:conversationtap="onSidebarConversationTap"
+    bind:newchat="onSidebarNewChat"
+    bind:settings="onSidebarSettings"
+    bind:profile="onSidebarProfile"
+    bind:loadmore="onSidebarLoadMore"
+  />
+
 </view>

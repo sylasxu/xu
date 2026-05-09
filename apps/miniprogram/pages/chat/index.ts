@@ -9,7 +9,7 @@
  * - 实现空气感渐变背景
  */
 import { useChatStore, type UIMessage } from '../../src/stores/chat'
-import { useChatHomeStore } from '../../src/stores/chat-home'
+import { useChatHomeStore, type ConversationSummary } from '../../src/stores/chat-home'
 import {
   useAppStore,
   type PendingActionAuthMode,
@@ -83,6 +83,13 @@ interface PageData {
   secondaryTaskCount: number
   taskPanelEyebrow: string
   taskPanelTitle: string
+
+  // 侧边栏状态
+  isSidebarVisible: boolean
+  sidebarConversations: ConversationSummary[]
+  sidebarHasMore: boolean
+  sidebarIsLoading: boolean
+  userAvatar: string
 }
 
 type RuntimeHomeState = 'H0' | 'H1' | 'H2' | 'H3' | 'H4'
@@ -400,11 +407,18 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     secondaryTaskCount: 0,
     taskPanelEyebrow: DEFAULT_TASK_PANEL_EYEBROW,
     taskPanelTitle: DEFAULT_TASK_PANEL_TITLE,
+
+    isSidebarVisible: false,
+    sidebarConversations: [],
+    sidebarHasMore: true,
+    sidebarIsLoading: false,
+    userAvatar: '',
   },
 
   unsubscribeChat: INITIAL_UNSUBSCRIBE,
   unsubscribeApp: INITIAL_UNSUBSCRIBE,
   unsubscribeUser: INITIAL_UNSUBSCRIBE,
+  unsubscribeChatHome: INITIAL_UNSUBSCRIBE,
   userLocation: INITIAL_USER_LOCATION,
   lastChatStatus: 'idle' as PageData['status'],
   lastUserId: '',
@@ -413,15 +427,18 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     this.subscribeChatStore()
     this.subscribeAppStore()
     this.subscribeUserStore()
+    this.subscribeChatHomeStore()
     this.initChat()
     this.loadUserInfo()
     this.loadCurrentTasks()
+    this.loadSidebarConversations()
     this.applyPrefillPrompt(options.prefill)
   },
 
   onShow() {
     this.loadUserInfo()
     this.loadCurrentTasks()
+    this.loadSidebarConversations()
     this.resumePendingActionIfReady()
   },
 
@@ -429,6 +446,7 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     this.unsubscribeChat?.()
     this.unsubscribeApp?.()
     this.unsubscribeUser?.()
+    this.unsubscribeChatHome?.()
     // 停止正在进行的流式输出
     useChatStore.getState().stop()
   },
@@ -480,11 +498,17 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
     const userStore = useUserStore.getState()
     this.lastUserId = userStore.user?.id || ''
     if (userStore.user) {
-      this.setData({ userNickname: userStore.user.nickname || '搭子' })
+      this.setData({
+        userNickname: userStore.user.nickname || '搭子',
+        userAvatar: userStore.user.avatarUrl || '',
+      })
     }
     this.unsubscribeUser = useUserStore.subscribe((state) => {
       if (state.user) {
-        this.setData({ userNickname: state.user.nickname || '搭子' })
+        this.setData({
+          userNickname: state.user.nickname || '搭子',
+          userAvatar: state.user.avatarUrl || '',
+        })
       }
 
       const nextUserId = state.user?.id || ''
@@ -492,6 +516,39 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
         this.lastUserId = nextUserId
       }
     })
+  },
+
+  subscribeChatHomeStore() {
+    const chatHomeStore = useChatHomeStore.getState()
+    this.setData({
+      sidebarConversations: chatHomeStore.conversations,
+      sidebarHasMore: chatHomeStore.hasMore,
+      sidebarIsLoading: chatHomeStore.isLoading || chatHomeStore.isLoadingMore,
+    })
+    this.unsubscribeChatHome = useChatHomeStore.subscribe((state) => {
+      this.setData({
+        sidebarConversations: state.conversations,
+        sidebarHasMore: state.hasMore,
+        sidebarIsLoading: state.isLoading || state.isLoadingMore,
+      })
+    })
+  },
+
+  async loadSidebarConversations() {
+    const userStore = useUserStore.getState()
+    if (!userStore.token || !userStore.user) {
+      this.setData({
+        sidebarConversations: [],
+        sidebarHasMore: false,
+        sidebarIsLoading: false,
+      })
+      return
+    }
+
+    const chatHomeStore = useChatHomeStore.getState()
+    if (chatHomeStore.conversations.length === 0 && !chatHomeStore.isLoading) {
+      await chatHomeStore.loadConversations()
+    }
   },
 
   /**
@@ -661,18 +718,24 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
 
   /**
    * 新对话
+   * 只重置前端状态，不删除服务端历史。已登录用户的历史会话保留在侧边栏列表中。
    */
   async onNewChat() {
     useChatStore.getState().clearMessages()
-    
-    // 同时清空服务端历史
-    try {
-      await useChatHomeStore.getState().clearConversations()
-    } catch (e) {
-      console.error('[Chat] Failed to clear server messages:', e)
-    }
-    
     await this.showWelcomeDashboard()
+  },
+
+  /**
+   * 从会话列表打开特定历史会话
+   */
+  async onOpenConversation(e: WechatMiniprogram.CustomEvent<{ conversationId: string }>) {
+    const conversationId =
+      typeof e.detail?.conversationId === 'string' ? e.detail.conversationId : ''
+    if (!conversationId) {
+      return
+    }
+
+    await useChatStore.getState().loadConversation(conversationId)
   },
 
   /**
@@ -745,12 +808,44 @@ Page<PageData, WechatMiniprogram.Page.CustomOption>({
   },
 
   onNavbarMenuTap() {
-    wx.navigateTo({ url: '/pages/profile/index' })
+    const sidebar = this.selectComponent('#chatSidebar')
+    if (sidebar) {
+      sidebar.open()
+    }
   },
 
   onNavbarItemTap(e: WechatMiniprogram.CustomEvent<{ action?: string }>) {
     if (e.detail?.action === 'message') {
       this.focusMessageCenter(null)
+    }
+  },
+
+  onSidebarClose() {
+    this.setData({ isSidebarVisible: false })
+  },
+
+  async onSidebarConversationTap(e: WechatMiniprogram.CustomEvent<{ conversationId: string }>) {
+    const conversationId = typeof e.detail?.conversationId === 'string' ? e.detail.conversationId : ''
+    if (!conversationId) return
+    await useChatStore.getState().loadConversation(conversationId)
+  },
+
+  async onSidebarNewChat() {
+    await this.onNewChat()
+  },
+
+  onSidebarSettings() {
+    this.openSetting()
+  },
+
+  onSidebarProfile() {
+    wx.navigateTo({ url: '/pages/profile/index' })
+  },
+
+  async onSidebarLoadMore() {
+    const chatHomeStore = useChatHomeStore.getState()
+    if (!chatHomeStore.isLoadingMore && chatHomeStore.hasMore && chatHomeStore.cursor) {
+      await chatHomeStore.loadMoreConversations()
     }
   },
 
